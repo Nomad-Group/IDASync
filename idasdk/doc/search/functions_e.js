@@ -1,0 +1,27 @@
+var searchData=
+[
+  ['nareas',['nareas',['../classareaset__t.html#aaf2ac7a18f5c70b39a12733b451d8117',1,'areaset_t']]],
+  ['nbits',['nbits',['../bytes_8hpp.html#acc205e32314437fc526186f33867bdf2',1,'bytes.hpp']]],
+  ['netnode',['netnode',['../classnetnode.html#a87b9bf7c4d490d4a3846a170a09a1df5',1,'netnode::netnode(void)'],['../classnetnode.html#a7c9f14edd6e05f462e50f83e3e311fae',1,'netnode::netnode(nodeidx_t num)'],['../classnetnode.html#a2bce30734bdec4cb4f50fd5608dd72d4',1,'netnode::netnode(const char *_name, size_t namlen=0, bool do_create=false)']]],
+  ['new_5ftil',['new_til',['../typeinf_8hpp.html#a13d90323712fdc9d0a8bc3966950a357',1,'typeinf.hpp']]],
+  ['next',['next',['../classplace__t.html#aea2b5b32abe1aa93e6e334140fdbae0c',1,'place_t::next()'],['../classnetnode.html#a988dbd86ebdc8fa249f6343c3ad729ae',1,'netnode::next()']]],
+  ['next_5faddr',['next_addr',['../classareaset__t.html#a084e45d52be344dd9e5636b42bc8083a',1,'areaset_t']]],
+  ['next_5farea',['next_area',['../classareaset__t.html#a40631930b42a9e0187f7fc9b975d2dd4',1,'areaset_t']]],
+  ['next_5farea_5fptr',['next_area_ptr',['../classareacb__t.html#af494cbea2765ad45b33fa43a72eaee5c',1,'areacb_t']]],
+  ['next_5ffrom',['next_from',['../structxrefblk__t.html#af36d63b3cf0675e4c677802300611d2e',1,'xrefblk_t::next_from(void)'],['../structxrefblk__t.html#ab53ce1c9cc889824cfa2e5f2d016fb93',1,'xrefblk_t::next_from(ea_t _from, ea_t _to, int flags)']]],
+  ['next_5fhead',['next_head',['../bytes_8hpp.html#ad518592ca7940ed8b019ed4d35661287',1,'bytes.hpp']]],
+  ['next_5fnamed_5ftype',['next_named_type',['../group__named__types.html#ga9f87865992b1a307b5c5a2d6fffc0967',1,'typeinf.hpp']]],
+  ['next_5fnot_5ftail',['next_not_tail',['../bytes_8hpp.html#ae3da655e70ee8cf9f4d4bdfd5fda1af7',1,'bytes.hpp']]],
+  ['next_5fto',['next_to',['../structxrefblk__t.html#a1c2dcf4afcc5aa629402094d0d4de54a',1,'xrefblk_t::next_to(void)'],['../structxrefblk__t.html#a1f078092e307a8766c381682ace4410e',1,'xrefblk_t::next_to(ea_t _from, ea_t _to, int flags)']]],
+  ['next_5funknown',['next_unknown',['../bytes_8hpp.html#a579bb032b20e7777b40975763c4dfd8e',1,'bytes.hpp']]],
+  ['next_5fvisea',['next_visea',['../bytes_8hpp.html#aa9cbe4f435300c277e90fb04208debe0',1,'bytes.hpp']]],
+  ['nextaddr',['nextaddr',['../bytes_8hpp.html#a5266bbfabd8c0450c587ad228730e099',1,'bytes.hpp']]],
+  ['nextchunk',['nextchunk',['../bytes_8hpp.html#a41783d88cef607358151edbb76ed5593',1,'bytes.hpp']]],
+  ['nextthat',['nextthat',['../bytes_8hpp.html#a700ae39548cf7ac1487c10e996a92c1f',1,'bytes.hpp']]],
+  ['noimmd',['noImmd',['../group___f_f__codefuncs.html#ga07d774c697a88b21eb686c1774dc406b',1,'bytes.hpp']]],
+  ['nomem',['nomem',['../kernwin_8hpp.html#ae27825a6d1482e6f07db29bb38f5e6d4',1,'kernwin.hpp']]],
+  ['notype',['noType',['../group___f_f__op.html#ga3341db03c98fbf05934dc4f5ac90721b',1,'bytes.hpp']]],
+  ['noused',['noUsed',['../auto_8hpp.html#af1c74b4bcd7106a7ff6d7b83e28371e1',1,'noUsed(ea_t ea):&#160;auto.hpp'],['../auto_8hpp.html#a8cc83fab3d509b01a920d5a7068758ee',1,'noUsed(ea_t sEA, ea_t eEA):&#160;auto.hpp']]],
+  ['numflag',['numflag',['../group___f_f__opfuncs3.html#ga71afdf13030530d5ac92ae6e439e0a80',1,'bytes.hpp']]],
+  ['numop2str',['numop2str',['../group__conv.html#ga69a59c44a34ab2ad3ac2a63db70a1d3b',1,'kernwin.hpp']]]
+];

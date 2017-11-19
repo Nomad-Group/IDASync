@@ -1,0 +1,454 @@
+ifndef __BSD__
+#DONT_FORCE_CPP=1
+#__CFLAGS=-DLIBWRAP
+#LIBWRAP=-lwrap
+
+PLUGIN_SCRIPT_PATH=../plugin.script
+
+O1=debmod
+O2=pc_debmod
+ifdef __LINUX__
+  ifdef __ARM__
+    SERVER=armlinux_server
+    ADDITIONAL_GOALS=$(SERVER)
+    DONT_BUILD_PLUGIN=1
+    INCFLAGS=-DWAIT_IN_MAIN_THREAD # we are compiling for wd
+#    STATIC_BUILD=-static -lpthread # specify the lib once more so that the linker sees it
+  else
+    SERVER=linux_server
+    PROC=linux_user
+    O3=linux_debmod
+    O4=linux_wait
+    O5=symelf
+    O6=linuxbase_debmod
+  endif
+  LINUX_SERVER=$(SERVER)
+  WRPOBJ=$(F)linux_check$(O)
+  ADDITIONAL_LIBS=-ldl -lthread_db
+  PLUGIN_SCRIPT=-Wl,--version-script=linux_debmod.script -Wl,--export-dynamic,--build-id
+else
+  INCFLAGS=-I../../ldr/mach-o/h
+  ifdef __IPHONE__
+    SERVER=iphone_server
+    DONT_BUILD_PLUGIN=1
+  else
+    SERVER=mac_server
+    PROC=mac_user
+  endif
+  O3=mac_debmod
+  O4=excServer
+  O5=symmacho
+  O6=macbase_debmod
+endif
+
+# do not build mixed servers, where sizeof(ea_t)==8 but sizeof(size_t)==4
+# they do not make any sense
+ifdef __EA64__
+ifndef __X64__
+SERVER=
+endif
+endif
+
+ifdef ENABLE_LOWCNDS
+  LOWCND_FLAGS=-DENABLE_LOWCNDS
+  LOWCND_LIBS=$(L)idc$(A)
+  LOWCND_OBJS=$(F)idcfuncs$(O) $(L)dbgsrv_funcs$(O)
+  O6=idcfuncs
+endif
+
+ifdef ENABLE_REMOTEPDB
+  REMOTEPDB_FLAGS=-DENABLE_REMOTEPDB
+endif
+__CFLAGS=$(INCFLAGS) $(LOWCND_FLAGS) $(REMOTEPDB_FLAGS) -Ibochs_ctrl/$(F)
+
+ifndef __ARM__ # ARM Linux: no stub or cfg files, only the server
+  ADDITIONAL_GOALS=$(ALLDIRS) $(SERVER) loaddll_test cfg
+  ifndef __X64__
+    ADDITIONAL_GOALS+=win32_stub linux_stub armlinux_stub mac_stub iphone_stub wince_stub gdb_user bochs_user replay_user
+  endif
+endif
+
+ifdef __X64__
+  DONT_BUILD_PLUGIN=1
+endif
+
+include ../plugin.mak
+
+# all debug servers should go under the dbgsrv directory
+SERVERBIN=$(R)dbgsrv/
+
+RPC_COMMON=$(F)rpc_hlp$(O) $(F)rpc_engine$(O) $(F)util$(O)
+STUB_COMMON=$(RPC_COMMON) $(F)rpc_client$(O) $(F)rpc_debmod$(O) $(F)debmod$(O)
+SERVER_COMMON=$(F)server$(O) $(RPC_COMMON) $(F)rpc_server$(O) $(F)debmod$(O) \
+              $(F)$(TARGET_PROCESSOR_MODULE)_debmod$(O) $(LOWCND_OBJS)
+
+.PHONY: mkdeb iphone_server mac_server linux_server
+
+#-----------------------------------------------------------------------------
+# Servers
+#------------
+MAC_OBJS=$(SERVER_COMMON) $(F)mac_debmod$(O) $(F)macbase_debmod$(O) $(F)tcpip$(O) $(F)excServer$(O) $(F)symmacho$(O)
+
+mac_server: $(SERVERBIN)mac_server$(B)
+iphone_server: $(SERVERBIN)iphone_server
+$(SERVERBIN)mac_server$(B) $(SERVERBIN)iphone_server: $(MAC_OBJS) $(LOWCND_LIBS) $(L)pro$(A)
+	$(call link_dumb,$@ $(MAC_OBJS) $(LOWCND_LIBS))
+#ifdef __IPHONE__
+#	export CODESIGN_ALLOCATE=$(DEV)/usr/bin/codesign_allocate
+#	codesign -v -v -fs "Ilfak Guilfanov" $@
+#	ldid -Sgdb.xml $@
+#endif
+	mkdeb $@
+iloop: loop.cpp
+	$(CCL) -o $@ loop.cpp $(STDLIBS)
+isignal: linux/signal.cpp
+	$(CCL) -o $@ linux/signal.cpp $(STDLIBS)
+#----------------------------------------------------------------------------
+# Linux server
+LINUX_OBJS=$(SERVER_COMMON) $(WRPOBJ) $(F)linux_debmod$(O) \
+	   $(F)linuxbase_debmod$(O) \
+           $(F)symelf$(O) $(F)tcpip$(O) $(F)linux_wait$(O)
+
+$(LINUX_SERVER): $(SERVERBIN)$(LINUX_SERVER)$(B)
+$(SERVERBIN)$(LINUX_SERVER)$(B): $(LINUX_OBJS) $(LOWCND_LIBS) $(L)pro$(A)
+	$(CCL) -o$@ $(PLUGIN_SCRIPT) $(LINUX_OBJS) $(DUMB) $(LOWCND_LIBS) $(L)pro$(A) $(LIBWRAP) $(ADDITIONAL_LIBS) $(STDLIBS) $(STATIC_BUILD)
+#-----------------------------------------------------------------------------
+# Stubs
+CLLOPTS=-L$(R) $(LINKIDA) $(PLUGIN_SCRIPT) $(STDLIBS)
+#------------
+WIN32_LOCAL_OBJ=$(F)win32_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON) $(F)w32sehch$(O)
+WIN32CLIENT=$(BIN_PATH)win32_stub$(PLUGIN)
+win32_stub: $(WIN32CLIENT)
+
+$(WIN32CLIENT): $(WIN32_LOCAL_OBJ) $(PLUGIN_SCRIPT_PATH)
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(WIN32_LOCAL_OBJ) $(CLLOPTS)
+
+#------------
+WINCE_STUB_OBJ=$(F)wince_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON)
+WINCECLIENT=$(BIN_PATH)wincetcp_stub$(PLUGIN)
+wince_stub: $(WINCECLIENT)
+
+$(WINCECLIENT): $(WINCE_STUB_OBJ) $(PLUGIN_SCRIPT_PATH)
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(WINCE_STUB_OBJ) $(CLLOPTS)
+#------------
+LINUX_LOCAL_OBJ=$(F)linux_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON)
+LINUXCLIENT=$(BIN_PATH)linux_stub$(PLUGIN)
+linux_stub: $(LINUXCLIENT)
+$(LINUXCLIENT): $(LINUX_LOCAL_OBJ) $(PLUGIN_SCRIPT_PATH)
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(LINUX_LOCAL_OBJ) $(CLLOPTS)
+#------------
+ARM_LINUX_LOCAL_OBJ=$(F)armlinux_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON)
+ARM_LINUXCLIENT=$(BIN_PATH)armlinux_stub$(PLUGIN)
+armlinux_stub: $(ARM_LINUXCLIENT)
+$(ARM_LINUXCLIENT): $(ARM_LINUX_LOCAL_OBJ) $(PLUGIN_SCRIPT_PATH)
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(ARM_LINUX_LOCAL_OBJ) $(CLLOPTS)
+#------------
+MAC_LOCAL_OBJ=$(F)mac_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON)
+MACCLIENT=$(BIN_PATH)mac_stub$(PLUGIN)
+mac_stub: $(MACCLIENT)
+$(MACCLIENT): $(MAC_LOCAL_OBJ) $(PLUGIN_SCRIPT_PATH)
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(MAC_LOCAL_OBJ) $(CLLOPTS)
+#------------
+IPHONE_LOCAL_OBJ=$(F)iphone_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON)
+IPHONECLIENT=$(BIN_PATH)iphone_stub$(PLUGIN)
+iphone_stub: $(IPHONECLIENT)
+$(IPHONECLIENT): $(IPHONE_LOCAL_OBJ) $(PLUGIN_SCRIPT_PATH)
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(IPHONE_LOCAL_OBJ) $(CLLOPTS)
+
+#------------
+cfg: $(C)exceptions.cfg
+$(C)exceptions.cfg: exceptions.cfg
+	$(CP) $? $@
+
+excServer.c:  /usr/include/mach/exc.defs
+	mig /usr/include/mach/exc.defs
+
+mkdeb: /usr/local/bin/mkdeb
+/usr/local/bin/mkdeb: mkdeb.cpp
+	rm -f mkdeb
+	$(CCL) -o mkdeb mkdeb.cpp
+	sudo cp mkdeb $@
+	sudo chown root $@
+	sudo chmod 4100 $@
+	sudo chmod +a "ig allow execute" $@
+	sudo chmod +a "elias allow execute" $@
+	sudo chmod +a "igor allow execute" $@
+
+
+# MAKEDEP dependency list ------------------
+$(F)arm_debmod$(O): $(I)area.hpp $(I)auto.hpp $(I)bytes.hpp $(I)expr.hpp      \
+	          $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp          \
+	          $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
+	          $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp  \
+	          $(I)offset.hpp $(I)pro.h $(I)queue.hpp $(I)segment.hpp    \
+	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp                    \
+	          ../../ldr/aof/aof.h ../../module/arm/../idaidp.hpp        \
+	          ../../module/arm/arm.hpp ../../module/arm/ins.hpp         \
+	          ../../module/arm/opinfo.cpp arm_debmod.cpp arm_debmod.h   \
+	          consts.h deb_arm.hpp debmod.h
+$(F)armlinux_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
+	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
+	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
+	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
+	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp                    \
+	          arm_local_impl.cpp armlinux_rstub.cpp async.h             \
+	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
+	          deb_arm.hpp debmod.h linux_local_impl.cpp rapi/rapi.h     \
+	          rpc_client.h rpc_debmod.h rpc_engine.h rpc_hlp.h tcpip.h
+$(F)async$(O)   : $(I)auto.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
+	          $(I)fpro.h $(I)ida.hpp $(I)kernwin.hpp $(I)llong.hpp      \
+	          $(I)pro.h async.cpp async.h consts.h rapi/rapi.h
+$(F)chktrk$(O)  : $(I)diskio.hpp $(I)err.h $(I)fpro.h $(I)kernwin.hpp       \
+	          $(I)llong.hpp $(I)pro.h chktrk.cpp metrotrk.cpp           \
+	          metrotrk.h
+$(F)debmod$(O)  : $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
+	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp   \
+	          $(I)pro.h $(I)segment.hpp $(I)typeinf.hpp $(I)ua.hpp      \
+	          $(I)xref.hpp consts.h debmod.cpp debmod.h
+$(F)epoc_debmod$(O): $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
+	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)nalt.hpp $(I)netnode.hpp $(I)pro.h      \
+	          $(I)segment.hpp $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp    \
+	          arm_debmod.h consts.h deb_arm.hpp debmod.h                \
+	          epoc_debmod.cpp epoc_debmod.h metrotrk.cpp metrotrk.h
+$(F)epoc_user$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
+	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
+	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
+	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
+	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp arm_debmod.h       \
+	          arm_local_impl.cpp common_local_impl.cpp                  \
+	          common_stub_impl.cpp consts.h deb_arm.hpp debmod.h        \
+	          epoc_debmod.h epoc_local_impl.cpp epoc_user.cpp           \
+	          metrotrk.h
+$(F)linux_check$(O): linux_check.c
+$(F)linux_debmod$(O): $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
+	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
+	          $(I)netnode.hpp $(I)pro.h $(I)prodir.h $(I)segment.hpp    \
+	          $(I)ua.hpp $(I)xref.hpp ../../ldr/elf/elf.h               \
+	          ../../ldr/elf/elfbase.h            \
+	          arm_debmod.h async.h consts.h deb_arm.hpp deb_pc.hpp      \
+	          debmod.h linux_debmod.cpp linux_debmod.h linuxbase_debmod.h \
+	          linux_threads.cpp pc_debmod.h rapi/rapi.h rpc_engine.h    \
+	          rpc_hlp.h rpc_server.h symelf.hpp tcpip.h
+$(F)linux_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
+	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
+	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
+	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
+	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp async.h            \
+	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
+	          deb_pc.hpp debmod.h linux_local_impl.cpp linux_rstub.cpp  \
+	          pc_local_impl.cpp rapi/rapi.h rpc_client.h rpc_debmod.h   \
+	          rpc_engine.h rpc_hlp.h tcpip.h
+$(F)linux_user$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)err.h          \
+	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
+	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)srarea.hpp  \
+	          $(I)ua.hpp $(I)xref.hpp arm_debmod.h                      \
+	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
+	          deb_arm.hpp deb_pc.hpp debmod.h linux_debmod.h            \
+	          linux_local_impl.cpp linux_user.cpp pc_debmod.h           \
+	          pc_local_impl.cpp linuxbase_debmod.h
+$(F)linux_wait$(O): $(I)area.hpp $(I)expr.hpp $(I)ida.hpp $(I)idd.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)pro.h     \
+	          $(I)ua.hpp $(I)xref.hpp arm_debmod.h consts.h             \
+	          deb_arm.hpp deb_pc.hpp debmod.h linux_debmod.h            \
+	          linux_wait.cpp pc_debmod.h linuxbase_debmod.h
+$(F)mac_debmod$(O): $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
+	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
+	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)ua.hpp      \
+	          $(I)xref.hpp ../../ldr/mach-o/common.h consts.h           \
+	          deb_arm.hpp deb_pc.hpp debmod.h mac_debmod.cpp            \
+	          mac_debmod.h pc_debmod.h symelf.hpp symmacho.hpp	    \
+		  linuxbase_debmod.cpp linuxbase_debmod.h macbase_debmod.h 
+$(F)mac_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
+	          $(I)err.h $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp            \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
+	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)ua.hpp      \
+	          $(I)xref.hpp async.h common_local_impl.cpp                \
+	          common_stub_impl.cpp consts.h deb_pc.hpp debmod.h         \
+	          mac_local_impl.cpp mac_rstub.cpp pc_local_impl.cpp        \
+	          rapi/ceapimap.h rapi/rapi.h rpc_client.h rpc_debmod.h     \
+	          rpc_engine.h rpc_hlp.h tcpip.h
+$(F)mac_user$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
+	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
+	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
+	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
+	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp                    \
+	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
+	          deb_arm.hpp deb_pc.hpp debmod.h mac_debmod.h              \
+	          mac_local_impl.cpp mac_user.cpp pc_debmod.h               \
+	          pc_local_impl.cpp symelf.hpp symmacho.hpp macbase_debmod.h
+$(F)pc_debmod$(O): $(I)area.hpp $(I)expr.hpp $(I)ida.hpp $(I)idd.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)pro.h     \
+	          $(I)ua.hpp $(I)xref.hpp consts.h deb_pc.hpp debmod.h      \
+	          pc_debmod.cpp pc_debmod.h
+$(F)rpc_client$(O): $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
+	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
+	          $(I)lines.hpp $(I)llong.hpp $(I)name.hpp $(I)pro.h        \
+	          $(I)ua.hpp $(I)xref.hpp async.h consts.h debmod.h         \
+	          rapi/rapi.h rpc_client.cpp rpc_client.h rpc_engine.h      \
+	          rpc_hlp.h tcpip.h
+$(F)rpc_debmod$(O): $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
+	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
+	          $(I)lines.hpp $(I)llong.hpp $(I)pro.h $(I)segment.hpp     \
+	          $(I)ua.hpp $(I)xref.hpp async.h consts.h debmod.h         \
+	          rapi/rapi.h rpc_client.h rpc_debmod.cpp rpc_debmod.h      \
+	          rpc_engine.h rpc_hlp.h tcpip.h
+$(F)rpc_engine$(O): $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
+	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
+	          $(I)lines.hpp $(I)llong.hpp $(I)pro.h $(I)ua.hpp          \
+	          $(I)xref.hpp async.h consts.h debmod.h rapi/rapi.h        \
+	          rpc_engine.cpp rpc_engine.h rpc_hlp.h tcpip.h
+$(F)rpc_hlp$(O) : $(I)area.hpp $(I)bytes.hpp $(I)expr.hpp $(I)fpro.h        \
+	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp  \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
+	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp consts.h          \
+	          rpc_hlp.cpp rpc_hlp.h
+$(F)rpc_server$(O): $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
+	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp   \
+	          $(I)pro.h $(I)segment.hpp $(I)typeinf.hpp $(I)ua.hpp      \
+	          $(I)xref.hpp async.h consts.h debmod.h rapi/rapi.h        \
+	          rpc_engine.h rpc_hlp.h rpc_server.cpp rpc_server.h        \
+	          server.h tcpip.h
+$(F)server$(O)  : $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
+	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
+	          $(I)lines.hpp $(I)llong.hpp $(I)pro.h $(I)ua.hpp          \
+	          $(I)xref.hpp async.h consts.h debmod.h rapi/rapi.h        \
+	          rpc_engine.h rpc_hlp.h rpc_server.h server.cpp server.h   \
+	          tcpip.h
+$(F)symelf$(O)  : $(I)area.hpp $(I)diskio.hpp $(I)expr.hpp $(I)fpro.h       \
+	          $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)pro.h $(I)ua.hpp $(I)xref.hpp           \
+	          ../../ldr/elf/common.cpp ../../ldr/elf/elf.h              \
+	          ../../ldr/elf/elfbase.h ../../ldr/elf/elfr_arm.h          \
+	          ../../ldr/elf/elfr_ia6.h ../../ldr/elf/elfr_mip.h         \
+	          ../../ldr/elf/elfr_ppc.h ../../ldr/elf/reader.cpp         \
+	          consts.h debmod.h symelf.cpp symelf.hpp
+$(F)tcpip$(O)   : $(I)err.h $(I)expr.hpp $(I)kernwin.hpp $(I)llong.hpp      \
+	          $(I)pro.h consts.h tcpip.cpp tcpip.h
+$(F)util$(O)    : $(I)area.hpp $(I)expr.hpp $(I)fpro.h $(I)ida.hpp          \
+	          $(I)idd.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
+	          $(I)pro.h $(I)ua.hpp $(I)xref.hpp consts.h debmod.h       \
+	          util.cpp
+$(F)w32sehch$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)fpro.h         \
+	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp               \
+	          $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)segment.hpp $(I)ua.hpp $(I)xref.hpp         \
+	          w32sehch.cpp w32sehch.h
+$(F)win32_debmod$(O): $(I)area.hpp $(I)auto.hpp $(I)bytes.hpp $(I)dbg.hpp       \
+	          $(I)diskio.hpp $(I)err.h $(I)exehdr.h $(I)expr.hpp        \
+	          $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp          \
+	          $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
+	          $(I)nalt.hpp $(I)netnode.hpp $(I)pro.h $(I)prodir.h       \
+	          $(I)segment.hpp $(I)ua.hpp $(I)xref.hpp                   \
+	          ../../ldr/pe/common.cpp ../../ldr/pe/common.h             \
+	          ../../ldr/pe/pe.h arm_debmod.h async.h consts.h           \
+	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h rapi/rapi.h   \
+	          rpc_engine.h rpc_hlp.h rpc_server.h tcpip.h               \
+	          win32_debmod.cpp win32_debmod.h win32_debmod_impl.cpp     \
+	          win32_rpc.h win32_undoc.h win32_util_impl.cpp             \
+	          winbase_debmod.h wince.hpp wince_debmod.h                 \
+	          wince_debmod_impl.cpp xscale/Breakpoint.h
+$(F)win32_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
+	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
+	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
+	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
+	          $(I)srarea.hpp $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp    \
+	          rpc_hlp.h win32_rpc.h ../../ldr/pe/pe.h                    \
+	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
+	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
+	          ../../plugins/pdb/pdblocal.hpp  async.h                   \
+	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
+	          deb_pc.hpp debmod.h pc_local_impl.cpp rapi/rapi.h         \
+	          rpc_client.h rpc_debmod.h rpc_engine.h rpc_hlp.h tcpip.h  \
+	          w32sehch.h win32_local_impl.cpp win32_rpc.h               \
+	          win32_rstub.cpp
+$(F)win32_server_impl$(O): $(I)area.hpp $(I)bytes.hpp $(I)expr.hpp $(I)fpro.h        \
+	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp  \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
+	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp                   \
+	          rpc_hlp.h win32_rpc.h   \
+	          ../../ldr/pe/cor.h ../../ldr/pe/corhdr.h                  \
+	          ../../ldr/pe/mycor.h ../../ldr/pe/pe.h                    \
+	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
+	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
+	          ../../plugins/pdb/pdblocal.hpp                            \
+	          ../../plugins/pdb/pdbremote.hpp arm_debmod.h consts.h     \
+	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h rpc_hlp.h     \
+	          tilfuncs.hpp win32_debmod.h win32_rpc.h                   \
+	          win32_server_impl.cpp winbase_debmod.h wince.hpp          \
+	          wince_debmod.h
+$(F)win32_server_stub$(O): $(I)area.hpp $(I)expr.hpp $(I)ida.hpp $(I)idd.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)pro.h     \
+	          $(I)ua.hpp $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h    \
+	          consts.h deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h      \
+	          win32_debmod.h win32_server_stub.cpp winbase_debmod.h     \
+	          wince.hpp wince_debmod.h
+$(F)win32_user$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)err.h          \
+	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
+	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)srarea.hpp  \
+	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp                   \
+	          rpc_hlp.h win32_rpc.h   \
+	          ../../ldr/pe/cor.h ../../ldr/pe/corhdr.h                  \
+	          ../../ldr/pe/mycor.h ../../ldr/pe/pe.h                    \
+	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
+	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
+	          ../../plugins/pdb/pdblocal.hpp                            \
+	          ../../plugins/pdb/pdbremote.hpp arm_debmod.h              \
+	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
+	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h               \
+	          pc_local_impl.cpp rpc_hlp.h w32sehch.h win32_debmod.h     \
+	          win32_local_impl.cpp win32_rpc.h win32_user.cpp           \
+	          winbase_debmod.h wince.hpp wince_debmod.h
+$(F)winbase_debmod$(O): $(I)area.hpp $(I)expr.hpp $(I)ida.hpp $(I)idd.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)pro.h     \
+	          $(I)ua.hpp $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h    \
+	          consts.h deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h      \
+	          winbase_debmod.cpp winbase_debmod.h wince.hpp             \
+	          wince_debmod.h
+$(F)wince_debmod$(O): $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
+	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
+	          $(I)lines.hpp $(I)llong.hpp $(I)pro.h $(I)ua.hpp          \
+	          $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h async.h       \
+	          consts.h deb_arm.hpp debmod.h rapi/rapi.h rpc_engine.h    \
+	          rpc_hlp.h rpc_server.h tcpip.h wince.hpp                  \
+	          wince_debmod.cpp wince_debmod.h xscale/Breakpoint.h
+$(F)wince_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
+	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
+	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
+	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
+	          $(I)srarea.hpp $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp    \
+	          rpc_hlp.h win32_rpc.h ../../ldr/pe/pe.h                   \
+	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
+	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
+	          ../../plugins/pdb/pdblocal.hpp arm_local_impl.cpp        \
+	          arm_regs.cpp async.h common_local_impl.cpp                \
+	          common_stub_impl.cpp consts.h deb_arm.hpp debmod.h        \
+	          rapi/rapi.h rpc_client.h rpc_debmod.h rpc_engine.h        \
+	          rpc_hlp.h tcpip.h win32_local_impl.cpp win32_rpc.h        \
+	          wince.hpp wince_rstub.cpp
+else
+all:
+endif
