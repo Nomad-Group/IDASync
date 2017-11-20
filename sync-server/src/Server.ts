@@ -29,11 +29,16 @@ export class Server {
 
         // Event Handler
         socket.on("end", this.onConnectionClosed.bind(this, client));
-        socket.on("data", this.onClientData.bind(this, client));       
+        socket.on("data", this.onClientData.bind(this, client));
+        socket.on("error", this.onConnectionError.bind(this, client));
     }
 
     private onConnectionClosed(client:Client) {
         console.log("[Server] Client disconnected (" + client.name + ")");
+    }
+
+    private onConnectionError(client:Client, error:Error) {
+        console.error("[Server] Client (" + client.name + ") error: " + error.name + "\n" + error.message);
     }
 
     private onClientData(client:Client, data:Buffer) {
@@ -67,10 +72,13 @@ export class Server {
         if(packet.packetType == PacketType.Handshake)
         {
             var response = new HandshakeResponse();
-            response.username = null;//"You suck";
-
+            response.username = "You suck";
             console.log(response);
+
             this.sendPacket(client, response);
+            setTimeout(() => {
+                this.sendPacket(client, response);
+            }, 1000);
         }
     }
 
