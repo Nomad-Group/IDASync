@@ -2,20 +2,22 @@
 #include <idp.hpp>
 #include <loader.hpp>
 
+#include "SyncPlugin.h"
+
 int __stdcall IDAP_init(void)
 {
-	msg("[SyncPlugin ] Loading...");
-	return PLUGIN_KEEP;
+	g_plugin = new SyncPlugin();
+	return g_plugin->Init() ? PLUGIN_KEEP : PLUGIN_SKIP;
 }
 void __stdcall IDAP_term(void)
 {
-	msg("[SyncPlugin ] Terminating...");
-	return;
+	if (g_plugin)
+		g_plugin->Shutdown();
 }
 void __stdcall IDAP_run(int arg)
 {
-	msg("[SyncPlugin ] Hello!");
-	return;
+	if (g_plugin)
+		g_plugin->Run();
 }
 
 char IDAP_comment[] = "Sync Plugin (Alpha)";

@@ -94,7 +94,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../idasdk/include/</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../idasdk/include/;include/;vendor/socket.io-client-cpp/src/</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__NT__;__IDP__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
@@ -108,7 +108,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../idasdk/include/</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../idasdk/include/;include/;vendor/socket.io-client-cpp/src/</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__NT__;__IDP__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
@@ -124,7 +124,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../idasdk/include/</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../idasdk/include/;include/;vendor/socket.io-client-cpp/src/</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__NT__;__IDP__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
@@ -142,7 +142,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../idasdk/include/</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>../idasdk/include/;include/;vendor/socket.io-client-cpp/src/</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>__NT__;__IDP__;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
@@ -154,7 +154,19 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\IDBHook.cpp" />
     <ClCompile Include="src\Main.cpp" />
+    <ClCompile Include="src\SyncPlugin.cpp" />
+    <ClCompile Include="src\SyncClient.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\ida\idb_events_strings.h" />
+    <ClInclude Include="include\ida\idp_events_strings.h" />
+    <ClInclude Include="include\packets\BasePacket.h" />
+    <ClInclude Include="include\packets\HandshakePacket.h" />
+    <ClInclude Include="include\SyncPlugin.h" />
+    <ClInclude Include="include\SyncClient.h" />
+    <ClInclude Include="include\Utility.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,0 +1,142 @@
+#pragma once
+
+const char* idp_events_strings[] = {
+	//enum idp_notify
+	"init",  //0
+	"term",  //1
+	"newprc",//2
+	"newasm",//3
+	"newfile",//4
+	"oldfile",//5
+	"newbinary",//6
+	"endbinary",//7
+	"newseg",//8
+	"assemble",//9
+	"obsolete_makemicro",//10
+	"outlabel",//11
+	"rename",//12
+	"may_show_sreg",//13
+	"closebase",//14
+	"load_idasgn",//15
+	"coagulate",//16
+	"auto_empty",//17
+	"auto_queue_empty",//18
+	"func_bounds",//19
+	"may_be_func",//20
+	"is_sane_insn",//21
+	"is_jump_func",//22
+	"gen_regvar_def",//23
+	"setsgr",//24
+	"set_compiler",//25
+	"is_basic_block_end",//26
+	"reglink",//27
+	"get_vxd_name",//28
+	"custom_ana",//29
+	"custom_out",//30
+	"custom_emu",//31
+	"custom_outop",//32
+	"custom_mnem",//33
+	"undefine",//34
+	"make_code",//35
+	"make_data",//36
+	"moving_segm",//37
+	"move_segm",//38
+	"is_call_insn",//39
+	"is_ret_insn",//40
+	"get_stkvar_scale_factor",//41
+	"create_flat_group",//42
+	"kernel_config_loaded",//43
+	"might_change_sp",//44
+	"is_alloca_probe",//45
+	"out_3byte",//46
+	"get_reg_name",//47
+	"savebase",//48
+	"gen_asm_or_lst",//49
+	"out_src_file_lnnum",//50
+	"get_autocmt",//51
+	"is_insn_table_jump",//52
+	"auto_empty_finally",//53
+	"loader_finished",//54
+	"loader_elf_machine",//55
+	"is_indirect_jump",//56
+	"verify_noreturn",//57
+	"verify_sp",//58
+	"renamed",//59
+	"add_func",//60
+	"del_func",//61
+	"set_func_start",//62
+	"set_func_end",//63
+	"treat_hindering_item",//64
+	"str2reg",//65
+	"create_switch_xrefs",//66
+	"calc_switch_cases",//67
+	"determined_main",//68
+	"preprocess_chart",//69
+	"get_bg_color",//70
+	"validate_flirt_func",//71
+	"get_operand_string",//72
+	"add_cref",//73
+	"add_dref",//74
+	"del_cref",//75
+	"del_dref",//76
+	"coagulate_dref",//77
+	"register_custom_fixup",//78
+	"custom_refinfo",//79
+	"set_proc_options",//80
+	"adjust_libfunc_ea",//81
+	"last_cb_before_debugger",//82
+	nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+	nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+#ifdef NO_OBSOLETE_FUNCS
+	"obsolete_get_operand_info",//100
+#else
+	"get_operand_info",//100
+#endif
+	"get_reg_info",//101
+#ifdef NO_OBSOLETE_FUNCS
+	"next_exec_insn",//102
+#else
+	"get_jump_target",//102
+#endif
+	"calc_step_over",//103
+	"get_macro_insn_head",//104
+	"get_dbr_opnum",//105
+	"insn_reads_tbit",//106
+#ifdef NO_OBSOLETE_FUNCS
+	"get_operand_info",//107
+#else
+	"reserved_entry",//107
+#endif
+	"calc_next_eas",//108
+	"clean_tbit",//109
+	"get_reg_info2",//110
+				/*
+				"decorate_name",//500
+				"setup_til",//501
+				"based_ptr",//502
+				"max_ptr_size",//503
+				"get_default_enum_size",//504
+				"OBSOLETE(calc_arglocs)",//505
+				"use_stkarg_type",//506
+				"OBSOLETE(use_regarg_type)",//507
+				"OBSOLETE(use_arg_types)",//508
+				"OBSOLETE(get_fastcall_regs)",//509
+				"OBSOLETE(get_thiscall_regs)",//510
+				"OBSOLETE(calc_cdecl_purged_bytes)",//511
+				"OBSOLETE(get_stkarg_offset)",//512
+				"calc_purged_bytes",//513
+				"calc_arglocs2",//514
+				"calc_retloc",//515
+				"calc_varglocs",//516
+				"OBSOLETE(get_varcall_regs)",//517
+				"use_regarg_type2",//518
+				"use_arg_types2",//519
+				"get_fastcall_regs2",//520
+				"get_thiscall_regs2",//521
+				"get_varcall_regs2",//522
+				"calc_cdecl_purged_bytes2",//523
+				"get_stkarg_offset2",//524
+				"til_for_file",//525
+				"loader=1000",//1000
+				*/
+};

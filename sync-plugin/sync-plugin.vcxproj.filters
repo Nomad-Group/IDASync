@@ -1,22 +1,56 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="Source Files">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
-    </Filter>
-    <Filter Include="Header Files">
+    <Filter Include="Header">
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
     </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    <Filter Include="Source">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header\ida">
+      <UniqueIdentifier>{8f73fb02-2577-4458-a46b-cd7c74b1ca7f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header\packets">
+      <UniqueIdentifier>{406ce466-52c5-4ec9-9d5c-720be8e9f014}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="src\SyncPlugin.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="src\IDBHook.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SyncClient.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\SyncPlugin.h">
+      <Filter>Header</Filter>
+    </ClInclude>
+    <ClInclude Include="include\Utility.h">
+      <Filter>Header</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ida\idb_events_strings.h">
+      <Filter>Header\ida</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ida\idp_events_strings.h">
+      <Filter>Header\ida</Filter>
+    </ClInclude>
+    <ClInclude Include="include\SyncClient.h">
+      <Filter>Header</Filter>
+    </ClInclude>
+    <ClInclude Include="include\packets\BasePacket.h">
+      <Filter>Header\packets</Filter>
+    </ClInclude>
+    <ClInclude Include="include\packets\HandshakePacket.h">
+      <Filter>Header\packets</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
