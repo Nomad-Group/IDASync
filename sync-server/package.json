@@ -1,0 +1,12 @@
+{
+  "name": "sync-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/app.js",
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^8.0.53",
+    "typescript": "^2.6.1"
+  }
+}

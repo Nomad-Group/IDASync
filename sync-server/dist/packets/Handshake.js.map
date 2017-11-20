@@ -1,0 +1,1 @@
+{"version":3,"file":"Handshake.js","sourceRoot":"","sources":["../../src/packets/Handshake.ts"],"names":[],"mappings":";;AAAA,6CAA0C;AAE1C,eAAuB,SAAQ,uBAAU;IAG9B,MAAM,CAAC,MAAa;QACvB,IAAI,CAAC,IAAI,GAAG,MAAM,CAAC,QAAQ,CAAC,MAAM,EAAE,uBAAU,CAAC,WAAW,EAAE,uBAAU,CAAC,WAAW,GAAG,EAAE,CAAC,CAAC;IAC7F,CAAC;CACJ;AAND,8BAMC"}
