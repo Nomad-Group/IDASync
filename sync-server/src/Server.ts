@@ -1,5 +1,5 @@
 import { BasePacket } from './packets/BasePacket';
-import { Handshake } from './packets/Handshake';
+import { Handshake, HandshakeResponse } from './packets/Handshake';
 import { PacketType } from './packets/PacketType';
 import * as net from 'net';
 
@@ -63,5 +63,22 @@ export class Server {
 
         // DEBUG
         console.log(packet);
+
+        if(packet.packetType == PacketType.Handshake)
+        {
+            var response = new HandshakeResponse();
+            response.username = null;//"You suck";
+
+            console.log(response);
+            this.sendPacket(client, response);
+        }
+    }
+
+    public sendPacket(client:Client, packet:BasePacket) {
+        var buffer:Buffer = new Buffer(packet.packetSize);
+        packet.encode(buffer);
+
+        client.socket.write(buffer);
+        client.socket.pipe(client.socket);
     }
 }

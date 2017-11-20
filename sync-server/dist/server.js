@@ -47,6 +47,18 @@ class Server {
         packet.decode(data);
         // DEBUG
         console.log(packet);
+        if (packet.packetType == PacketType_1.PacketType.Handshake) {
+            var response = new Handshake_1.HandshakeResponse();
+            response.username = null; //"You suck";
+            console.log(response);
+            this.sendPacket(client, response);
+        }
+    }
+    sendPacket(client, packet) {
+        var buffer = new Buffer(packet.packetSize);
+        packet.encode(buffer);
+        client.socket.write(buffer);
+        client.socket.pipe(client.socket);
     }
 }
 Server.PORT = 4523;

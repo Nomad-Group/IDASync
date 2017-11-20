@@ -20,7 +20,7 @@ bool SyncClient::Connect(const std::string& ip, uint16_t port)
 	// WSA
 	int resultCode = WSAStartup(MAKEWORD(2, 2), &m_wsaData);
 	if (resultCode != 0) {
-		g_plugin->ShowErrorDialog("WSAStartup failed!");
+		g_plugin->ShowInfoDialog("WSAStartup failed!");
 		return false;
 	}
 
@@ -37,7 +37,7 @@ bool SyncClient::Connect(const std::string& ip, uint16_t port)
 	// Resolve Address
 	resultCode = getaddrinfo(ip.c_str(), std::to_string(port).c_str(), &hints, &result);
 	if (resultCode != 0) {
-		g_plugin->ShowErrorDialog("getaddrinfo failed for " + ip + ":" + std::to_string(port));
+		g_plugin->ShowInfoDialog("getaddrinfo failed for " + ip + ":" + std::to_string(port));
 		return false;
 	}
 
@@ -46,7 +46,7 @@ bool SyncClient::Connect(const std::string& ip, uint16_t port)
 		// Socket
 		m_socket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
 		if (m_socket == INVALID_SOCKET) {
-			g_plugin->ShowErrorDialog("socket failed!");
+			g_plugin->ShowInfoDialog("socket failed!");
 			
 			freeaddrinfo(result);
 			return false;
@@ -70,7 +70,7 @@ bool SyncClient::Connect(const std::string& ip, uint16_t port)
 	// Check
 	if (m_socket == INVALID_SOCKET)
 	{
-		g_plugin->ShowErrorDialog("Unable to connect to " + ip + ":" + std::to_string(port));
+		g_plugin->ShowInfoDialog("Unable to connect to " + ip + ":" + std::to_string(port));
 		return false;
 	}
 
@@ -84,10 +84,18 @@ bool SyncClient::Connect(const std::string& ip, uint16_t port)
 
 	if (!Send(&packet))
 	{
-		g_plugin->ShowErrorDialog("Handshake failed!");
+		g_plugin->ShowInfoDialog("Handshake failed!");
 		return false;
 	}
 
+	// Receive HandshakeResponse
+	HandshakeResponsePacket packetResponse;
+	if (!ExpectPacket(&packetResponse))
+	{
+		g_plugin->ShowInfoDialog("Expected HandshakeResponse Packet!");
+		return false;
+	}
+	
 	// Connected
 	return true;
 }
@@ -97,7 +105,7 @@ bool SyncClient::_send(BasePacket* pPacket, size_t stSize)
 	if (pPacket == nullptr)
 		return false;
 
-	pPacket->packetSize = stSize;
+	pPacket->packetSize = static_cast<uint16_t>(stSize);
 
 #ifdef _DEBUG
 	g_plugin->Log("DEBUG: Sending " + std::string(PacketTypeToString(pPacket->packetType)));
@@ -106,11 +114,43 @@ bool SyncClient::_send(BasePacket* pPacket, size_t stSize)
 	auto resultCode = send(m_socket, (const char*) pPacket, stSize, 0);
 	if (resultCode == SOCKET_ERROR)
 	{
-		g_plugin->ShowErrorDialog("send() failed!");
+		g_plugin->ShowInfoDialog("send() failed!");
 		return false;
 	}
 
 	return resultCode == stSize;
+}
+
+bool SyncClient::_expect(PacketType ePacketType, BasePacket* pPacket, size_t stSize)
+{
+	if (pPacket == nullptr)
+		return false;
+
+	// Packet Header
+	auto resultCode = recv(m_socket, (char*)pPacket, sizeof(BasePacket), 0);
+	if (resultCode == SOCKET_ERROR)
+	{
+		g_plugin->ShowInfoDialog("recv() failed!");
+		return false;
+	}
+
+	// Check Packet Type
+	if (pPacket->packetType != ePacketType)
+	{
+		g_plugin->ShowInfoDialog("Expected Packet " + std::string(PacketTypeToString(ePacketType)) + ", got " + PacketTypeToString(pPacket->packetType) + " instead!");
+		return false;
+	}
+
+	// Read rest of Packet
+	resultCode = recv(m_socket, ((char*)pPacket) + sizeof(BasePacket), pPacket->packetSize - sizeof(BasePacket), 0);
+	if (resultCode == SOCKET_ERROR)
+	{
+		g_plugin->ShowInfoDialog("recv() failed!");
+		return false;
+	}
+
+	// Done
+	return true;
 }
 
 void SyncClient::Disconnect()

@@ -13,6 +13,7 @@ class SyncClient
 	SOCKET m_socket = INVALID_SOCKET;
 
 	bool _send(BasePacket*, size_t);
+	bool _expect(PacketType, BasePacket*, size_t);
 
 	std::string GetHardwareId();
 
@@ -27,6 +28,12 @@ public:
 	inline bool Send(T* pPacket, size_t stSize = sizeof(T))
 	{
 		return _send((BasePacket*)pPacket, stSize);
+	}
+
+	template <class T>
+	inline bool ExpectPacket(T* pPacket, size_t stSize = sizeof(T))
+	{
+		return _expect(T::Enum, (BasePacket*)pPacket, stSize);
 	}
 };
 
