@@ -156,16 +156,21 @@
   <ItemGroup>
     <ClCompile Include="src\IDBHook.cpp" />
     <ClCompile Include="src\Main.cpp" />
+    <ClCompile Include="src\network\Networking.cpp" />
+    <ClCompile Include="src\network\Socket.cpp" />
+    <ClCompile Include="src\SocketEventDispatcher.cpp" />
     <ClCompile Include="src\SyncPlugin.cpp" />
-    <ClCompile Include="src\SyncClient.cpp" />
+    <ClCompile Include="src\NetworkClient.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ida\idb_events_strings.h" />
     <ClInclude Include="include\ida\idp_events_strings.h" />
-    <ClInclude Include="include\packets\BasePacket.h" />
-    <ClInclude Include="include\packets\HandshakePacket.h" />
+    <ClInclude Include="include\network\NetworkClient.h" />
+    <ClInclude Include="include\network\Networking.h" />
+    <ClInclude Include="include\network\Socket.h" />
+    <ClInclude Include="include\network\SocketEventDispatcher.h" />
+    <ClInclude Include="include\network\SocketEvent.h" />
     <ClInclude Include="include\SyncPlugin.h" />
-    <ClInclude Include="include\SyncClient.h" />
     <ClInclude Include="include\Utility.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

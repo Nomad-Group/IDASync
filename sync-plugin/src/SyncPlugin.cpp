@@ -1,6 +1,7 @@
 #include "SyncPlugin.h"
-#include "SyncClient.h"
-#include "packets/HandshakePacket.h"
+#include "network/Networking.h"
+#include "network/NetworkClient.h"
+#include "network/packets/HandshakePacket.h"
 #include <ida.hpp>
 #include <idp.hpp>
 
@@ -17,8 +18,14 @@ bool SyncPlugin::Init()
 		return false;
 	}
 
-	// Client
-	g_client = new SyncClient();
+	// Networking
+	if (!Networking::GlobalInit())
+	{
+		Log("Error: Failed to initialize Networking!");
+		return false;
+	}
+
+	g_client = new NetworkClient();
 
 	// Done
 	return true;
@@ -26,8 +33,11 @@ bool SyncPlugin::Init()
 
 void SyncPlugin::Shutdown()
 {
+	// Networking
 	if (g_client)
 		delete g_client;
+
+	Networking::GlobalShutdown();
 }
 
 void SyncPlugin::Run()
@@ -39,7 +49,7 @@ void SyncPlugin::Run()
 	// Hardware ID
 	HandshakePacket packet;
 	packet.packetType = PacketType::Handshake;
-	memcpy(&packet.guid, SyncClient::GetHardwareId().c_str(), sizeof(packet.guid));
+	memcpy(&packet.guid, Networking::GetHardwareId().c_str(), sizeof(packet.guid));
 	retrieve_input_file_md5(packet.binarymd5);
 
 	// Handshake
@@ -60,7 +70,7 @@ void SyncPlugin::Run()
 	}
 
 	// Connected
-	g_client->LaunchThread();
+	g_client->StartListening();
 }
 
 void SyncPlugin::Log(const std::string& message)
