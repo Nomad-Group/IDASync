@@ -70,7 +70,11 @@ void SyncPlugin::Run()
 	}
 
 	// Connected
-	g_client->StartListening();
+	if (!g_client->StartListening())
+	{
+		g_plugin->ShowInfoDialog("NetworkClient::StartListening failed!");
+		return;
+	}
 }
 
 void SyncPlugin::Log(const std::string& message)

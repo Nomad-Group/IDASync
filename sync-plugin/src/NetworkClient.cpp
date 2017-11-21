@@ -1,4 +1,5 @@
 #include "network/NetworkClient.h"
+#include "network/SocketEventDispatcher.h"
 #include "SyncPlugin.h"
 
 NetworkClient* g_client = nullptr;
@@ -11,7 +12,11 @@ NetworkClient::~NetworkClient()
 
 bool NetworkClient::StartListening()
 {
-	return true;
+	if (m_eventDispatcher)
+		delete m_eventDispatcher;
+	
+	m_eventDispatcher = new SocketEventDispatcher(m_socket.GetHandle());
+	return m_eventDispatcher->StartListening(this);
 }
 
 bool NetworkClient::SendPacketInternal(BasePacket* pPacket, size_t stSize)

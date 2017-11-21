@@ -10,11 +10,16 @@
 #include "Socket.h"
 #include "SocketEvent.h"
 
+class SocketEventDispatcher;
 class NetworkClient : public ISocketEventListener
 {
 protected:
+	// Socket
 	Socket m_socket;
 	bool ErrorCheck(Socket::StatusCode);
+
+	// Event Handling
+	SocketEventDispatcher* m_eventDispatcher = nullptr;
 
 	// Packets
 	bool SendPacketInternal(BasePacket*, size_t);

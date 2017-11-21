@@ -35,4 +35,5 @@ public:
 
 	// Validity-Check
 	inline bool IsValid() { return m_socket != INT32_MAX; };
+	inline int32_t GetHandle() { return m_socket; };
 };
