@@ -1,5 +1,6 @@
 #include "SyncPlugin.h"
 #include "SyncClient.h"
+#include "packets/HandshakePacket.h"
 #include <ida.hpp>
 #include <idp.hpp>
 
@@ -16,19 +17,50 @@ bool SyncPlugin::Init()
 		return false;
 	}
 
+	// Client
+	g_client = new SyncClient();
+
+	// Done
 	return true;
 }
 
 void SyncPlugin::Shutdown()
 {
-
+	if (g_client)
+		delete g_client;
 }
 
 void SyncPlugin::Run()
 {
-	g_client = new SyncClient();
-	if (g_client->Connect("127.0.0.1"))
-		Log("yey!");
+	std::string ip = "127.0.0.1";
+	if (!g_client->Connect(ip))
+		return;
+
+	// Hardware ID
+	HandshakePacket packet;
+	packet.packetType = PacketType::Handshake;
+	memcpy(&packet.guid, SyncClient::GetHardwareId().c_str(), sizeof(packet.guid));
+	retrieve_input_file_md5(packet.binarymd5);
+
+	// Handshake
+	g_plugin->Log("Connected to " + ip + ", shaking hands..");
+
+	if (!g_client->Send(&packet))
+	{
+		g_plugin->ShowInfoDialog("Handshake failed!");
+		return;
+	}
+
+	// Receive HandshakeResponse
+	HandshakeResponsePacket packetResponse;
+	if (!g_client->ExpectPacket(&packetResponse))
+	{
+		g_plugin->ShowInfoDialog("Expected HandshakeResponse Packet!");
+		return;
+	}
+
+	// Connected
+	g_client->LaunchThread();
 }
 
 void SyncPlugin::Log(const std::string& message)

@@ -73,31 +73,18 @@ bool SyncClient::Connect(const std::string& ip, uint16_t port)
 		g_plugin->ShowInfoDialog("Unable to connect to " + ip + ":" + std::to_string(port));
 		return false;
 	}
-
-	// Hardware ID
-	auto hardwareId = GetHardwareId();
-	g_plugin->Log("Connected to " + ip + " - sending Hardware ID...");
-
-	HandshakePacket packet;
-	packet.packetType = PacketType::Handshake;
-	memcpy(&packet.guid, hardwareId.c_str(), sizeof(packet.guid));
-
-	if (!Send(&packet))
-	{
-		g_plugin->ShowInfoDialog("Handshake failed!");
-		return false;
-	}
-
-	// Receive HandshakeResponse
-	HandshakeResponsePacket packetResponse;
-	if (!ExpectPacket(&packetResponse))
-	{
-		g_plugin->ShowInfoDialog("Expected HandshakeResponse Packet!");
-		return false;
-	}
 	
 	// Connected
 	return true;
+}
+
+void SyncClient::LaunchThread()
+{
+	m_thread = std::thread([=]() {
+		this->_Worker();
+	});
+
+	m_thread.detach();
 }
 
 bool SyncClient::_send(BasePacket* pPacket, size_t stSize)
@@ -155,8 +142,71 @@ bool SyncClient::_expect(PacketType ePacketType, BasePacket* pPacket, size_t stS
 
 void SyncClient::Disconnect()
 {
-	if (m_socket != INVALID_SOCKET)
-		closesocket(m_socket);
+	if (m_socket == INVALID_SOCKET)
+		return;
+
+	// Join Thread
+	if(m_thread.joinable())
+		m_thread.join();
+
+	// Destroy Socket
+	closesocket(m_socket);
+	m_socket = INVALID_SOCKET;
+}
+
+void SyncClient::_Worker()
+{
+	// Timeout
+	DWORD timeout = 100;
+	setsockopt(g_client->m_socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout));
+
+	// Buffer
+	BasePacket packetHeader;
+
+	while (true)
+	{
+		// Packet Header
+		auto recvSize = recv(g_client->m_socket, (char*)&packetHeader, sizeof(packetHeader), 0);
+		if (recvSize == SOCKET_ERROR)
+		{
+			// Timeout
+			if (WSAGetLastError() == WSAETIMEDOUT)
+				continue;
+
+			// Failed
+			g_plugin->ShowInfoDialog("recv() 1 failed!");
+			return;
+		}
+
+		// Packet Contents
+		auto packetBuffer = (char*) malloc(packetHeader.packetSize);
+		memcpy(packetBuffer, &packetHeader, sizeof(BasePacket));
+
+		size_t remainingSize = packetHeader.packetSize - sizeof(BasePacket);
+		recvSize = recv(g_client->m_socket, ((char*)&packetHeader) + sizeof(BasePacket), remainingSize, 0);
+
+		if (recvSize == SOCKET_ERROR)
+		{
+			delete packetBuffer;
+
+			// Failed
+			g_plugin->ShowInfoDialog("recv() 2 failed!");
+			return;
+		}
+
+		if (recvSize < remainingSize)
+		{
+			delete packetBuffer;
+
+			// Failed
+			g_plugin->ShowInfoDialog("recv() failed: Packet was smaller than expected!");
+			return;
+		}
+
+		// Queue
+		auto packetType = PacketTypeToString(((BasePacket*)packetBuffer)->packetType);
+		g_plugin->Log("Received Packet " + std::string(packetType));
+	}
 }
 
 std::string SyncClient::GetHardwareId()

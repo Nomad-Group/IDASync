@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <thread>
 #include <stdint.h>
 
 #include <winsock2.h>
@@ -15,13 +16,15 @@ class SyncClient
 	bool _send(BasePacket*, size_t);
 	bool _expect(PacketType, BasePacket*, size_t);
 
-	std::string GetHardwareId();
+	std::thread m_thread;
+	static void _Worker();
 
 public:
 	SyncClient() = default;
 	~SyncClient();
 
 	bool Connect(const std::string& ip, uint16_t port = 4523);
+	void LaunchThread();
 	void Disconnect();
 
 	template <class T>
@@ -35,6 +38,9 @@ public:
 	{
 		return _expect(T::Enum, (BasePacket*)pPacket, stSize);
 	}
+
+	// Utility
+	static std::string GetHardwareId();
 };
 
 extern SyncClient* g_client;

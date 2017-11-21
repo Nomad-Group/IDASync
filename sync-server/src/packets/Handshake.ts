@@ -3,6 +3,7 @@ import { BasePacket } from './BasePacket';
 
 export class Handshake extends BasePacket {
     public guid:string;
+    public binarymd5:string;
 
     public constructor() {
         super();
@@ -15,17 +16,20 @@ export class Handshake extends BasePacket {
         super.decode(buffer);
 
         this.guid = buffer.toString("utf8", BasePacket.HEADER_SIZE, BasePacket.HEADER_SIZE + 38);
+        this.binarymd5 = buffer.toString("utf8", BasePacket.HEADER_SIZE + 38, BasePacket.HEADER_SIZE + 38 + 16);
     }
 
     public encode(buffer:Buffer) {
         super.encode(buffer);
 
         buffer.write(this.guid, BasePacket.HEADER_SIZE, 38, "utf8");
+        buffer.write(this.binarymd5, BasePacket.HEADER_SIZE + 38, 16, "utf8");
     }
 }
 
 export class HandshakeResponse extends BasePacket {
     public username:string;
+    public project_name:string;
 
     public constructor() {
         super();
@@ -38,16 +42,18 @@ export class HandshakeResponse extends BasePacket {
         super.decode(buffer);
 
         this.username = buffer.toString("utf8", BasePacket.HEADER_SIZE, BasePacket.HEADER_SIZE + 32);
+        this.project_name = buffer.toString("utf8", BasePacket.HEADER_SIZE + 32, BasePacket.HEADER_SIZE + 64);
     }
 
     public encode(buffer:Buffer) {
         super.encode(buffer);
 
-        if(this.username == null) {
-            for(var i = 0; i < 32; i++)
-                buffer[BasePacket.HEADER_SIZE + i] = 0;
-        } else {
+        if(this.username != null) {
             buffer.write(this.username, BasePacket.HEADER_SIZE, 32, "utf8");
+        }
+
+        if(this.project_name != null) {
+            buffer.write(this.project_name, BasePacket.HEADER_SIZE + 32, 32, "utf8");
         }
     }
 }
