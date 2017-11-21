@@ -6,7 +6,7 @@ enum class PacketType : uint8_t
 	Handshake = 0,
 	HandshakeResponse,
 
-
+	Heartbeat,
 };
 
 static const char* PacketTypeToString(PacketType packetType)
@@ -18,6 +18,9 @@ static const char* PacketTypeToString(PacketType packetType)
 
 	case PacketType::HandshakeResponse:
 		return "PacketType::HandshakeResponse";
+
+	case PacketType::Heartbeat:
+		return "PacketType::Heartbeat";
 
 	default:
 		return "PacketType::_Unknown[Error]";

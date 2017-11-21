@@ -15,6 +15,12 @@
     <Filter Include="Header\network">
       <UniqueIdentifier>{87799750-8315-48e5-8d9b-31e8a45547ee}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\network">
+      <UniqueIdentifier>{f77be3ed-0c1a-4575-8639-0672e8cf23db}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header\network\packets">
+      <UniqueIdentifier>{4ec212a8-05b0-42fa-8fa2-3196d62ef5a0}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp">
@@ -26,17 +32,17 @@
     <ClCompile Include="src\IDBHook.cpp">
       <Filter>Source</Filter>
     </ClCompile>
-    <ClCompile Include="src\NetworkClient.cpp">
-      <Filter>Source</Filter>
-    </ClCompile>
     <ClCompile Include="src\SocketEventDispatcher.cpp">
-      <Filter>Source</Filter>
+      <Filter>Source\network</Filter>
     </ClCompile>
     <ClCompile Include="src\network\Socket.cpp">
-      <Filter>Source</Filter>
+      <Filter>Source\network</Filter>
     </ClCompile>
     <ClCompile Include="src\network\Networking.cpp">
-      <Filter>Source</Filter>
+      <Filter>Source\network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\NetworkClient.cpp">
+      <Filter>Source\network</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -66,6 +72,18 @@
     </ClInclude>
     <ClInclude Include="include\network\Networking.h">
       <Filter>Header\network</Filter>
+    </ClInclude>
+    <ClInclude Include="include\IDANetworkHandler.h">
+      <Filter>Header</Filter>
+    </ClInclude>
+    <ClInclude Include="include\network\packets\BasePacket.h">
+      <Filter>Header\network\packets</Filter>
+    </ClInclude>
+    <ClInclude Include="include\network\packets\HandshakePacket.h">
+      <Filter>Header\network\packets</Filter>
+    </ClInclude>
+    <ClInclude Include="include\network\packets\HeartbeatPacket.h">
+      <Filter>Header\network\packets</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

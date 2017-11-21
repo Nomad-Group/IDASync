@@ -1,4 +1,4 @@
-#define _WINSOCK_DEPRECATED_NO_WARNINGS // yea.. i know...
+#include <winsock2.h>
 #include "network/Socket.h"
 #include "network/SocketEventDispatcher.h"
 
@@ -16,63 +16,52 @@ bool SocketEventDispatcher::StartListening(ISocketEventListener* socketEventList
 	if (!IsSocketValid())
 		return false;
 
-	// Create Window
-	m_hwnd = CreateWindowEx(0, "STATIC", "SyncPlugin SocketEventDispatcher", 0, 0, 0, 0, 0, HWND_MESSAGE, 0, 0, socketEventListener);
-	if (m_hwnd == nullptr)
+	// Event
+	m_hEvent = WSACreateEvent();
+	if (m_hEvent == nullptr)
 		return false;
 
-	// Hook WndProc
-	m_wndproc = (WNDPROC)SetWindowLongPtr(m_hwnd, GWL_WNDPROC, (LONG_PTR)WndProc_Hook);
-	if (m_wndproc == 0)
-	{
-		StopListening();
+	// Network Events
+	if (WSAEventSelect(m_socket, m_hEvent, FD_READ | FD_WRITE | FD_CLOSE) != 0)
 		return false;
-	}
 
-	// Socket => Window
-	// TODO: THIS SHIT IS DEPRECATED
-	if (WSAAsyncSelect(m_socket, m_hwnd, WM_USER, FD_READ | FD_WRITE | FD_CLOSE) == SOCKET_ERROR)
-	{
-		StopListening();
-		return false;
-	}
+	// Create Thread
+	m_thread = std::thread([=]() {
+		this->_WorkerThread(socketEventListener);
+	});
+	m_thread.detach();
 
 	// Done
 	return true;
 }
 
-BOOL CALLBACK SocketEventDispatcher::WndProc_Hook(HWND hWnd, UINT uiMessage, WPARAM wParam, LPARAM lParam)
+void SocketEventDispatcher::_WorkerThread(ISocketEventListener* socketEventListener)
 {
-	auto pClient = (ISocketEventListener*) GetWindowLongPtr(hWnd, GWLP_USERDATA);
-	if (uiMessage == WM_USER || pClient != nullptr)
-		return false;
-	
-	// Error?
-	if (WSAGETSELECTERROR(lParam))
-		return pClient->OnSocketEvent(SocketEvent::Error);
+	WSANETWORKEVENTS wsaNetworkEvents;
 
-	// Socket Event
-	SocketEvent socketEvent;
-	switch (WSAGETSELECTEVENT(lParam))
+	while (IsSocketValid())
 	{
-	case FD_READ:
-		socketEvent = SocketEvent::Read;
-		break;
+		auto dwEvent = WSAWaitForMultipleEvents(1, &m_hEvent, false, WSA_INFINITE, false);
+		WSAEnumNetworkEvents(m_socket, m_hEvent, &wsaNetworkEvents);
 
-	case FD_WRITE:
-		socketEvent = SocketEvent::Write;
-		break;
+		// Error?
+		/*if (wsaNetworkEvents.iErrorCode[0] != 0)
+			DebugBreak();*/
 
-	case FD_CLOSE:
-		socketEvent = SocketEvent::Close;
-		break;
+		// Socket Event
+		SocketEvent socketEvent;
+		if (wsaNetworkEvents.lNetworkEvents & FD_CLOSE)
+			socketEvent = SocketEvent::Close;
+		else if (wsaNetworkEvents.lNetworkEvents & FD_READ)
+			socketEvent = SocketEvent::Read;
+		else if (wsaNetworkEvents.lNetworkEvents & FD_WRITE)
+			socketEvent = SocketEvent::Write;
+		else
+			continue;
 
-	default:
-		return true;
+		// Trigger
+		socketEventListener->OnSocketEvent(socketEvent);
 	}
-
-	// Handle
-	return pClient->OnSocketEvent(socketEvent);
 }
 
 void SocketEventDispatcher::StopListening()
@@ -81,13 +70,6 @@ void SocketEventDispatcher::StopListening()
 		return;
 
 	// Socket
-	if(m_socket != INVALID_SOCKET)
-		WSAAsyncSelect(m_socket, m_hwnd, 0, 0);
-
-	// Window
-	if (m_hwnd != nullptr)
-	{
-		DestroyWindow(m_hwnd);
-		m_hwnd = nullptr;
-	}
+	if (m_socket != INVALID_SOCKET)
+		WSAEventSelect(m_socket, nullptr, 0);
 }

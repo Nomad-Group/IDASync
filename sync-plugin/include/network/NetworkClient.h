@@ -10,6 +10,13 @@
 #include "Socket.h"
 #include "SocketEvent.h"
 
+struct INetworkClientEventListener
+{
+	virtual ~INetworkClientEventListener() = default;
+
+	virtual void OnPacket(BasePacket*) = 0;
+};
+
 class SocketEventDispatcher;
 class NetworkClient : public ISocketEventListener
 {
@@ -20,10 +27,13 @@ protected:
 
 	// Event Handling
 	SocketEventDispatcher* m_eventDispatcher = nullptr;
+	INetworkClientEventListener* m_listener = nullptr;
 
 	// Packets
 	bool SendPacketInternal(BasePacket*, size_t);
-	bool ExpectPacketInternal(PacketType, BasePacket*, size_t);
+
+	BasePacket* ReadPacketInternal();
+	bool ReadPacketInternal(PacketType, BasePacket*, size_t);
 
 public:
 	NetworkClient() = default;
@@ -34,7 +44,7 @@ public:
 	inline bool Disconnect() { return m_socket.Close(); };
 
 	// Socket Events
-	bool StartListening();
+	bool StartListening(INetworkClientEventListener*);
 	virtual bool OnSocketEvent(SocketEvent) override;
 
 	/*
@@ -46,9 +56,9 @@ public:
 		return SendPacketInternal((BasePacket*)pPacket, stSize);
 	}
 	template <class T>
-	inline bool ExpectPacket(T* pPacket, size_t stSize = sizeof(T))
+	inline bool ReadPacket(T* pPacket, size_t stSize = sizeof(T))
 	{
-		return ExpectPacketInternal(T::Enum, (BasePacket*)pPacket, stSize);
+		return ReadPacketInternal(T::Enum, (BasePacket*)pPacket, stSize);
 	}
 };
 

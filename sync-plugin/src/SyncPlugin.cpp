@@ -40,6 +40,30 @@ void SyncPlugin::Shutdown()
 	Networking::GlobalShutdown();
 }
 
+struct PacketDispatcher : exec_request_t
+{
+	BasePacket* pPacket;
+
+	virtual int idaapi execute()
+	{
+		g_plugin->Log("Hello from the main thread! Got your packet!");
+		DebugBreak();
+		return 0;
+	}
+};
+
+struct IDANetworkDispatcher : INetworkClientEventListener
+{
+	virtual void OnPacket(BasePacket* pPacket)
+	{
+		// ya ya lots of mem leaks, just proof of concept
+		PacketDispatcher* dispatcher = new PacketDispatcher();
+		dispatcher->pPacket = pPacket;
+
+		execute_sync(*dispatcher, MFF_WRITE | MFF_NOWAIT);
+	}
+};
+
 void SyncPlugin::Run()
 {
 	std::string ip = "127.0.0.1";
@@ -63,14 +87,14 @@ void SyncPlugin::Run()
 
 	// Receive HandshakeResponse
 	HandshakeResponsePacket packetResponse;
-	if (!g_client->ExpectPacket(&packetResponse))
+	if (!g_client->ReadPacket(&packetResponse))
 	{
 		g_plugin->ShowInfoDialog("Expected HandshakeResponse Packet!");
 		return;
 	}
 
 	// Connected
-	if (!g_client->StartListening())
+	if (!g_client->StartListening(new IDANetworkDispatcher()))
 	{
 		g_plugin->ShowInfoDialog("NetworkClient::StartListening failed!");
 		return;

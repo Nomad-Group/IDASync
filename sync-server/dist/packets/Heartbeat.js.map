@@ -1,0 +1,1 @@
+{"version":3,"file":"Heartbeat.js","sourceRoot":"","sources":["../../src/packets/Heartbeat.ts"],"names":[],"mappings":";;AAAA,6CAA0C;AAC1C,6CAA0C;AAE1C,eAAuB,SAAQ,uBAAU;IACrC;QACI,KAAK,EAAE,CAAC;QAER,IAAI,CAAC,UAAU,GAAG,uBAAU,CAAC,SAAS,CAAC;QACvC,IAAI,CAAC,UAAU,GAAG,uBAAU,CAAC,WAAW,CAAC;IAC7C,CAAC;CACJ;AAPD,8BAOC"}
