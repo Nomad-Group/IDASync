@@ -78,8 +78,8 @@ void SyncPlugin::Run()
 	memcpy(&packet->guid, Networking::GetHardwareId().c_str(), sizeof(HandshakePacket::guid));
 
 	// Binary
-	//retrieve_input_file_md5(packet.binary_md5);
-	//get_root_filename(packet.binary_name, sizeof(packet.binary_name));
+	retrieve_input_file_md5(packet->binary_md5);
+	get_root_filename(packet->binary_name, sizeof(HandshakePacket::binary_name));
 
 	// Handshake
 	if (!g_client->Send(packet))

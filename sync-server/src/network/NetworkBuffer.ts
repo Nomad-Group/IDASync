@@ -28,7 +28,7 @@ export class NetworkBuffer {
     public readCharArray(size:number):string {
         var result = this.buffer.toString("utf8", this.offset, this.offset + size);
         if(result.indexOf('\u0000') > -1)
-            result.slice(0, result.indexOf('\u0000'));
+            result = result.slice(0, result.indexOf('\u0000'));
         this.offset += size;
         return result;
     }
