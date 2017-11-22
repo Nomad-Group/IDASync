@@ -1,3 +1,4 @@
+import { HandshakeHandler } from './server/HandshakeHandler';
 import { NetworkBuffer } from './network/NetworkBuffer';
 import { NetworkClient } from './network/NetworkClient';
 import { Heartbeat } from './network/packets/Heartbeat';
@@ -81,19 +82,16 @@ export class Server {
 
         if(packet.packetType == PacketType.Handshake)
         {
-            var response = new HandshakeResponse();
-            response.username = "You suck";
-            console.log(response);
-
-            this.sendPacket(client, response);
+            HandshakeHandler.handle(client, <Handshake> packet);
         }
     }
 
     public sendPacket(client:NetworkClient, packet:BasePacket) {
+        // Network Buffer
         var buffer = new NetworkBuffer(new Buffer(packet.packetSize));
         packet.encode(buffer);
 
-        client.socket.write(buffer.buffer);
-        //client.socket.pipe(client.socket);
+        // Send Packet
+        return client.socket.write(buffer.buffer);
     }
 }

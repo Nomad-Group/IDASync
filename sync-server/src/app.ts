@@ -2,12 +2,14 @@ import { ProjectData } from './database/ProjectData';
 import { Database } from './Database';
 import { Server } from './server';
 
-let database = new Database();
+export var database:Database = new Database();
+export var server:Server = null;
+
 database.initialize()
 .then(() => {
     console.log("[Database] Connected!");
 
-    let server = new Server();
+    server = new Server();
     server.startServer();
 })
 .catch(() => {

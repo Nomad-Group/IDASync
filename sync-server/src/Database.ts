@@ -1,15 +1,19 @@
+import { UserManager } from './database/manager/UserManager';
+import { ProjectsManager } from './database/manager/ProjectsManager';
 import { MongoClient, Db, Collection } from "mongodb";
-import { ProjectsManager } from "./database/ProjectsManager";
 
 export class Database {
     private client:MongoClient;
     private db:Db;
 
     public projects:ProjectsManager;
+    public users:UserManager;
 
     public constructor() {
         this.client = new MongoClient();
+
         this.projects = new ProjectsManager();
+        this.users = new UserManager();
     }
 
     public initialize():Promise<void> {
@@ -17,6 +21,7 @@ export class Database {
             this.client.connect("mongodb://localhost:27017/ida-synced")
             .then(this.initializeCollections.bind(this))
             .then(() => resolve())
+            .catch(reject)
         })
     }
 
@@ -24,7 +29,8 @@ export class Database {
         this.db = db;
 
         var manager = [
-            this.projects.initialize(db)
+            this.projects.initialize(db),
+            this.users.initialize(db)
         ];
         return Promise.all(manager);
     }

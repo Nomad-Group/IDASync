@@ -1,4 +1,5 @@
-import { ProjectData } from './ProjectData';
+import { ProjectData } from './../ProjectData';
+
 import { BaseCollectionManager } from './BaseCollectionManager';
 import { Collection } from 'mongodb';
 import { Db } from 'mongodb';
