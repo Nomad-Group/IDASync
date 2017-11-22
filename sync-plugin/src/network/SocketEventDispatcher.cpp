@@ -26,7 +26,7 @@ bool SocketEventDispatcher::StartListening(ISocketEventListener* socketEventList
 		return false;
 
 	// Timeout
-	DWORD dwTimeout = 250;
+	DWORD dwTimeout = 100;
 	setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&dwTimeout, sizeof(dwTimeout));
 
 	// Create Thread

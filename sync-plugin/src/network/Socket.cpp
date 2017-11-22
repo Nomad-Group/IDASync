@@ -62,6 +62,11 @@ Socket::StatusCode Socket::Connect(const std::string& ip, uint16_t port)
 		return StatusCode::ConnectFailed;
 	}
 
+	// Socket Timeout
+	DWORD dwTimeout = 200;
+	setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&dwTimeout, sizeof(dwTimeout));
+
+	// Done
 	return StatusCode::Success;
 }
 
@@ -104,4 +109,34 @@ bool Socket::Close()
 	return
 		IsValid() &&
 		closesocket(m_socket) == 0;
+}
+
+const char* Socket::StatusCodeToString(StatusCode statusCode)
+{
+	switch (statusCode)
+	{
+	case StatusCode::Success:
+		return "Success";
+
+	case StatusCode::InvalidSocket:
+		return "Invalid Socket";
+
+	case StatusCode::ResolveAddressFailed:
+		return "Failed to resolve Address";
+
+	case StatusCode::CreateSocketFailed:
+		return "Socket Creation failed";
+
+	case StatusCode::ConnectFailed:
+		return "Connection failed";
+
+	case StatusCode::SendFailed:
+		return "send() failed";
+
+	case StatusCode::RecvFailed:
+		return "recv() failed";
+
+	default:
+		return "Unknown Error";
+	}
 }

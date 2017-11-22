@@ -19,6 +19,7 @@ public:
 		SendFailed,
 		RecvFailed
 	};
+	static const char* StatusCodeToString(StatusCode);
 
 public:
 	Socket() = default;

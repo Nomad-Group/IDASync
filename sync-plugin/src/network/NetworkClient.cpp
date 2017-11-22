@@ -118,6 +118,6 @@ bool NetworkClient::ErrorCheck(Socket::StatusCode statusCode)
 	if (statusCode == Socket::StatusCode::Success)
 		return true;
 
-	g_plugin->ShowInfoDialog("Socket Error! Code: " + std::to_string((int)statusCode));
+	g_plugin->Log("ERROR: " + std::string(Socket::StatusCodeToString(statusCode)));
 	return false;
 }

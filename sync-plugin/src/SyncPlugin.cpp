@@ -71,37 +71,39 @@ void SyncPlugin::Run()
 		return;
 
 	// Hardware ID
-	HandshakePacket packet;
-	packet.packetType = PacketType::Handshake;
-	memcpy(&packet.guid, Networking::GetHardwareId().c_str(), sizeof(packet.guid));
+	HandshakePacket* packet = new HandshakePacket();
+	packet->packetType = PacketType::Handshake;
+	memcpy(&packet->guid, Networking::GetHardwareId().c_str(), sizeof(HandshakePacket::guid));
 
 	// Binary
-	retrieve_input_file_md5(packet.binary_md5);
-	get_root_filename(packet.binary_name, sizeof(packet.binary_name));
+	//retrieve_input_file_md5(packet.binary_md5);
+	//get_root_filename(packet.binary_name, sizeof(packet.binary_name));
 
 	// Handshake
-	g_plugin->Log("Connected to " + ip + ", shaking hands..");
-
-	if (!g_client->Send(&packet))
+	if (!g_client->Send(packet))
 	{
-		g_plugin->ShowInfoDialog("Handshake failed!");
+		g_plugin->Log("Handshake failed!");
 		return;
 	}
 
 	// Receive HandshakeResponse
-	HandshakeResponsePacket packetResponse;
-	if (!g_client->ReadPacket(&packetResponse))
+	HandshakeResponsePacket* packetResponse = new HandshakeResponsePacket();
+	if (!g_client->ReadPacket(packetResponse))
 	{
-		g_plugin->ShowInfoDialog("Expected HandshakeResponse Packet!");
+		g_plugin->Log("Handshake failed!");
 		return;
 	}
 
-	// Connected
+	// Listener
 	if (!g_client->StartListening(new IDANetworkDispatcher()))
 	{
-		g_plugin->ShowInfoDialog("NetworkClient::StartListening failed!");
+		g_plugin->Log("Unable to start Network Listener.. Disconnecting!");
+		g_client->Disconnect();
 		return;
 	}
+
+	// Connected!
+	g_plugin->Log("Successfully connected to " + ip);
 }
 
 void SyncPlugin::Log(const std::string& message)

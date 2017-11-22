@@ -12,7 +12,7 @@ export class Server {
     private clients:NetworkClient[] = [];
 
     public constructor() {
-        //setInterval(this.onHeartbeat.bind(this), 1000);
+        setInterval(this.onHeartbeat.bind(this), 1000);
     }
 
     private onHeartbeat() {

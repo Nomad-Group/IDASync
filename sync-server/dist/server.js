@@ -9,7 +9,7 @@ const net = require("net");
 class Server {
     constructor() {
         this.clients = [];
-        //setInterval(this.onHeartbeat.bind(this), 1000);
+        setInterval(this.onHeartbeat.bind(this), 1000);
     }
     onHeartbeat() {
         var heartbeat = new Heartbeat_1.Heartbeat();
