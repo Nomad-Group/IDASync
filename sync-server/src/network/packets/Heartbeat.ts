@@ -6,6 +6,5 @@ export class Heartbeat extends BasePacket {
         super();
 
         this.packetType = PacketType.Heartbeat;
-        this.packetSize = BasePacket.HEADER_SIZE;
     }
 }

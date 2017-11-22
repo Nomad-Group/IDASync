@@ -74,7 +74,10 @@ void SyncPlugin::Run()
 	HandshakePacket packet;
 	packet.packetType = PacketType::Handshake;
 	memcpy(&packet.guid, Networking::GetHardwareId().c_str(), sizeof(packet.guid));
-	retrieve_input_file_md5(packet.binarymd5);
+
+	// Binary
+	retrieve_input_file_md5(packet.binary_md5);
+	get_root_filename(packet.binary_name, sizeof(packet.binary_name));
 
 	// Handshake
 	g_plugin->Log("Connected to " + ip + ", shaking hands..");

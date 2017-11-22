@@ -32,16 +32,16 @@
     <ClCompile Include="src\IDBHook.cpp">
       <Filter>Source</Filter>
     </ClCompile>
-    <ClCompile Include="src\SocketEventDispatcher.cpp">
-      <Filter>Source\network</Filter>
-    </ClCompile>
     <ClCompile Include="src\network\Socket.cpp">
       <Filter>Source\network</Filter>
     </ClCompile>
     <ClCompile Include="src\network\Networking.cpp">
       <Filter>Source\network</Filter>
     </ClCompile>
-    <ClCompile Include="src\NetworkClient.cpp">
+    <ClCompile Include="src\network\NetworkClient.cpp">
+      <Filter>Source\network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\network\SocketEventDispatcher.cpp">
       <Filter>Source\network</Filter>
     </ClCompile>
   </ItemGroup>
@@ -72,9 +72,6 @@
     </ClInclude>
     <ClInclude Include="include\network\Networking.h">
       <Filter>Header\network</Filter>
-    </ClInclude>
-    <ClInclude Include="include\IDANetworkHandler.h">
-      <Filter>Header</Filter>
     </ClInclude>
     <ClInclude Include="include\network\packets\BasePacket.h">
       <Filter>Header\network\packets</Filter>

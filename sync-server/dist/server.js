@@ -1,15 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-const Heartbeat_1 = require("./packets/Heartbeat");
-const Handshake_1 = require("./packets/Handshake");
-const PacketType_1 = require("./packets/PacketType");
+const NetworkBuffer_1 = require("./network/NetworkBuffer");
+const NetworkClient_1 = require("./network/NetworkClient");
+const Heartbeat_1 = require("./network/packets/Heartbeat");
+const Handshake_1 = require("./network/packets/Handshake");
+const PacketType_1 = require("./network/packets/PacketType");
 const net = require("net");
-class Client {
-}
 class Server {
     constructor() {
         this.clients = [];
-        setInterval(this.onHeartbeat.bind(this), 1000);
+        //setInterval(this.onHeartbeat.bind(this), 1000);
     }
     onHeartbeat() {
         var heartbeat = new Heartbeat_1.Heartbeat();
@@ -20,7 +20,7 @@ class Server {
     }
     onConnection(socket) {
         // Client
-        var client = new Client();
+        var client = new NetworkClient_1.NetworkClient();
         client.socket = socket;
         client.name = socket.remoteAddress + ":" + socket.remotePort;
         this.clients.push(client);
@@ -38,10 +38,11 @@ class Server {
     onConnectionError(client, error) {
         console.error("[Server] Client (" + client.name + ") caused error: " + error.name + "\n" + error.message);
     }
-    onClientData(client, data) {
-        console.log("[Server] Data: " + data.toString());
+    onClientData(client, dataBuffer) {
+        var data = new NetworkBuffer_1.NetworkBuffer(dataBuffer);
+        console.log("[Server] Data: " + dataBuffer.toString());
         var packet = null;
-        var packetType = data.readUInt8(0);
+        var packetType = data.readUInt16();
         switch (packetType) {
             case PacketType_1.PacketType.Handshake: {
                 packet = new Handshake_1.Handshake();
@@ -53,8 +54,9 @@ class Server {
         }
         // Packet Header
         packet.packetType = packetType;
-        packet.packetSize = data.readUInt16LE(2);
+        packet.packetSize = data.readUInt16();
         // Decode Packet
+        data.offset = 0;
         packet.decode(data);
         // DEBUG
         console.log(packet);
@@ -69,9 +71,9 @@ class Server {
         }
     }
     sendPacket(client, packet) {
-        var buffer = new Buffer(packet.packetSize);
+        var buffer = new NetworkBuffer_1.NetworkBuffer(new Buffer(packet.packetSize));
         packet.encode(buffer);
-        client.socket.write(buffer);
+        client.socket.write(buffer.buffer);
         //client.socket.pipe(client.socket);
     }
 }

@@ -1,13 +1,14 @@
 #pragma once
 #include <stdint.h>
 
-enum class PacketType : uint8_t
+enum class PacketType : uint16_t
 {
 	Handshake = 0,
 	HandshakeResponse,
 
 	Heartbeat,
 };
+static_assert(sizeof(PacketType) == 2, "PacketType size mismatch!");
 
 static const char* PacketTypeToString(PacketType packetType)
 {
@@ -32,9 +33,11 @@ struct BasePacket
 	PacketType packetType;
 	uint16_t packetSize;
 };
+static_assert(sizeof(BasePacket) == 4, "BasePacket size mismatch!");
 
 template <PacketType TPacketType>
 struct BasePacketEnumType : BasePacket
 {
 	static constexpr const PacketType Enum = TPacketType;
 };
+static_assert(sizeof(BasePacketEnumType<PacketType::Heartbeat>) == sizeof(BasePacket), "BasePacketEnumType size mismatch!");

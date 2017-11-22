@@ -11,12 +11,14 @@ class Handshake extends BasePacket_1.BasePacket {
     decode(buffer) {
         super.decode(buffer);
         this.guid = buffer.toString("utf8", BasePacket_1.BasePacket.HEADER_SIZE, BasePacket_1.BasePacket.HEADER_SIZE + 38);
-        this.binarymd5 = buffer.toString("utf8", BasePacket_1.BasePacket.HEADER_SIZE + 38, BasePacket_1.BasePacket.HEADER_SIZE + 38 + 16);
+        this.binary_name = buffer.toString("utf8", BasePacket_1.BasePacket.HEADER_SIZE + 38, BasePacket_1.BasePacket.HEADER_SIZE + 38 + 128);
+        this.binary_md5 = buffer.toString("utf8", BasePacket_1.BasePacket.HEADER_SIZE + 38 + 128, BasePacket_1.BasePacket.HEADER_SIZE + 38 + 128 + 16);
     }
     encode(buffer) {
         super.encode(buffer);
         buffer.write(this.guid, BasePacket_1.BasePacket.HEADER_SIZE, 38, "utf8");
-        buffer.write(this.binarymd5, BasePacket_1.BasePacket.HEADER_SIZE + 38, 16, "utf8");
+        buffer.write(this.binary_name, BasePacket_1.BasePacket.HEADER_SIZE + 38, 128, "utf8");
+        buffer.write(this.binary_md5, BasePacket_1.BasePacket.HEADER_SIZE + 38 + 128, 16, "utf8");
     }
 }
 exports.Handshake = Handshake;

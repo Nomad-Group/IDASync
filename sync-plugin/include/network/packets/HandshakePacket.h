@@ -4,7 +4,8 @@
 struct HandshakePacket : BasePacketEnumType<PacketType::Handshake>
 {
 	char guid[38];
-	uint8_t binarymd5[16];
+	char binary_name[128];
+	uint8_t binary_md5[16];
 };
 
 struct HandshakeResponsePacket : BasePacketEnumType<PacketType::HandshakeResponse>

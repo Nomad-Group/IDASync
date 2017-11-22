@@ -25,6 +25,10 @@ bool SocketEventDispatcher::StartListening(ISocketEventListener* socketEventList
 	if (WSAEventSelect(m_socket, m_hEvent, FD_READ | FD_WRITE | FD_CLOSE) != 0)
 		return false;
 
+	// Timeout
+	DWORD dwTimeout = 250;
+	setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&dwTimeout, sizeof(dwTimeout));
+
 	// Create Thread
 	m_thread = std::thread([=]() {
 		this->_WorkerThread(socketEventListener);

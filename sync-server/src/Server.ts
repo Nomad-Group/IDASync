@@ -1,21 +1,18 @@
-import { Heartbeat } from './packets/Heartbeat';
-import { BasePacket } from './packets/BasePacket';
-import { Handshake, HandshakeResponse } from './packets/Handshake';
-import { PacketType } from './packets/PacketType';
+import { NetworkBuffer } from './network/NetworkBuffer';
+import { NetworkClient } from './network/NetworkClient';
+import { Heartbeat } from './network/packets/Heartbeat';
+import { BasePacket } from './network/packets/BasePacket';
+import { Handshake, HandshakeResponse } from './network/packets/Handshake';
+import { PacketType } from './network/packets/PacketType';
 import * as net from 'net';
-
-class Client {
-    public socket:net.Socket;
-    public name:string;
-}
 
 export class Server {
     public static readonly PORT:number = 4523;
     public server:net.Server;
-    private clients:Client[] = [];
+    private clients:NetworkClient[] = [];
 
     public constructor() {
-        setInterval(this.onHeartbeat.bind(this), 1000);
+        //setInterval(this.onHeartbeat.bind(this), 1000);
     }
 
     private onHeartbeat() {
@@ -29,7 +26,7 @@ export class Server {
 
     private onConnection(socket:net.Socket) {
         // Client
-        var client = new Client();
+        var client = new NetworkClient();
         client.socket = socket;
         client.name = socket.remoteAddress + ":" + socket.remotePort;
         this.clients.push(client);
@@ -43,20 +40,21 @@ export class Server {
         socket.on("error", this.onConnectionError.bind(this, client));
     }
 
-    private onConnectionClosed(client:Client) {
+    private onConnectionClosed(client:NetworkClient) {
         console.log("[Server] Client disconnected (" + client.name + ")");
         this.clients.splice(this.clients.indexOf(client));
     }
 
-    private onConnectionError(client:Client, error:Error) {
+    private onConnectionError(client:NetworkClient, error:Error) {
         console.error("[Server] Client (" + client.name + ") caused error: " + error.name + "\n" + error.message);
     }
 
-    private onClientData(client:Client, data:Buffer) {
-        console.log("[Server] Data: " + data.toString());
+    private onClientData(client:NetworkClient, dataBuffer:Buffer) {
+        var data = new NetworkBuffer(dataBuffer);
+        console.log("[Server] Data: " + dataBuffer.toString());
 
         var packet:BasePacket = null;
-        var packetType:PacketType = data.readUInt8(0);
+        var packetType:PacketType = data.readUInt16();
 
         switch(packetType)
         {
@@ -72,9 +70,10 @@ export class Server {
 
         // Packet Header
         packet.packetType = packetType;
-        packet.packetSize = data.readUInt16LE(2);
+        packet.packetSize = data.readUInt16();
 
         // Decode Packet
+        data.offset = 0;
         packet.decode(data);
 
         // DEBUG
@@ -93,11 +92,11 @@ export class Server {
         }
     }
 
-    public sendPacket(client:Client, packet:BasePacket) {
-        var buffer:Buffer = new Buffer(packet.packetSize);
+    public sendPacket(client:NetworkClient, packet:BasePacket) {
+        var buffer = new NetworkBuffer(new Buffer(packet.packetSize));
         packet.encode(buffer);
 
-        client.socket.write(buffer);
+        client.socket.write(buffer.buffer);
         //client.socket.pipe(client.socket);
     }
 }
