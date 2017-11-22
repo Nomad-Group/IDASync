@@ -41,7 +41,7 @@ public:
 
 	// Connection
 	inline bool Connect(const std::string& ip, uint16_t port = 4523) { return ErrorCheck(m_socket.Connect(ip, port)); };
-	inline bool Disconnect() { return m_socket.Close(); };
+	bool Disconnect();
 
 	// Socket Events
 	bool StartListening(INetworkClientEventListener*);

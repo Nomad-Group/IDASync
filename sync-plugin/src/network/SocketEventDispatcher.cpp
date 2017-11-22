@@ -41,16 +41,16 @@ bool SocketEventDispatcher::StartListening(ISocketEventListener* socketEventList
 
 void SocketEventDispatcher::_WorkerThread(ISocketEventListener* socketEventListener)
 {
+	// Network Event
 	WSANETWORKEVENTS wsaNetworkEvents;
+	WSAResetEvent(&wsaNetworkEvents);
 
+	// Event Loop
 	while (IsSocketValid())
 	{
 		auto dwEvent = WSAWaitForMultipleEvents(1, &m_hEvent, false, WSA_INFINITE, false);
-		WSAEnumNetworkEvents(m_socket, m_hEvent, &wsaNetworkEvents);
-
-		// Error?
-		/*if (wsaNetworkEvents.iErrorCode[0] != 0)
-			DebugBreak();*/
+		if (WSAEnumNetworkEvents(m_socket, m_hEvent, &wsaNetworkEvents) != 0)
+			continue; // Is this a good idea?
 
 		// Socket Event
 		SocketEvent socketEvent;
@@ -76,4 +76,10 @@ void SocketEventDispatcher::StopListening()
 	// Socket
 	if (m_socket != INVALID_SOCKET)
 		WSAEventSelect(m_socket, nullptr, 0);
+	
+	m_socket = UINT32_MAX;
+
+	// Join Thread
+	if(m_thread.joinable())
+		m_thread.join();
 }

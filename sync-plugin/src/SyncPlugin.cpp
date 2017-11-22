@@ -35,7 +35,10 @@ void SyncPlugin::Shutdown()
 {
 	// Networking
 	if (g_client)
+	{
+		g_client->Disconnect();
 		delete g_client;
+	}
 
 	Networking::GlobalShutdown();
 }
@@ -47,7 +50,6 @@ struct PacketDispatcher : exec_request_t
 	virtual int idaapi execute()
 	{
 		g_plugin->Log("Hello from the main thread! Got your packet!");
-		DebugBreak();
 		return 0;
 	}
 };

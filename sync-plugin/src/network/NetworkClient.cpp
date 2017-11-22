@@ -21,6 +21,15 @@ bool NetworkClient::StartListening(INetworkClientEventListener* eventListener)
 	return m_eventDispatcher->StartListening(this);
 }
 
+bool NetworkClient::Disconnect()
+{
+	auto success = m_socket.Close();
+	if(m_eventDispatcher)
+		m_eventDispatcher->StopListening();
+
+	return success;
+}
+
 bool NetworkClient::SendPacketInternal(BasePacket* pPacket, size_t stSize)
 {
 	if (pPacket == nullptr)
