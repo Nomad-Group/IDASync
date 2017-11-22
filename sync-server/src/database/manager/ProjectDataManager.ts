@@ -1,10 +1,10 @@
 import { ProjectData } from './../ProjectData';
 
 import { BaseCollectionManager } from './BaseCollectionManager';
-import { Collection } from 'mongodb';
+import { Collection, ObjectID } from 'mongodb';
 import { Db } from 'mongodb';
 
-export class ProjectsManager extends BaseCollectionManager {
+export class ProjectDataManager extends BaseCollectionManager {
     public constructor() {
         super();
 
@@ -14,5 +14,13 @@ export class ProjectsManager extends BaseCollectionManager {
     public findByMd5(md5_hash:string):Promise<ProjectData> {
         var query = { binary_md5: md5_hash };
         return this.collection.findOne(query);
+    }
+
+    public create(project:ProjectData) {
+        return new Promise<ObjectID>((resolve, reject) =>
+             this.collection.insertOne(project)
+             .then(result => resolve(result.insertedId))
+             .catch(reason => reject(reason))
+        );
     }
 }

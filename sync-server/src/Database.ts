@@ -1,18 +1,18 @@
 import { UserManager } from './database/manager/UserManager';
-import { ProjectsManager } from './database/manager/ProjectsManager';
+import { ProjectDataManager } from './database/manager/ProjectDataManager';
 import { MongoClient, Db, Collection } from "mongodb";
 
 export class Database {
     private client:MongoClient;
     private db:Db;
 
-    public projects:ProjectsManager;
+    public projects:ProjectDataManager;
     public users:UserManager;
 
     public constructor() {
         this.client = new MongoClient();
 
-        this.projects = new ProjectsManager();
+        this.projects = new ProjectDataManager();
         this.users = new UserManager();
     }
 

@@ -1,3 +1,4 @@
+import { projectsManager } from './app';
 import { HandshakeHandler } from './server/HandshakeHandler';
 import { NetworkBuffer } from './network/NetworkBuffer';
 import { NetworkClient } from './network/NetworkClient';
@@ -43,6 +44,8 @@ export class Server {
 
     private onConnectionClosed(client:NetworkClient) {
         console.log("[Server] Client disconnected (" + client.name + ")");
+        projectsManager.removeActive(client);
+
         this.clients.splice(this.clients.indexOf(client));
     }
 

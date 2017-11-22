@@ -1,5 +1,6 @@
+import { ProjectData } from './../database/ProjectData';
 import { User } from './../database/User';
-import { database, server } from './../app';
+import { database, server, projectsManager } from './../app';
 import { NetworkClient } from './../network/NetworkClient';
 import { Handshake, HandshakeResponse } from './../network/packets/Handshake';
 
@@ -33,14 +34,58 @@ export class HandshakeHandler {
         });
     }
 
+    private static getProject(binary_md5:string, name:string):Promise<ProjectData> {
+        return new Promise<ProjectData>((resolve, reject) => {
+            database.projects.findByMd5(binary_md5)
+                .then(project => {
+                    // Projects
+                    if(project != null) {
+                        resolve(project);
+                        return;
+                    }
+
+                    // Setup
+                    project = new ProjectData();
+                    project.binary_md5 = binary_md5;
+                    project.name = name;
+
+                    // Create
+                    database.projects.create(project)
+                        .then(id => {
+                            console.log("[Projects] Virgin idb detected: " + project.name);
+                            resolve(project);
+                        })
+                        .catch(reason => reject(reason));
+                })
+                .catch(reject)
+        });
+    }
+
     public static handle(client:NetworkClient, packet:Handshake) {
-        this.getUser(packet.guid)
-            .then(user => {
+        Promise.all([
+            this.getUser(packet.guid),
+            this.getProject(packet.binary_md5, packet.binary_name)
+        ])
+            .then((results) => {
                 var response = new HandshakeResponse();
 
+                // User 
+                var user = results[0];
                 response.username = user.username;
                 client.name = user.username;
 
+                // Project
+                var project = results[1];
+                response.project_name = project.name;
+
+                // Network Client
+                client.user = user;
+                client.active_project = project;
+
+                // Join Project as Active
+                projectsManager.addActive(project, client);
+
+                // Send
                 server.sendPacket(client, response);
             })
     }
