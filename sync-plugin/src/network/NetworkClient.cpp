@@ -112,13 +112,24 @@ bool NetworkClient::ReadPacketInternal(PacketType ePacketType, BasePacket* pPack
 
 bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 {
+	// Read
 	if (socketEvent == SocketEvent::Read)
 	{
 		auto pPacket = ReadPacketInternal();
 		if (pPacket)
 			m_listener->OnPacket(pPacket);
+
+		return true;
 	}
 
+	// Close
+	if (socketEvent == SocketEvent::Close)
+	{
+		m_listener->OnConnectionClosed();
+		return true;
+	}
+
+	// Done
 	return false;
 }
 

@@ -21,6 +21,12 @@
     <Filter Include="Header\network\packets">
       <UniqueIdentifier>{4ec212a8-05b0-42fa-8fa2-3196d62ef5a0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header\client">
+      <UniqueIdentifier>{1d07230d-9d21-438c-ad28-d2fa9134ee34}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\client">
+      <UniqueIdentifier>{f3a8e9e8-a625-45e6-aebc-16fd1c144761}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp">
@@ -43,6 +49,9 @@
     </ClCompile>
     <ClCompile Include="src\network\SocketEventDispatcher.cpp">
       <Filter>Source\network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\client\NetworkDispatcher.cpp">
+      <Filter>Source\client</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -81,6 +90,9 @@
     </ClInclude>
     <ClInclude Include="include\network\packets\HeartbeatPacket.h">
       <Filter>Header\network\packets</Filter>
+    </ClInclude>
+    <ClInclude Include="include\client\NetworkDispatcher.h">
+      <Filter>Header\client</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

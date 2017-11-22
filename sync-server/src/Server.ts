@@ -86,9 +86,6 @@ export class Server {
             console.log(response);
 
             this.sendPacket(client, response);
-            setTimeout(() => {
-                this.sendPacket(client, response);
-            }, 1000);
         }
     }
 
