@@ -161,6 +161,7 @@
     <ClCompile Include="src\network\Networking.cpp" />
     <ClCompile Include="src\network\Socket.cpp" />
     <ClCompile Include="src\network\SocketEventDispatcher.cpp" />
+    <ClCompile Include="src\SyncPacketHandler.cpp" />
     <ClCompile Include="src\SyncPlugin.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -170,6 +171,7 @@
     <ClInclude Include="include\network\NetworkClient.h" />
     <ClInclude Include="include\network\Networking.h" />
     <ClInclude Include="include\network\packets\BasePacket.h" />
+    <ClInclude Include="include\network\packets\BroadcastMessagePacket.h" />
     <ClInclude Include="include\network\packets\HandshakePacket.h" />
     <ClInclude Include="include\network\packets\HeartbeatPacket.h" />
     <ClInclude Include="include\network\Socket.h" />

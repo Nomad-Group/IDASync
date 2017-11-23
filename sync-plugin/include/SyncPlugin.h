@@ -12,6 +12,9 @@ private:
 	// IDA
 	bool InstallIDBHook();
 
+	// Packet Handler
+	bool HandleBroadcastMessagePacket(BroadcastMessagePacket*);
+
 public:
 	// IDA Callbacks
 	bool Init();
@@ -19,7 +22,7 @@ public:
 	void Run();
 
 	// Network Events
-	void HandleNetworkPacket(BasePacket*);
+	bool HandleNetworkPacket(BasePacket*);
 	void HandleDisconnect();
 
 	// Logging

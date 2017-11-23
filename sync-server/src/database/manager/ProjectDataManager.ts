@@ -23,4 +23,8 @@ export class ProjectDataManager extends BaseCollectionManager {
              .catch(reason => reject(reason))
         );
     }
+
+    public update(project:ProjectData) {
+        return this.collection.updateOne({ _id: project._id }, project);
+    }
 }

@@ -19,7 +19,8 @@ export class ProjectsManager {
 
         // Client
         // TODO: check if one user is connected multiple times?
-        project.onClientJoined(client);
+        var firstTimeJoin = projectData.users.findIndex(usr => usr.equals(client.user._id)) == -1;
+        project.onClientJoined(client, firstTimeJoin);
     }
 
     public removeActive(client:NetworkClient) {

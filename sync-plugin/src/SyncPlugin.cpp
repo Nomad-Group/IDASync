@@ -85,17 +85,6 @@ void SyncPlugin::Run()
 	g_plugin->Log("Successfully connected to " + ip);
 }
 
-void SyncPlugin::HandleNetworkPacket(BasePacket* packet)
-{
-	g_plugin->Log("Main Thread got packet! " + std::string(PacketTypeToString(packet->packetType)));
-}
-
-void SyncPlugin::HandleDisconnect()
-{
-	g_client->Disconnect();
-	Log("Connection lost!");
-}
-
 // Logging
 void SyncPlugin::Log(const std::string& message)
 {

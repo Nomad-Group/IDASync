@@ -1,3 +1,4 @@
+import { BroadcastMessagePacket } from './network/packets/BroadcastMessagePacket';
 import { projectsManager } from './app';
 import { HandshakeHandler } from './server/HandshakeHandler';
 import { NetworkBuffer } from './network/NetworkBuffer';
@@ -14,7 +15,7 @@ export class Server {
     private clients:NetworkClient[] = [];
 
     public constructor() {
-        setInterval(this.onHeartbeat.bind(this), 1000);
+        //setInterval(this.onHeartbeat.bind(this), 1000);
     }
 
     private onHeartbeat() {
@@ -96,5 +97,14 @@ export class Server {
 
         // Send Packet
         return client.socket.write(buffer.buffer);
+    }
+
+    public sendPackets(clients:NetworkClient[], packet:BasePacket) {
+         // Network Buffer
+         var buffer = new NetworkBuffer(new Buffer(packet.packetSize));
+         packet.encode(buffer);
+
+         // Send
+         clients.forEach(client => client.socket.write(buffer.buffer));
     }
 }

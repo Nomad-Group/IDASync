@@ -53,6 +53,9 @@
     <ClCompile Include="src\client\NetworkDispatcher.cpp">
       <Filter>Source\client</Filter>
     </ClCompile>
+    <ClCompile Include="src\SyncPacketHandler.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\SyncPlugin.h">
@@ -93,6 +96,9 @@
     </ClInclude>
     <ClInclude Include="include\client\NetworkDispatcher.h">
       <Filter>Header\client</Filter>
+    </ClInclude>
+    <ClInclude Include="include\network\packets\BroadcastMessagePacket.h">
+      <Filter>Header\network\packets</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

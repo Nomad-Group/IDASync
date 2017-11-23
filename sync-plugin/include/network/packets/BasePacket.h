@@ -7,6 +7,7 @@ enum class PacketType : uint16_t
 	HandshakeResponse,
 
 	Heartbeat,
+	BroadcastMessage
 };
 static_assert(sizeof(PacketType) == 2, "PacketType size mismatch!");
 
@@ -22,6 +23,9 @@ static const char* PacketTypeToString(PacketType packetType)
 
 	case PacketType::Heartbeat:
 		return "PacketType::Heartbeat";
+
+	case PacketType::BroadcastMessage:
+		return "PacketType::BroadcastMessage";
 
 	default:
 		return "PacketType::_Unknown[Error]";
@@ -41,3 +45,8 @@ struct BasePacketEnumType : BasePacket
 	static constexpr const PacketType Enum = TPacketType;
 };
 static_assert(sizeof(BasePacketEnumType<PacketType::Heartbeat>) == sizeof(BasePacket), "BasePacketEnumType size mismatch!");
+
+// Forward Defines
+struct HandshakePacket;
+struct HeartbeatPacket;
+struct BroadcastMessagePacket;
