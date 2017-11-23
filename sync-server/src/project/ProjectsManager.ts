@@ -5,7 +5,7 @@ import { Project } from "./Project";
 export class ProjectsManager {
     public active_projects:Project[] = [];
 
-    public addActive(projectData:ProjectData, client:NetworkClient) {
+    public addActive(projectData:ProjectData, client:NetworkClient, localVersion:number) {
         // Project
         var project:Project = null;
 
@@ -20,7 +20,7 @@ export class ProjectsManager {
         // Client
         // TODO: check if one user is connected multiple times?
         var firstTimeJoin = projectData.users.findIndex(usr => usr.equals(client.user._id)) == -1;
-        project.onClientJoined(client, firstTimeJoin);
+        project.onClientJoined(client, firstTimeJoin, localVersion);
     }
 
     public removeActive(client:NetworkClient) {

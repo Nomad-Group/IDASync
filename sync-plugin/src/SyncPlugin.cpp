@@ -1,4 +1,5 @@
 #include "SyncPlugin.h"
+#include "ida/IdbManager.h"
 #include "network/Networking.h"
 #include "network/NetworkClient.h"
 #include "network/packets/HandshakePacket.h"
@@ -11,10 +12,18 @@ bool SyncPlugin::Init()
 {
 	bool isX86 = strncmp(inf.procName, "metapc", 8) != 0;
 
-	// IDB Hook
+	// Idb Manager
+	g_idb = new IdbManager();
+	if (!g_idb->Initialize())
+	{
+		Log("Error: Failed to initialize IdbManager!");
+		return false;
+	}
+
+	// Idb Hook
 	if (!InstallIDBHook())
 	{
-		Log("Error: Failed to install IDB Hook!");
+		Log("Error: Failed to install Idb Hook!");
 		return false;
 	}
 
@@ -33,6 +42,10 @@ bool SyncPlugin::Init()
 
 void SyncPlugin::Shutdown()
 {
+	// Idb Manager
+	delete g_idb;
+	g_idb = nullptr;
+
 	// Networking
 	if (g_client)
 	{
@@ -57,6 +70,7 @@ void SyncPlugin::Run()
 	// Binary
 	retrieve_input_file_md5(packet->binary_md5);
 	get_root_filename(packet->binary_name, sizeof(HandshakePacket::binary_name));
+	packet->binary_version = g_idb->GetVersion();
 
 	// Handshake
 	if (!g_client->Send(packet))
@@ -70,6 +84,7 @@ void SyncPlugin::Run()
 	if (!g_client->ReadPacket(packetResponse))
 	{
 		g_plugin->Log("Handshake failed!");
+		delete packetResponse;
 		return;
 	}
 
@@ -78,11 +93,13 @@ void SyncPlugin::Run()
 	{
 		g_plugin->Log("Unable to start Network Listener.. Disconnecting!");
 		g_client->Disconnect();
+		delete packetResponse;
 		return;
 	}
 
 	// Connected!
-	g_plugin->Log("Successfully connected to " + ip);
+	g_plugin->Log("Successfully connected as " + std::string(packetResponse->username) + " (project: " + std::string(packetResponse->project_name) + ")");
+	delete packetResponse;
 }
 
 // Logging

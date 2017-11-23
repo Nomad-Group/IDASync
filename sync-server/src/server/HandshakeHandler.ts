@@ -86,7 +86,7 @@ export class HandshakeHandler {
                 server.sendPacket(client, response);
 
                 // Join Project as Active
-                projectsManager.addActive(project, client);
+                projectsManager.addActive(project, client, packet.binary_version);
             })
     }
 }

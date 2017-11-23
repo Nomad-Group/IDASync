@@ -25,6 +25,17 @@ export class NetworkBuffer {
         this.offset += 2;
     }
 
+    public readUInt32():number {
+        var result = this.buffer.readUInt32LE(this.offset);
+        this.offset += 4;
+        return result;
+    }
+
+    public writeUInt32(num:number) {
+        this.buffer.writeUInt32LE(num, this.offset);
+        this.offset += 4;
+    }
+
     public readCharArray(size:number):string {
         var result = this.buffer.toString("utf8", this.offset, this.offset + size);
         if(result.indexOf('\u0000') > -1)

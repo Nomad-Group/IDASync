@@ -8,7 +8,7 @@ export class Project {
     public active_clients:NetworkClient[] = [];
     public constructor(public data:ProjectData) {}
 
-    public onClientJoined(client:NetworkClient, firstTime:boolean) {
+    public onClientJoined(client:NetworkClient, firstTime:boolean, localVersion:number) {
         // Join
         this.active_clients.push(client);
 
@@ -28,6 +28,11 @@ export class Project {
 
         // Log
         console.log("[Users] " + client.user.username + " joined " + this.data.name + (firstTime ? " (for the first time)" : ""));
+
+        // Version
+        if(localVersion < this.data.binary_version) {
+            console.log("Version " + localVersion + " (client) vs. " + this.data.binary_version + " (server)");
+        }
     }
 
     public onClientLeft(client:NetworkClient) {

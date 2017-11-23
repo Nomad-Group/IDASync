@@ -6,6 +6,7 @@ export class Handshake extends BasePacket {
     public guid:string;
     public binary_md5:string;
     public binary_name:string;
+    public binary_version:number;
 
     public constructor() {
         super();
@@ -20,6 +21,7 @@ export class Handshake extends BasePacket {
         this.guid = buffer.readCharArray(38);
         this.binary_name = buffer.readCharArray(128);
         this.binary_md5 = buffer.readCharArray(16);
+        this.binary_version = buffer.readUInt32();
     }
 
     public encode(buffer:NetworkBuffer) {
@@ -28,6 +30,7 @@ export class Handshake extends BasePacket {
         buffer.writeCharArray(this.guid, 38);
         buffer.writeCharArray(this.binary_name, 128);
         buffer.writeCharArray(this.binary_md5, 16);
+        buffer.writeUInt32(this.binary_version);
     }
 }
 
