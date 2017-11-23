@@ -172,10 +172,12 @@
     <ClInclude Include="include\ida\idp_events_strings.h" />
     <ClInclude Include="include\network\NetworkClient.h" />
     <ClInclude Include="include\network\Networking.h" />
+    <ClInclude Include="include\network\packets\BaseIdbUpdatePacket.h" />
     <ClInclude Include="include\network\packets\BasePacket.h" />
     <ClInclude Include="include\network\packets\BroadcastMessagePacket.h" />
     <ClInclude Include="include\network\packets\HandshakePacket.h" />
     <ClInclude Include="include\network\packets\HeartbeatPacket.h" />
+    <ClInclude Include="include\network\packets\IdbNameAddressPacket.h" />
     <ClInclude Include="include\network\Socket.h" />
     <ClInclude Include="include\network\SocketEventDispatcher.h" />
     <ClInclude Include="include\network\SocketEvent.h" />

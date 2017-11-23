@@ -106,5 +106,11 @@
     <ClInclude Include="include\ida\IdbManager.h">
       <Filter>Header\ida</Filter>
     </ClInclude>
+    <ClInclude Include="include\network\packets\BaseIdbUpdatePacket.h">
+      <Filter>Header\network\packets</Filter>
+    </ClInclude>
+    <ClInclude Include="include\network\packets\IdbNameAddressPacket.h">
+      <Filter>Header\network\packets</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

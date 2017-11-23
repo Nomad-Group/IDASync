@@ -7,7 +7,9 @@ enum class PacketType : uint16_t
 	HandshakeResponse,
 
 	Heartbeat,
-	BroadcastMessage
+	BroadcastMessage,
+
+	IdbNameAddressPacket
 };
 static_assert(sizeof(PacketType) == 2, "PacketType size mismatch!");
 
@@ -26,6 +28,9 @@ static const char* PacketTypeToString(PacketType packetType)
 
 	case PacketType::BroadcastMessage:
 		return "PacketType::BroadcastMessage";
+
+	case PacketType::IdbNameAddressPacket:
+		return "PacketType::IdbNameAddressPacket";
 
 	default:
 		return "PacketType::_Unknown[Error]";

@@ -98,8 +98,8 @@ void SyncPlugin::Run()
 	}
 
 	// Connected!
-	g_plugin->Log("Successfully connected as " + std::string(packetResponse->username) + " (project: " + std::string(packetResponse->project_name) + ")");
-	delete packetResponse;
+	g_plugin->Log("Successfully connected");// as " + std::string(packetResponse->username) + " (project: " + std::string(packetResponse->project_name) + ")");
+	//delete packetResponse;
 }
 
 // Logging

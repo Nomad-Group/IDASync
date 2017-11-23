@@ -18,6 +18,9 @@ export class ProjectsManager {
         }
 
         // Client
+        client.active_project = project;
+
+        // Client
         // TODO: check if one user is connected multiple times?
         var firstTimeJoin = projectData.users.findIndex(usr => usr.equals(client.user._id)) == -1;
         project.onClientJoined(client, firstTimeJoin, localVersion);
@@ -28,7 +31,7 @@ export class ProjectsManager {
             return;
         }
 
-        var index = this.active_projects.findIndex(prj => prj.data.binary_md5 == client.active_project.binary_md5);
+        var index = this.active_projects.findIndex(prj => prj.data.binary_md5 == client.active_project.data.binary_md5);
         if(index < 0) {
             return;
         }

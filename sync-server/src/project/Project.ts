@@ -1,3 +1,6 @@
+import { BaseIdbUpdatePacket } from './../network/packets/BaseIdbUpdatePacket';
+import { ObjectID } from 'mongodb';
+import { IdbUpdate } from './../database/IdbUpdate';
 import { BroadcastMessagePacket, BroadcastMessageType } from './../network/packets/BroadcastMessagePacket';
 import { server, projectsManager, database } from './../app';
 import { BasePacket } from './../network/packets/BasePacket';
@@ -11,6 +14,7 @@ export class Project {
     public onClientJoined(client:NetworkClient, firstTime:boolean, localVersion:number) {
         // Join
         this.active_clients.push(client);
+        client.active_project = this;
 
         // Join Broadcast
         var broadcast = new BroadcastMessagePacket();
@@ -35,13 +39,54 @@ export class Project {
         }
     }
 
-    public onClientLeft(client:NetworkClient) {
-        var index = this.active_clients.indexOf(client);
-        if(index > -1)
-            this.active_clients.slice(index);
+    public onClientData(client:NetworkClient, packet:BasePacket):boolean {
+        // Idb Update
+        var idbUpdatePacket = packet as BaseIdbUpdatePacket;
+        if(idbUpdatePacket) {
+            this.onIdbUpdatePacket(client, idbUpdatePacket);
+            return true;
+        }
+
+        // Unhandled
+        return false;
     }
 
-    public onClientPacket(client:NetworkClient, packet:BasePacket) {
+    public onClientLeft(client:NetworkClient) {
+        var index = this.active_clients.indexOf(client);
+        if(index > -1) {
+            this.active_clients.slice(index);
+        }
+
+        client.active_project = null;
+    }
+
+    private onIdbUpdatePacket(client:NetworkClient, packet:BaseIdbUpdatePacket) {
+        console.log("[Project] " + client.name + " sent update (" + packet.constructor.name + ")");
+
+        // IdbUpdate
+        var idbUpdate = packet.toIdbUpdate();
+        if(!idbUpdate) {
+            console.error("[Project] Failed creating IdbUpdate from packet!");
+            return;
+        }
+
+        // Store
+        this.applyUpdate(idbUpdate, client).then(x => { console.log(x); console.log(idbUpdate); });
+    }
+
+    private applyUpdate(update:IdbUpdate, client:NetworkClient):Promise<ObjectID> {
+        // Update Data
+        update.project_id = this.data._id;
+        update.user_id = client.user._id;
+
+        // Binary Version
+        this.data.binary_version++;
+        update.version = this.data.binary_version;
         
+        return new Promise<ObjectID>((resolve, reject) => {
+            database.projects.update(this.data)
+                .then(() => database.idbUpdates.create(update))
+                .then(resolve)
+        });
     }
 }

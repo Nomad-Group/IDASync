@@ -1,3 +1,4 @@
+import { IdbUpdatesManager } from './database/manager/IdbUpdatesManager';
 import { UserManager } from './database/manager/UserManager';
 import { ProjectDataManager } from './database/manager/ProjectDataManager';
 import { MongoClient, Db, Collection } from "mongodb";
@@ -7,12 +8,14 @@ export class Database {
     private db:Db;
 
     public projects:ProjectDataManager;
+    public idbUpdates:IdbUpdatesManager;
     public users:UserManager;
 
     public constructor() {
         this.client = new MongoClient();
 
         this.projects = new ProjectDataManager();
+        this.idbUpdates = new IdbUpdatesManager();
         this.users = new UserManager();
     }
 
@@ -30,6 +33,7 @@ export class Database {
 
         var manager = [
             this.projects.initialize(db),
+            this.idbUpdates.initialize(db),
             this.users.initialize(db)
         ];
         return Promise.all(manager);

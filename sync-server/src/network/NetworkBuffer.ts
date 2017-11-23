@@ -8,7 +8,6 @@ export class NetworkBuffer {
         this.offset += 1;
         return result;
     }
-
     public writeUInt8(num) {
         this.buffer.writeUInt8(num, this.offset);
         this.offset++;
@@ -19,7 +18,6 @@ export class NetworkBuffer {
         this.offset += 2;
         return result;
     }
-
     public writeUInt16(num:number) {
         this.buffer.writeUInt16LE(num, this.offset);
         this.offset += 2;
@@ -30,10 +28,17 @@ export class NetworkBuffer {
         this.offset += 4;
         return result;
     }
-
     public writeUInt32(num:number) {
         this.buffer.writeUInt32LE(num, this.offset);
         this.offset += 4;
+    }
+
+    public readUInt64():number {
+        return (this.readUInt32() << 8) + this.readUInt32();
+    }
+    public writeUInt64(num:number) {
+        this.writeUInt32(num >> 8);
+        this.writeUInt32(num & 0x00ff);
     }
 
     public readCharArray(size:number):string {
@@ -43,7 +48,6 @@ export class NetworkBuffer {
         this.offset += size;
         return result;
     }
-
     public writeCharArray(str:string, size:number) {
         if(str == null || str == undefined) {
             for(var i = 0; i < size; i++) {

@@ -3,5 +3,7 @@ export enum PacketType {
     HandshakeResponse,
 
     Heartbeat,
-    BroadcastMessage
+    BroadcastMessage,
+
+    IdbNameAddressPacket
 }

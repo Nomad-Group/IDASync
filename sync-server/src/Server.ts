@@ -1,3 +1,4 @@
+import { IdbNameAddressPacket } from './network/packets/IdbNameAddressPacket';
 import { BroadcastMessagePacket } from './network/packets/BroadcastMessagePacket';
 import { projectsManager } from './app';
 import { HandshakeHandler } from './server/HandshakeHandler';
@@ -65,12 +66,18 @@ export class Server {
         {
             case PacketType.Handshake: {
                 packet = new Handshake();
+                break;
             }
-        }
 
-        if(packet == null) {
-            console.log("[Server] ERROR: Client (" + client.name + ") sent unknown Packet Type " + packetType.toString());
-            return;
+            case PacketType.IdbNameAddressPacket: {
+                packet = new IdbNameAddressPacket();
+                break;
+            }
+
+            default: {
+                console.log("[Server] ERROR: Client (" + client.name + ") sent unknown Packet Type " + packetType.toString());
+                return;
+            }
         }
 
         // Packet Header
@@ -87,7 +94,16 @@ export class Server {
         if(packet.packetType == PacketType.Handshake)
         {
             HandshakeHandler.handle(client, <Handshake> packet);
+            return;
         }
+
+        // Project: Handle Packet
+        if(client.active_project && client.active_project.onClientData(client, packet)) {
+            return;
+        }
+
+        // Unhandled Packet
+        console.error("[Server] Unhandled Packet from " + client.name + " (Type: " + PacketType[packet.packetType] + ")");
     }
 
     public sendPacket(client:NetworkClient, packet:BasePacket) {

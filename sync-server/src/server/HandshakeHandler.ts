@@ -72,15 +72,13 @@ export class HandshakeHandler {
                 // User 
                 var user = <User> results[0].user;
                 response.username = user.username;
+
                 client.name = user.username;
+                client.user = user;
 
                 // Project
                 var project = <ProjectData> results[1].project;
                 response.project_name = project.name;
-
-                // Network Client
-                client.user = user;
-                client.active_project = project;
 
                 // Send
                 server.sendPacket(client, response);

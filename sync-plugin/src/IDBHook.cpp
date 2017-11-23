@@ -8,6 +8,11 @@
 #include "ida/idb_events_strings.h"
 #include "ida/idp_events_strings.h"
 
+#include "ida/IdbManager.h"
+
+#include "network/packets/IdbNameAddressPacket.h"
+#include "network/NetworkClient.h"
+
 int idaapi idb_hook(void*, int notification_code, va_list va)
 {
 	//g_plugin->Log(std::string("IDB: ") + idb_events_strings[notification_code]);
@@ -25,6 +30,13 @@ int idaapi idp_hook(void*, int notification_code, va_list va)
 		bool local = va_arg(va, int) != 0;
 
 		g_plugin->Log(number2hex(ea) + ": Rename to " + std::string(name));
+
+		auto packet = new IdbNameAddressPacket();
+		packet->binaryVersion = g_idb->GetVersion();
+		packet->ptr = static_cast<uint64_t>(ea);
+		strcpy_s(packet->name, name);
+
+		g_client->Send(packet);
 	}
 	
 	return 0;

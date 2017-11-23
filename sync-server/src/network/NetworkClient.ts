@@ -1,4 +1,4 @@
-import { ProjectData } from './../database/ProjectData';
+import { Project } from './../project/Project';
 import { User } from './../database/User';
 import * as net from 'net';
 
@@ -7,5 +7,5 @@ export class NetworkClient {
     public name:string;
 
     public user:User;
-    public active_project:ProjectData;
+    public active_project:Project;
 }

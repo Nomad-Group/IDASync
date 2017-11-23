@@ -15,7 +15,7 @@ bool IdbManager::Initialize()
 			return false;
 
 		static const uint32_t InitialVersionIndex = 0;
-		if (SetVersion(InitialVersionIndex))
+		if (!SetVersion(InitialVersionIndex))
 			return false;
 	}
 
