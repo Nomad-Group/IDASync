@@ -34,8 +34,10 @@ export class Project {
         console.log("[Users] " + client.user.username + " joined " + this.data.name + (firstTime ? " (for the first time)" : ""));
 
         // Version
+        console.log("Version " + localVersion + " (client) vs. " + this.data.binary_version + " (server)");
         if(localVersion < this.data.binary_version) {
-            console.log("Version " + localVersion + " (client) vs. " + this.data.binary_version + " (server)");
+
+            this.sendUpdates(client, localVersion, this.data.binary_version);
         }
     }
 
@@ -63,15 +65,8 @@ export class Project {
     private onIdbUpdatePacket(client:NetworkClient, packet:BaseIdbUpdatePacket) {
         console.log("[Project] " + client.name + " sent update (" + packet.constructor.name + ")");
 
-        // IdbUpdate
-        var idbUpdate = packet.toIdbUpdate();
-        if(!idbUpdate) {
-            console.error("[Project] Failed creating IdbUpdate from packet!");
-            return;
-        }
-
         // Store
-        this.applyUpdate(idbUpdate, client).then(x => { console.log(x); console.log(idbUpdate); });
+        this.applyUpdate(packet.getUpdateData(), client);
     }
 
     private applyUpdate(update:IdbUpdate, client:NetworkClient):Promise<ObjectID> {
@@ -88,5 +83,16 @@ export class Project {
                 .then(() => database.idbUpdates.create(update))
                 .then(resolve)
         });
+    }
+
+    private sendUpdates(client:NetworkClient, version_start:number, version_to:number) {
+        database.idbUpdates.findUpdates(this.data._id, version_start, version_to)
+            .then(updates => {
+                updates.forEach(update => this.sendUpdate(update, client))
+            });
+    }
+
+    private sendUpdate(update:IdbUpdate, client:NetworkClient) {
+        
     }
 }

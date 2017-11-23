@@ -19,4 +19,15 @@ export class IdbUpdatesManager extends BaseCollectionManager {
              .catch(reason => reject(reason))
         );
     }
+
+    public findUpdates(project_id:ObjectID, from_version:number, to_version?:number) {
+        var query:any = { project_id: project_id };
+        if(!to_version) {
+            query.version = from_version;
+        } else {
+            query.version = { $gt: from_version, $lte: to_version };
+        }
+
+        return this.collection.find<IdbUpdate>(query).toArray();
+    }
 }

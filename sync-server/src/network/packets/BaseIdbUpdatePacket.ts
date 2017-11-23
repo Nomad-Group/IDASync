@@ -4,7 +4,7 @@ import { BasePacket } from './BasePacket';
 import { IdbUpdate, IdbUpdateType } from './../../database/IdbUpdate';
 
 export class BaseIdbUpdatePacket extends BasePacket {
-    public binaryVersion:number;
+    //public binaryVersion:number;
 
     public constructor() {
         super();
@@ -12,7 +12,7 @@ export class BaseIdbUpdatePacket extends BasePacket {
         this.packetSize += 4;
     }
 
-    public encode(buffer:NetworkBuffer) {
+    /*public encode(buffer:NetworkBuffer) {
         super.encode(buffer);
 
         buffer.writeUInt32(this.binaryVersion);
@@ -22,9 +22,9 @@ export class BaseIdbUpdatePacket extends BasePacket {
         super.decode(buffer);
 
         this.binaryVersion = buffer.readUInt32();
-    }
+    }*/
 
-    public toIdbUpdate():IdbUpdate {
+    public getUpdateData():IdbUpdate {
         return null;
     }
 }

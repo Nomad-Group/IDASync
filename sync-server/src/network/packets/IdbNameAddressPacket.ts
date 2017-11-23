@@ -5,8 +5,7 @@ import { PacketType } from './PacketType';
 import { BaseIdbUpdatePacket } from './BaseIdbUpdatePacket';
 
 export class IdbNameAddressPacket extends BaseIdbUpdatePacket {
-    public ptr:number;
-    public name:string;
+    public updateData:IdbUpdateName = new IdbUpdateName();
 
     public constructor() {
         super();
@@ -18,24 +17,22 @@ export class IdbNameAddressPacket extends BaseIdbUpdatePacket {
     public encode(buffer:NetworkBuffer) {
         super.encode(buffer);
 
-        buffer.writeUInt64(this.ptr);
-        buffer.writeCharArray(this.name, 128);
+        buffer.writeUInt32(this.updateData.version);
+        buffer.writeUInt64(this.updateData.ptr);
+        buffer.writeCharArray(this.updateData.name, 128);
+        buffer.writeUInt8(this.updateData.local ? 1 : 0);
     }
 
     public decode(buffer:NetworkBuffer) {
         super.decode(buffer);
 
-        this.ptr = buffer.readUInt64();
-        this.name = buffer.readCharArray(128);
+        this.updateData.version = buffer.readUInt32();
+        this.updateData.ptr = buffer.readUInt64();
+        this.updateData.name = buffer.readCharArray(128);
+        this.updateData.local = buffer.readUInt8() == 1;
     }
 
-    public toIdbUpdate():IdbUpdate {
-        var update = new IdbUpdateName();
-        update.type = IdbUpdateType.Name;
-
-        update.ptr = this.ptr;
-        update.name = this.name;
-
-        return update;
+    public getUpdateData():IdbUpdate {
+        return this.updateData;
     }
 }

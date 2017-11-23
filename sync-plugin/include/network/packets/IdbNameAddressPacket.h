@@ -5,4 +5,5 @@ struct IdbNameAddressPacket : BaseIdbUpdatePacket<PacketType::IdbNameAddressPack
 {
 	uint64_t ptr;
 	char name[128];
+	bool local;
 };
