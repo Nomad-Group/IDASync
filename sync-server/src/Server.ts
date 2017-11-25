@@ -57,7 +57,7 @@ export class Server {
 
     private onClientData(client:NetworkClient, dataBuffer:Buffer) {
         var data = new NetworkBuffer(dataBuffer);
-        console.log("[Server] Data: " + dataBuffer.toString());
+        //console.log("[Server] Data: " + dataBuffer.toString());
 
         var packet:BasePacket = null;
         var packetType:PacketType = data.readUInt16();
@@ -89,7 +89,7 @@ export class Server {
         packet.decode(data);
 
         // DEBUG
-        console.log(packet);
+        //console.log(packet);
 
         if(packet.packetType == PacketType.Handshake)
         {

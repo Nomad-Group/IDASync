@@ -64,7 +64,15 @@ void SyncPlugin::Run()
 
 	// Handshake
 	auto packet = new NetworkBufferT<BasePacket>();
+
+	// User
 	packet->Write(Networking::GetHardwareId().c_str(), 38);
+	
+	char username[64] = { 0 };
+
+	DWORD stUsernameSize = sizeof(username);
+	GetUserName(username, &stUsernameSize);
+	packet->Write(username, stUsernameSize);
 
 	// Binary
 	retrieve_input_file_md5((uchar*) packet->WritePtr(16));

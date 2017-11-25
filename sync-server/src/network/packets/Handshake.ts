@@ -3,7 +3,9 @@ import { PacketType } from './PacketType';
 import { BasePacket } from './BasePacket';
 
 export class Handshake extends BasePacket {
-    public guid:string;
+    public user_guid:string;
+    public user_name:string;
+
     public binary_md5:string;
     public binary_name:string;
     public binary_version:number;
@@ -18,7 +20,9 @@ export class Handshake extends BasePacket {
     public decode(buffer:NetworkBuffer) {
         super.decode(buffer);
 
-        this.guid = buffer.readCharArray(38);
+        this.user_guid = buffer.readCharArray(38);
+        this.user_name = buffer.readString();
+
         this.binary_md5 = buffer.readCharArray(16);
         this.binary_name = buffer.readString();
         this.binary_version = buffer.readUInt32();
@@ -27,7 +31,9 @@ export class Handshake extends BasePacket {
     public encode(buffer:NetworkBuffer) {
         super.encode(buffer);
 
-        buffer.writeCharArray(this.guid, 38);
+        buffer.writeCharArray(this.user_guid, 38);
+        buffer.writeString(this.user_name);
+
         buffer.writeCharArray(this.binary_md5, 16);
         buffer.writeString(this.binary_name);
         buffer.writeUInt32(this.binary_version);

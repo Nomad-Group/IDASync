@@ -5,7 +5,7 @@ import { NetworkClient } from './../network/NetworkClient';
 import { Handshake, HandshakeResponse } from './../network/packets/Handshake';
 
 export class HandshakeHandler {
-    private static getUser(hardware_id:string):Promise<any> {
+    private static getUser(hardware_id:string, name:string):Promise<any> {
         return new Promise<any>((resolve, reject) => {
             database.users.findByHardwareId(hardware_id)
                 .then(user => {
@@ -20,7 +20,7 @@ export class HandshakeHandler {
                     // Setup
                     user = new User();
                     user.hardware_id = hardware_id;
-                    user.username = "Unknown User (?)";
+                    user.username = name;
 
                     // Create
                     database.users.create(user)
@@ -63,7 +63,7 @@ export class HandshakeHandler {
 
     public static handle(client:NetworkClient, packet:Handshake) {
         Promise.all([
-            this.getUser(packet.guid),
+            this.getUser(packet.user_guid, packet.user_name),
             this.getProject(packet.binary_md5, packet.binary_name)
         ])
             .then((results) => {
