@@ -19,8 +19,8 @@ export class Handshake extends BasePacket {
         super.decode(buffer);
 
         this.guid = buffer.readCharArray(38);
-        this.binary_name = buffer.readCharArray(128);
         this.binary_md5 = buffer.readCharArray(16);
+        this.binary_name = buffer.readString();
         this.binary_version = buffer.readUInt32();
     }
 
@@ -28,8 +28,8 @@ export class Handshake extends BasePacket {
         super.encode(buffer);
 
         buffer.writeCharArray(this.guid, 38);
-        buffer.writeCharArray(this.binary_name, 128);
         buffer.writeCharArray(this.binary_md5, 16);
+        buffer.writeString(this.binary_name);
         buffer.writeUInt32(this.binary_version);
     }
 }

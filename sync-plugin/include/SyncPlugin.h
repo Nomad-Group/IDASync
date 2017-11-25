@@ -14,7 +14,6 @@ private:
 
 	// Packet Handler
 	bool HandleBroadcastMessagePacket(BroadcastMessagePacket*);
-	bool HandleIdbNameAddressPacket(IdbNameAddressPacket*);
 
 public:
 	// IDA Callbacks

@@ -9,6 +9,7 @@
 #include "packets/BasePacket.h"
 #include "Socket.h"
 #include "SocketEvent.h"
+#include "NetworkBuffer.h"
 
 struct INetworkClientEventListener
 {
@@ -19,6 +20,8 @@ struct INetworkClientEventListener
 };
 
 class SocketEventDispatcher;
+class NetworkBuffer;
+
 class NetworkClient : public ISocketEventListener
 {
 protected:
@@ -34,7 +37,7 @@ protected:
 	bool SendPacketInternal(BasePacket*, size_t);
 
 	BasePacket* ReadPacketInternal();
-	bool ReadPacketInternal(PacketType, BasePacket*, size_t);
+	bool ReadPacketInternal(PacketType, NetworkBufferT<BasePacket>*);
 
 public:
 	NetworkClient() = default;
@@ -48,6 +51,18 @@ public:
 	bool StartListening(INetworkClientEventListener*);
 	virtual bool OnSocketEvent(SocketEvent) override;
 
+	// Send
+	bool Send(NetworkBuffer*);
+
+	template <class T>
+	inline bool Send(NetworkBufferT<T>* pBuffer)
+	{
+		return Send((NetworkBuffer*)pBuffer);
+	}
+
+	// Receive
+	bool Read(NetworkBuffer*);
+
 	/*
 	 * Packets
 	 */
@@ -55,12 +70,19 @@ public:
 	inline bool Send(T* pPacket, size_t stSize = sizeof(T))
 	{
 		pPacket->packetType = T::Enum;
-		return SendPacketInternal((BasePacket*)pPacket, stSize);
+		return SendPacketInternal((BasePacket*) pPacket, stSize);
 	}
+
 	template <class T>
-	inline bool ReadPacket(T* pPacket, size_t stSize = sizeof(T))
+	inline bool ReadPacket(NetworkBufferT<T>* pPacket)
 	{
-		return ReadPacketInternal(T::Enum, (BasePacket*)pPacket, stSize);
+		return ReadPacketInternal(PacketType::UnknownAny, (NetworkBufferT<BasePacket>*) pPacket);
+	}
+
+	template <class T>
+	inline bool ReadPacket(PacketType packetType, NetworkBufferT<T>* pPacket)
+	{
+		return ReadPacketInternal(packetType, (NetworkBufferT<BasePacket>*) pPacket);
 	}
 };
 

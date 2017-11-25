@@ -1,5 +1,7 @@
 #include "network/NetworkClient.h"
 #include "network/SocketEventDispatcher.h"
+#include "network/NetworkBuffer.h"
+
 #include "SyncPlugin.h"
 
 NetworkClient* g_client = nullptr;
@@ -49,6 +51,28 @@ bool NetworkClient::SendPacketInternal(BasePacket* pPacket, size_t stSize)
 		stBytesSent == stSize;
 }
 
+bool NetworkClient::Send(NetworkBuffer* pBuffer)
+{
+	if (pBuffer == nullptr)
+		return false;
+
+	// Send
+	size_t stBytesSent = 0;
+	return
+		ErrorCheck(m_socket.Send((const char*)pBuffer->GetBuffer(), pBuffer->GetSize(), &stBytesSent)) &&
+		stBytesSent == pBuffer->GetSize();
+}
+
+bool NetworkClient::Read(NetworkBuffer* pBuffer)
+{
+	if (pBuffer == nullptr)
+		return false;
+
+	// Receive
+	return
+		ErrorCheck(m_socket.Receive((char*)pBuffer->GetBuffer(), pBuffer->GetSize()));
+}
+
 BasePacket* NetworkClient::ReadPacketInternal()
 {
 	// Packet Header
@@ -79,34 +103,34 @@ BasePacket* NetworkClient::ReadPacketInternal()
 	return (BasePacket*) pPacket;
 }
 
-bool NetworkClient::ReadPacketInternal(PacketType ePacketType, BasePacket* pPacket, size_t stSize)
+bool NetworkClient::ReadPacketInternal(PacketType ePacketType, NetworkBufferT<BasePacket>* pPacket)
 {
 	if (pPacket == nullptr)
 		return false;
 
 	// Packet Header
-	if (!ErrorCheck(m_socket.Receive((char*)pPacket, sizeof(BasePacket))))
+	if (!ErrorCheck(m_socket.Receive((char*) pPacket->GetBuffer(), sizeof(BasePacket))))
 		return false;
 
 	// Check Packet Type
-	if (pPacket->packetType != ePacketType)
+	if (ePacketType != PacketType::UnknownAny && ePacketType != pPacket->t->packetType)
 	{
 		g_plugin->ShowInfoDialog(
 			"Expected Packet " + std::string(PacketTypeToString(ePacketType)) +
-			", got " + PacketTypeToString(pPacket->packetType) + " instead!"
+			", got " + PacketTypeToString(pPacket->t->packetType) + " instead!"
 		);
 		
 		return false;
 	}
 
 	// Read rest of Packet
-	size_t remainingSize = pPacket->packetSize - sizeof(BasePacket);
+	size_t remainingSize = pPacket->t->packetSize - sizeof(BasePacket);
 	if (remainingSize == 0)
 		return true;
 
 	return ErrorCheck(m_socket.Receive(
-		((char*)pPacket) + sizeof(BasePacket),
-		pPacket->packetSize - sizeof(BasePacket)
+		(char*) pPacket->WritePtr(remainingSize),
+		remainingSize
 	));
 }
 

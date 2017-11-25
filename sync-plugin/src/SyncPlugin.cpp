@@ -2,7 +2,7 @@
 #include "ida/IdbManager.h"
 #include "network/Networking.h"
 #include "network/NetworkClient.h"
-#include "network/packets/HandshakePacket.h"
+#include "network/NetworkBuffer.h"
 #include <ida.hpp>
 #include <idp.hpp>
 
@@ -62,25 +62,36 @@ void SyncPlugin::Run()
 	if (!g_client->Connect(ip))
 		return;
 
-	// Hardware ID
-	HandshakePacket* packet = new HandshakePacket();
-	packet->packetType = PacketType::Handshake;
-	memcpy(&packet->guid, Networking::GetHardwareId().c_str(), sizeof(HandshakePacket::guid));
+	// Handshake
+	auto packet = new NetworkBufferT<BasePacket>();
+	packet->Write(Networking::GetHardwareId().c_str(), 38);
 
 	// Binary
-	retrieve_input_file_md5(packet->binary_md5);
-	get_root_filename(packet->binary_name, sizeof(HandshakePacket::binary_name));
-	packet->binary_version = g_idb->GetVersion();
+	retrieve_input_file_md5((uchar*) packet->WritePtr(16));
+	
+	char buffer[128];
+	size_t stFilenameSize = get_root_filename(buffer, sizeof(buffer) - 1) + 1;
+	get_root_filename((char*) packet->WritePtr(stFilenameSize), stFilenameSize);
 
-	// Handshake
+	packet->Write(g_idb->GetVersion());
+
+	// Handshake Packet
+	packet->t->packetType = PacketType::Handshake;
+	packet->t->packetSize = static_cast<uint16_t>(packet->GetSize());
+
 	if (!g_client->Send(packet))
 	{
 		g_plugin->Log("Handshake failed!");
+
+		delete packet;
 		return;
 	}
 
+	delete packet;
+
 	// Receive HandshakeResponse
-	HandshakeResponsePacket* packetResponse = new HandshakeResponsePacket();
+	auto packetResponse = new NetworkBufferT<BasePacket>();
+
 	if (!g_client->ReadPacket(packetResponse))
 	{
 		g_plugin->Log("Handshake failed!");
@@ -99,7 +110,7 @@ void SyncPlugin::Run()
 
 	// Connected!
 	g_plugin->Log("Successfully connected");// as " + std::string(packetResponse->username) + " (project: " + std::string(packetResponse->project_name) + ")");
-	//delete packetResponse;
+	delete packetResponse;
 }
 
 // Logging

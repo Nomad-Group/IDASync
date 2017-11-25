@@ -66,6 +66,21 @@ export class NetworkBuffer {
         this.offset += size;
     }
 
+    public readString():string {
+        var size = 0;
+
+        for(var i = this.offset; i < this.buffer.length; i++) {
+            if(this.buffer[i] == 0) {
+                size = i - this.offset;
+                break;
+            }
+        }
+
+        
+        var result = this.buffer.toString("utf8", this.offset, this.offset + size);
+        this.offset += size;
+        return result;
+    }
     public writeString(str:string) {
         return this.writeCharArray(str, str.length);
     }

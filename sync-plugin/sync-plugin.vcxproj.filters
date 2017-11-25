@@ -59,6 +59,9 @@
     <ClCompile Include="src\ida\IdbManager.cpp">
       <Filter>Source</Filter>
     </ClCompile>
+    <ClCompile Include="src\network\NetworkBuffer.cpp">
+      <Filter>Source\network</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\SyncPlugin.h">
@@ -91,9 +94,6 @@
     <ClInclude Include="include\network\packets\BasePacket.h">
       <Filter>Header\network\packets</Filter>
     </ClInclude>
-    <ClInclude Include="include\network\packets\HandshakePacket.h">
-      <Filter>Header\network\packets</Filter>
-    </ClInclude>
     <ClInclude Include="include\network\packets\HeartbeatPacket.h">
       <Filter>Header\network\packets</Filter>
     </ClInclude>
@@ -109,8 +109,8 @@
     <ClInclude Include="include\network\packets\BaseIdbUpdatePacket.h">
       <Filter>Header\network\packets</Filter>
     </ClInclude>
-    <ClInclude Include="include\network\packets\IdbNameAddressPacket.h">
-      <Filter>Header\network\packets</Filter>
+    <ClInclude Include="include\network\NetworkBuffer.h">
+      <Filter>Header\network</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

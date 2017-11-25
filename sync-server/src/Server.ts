@@ -52,7 +52,7 @@ export class Server {
     }
 
     private onConnectionError(client:NetworkClient, error:Error) {
-        console.error("[Server] Client (" + client.name + ") caused error: " + error.name + "\n" + error.message);
+        //console.error("[Server] Client (" + client.name + ") caused error: " + error.name + "\n" + error.message);
     }
 
     private onClientData(client:NetworkClient, dataBuffer:Buffer) {

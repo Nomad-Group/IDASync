@@ -9,7 +9,9 @@ enum class PacketType : uint16_t
 	Heartbeat,
 	BroadcastMessage,
 
-	IdbNameAddressPacket
+	IdbNameAddressPacket,
+
+	UnknownAny = UINT16_MAX
 };
 static_assert(sizeof(PacketType) == 2, "PacketType size mismatch!");
 
@@ -55,4 +57,3 @@ static_assert(sizeof(BasePacketEnumType<PacketType::Heartbeat>) == sizeof(BasePa
 struct HandshakePacket;
 struct HeartbeatPacket;
 struct BroadcastMessagePacket;
-struct IdbNameAddressPacket;

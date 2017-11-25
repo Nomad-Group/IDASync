@@ -10,7 +10,6 @@
 
 #include "ida/IdbManager.h"
 
-#include "network/packets/IdbNameAddressPacket.h"
 #include "network/NetworkClient.h"
 
 int idaapi idb_hook(void*, int notification_code, va_list va)
@@ -31,12 +30,12 @@ int idaapi idp_hook(void*, int notification_code, va_list va)
 
 		g_plugin->Log(number2hex(ea) + ": Rename to " + std::string(name));
 
-		auto packet = new IdbNameAddressPacket();
+		/*auto packet = new IdbNameAddressPacket();
 		packet->binaryVersion = g_idb->GetVersion();
 		packet->ptr = static_cast<uint64_t>(ea);
-		strcpy_s(packet->name, name);
+		strcpy_s(packet->name, name);*/
 
-		g_client->Send(packet);
+		//g_client->Send(packet);
 	}
 	
 	return 0;

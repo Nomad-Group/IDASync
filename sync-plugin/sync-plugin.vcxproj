@@ -158,6 +158,7 @@
     <ClCompile Include="src\ida\IdbManager.cpp" />
     <ClCompile Include="src\IDBHook.cpp" />
     <ClCompile Include="src\Main.cpp" />
+    <ClCompile Include="src\network\NetworkBuffer.cpp" />
     <ClCompile Include="src\network\NetworkClient.cpp" />
     <ClCompile Include="src\network\Networking.cpp" />
     <ClCompile Include="src\network\Socket.cpp" />
@@ -170,14 +171,13 @@
     <ClInclude Include="include\ida\IdbManager.h" />
     <ClInclude Include="include\ida\idb_events_strings.h" />
     <ClInclude Include="include\ida\idp_events_strings.h" />
+    <ClInclude Include="include\network\NetworkBuffer.h" />
     <ClInclude Include="include\network\NetworkClient.h" />
     <ClInclude Include="include\network\Networking.h" />
     <ClInclude Include="include\network\packets\BaseIdbUpdatePacket.h" />
     <ClInclude Include="include\network\packets\BasePacket.h" />
     <ClInclude Include="include\network\packets\BroadcastMessagePacket.h" />
-    <ClInclude Include="include\network\packets\HandshakePacket.h" />
     <ClInclude Include="include\network\packets\HeartbeatPacket.h" />
-    <ClInclude Include="include\network\packets\IdbNameAddressPacket.h" />
     <ClInclude Include="include\network\Socket.h" />
     <ClInclude Include="include\network\SocketEventDispatcher.h" />
     <ClInclude Include="include\network\SocketEvent.h" />
