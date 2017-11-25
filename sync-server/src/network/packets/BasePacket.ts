@@ -7,16 +7,19 @@ export class BasePacket {
         this.packetSize = BasePacket.HEADER_SIZE;
     }
 
-    public packetType:PacketType;
     public packetSize:number;
+    public packetType:PacketType;
 
     public decode(buffer:NetworkBuffer) {
-        this.packetType = buffer.readUInt16();
         this.packetSize = buffer.readUInt16();
+        this.packetType = buffer.readUInt16();
     }
 
     public encode(buffer:NetworkBuffer) {
-        buffer.writeUInt16(this.packetType);
         buffer.writeUInt16(this.packetSize);
+        buffer.writeUInt16(this.packetType);
     }
+
+    // Optional, usually set when receiving
+    public buffer:NetworkBuffer = null;
 }

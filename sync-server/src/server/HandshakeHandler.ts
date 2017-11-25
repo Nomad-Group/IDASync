@@ -82,7 +82,7 @@ export class HandshakeHandler {
 
                 // Send
                 server.sendPacket(client, response);
-
+                
                 // Join Project as Active
                 projectsManager.addActive(project, client, packet.binary_version);
             })

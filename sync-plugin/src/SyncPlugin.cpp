@@ -79,7 +79,7 @@ void SyncPlugin::Run()
 	
 	char buffer[128];
 	size_t stFilenameSize = get_root_filename(buffer, sizeof(buffer) - 1) + 1;
-	get_root_filename((char*) packet->WritePtr(stFilenameSize), stFilenameSize);
+	packet->WriteString(buffer);
 
 	packet->Write(g_idb->GetVersion());
 

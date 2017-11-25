@@ -7,7 +7,7 @@ class NetworkDispatcher : public INetworkClientEventListener
 private:
 	struct OnPacketEvent : exec_request_t
 	{
-		BasePacket* m_packet;
+		NetworkBufferT<BasePacket>* m_packet;
 		virtual int idaapi execute() override;
 	};
 	struct OnConnectionClosedEvent : exec_request_t
@@ -18,6 +18,6 @@ private:
 	void QueueEvent(exec_request_t*);
 
 public:
-	virtual void OnPacket(BasePacket* pPacket) override;
+	virtual bool OnPacket(NetworkBufferT<BasePacket>*) override;
 	virtual void OnConnectionClosed() override;
 };

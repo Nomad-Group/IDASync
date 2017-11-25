@@ -14,7 +14,6 @@ export class Handshake extends BasePacket {
         super();
 
         this.packetType = PacketType.Handshake;
-        this.packetSize = 42;
     }
 
     public decode(buffer:NetworkBuffer) {

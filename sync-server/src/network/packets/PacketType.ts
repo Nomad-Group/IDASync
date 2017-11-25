@@ -5,5 +5,5 @@ export enum PacketType {
     Heartbeat,
     BroadcastMessage,
 
-    IdbNameAddressPacket
+    IdbUpdate
 }

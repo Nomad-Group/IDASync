@@ -1,7 +1,35 @@
 
 export class NetworkBuffer {
     public offset:number = 0;
-    public constructor(public buffer:Buffer) {}
+
+    public constructor(public buffer:Buffer = new Buffer(8)) {}
+
+    public resize(newSize:number) {
+        if(this.buffer.length == newSize) {
+            return this.buffer.length;
+        }
+
+        var oldSize = this.buffer.length;
+
+        // Buffer
+        var newBuffer = new Buffer(newSize);
+        this.buffer.copy(newBuffer);
+        this.buffer = newBuffer;
+
+        return oldSize;
+    }
+
+    private adjustSizeFor(size:number) {
+        var requiredSize = this.offset + size;
+        if(requiredSize > this.buffer.length) {
+            this.resize(requiredSize);
+        }
+    }
+
+    public getSize():number {
+        // Hmmmm....
+        return this.offset;
+    }
 
     public readUInt8():number {
         var result = this.buffer.readUInt8(this.offset);
@@ -9,6 +37,8 @@ export class NetworkBuffer {
         return result;
     }
     public writeUInt8(num) {
+        this.adjustSizeFor(1);
+        
         this.buffer.writeUInt8(num, this.offset);
         this.offset++;
     }
@@ -19,6 +49,8 @@ export class NetworkBuffer {
         return result;
     }
     public writeUInt16(num:number) {
+        this.adjustSizeFor(2);
+
         this.buffer.writeUInt16LE(num, this.offset);
         this.offset += 2;
     }
@@ -29,6 +61,8 @@ export class NetworkBuffer {
         return result;
     }
     public writeUInt32(num:number) {
+        this.adjustSizeFor(4);
+
         this.buffer.writeUInt32LE(num, this.offset);
         this.offset += 4;
     }
@@ -49,6 +83,8 @@ export class NetworkBuffer {
         return result;
     }
     public writeCharArray(str:string, size:number) {
+        this.adjustSizeFor(size);
+
         if(str == null || str == undefined) {
             for(var i = 0; i < size; i++) {
                 this.buffer[this.offset + i] = 0;
@@ -69,19 +105,20 @@ export class NetworkBuffer {
     public readString():string {
         var size = 0;
 
-        for(var i = this.offset; i < this.buffer.length; i++) {
-            if(this.buffer[i] == 0) {
-                size = i - this.offset;
+        for(var i = 0; i < this.buffer.length; i++) {
+            if(this.buffer[this.offset + i] == 0) {
+                size = i;
                 break;
             }
         }
 
         
         var result = this.buffer.toString("utf8", this.offset, this.offset + size);
-        this.offset += size;
+        this.offset += size + 1;
         return result;
     }
-    public writeString(str:string) {
-        return this.writeCharArray(str, str.length);
+    public writeString(str:string):number {
+        this.writeCharArray(str, str.length);
+        return str.length;
     }
 }

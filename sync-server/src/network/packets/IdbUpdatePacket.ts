@@ -1,30 +1,30 @@
+import { SyncType } from './../../sync/ISyncHandler';
 import { NetworkBuffer } from './../NetworkBuffer';
 import { PacketType } from './PacketType';
 import { BasePacket } from './BasePacket';
-import { IdbUpdate, IdbUpdateType } from './../../database/IdbUpdate';
+import { IdbUpdate } from './../../database/IdbUpdate';
 
-export class BaseIdbUpdatePacket extends BasePacket {
-    //public binaryVersion:number;
+export class IdbUpdatePacket extends BasePacket {
+    public binaryVersion:number;
+    public syncType:SyncType;
 
     public constructor() {
         super();
 
-        this.packetSize += 4;
+        this.packetType = PacketType.IdbUpdate;
     }
 
-    /*public encode(buffer:NetworkBuffer) {
+    public encode(buffer:NetworkBuffer) {
         super.encode(buffer);
 
         buffer.writeUInt32(this.binaryVersion);
+        buffer.writeUInt16(this.syncType);
     }
 
     public decode(buffer:NetworkBuffer) {
         super.decode(buffer);
 
         this.binaryVersion = buffer.readUInt32();
-    }*/
-
-    public getUpdateData():IdbUpdate {
-        return null;
+        this.syncType = buffer.readUInt16();
     }
 }

@@ -7,14 +7,14 @@
 #include <idp.hpp>
 #include <name.hpp>
 
-bool SyncPlugin::HandleNetworkPacket(BasePacket* packet)
+bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 {
-	g_plugin->Log("DEBUG: Incoming " + std::string(PacketTypeToString(packet->packetType)));
+	g_plugin->Log("DEBUG: Incoming " + std::string(PacketTypeToString(packet->t->packetType)));
 
-	switch (packet->packetType)
+	switch (packet->t->packetType)
 	{
 	case PacketType::BroadcastMessage:
-		return HandleBroadcastMessagePacket((BroadcastMessagePacket*)packet);
+		return HandleBroadcastMessagePacket((NetworkBufferT<BroadcastMessagePacket>*)packet);
 
 	default:
 		return false;
@@ -27,20 +27,20 @@ void SyncPlugin::HandleDisconnect()
 	Log("Connection lost!");
 }
 
-bool SyncPlugin::HandleBroadcastMessagePacket(BroadcastMessagePacket* packet)
+bool SyncPlugin::HandleBroadcastMessagePacket(NetworkBufferT<BroadcastMessagePacket>* packet)
 {
-	switch (packet->messageType)
+	switch (packet->t->messageType)
 	{
 	case BroadcastMessageType::ClientFirstJoin:
-		Log(std::string(packet->data) + " joined this project!");
+		Log(std::string(packet->ReadString()) + " joined this project!");
 		break;
 
 	case BroadcastMessageType::ClientJoin:
-		Log(std::string(packet->data) + " connected.");
+		Log(std::string(packet->ReadString()) + " connected.");
 		break;
 
 	case BroadcastMessageType::ClientDisconnect:
-		Log(std::string(packet->data) + " disconnected.");
+		Log(std::string(packet->ReadString()) + " disconnected.");
 		break;
 
 	default:

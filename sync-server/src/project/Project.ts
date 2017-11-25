@@ -1,8 +1,9 @@
-import { BaseIdbUpdatePacket } from './../network/packets/BaseIdbUpdatePacket';
+import { SyncType } from './../sync/ISyncHandler';
+import { IdbUpdatePacket } from './../network/packets/IdbUpdatePacket';
 import { ObjectID } from 'mongodb';
 import { IdbUpdate } from './../database/IdbUpdate';
 import { BroadcastMessagePacket, BroadcastMessageType } from './../network/packets/BroadcastMessagePacket';
-import { server, projectsManager, database } from './../app';
+import { server, projectsManager, database, syncManager } from './../app';
 import { BasePacket } from './../network/packets/BasePacket';
 import { NetworkClient } from './../network/NetworkClient';
 import { ProjectData } from './../database/ProjectData';
@@ -21,7 +22,7 @@ export class Project {
         broadcast.messageType = firstTime ? BroadcastMessageType.ClientFirstJoin : BroadcastMessageType.ClientJoin;
         broadcast.data = client.user.username;
 
-        server.sendPackets(this.active_clients, broadcast);
+        //server.sendPackets(this.active_clients, broadcast);
 
         // First Time?
         if(firstTime) {
@@ -43,7 +44,7 @@ export class Project {
 
     public onClientData(client:NetworkClient, packet:BasePacket):boolean {
         // Idb Update
-        var idbUpdatePacket = packet as BaseIdbUpdatePacket;
+        var idbUpdatePacket = packet as IdbUpdatePacket;
         if(idbUpdatePacket) {
             this.onIdbUpdatePacket(client, idbUpdatePacket);
             return true;
@@ -62,22 +63,28 @@ export class Project {
         client.active_project = null;
     }
 
-    private onIdbUpdatePacket(client:NetworkClient, packet:BaseIdbUpdatePacket) {
-        console.log("[Project] " + client.name + " sent update (" + packet.constructor.name + ")");
+    private onIdbUpdatePacket(client:NetworkClient, packet:IdbUpdatePacket) {
+        console.log("[Project] " + client.name + " sent update (" + SyncType[packet.syncType] + ")");
+
+        // Update Data
+        var updateData = syncManager.decodePacket(packet);
+        if(updateData == null) {
+            return;
+        }
+
+        updateData.project_id = this.data._id;
+        updateData.user_id = client.user._id;
 
         // Store
-        this.applyUpdate(packet.getUpdateData(), client);
+        this.applyUpdate(updateData);
     }
 
-    private applyUpdate(update:IdbUpdate, client:NetworkClient):Promise<ObjectID> {
-        // Update Data
-        update.project_id = this.data._id;
-        update.user_id = client.user._id;
-
+    private applyUpdate(update:IdbUpdate):Promise<ObjectID> {
         // Binary Version
         this.data.binary_version++;
         update.version = this.data.binary_version;
         
+        // Database
         return new Promise<ObjectID>((resolve, reject) => {
             database.projects.update(this.data)
                 .then(() => database.idbUpdates.create(update))
@@ -93,6 +100,7 @@ export class Project {
     }
 
     private sendUpdate(update:IdbUpdate, client:NetworkClient) {
-        
+        var updatePacket = syncManager.encodePacket(update);
+        server.sendPacket(client, updatePacket);
     }
 }

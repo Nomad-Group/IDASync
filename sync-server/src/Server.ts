@@ -1,4 +1,4 @@
-import { IdbNameAddressPacket } from './network/packets/IdbNameAddressPacket';
+import { IdbUpdatePacket } from './network/packets/IdbUpdatePacket';
 import { BroadcastMessagePacket } from './network/packets/BroadcastMessagePacket';
 import { projectsManager } from './app';
 import { HandshakeHandler } from './server/HandshakeHandler';
@@ -60,7 +60,7 @@ export class Server {
         //console.log("[Server] Data: " + dataBuffer.toString());
 
         var packet:BasePacket = null;
-        var packetType:PacketType = data.readUInt16();
+        var packetType:PacketType = dataBuffer.readUInt16LE(2);
 
         switch(packetType)
         {
@@ -69,8 +69,8 @@ export class Server {
                 break;
             }
 
-            case PacketType.IdbNameAddressPacket: {
-                packet = new IdbNameAddressPacket();
+            case PacketType.IdbUpdate: {
+                packet = new IdbUpdatePacket();
                 break;
             }
 
@@ -80,12 +80,8 @@ export class Server {
             }
         }
 
-        // Packet Header
-        packet.packetType = packetType;
-        packet.packetSize = data.readUInt16();
-
         // Decode Packet
-        data.offset = 0;
+        packet.buffer = data;
         packet.decode(data);
 
         // DEBUG
@@ -108,8 +104,12 @@ export class Server {
 
     public sendPacket(client:NetworkClient, packet:BasePacket) {
         // Network Buffer
-        var buffer = new NetworkBuffer(new Buffer(packet.packetSize));
+        var buffer = new NetworkBuffer();
         packet.encode(buffer);
+
+        // Packet Size
+        packet.packetSize = buffer.getSize();
+        buffer.buffer.writeUInt16LE(packet.packetSize, 0);
 
         // Send Packet
         return client.socket.write(buffer.buffer);
@@ -117,8 +117,12 @@ export class Server {
 
     public sendPackets(clients:NetworkClient[], packet:BasePacket) {
          // Network Buffer
-         var buffer = new NetworkBuffer(new Buffer(packet.packetSize));
+         var buffer = new NetworkBuffer();
          packet.encode(buffer);
+
+         // Packet Size
+         packet.packetSize = buffer.getSize();
+         buffer.buffer.writeUInt16LE(packet.packetSize, 0);
 
          // Send
          clients.forEach(client => client.socket.write(buffer.buffer));

@@ -15,7 +15,7 @@ struct INetworkClientEventListener
 {
 	virtual ~INetworkClientEventListener() = default;
 
-	virtual void OnPacket(BasePacket*) = 0;
+	virtual bool OnPacket(NetworkBufferT<BasePacket>*) = 0;
 	virtual void OnConnectionClosed() = 0;
 };
 

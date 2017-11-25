@@ -11,6 +11,7 @@
 #include "ida/IdbManager.h"
 
 #include "network/NetworkClient.h"
+#include "network/packets/BaseIdbUpdatePacket.h"
 
 int idaapi idb_hook(void*, int notification_code, va_list va)
 {
@@ -29,6 +30,20 @@ int idaapi idp_hook(void*, int notification_code, va_list va)
 		bool local = va_arg(va, int) != 0;
 
 		g_plugin->Log(number2hex(ea) + ": Rename to " + std::string(name));
+
+		auto packet = new NetworkBufferT<BasePacket>();
+		packet->t->packetType = PacketType::IdbUpdate;
+		
+		packet->Write<uint32_t>(0); // version
+		packet->Write<uint16_t>(0); // syncType
+		//packet->t->syncType = 0;
+
+		packet->Write(static_cast<uint64_t>(ea));
+		packet->WriteString(name);
+
+		packet->t->packetSize = packet->GetSize();
+		g_client->Send(packet);
+		delete packet;
 
 		/*auto packet = new IdbNameAddressPacket();
 		packet->binaryVersion = g_idb->GetVersion();

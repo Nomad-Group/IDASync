@@ -6,12 +6,13 @@ void NetworkDispatcher::QueueEvent(exec_request_t* request)
 	execute_sync(*request, MFF_WRITE | MFF_NOWAIT);
 }
 
-void NetworkDispatcher::OnPacket(BasePacket* packet)
+bool NetworkDispatcher::OnPacket(NetworkBufferT<BasePacket>* packet)
 {
 	auto dispatchEvent = new OnPacketEvent();
 	dispatchEvent->m_packet = packet;
 
 	QueueEvent(dispatchEvent);
+	return true;
 }
 int idaapi NetworkDispatcher::OnPacketEvent::execute()
 {

@@ -17,7 +17,7 @@ public:
 
 	// Buffer
 	virtual size_t Resize(size_t stNewSize);
-	inline size_t GetSize() const { return m_stActualSize; };
+	inline size_t GetSize() const { return m_stSize; };
 	inline size_t GetActualBufferSize() const { return m_stActualSize; };
 	inline int8_t* GetBuffer() { return m_buffer; }
 
@@ -28,6 +28,9 @@ public:
 	// Read
 	bool Read(int8_t*, size_t);
 	template <typename T> inline bool Read(T* out, size_t stSize = sizeof(T)) { return Read((int8_t*)out, stSize); };
+
+	const char* ReadString();
+	void WriteString(const char*);
 
 	// Write
 	void Write(int8_t*, size_t);
@@ -43,9 +46,11 @@ class NetworkBufferT : public NetworkBuffer
 public:
 	using Type = T;
 
-	NetworkBufferT() : NetworkBuffer(min(sizeof(T), 256))
+	NetworkBufferT() : NetworkBuffer(max(sizeof(T), 256))
 	{
 		m_stOffset = sizeof(T);
+		m_stSize = sizeof(T);
+
 		t = (T*) m_buffer;
 	}
 

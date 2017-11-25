@@ -109,7 +109,9 @@ bool NetworkClient::ReadPacketInternal(PacketType ePacketType, NetworkBufferT<Ba
 		return false;
 
 	// Packet Header
-	if (!ErrorCheck(m_socket.Receive((char*) pPacket->GetBuffer(), sizeof(BasePacket))))
+	size_t stBytesRead = 0;
+	if (!ErrorCheck(m_socket.Receive((char*) pPacket->GetBuffer(), sizeof(BasePacket), &stBytesRead)) ||
+		stBytesRead != sizeof(BasePacket))
 		return false;
 
 	// Check Packet Type
@@ -120,6 +122,13 @@ bool NetworkClient::ReadPacketInternal(PacketType ePacketType, NetworkBufferT<Ba
 			", got " + PacketTypeToString(pPacket->t->packetType) + " instead!"
 		);
 		
+		return false;
+	}
+	
+	// Check Packet Size
+	if (pPacket->t->packetSize < sizeof(BasePacket))
+	{
+		g_plugin->Log("ERROR: packetSize [" + std::to_string(pPacket->t->packetSize) + "] < sizeof(BasePacket)! [on " + std::string(PacketTypeToString(ePacketType)) + "]");
 		return false;
 	}
 
@@ -139,11 +148,15 @@ bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 	// Read
 	if (socketEvent == SocketEvent::Read)
 	{
-		auto pPacket = ReadPacketInternal();
-		if (pPacket)
-			m_listener->OnPacket(pPacket);
+		// Packet
+		auto pBuffer = new NetworkBufferT<BasePacket>();
+		if (!ReadPacketInternal(PacketType::UnknownAny, pBuffer)) {
+			delete pBuffer;
+			return false;
+		}
 
-		return true;
+		// Listener
+		return m_listener->OnPacket(pBuffer);
 	}
 
 	// Close

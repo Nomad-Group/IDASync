@@ -16,7 +16,6 @@ export class BroadcastMessagePacket extends BasePacket {
         super();
 
         this.packetType = PacketType.BroadcastMessage;
-        this.packetSize = BasePacket.HEADER_SIZE + 65;
     }
 
     public decode(buffer:NetworkBuffer) {

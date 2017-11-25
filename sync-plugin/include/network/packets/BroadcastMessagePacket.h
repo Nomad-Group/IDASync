@@ -11,5 +11,4 @@ enum class BroadcastMessageType : uint8_t
 struct BroadcastMessagePacket : BasePacketEnumType<PacketType::BroadcastMessage>
 {
 	BroadcastMessageType messageType;
-	char data[64];
 };
