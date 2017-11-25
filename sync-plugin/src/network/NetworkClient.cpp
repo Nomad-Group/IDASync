@@ -155,6 +155,8 @@ bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 			return false;
 		}
 
+		pBuffer->SetOffset(sizeof(BasePacket));
+
 		// Listener
 		return m_listener->OnPacket(pBuffer);
 	}

@@ -20,6 +20,6 @@ export class NameSyncHandler implements ISyncHandler {
 
     public encodePacket(packet:IdbUpdatePacket, updateData:NameSyncUpdateData) {
         packet.buffer.writeUInt64(updateData.ptr);
-        packet.buffer.writeString(updateData.name);
+        packet.buffer.writeString("hello_fotze");// updateData.name);
     }
 }

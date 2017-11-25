@@ -106,9 +106,13 @@ Socket::StatusCode Socket::Receive(char* buffer, size_t stSize, size_t* stBytesR
 
 bool Socket::Close()
 {
-	return
-		IsValid() &&
-		closesocket(m_socket) == 0;
+	auto s = m_socket;
+	m_socket = UINT32_MAX;
+
+	if (IsValid())
+		return closesocket(s) == 0;
+	
+	return true;
 }
 
 const char* Socket::StatusCodeToString(StatusCode statusCode)

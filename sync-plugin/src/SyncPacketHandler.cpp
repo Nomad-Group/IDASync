@@ -1,4 +1,5 @@
 #include "SyncPlugin.h"
+#include "sync/SyncManager.h"
 #include "Utility.h"
 
 #include "network/packets/BroadcastMessagePacket.h"
@@ -14,7 +15,10 @@ bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 	switch (packet->t->packetType)
 	{
 	case PacketType::BroadcastMessage:
-		return HandleBroadcastMessagePacket((NetworkBufferT<BroadcastMessagePacket>*)packet);
+		return HandleBroadcastMessagePacket((NetworkBufferT<BroadcastMessagePacket>*) packet);
+
+	case PacketType::IdbUpdate:
+		return HandleIdbUpdatePacket(packet);
 
 	default:
 		return false;
@@ -24,6 +28,8 @@ bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 void SyncPlugin::HandleDisconnect()
 {
 	g_client->Disconnect();
+
+	// Log
 	Log("Connection lost!");
 }
 
@@ -46,6 +52,14 @@ bool SyncPlugin::HandleBroadcastMessagePacket(NetworkBufferT<BroadcastMessagePac
 	default:
 		return false;
 	}
+
+	return true;
+}
+
+bool SyncPlugin::HandleIdbUpdatePacket(NetworkBufferT<BasePacket>* packet)
+{
+	auto updateData = g_syncManager->DecodePacket(packet);
+	bool success = g_syncManager->ApplyUpdate(updateData);
 
 	return true;
 }

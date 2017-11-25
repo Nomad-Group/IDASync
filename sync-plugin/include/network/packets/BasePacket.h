@@ -57,3 +57,4 @@ static_assert(sizeof(BasePacketEnumType<PacketType::Heartbeat>) == sizeof(BasePa
 struct HandshakePacket;
 struct HeartbeatPacket;
 struct BroadcastMessagePacket;
+struct IdbUpdatePacket;

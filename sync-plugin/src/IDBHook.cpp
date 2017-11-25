@@ -11,7 +11,6 @@
 #include "ida/IdbManager.h"
 
 #include "network/NetworkClient.h"
-#include "network/packets/BaseIdbUpdatePacket.h"
 
 int idaapi idb_hook(void*, int notification_code, va_list va)
 {
@@ -42,7 +41,7 @@ int idaapi idp_hook(void*, int notification_code, va_list va)
 		packet->WriteString(name);
 
 		packet->t->packetSize = packet->GetSize();
-		g_client->Send(packet);
+		//g_client->Send(packet);
 		delete packet;
 
 		/*auto packet = new IdbNameAddressPacket();

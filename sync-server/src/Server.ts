@@ -102,29 +102,37 @@ export class Server {
         console.error("[Server] Unhandled Packet from " + client.name + " (Type: " + PacketType[packet.packetType] + ")");
     }
 
-    public sendPacket(client:NetworkClient, packet:BasePacket) {
+    public sendPacket(client:NetworkClient, packet:BasePacket, encode:boolean = true) {        
+       // Network Buffer
+        if(encode){
+            var buffer = new NetworkBuffer();
+            packet.encode(buffer);
+
+            packet.buffer = buffer;
+        }
+
+        // Packet Size
+        packet.packetSize = packet.buffer.getSize();
+        packet.buffer.buffer.writeUInt16LE(packet.packetSize, 0);
+
+        // Send Packet
+        return client.socket.write(packet.buffer.buffer);
+    }
+
+    public sendPackets(clients:NetworkClient[], packet:BasePacket, encode:boolean = true) {
         // Network Buffer
-        var buffer = new NetworkBuffer();
-        packet.encode(buffer);
+        if(encode) { 
+            var buffer = new NetworkBuffer();
+            packet.encode(buffer);
+
+            packet.buffer = buffer;
+        }
 
         // Packet Size
         packet.packetSize = buffer.getSize();
-        buffer.buffer.writeUInt16LE(packet.packetSize, 0);
+        packet.buffer.buffer.writeUInt16LE(packet.packetSize, 0);
 
-        // Send Packet
-        return client.socket.write(buffer.buffer);
-    }
-
-    public sendPackets(clients:NetworkClient[], packet:BasePacket) {
-         // Network Buffer
-         var buffer = new NetworkBuffer();
-         packet.encode(buffer);
-
-         // Packet Size
-         packet.packetSize = buffer.getSize();
-         buffer.buffer.writeUInt16LE(packet.packetSize, 0);
-
-         // Send
-         clients.forEach(client => client.socket.write(buffer.buffer));
+        // Send
+        clients.forEach(client => client.socket.write(packet.buffer.buffer));
     }
 }

@@ -14,6 +14,7 @@ private:
 
 	// Packet Handler
 	bool HandleBroadcastMessagePacket(NetworkBufferT<BroadcastMessagePacket>*);
+	bool HandleIdbUpdatePacket(NetworkBufferT<BasePacket>*);
 
 public:
 	// IDA Callbacks

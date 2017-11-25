@@ -54,13 +54,14 @@ const char* NetworkBuffer::ReadString()
 	while(m_stOffset < m_stActualSize)
 	{
 		if (m_buffer[m_stOffset] == '\0')
-			break;
+			return (const char*)&m_buffer[m_stOffset - stStringLength];
 
 		stStringLength++;
 		m_stOffset++;
 	}
 
-	return (const char*) &m_buffer[m_stOffset - stStringLength];
+	// Shit, string is not null-terminated. we failed
+	return nullptr;
 }
 
 void NetworkBuffer::WriteString(const char* str)

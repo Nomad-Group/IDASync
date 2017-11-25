@@ -101,6 +101,6 @@ export class Project {
 
     private sendUpdate(update:IdbUpdate, client:NetworkClient) {
         var updatePacket = syncManager.encodePacket(update);
-        server.sendPacket(client, updatePacket);
+        server.sendPacket(client, updatePacket, false);
     }
 }

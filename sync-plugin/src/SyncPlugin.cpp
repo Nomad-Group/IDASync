@@ -1,5 +1,6 @@
 #include "SyncPlugin.h"
 #include "ida/IdbManager.h"
+#include "sync/SyncManager.h"
 #include "network/Networking.h"
 #include "network/NetworkClient.h"
 #include "network/NetworkBuffer.h"
@@ -24,6 +25,14 @@ bool SyncPlugin::Init()
 	if (!InstallIDBHook())
 	{
 		Log("Error: Failed to install Idb Hook!");
+		return false;
+	}
+
+	// Sync Manager
+	g_syncManager = new SyncManager();
+	if (!g_syncManager->Initialize())
+	{
+		Log("Error: Failed to initialize Sync Manager!");
 		return false;
 	}
 

@@ -32,9 +32,11 @@ export class SyncManager {
         updatePacket.syncType = updateData.type;
         updatePacket.binaryVersion = updateData.version;
 
+        // Encode Header
         updatePacket.buffer = new NetworkBuffer();
+        updatePacket.encode(updatePacket.buffer);
 
-        // Encode
+        // Encode Body
         var syncHandler = this.syncHandlers[updateData.type];
         syncHandler.encodePacket(updatePacket, updateData);
 

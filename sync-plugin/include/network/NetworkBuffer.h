@@ -46,7 +46,7 @@ class NetworkBufferT : public NetworkBuffer
 public:
 	using Type = T;
 
-	NetworkBufferT() : NetworkBuffer(max(sizeof(T), 256))
+	NetworkBufferT() : NetworkBuffer(256)
 	{
 		m_stOffset = sizeof(T);
 		m_stSize = sizeof(T);

@@ -16,6 +16,7 @@ bool NetworkDispatcher::OnPacket(NetworkBufferT<BasePacket>* packet)
 }
 int idaapi NetworkDispatcher::OnPacketEvent::execute()
 {
+	// Handle Packet
 	g_plugin->HandleNetworkPacket(m_packet);
 
 	// Cleanup

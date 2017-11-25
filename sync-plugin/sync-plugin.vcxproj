@@ -165,6 +165,8 @@
     <ClCompile Include="src\network\SocketEventDispatcher.cpp" />
     <ClCompile Include="src\SyncPacketHandler.cpp" />
     <ClCompile Include="src\SyncPlugin.cpp" />
+    <ClCompile Include="src\sync\NameSyncHandler.cpp" />
+    <ClCompile Include="src\sync\SyncManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\client\NetworkDispatcher.h" />
@@ -174,7 +176,6 @@
     <ClInclude Include="include\network\NetworkBuffer.h" />
     <ClInclude Include="include\network\NetworkClient.h" />
     <ClInclude Include="include\network\Networking.h" />
-    <ClInclude Include="include\network\packets\BaseIdbUpdatePacket.h" />
     <ClInclude Include="include\network\packets\BasePacket.h" />
     <ClInclude Include="include\network\packets\BroadcastMessagePacket.h" />
     <ClInclude Include="include\network\packets\HeartbeatPacket.h" />
@@ -182,6 +183,10 @@
     <ClInclude Include="include\network\SocketEventDispatcher.h" />
     <ClInclude Include="include\network\SocketEvent.h" />
     <ClInclude Include="include\SyncPlugin.h" />
+    <ClInclude Include="include\sync\IdbUpdate.h" />
+    <ClInclude Include="include\sync\ISyncHandler.h" />
+    <ClInclude Include="include\sync\NameSyncHandler.h" />
+    <ClInclude Include="include\sync\SyncManager.h" />
     <ClInclude Include="include\Utility.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

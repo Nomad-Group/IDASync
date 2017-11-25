@@ -27,6 +27,12 @@
     <Filter Include="Source\client">
       <UniqueIdentifier>{f3a8e9e8-a625-45e6-aebc-16fd1c144761}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header\sync">
+      <UniqueIdentifier>{5fdec757-2a37-4356-a9f2-0bb3b153ae9f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\sync">
+      <UniqueIdentifier>{ad6a73d5-1c79-447e-aafb-30f0d3b39f30}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp">
@@ -61,6 +67,12 @@
     </ClCompile>
     <ClCompile Include="src\network\NetworkBuffer.cpp">
       <Filter>Source\network</Filter>
+    </ClCompile>
+    <ClCompile Include="src\sync\SyncManager.cpp">
+      <Filter>Source\sync</Filter>
+    </ClCompile>
+    <ClCompile Include="src\sync\NameSyncHandler.cpp">
+      <Filter>Source\sync</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -106,11 +118,20 @@
     <ClInclude Include="include\ida\IdbManager.h">
       <Filter>Header\ida</Filter>
     </ClInclude>
-    <ClInclude Include="include\network\packets\BaseIdbUpdatePacket.h">
-      <Filter>Header\network\packets</Filter>
-    </ClInclude>
     <ClInclude Include="include\network\NetworkBuffer.h">
       <Filter>Header\network</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\SyncManager.h">
+      <Filter>Header\sync</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\ISyncHandler.h">
+      <Filter>Header\sync</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\IdbUpdate.h">
+      <Filter>Header\sync</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\NameSyncHandler.h">
+      <Filter>Header\sync</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
