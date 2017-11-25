@@ -3,6 +3,7 @@
 #include "Utility.h"
 
 #include "network/packets/BroadcastMessagePacket.h"
+#include "sync/IdbUpdate.h"
 
 #include <ida.hpp>
 #include <idp.hpp>
@@ -58,18 +59,21 @@ bool SyncPlugin::HandleBroadcastMessagePacket(NetworkBufferT<BroadcastMessagePac
 
 bool SyncPlugin::HandleIdbUpdatePacket(NetworkBufferT<BasePacket>* packet)
 {
+	// Decode
 	auto updateData = g_syncManager->DecodePacket(packet);
-	bool success = g_syncManager->ApplyUpdate(updateData);
+	if (updateData == nullptr)
+	{
+		Log("ERROR: Failed to decode IdbUpdate Package!");
+		return false;
+	}
+	
+	// Apply
+	if (!g_syncManager->ApplyUpdate(updateData))
+	{
+		Log("ERROR: Failed to apply IdbUpdate! Version: " + updateData->version);
+		return false;
+	}
 
+	// Done
 	return true;
 }
-
-/*
-bool SyncPlugin::HandleIdbNameAddressPacket(IdbNameAddressPacket* packet)
-{
-	if (!set_name(static_cast<ea_t>(packet->ptr), packet->name, (packet->local ? SN_LOCAL : 0) | SN_NOWARN))
-		return false;
-
-	Log("Naming Request at 0x" + number2hex(packet->ptr) + " to " + std::string(packet->name));
-	return true;
-}*/

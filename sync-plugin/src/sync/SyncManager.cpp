@@ -20,6 +20,14 @@ bool SyncManager::Initialize()
 	return true;
 }
 
+ISyncHandler* SyncManager::GetSyncHandler(SyncType syncType)
+{
+	if (syncType >= SyncType::_Count)
+		return nullptr;
+
+	return m_syncHandler[(size_t) syncType];
+}
+
 IdbUpdate* SyncManager::DecodePacket(NetworkBufferT<BasePacket>* packet)
 {
 	IdbUpdate updateDataHeader;
@@ -31,10 +39,9 @@ IdbUpdate* SyncManager::DecodePacket(NetworkBufferT<BasePacket>* packet)
 		return nullptr;
 
 	// Sync Handler
-	if (updateDataHeader.syncType >= SyncType::_Count)
+	auto syncHandler = GetSyncHandler(updateDataHeader.syncType);
+	if (syncHandler == nullptr)
 		return nullptr;
-
-	auto syncHandler = m_syncHandler[(size_t)updateDataHeader.syncType];
 	
 	// Decode
 	auto updateData = syncHandler->DecodePacket(packet);
@@ -61,10 +68,11 @@ NetworkBufferT<BasePacket>* SyncManager::EncodePacket(IdbUpdate* updateData)
 	packet->Write(updateData->syncType);
 
 	// Sync Handler
-	if (updateData->syncType >= SyncType::_Count)
+	auto syncHandler = GetSyncHandler(updateData->syncType);
+	if (syncHandler == nullptr)
 		return nullptr;
 
-	auto syncHandler = m_syncHandler[(size_t)updateData->syncType];
+	// Encode
 	if (!syncHandler->EncodePacket(packet, updateData))
 	{
 		delete packet;
@@ -78,9 +86,10 @@ NetworkBufferT<BasePacket>* SyncManager::EncodePacket(IdbUpdate* updateData)
 bool SyncManager::ApplyUpdate(IdbUpdate* updateData)
 {
 	// Sync Handler
-	if (updateData == nullptr || updateData->syncType >= SyncType::_Count)
+	auto syncHandler = GetSyncHandler(updateData->syncType);
+	if (syncHandler == nullptr)
 		return false;
 
-	auto syncHandler = m_syncHandler[(size_t)updateData->syncType];
+	// Apply
 	return syncHandler->ApplyUpdate(updateData);
 }
