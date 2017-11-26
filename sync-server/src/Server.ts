@@ -1,3 +1,4 @@
+import { HeartbeatService } from './server/HeartbeatService';
 import { IdbUpdatePacket } from './network/packets/IdbUpdatePacket';
 import { BroadcastMessagePacket } from './network/packets/BroadcastMessagePacket';
 import { projectsManager } from './app';
@@ -13,16 +14,8 @@ import * as net from 'net';
 export class Server {
     public static readonly PORT:number = 4523;
     public server:net.Server;
-    private clients:NetworkClient[] = [];
-
-    public constructor() {
-        //setInterval(this.onHeartbeat.bind(this), 1000);
-    }
-
-    private onHeartbeat() {
-        var heartbeat = new Heartbeat();
-        this.clients.forEach(client => this.sendPacket(client, heartbeat));
-    }
+    public clients:NetworkClient[] = [];
+    private heartbeatService:HeartbeatService = new HeartbeatService();
 
     public startServer() {
         this.server = net.createServer(this.onConnection.bind(this)).listen(Server.PORT);
@@ -72,6 +65,11 @@ export class Server {
             case PacketType.IdbUpdate: {
                 packet = new IdbUpdatePacket();
                 break;
+            }
+
+            case PacketType.Heartbeat: {
+                client.last_heartbeat = Date.now();
+                return;
             }
 
             default: {

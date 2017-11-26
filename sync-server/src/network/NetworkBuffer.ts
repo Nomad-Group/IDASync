@@ -2,7 +2,7 @@
 export class NetworkBuffer {
     public offset:number = 0;
 
-    public constructor(public buffer:Buffer = new Buffer(8)) {}
+    public constructor(public buffer:Buffer = new Buffer(4)) {}
 
     public resize(newSize:number) {
         if(this.buffer.length == newSize) {

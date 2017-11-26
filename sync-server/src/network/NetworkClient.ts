@@ -8,4 +8,6 @@ export class NetworkClient {
 
     public user:User;
     public active_project:Project;
+
+    public last_heartbeat:number = 0;
 }

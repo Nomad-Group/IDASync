@@ -12,6 +12,7 @@ private:
 	// Packet Handler
 	bool HandleBroadcastMessagePacket(NetworkBufferT<BroadcastMessagePacket>*);
 	bool HandleIdbUpdatePacket(NetworkBufferT<BasePacket>*);
+	bool HandleHeartbeat();
 
 public:
 	// IDA Callbacks
