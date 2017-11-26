@@ -20,7 +20,7 @@ bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 		return HandleHeartbeat();
 
 	case PacketType::BroadcastMessage:
-		return HandleBroadcastMessagePacket((NetworkBufferT<BroadcastMessagePacket>*) packet);
+		return HandleBroadcastMessagePacket(packet);
 
 	case PacketType::IdbUpdate:
 		return HandleIdbUpdatePacket(packet);
@@ -49,9 +49,12 @@ bool SyncPlugin::HandleHeartbeat()
 	return true;
 }
 
-bool SyncPlugin::HandleBroadcastMessagePacket(NetworkBufferT<BroadcastMessagePacket>* packet)
+bool SyncPlugin::HandleBroadcastMessagePacket(NetworkBufferT<BasePacket>* packet)
 {
-	switch (packet->t->messageType)
+	BroadcastMessageType messageType;
+	packet->Read(&messageType);
+
+	switch (messageType)
 	{
 	case BroadcastMessageType::ClientFirstJoin:
 		Log(std::string(packet->ReadString()) + " joined this project!");

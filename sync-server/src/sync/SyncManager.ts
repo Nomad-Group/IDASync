@@ -1,7 +1,7 @@
 import { NetworkBuffer } from './../network/NetworkBuffer';
 import { IdbUpdate } from './../database/IdbUpdate';
 import { IdbUpdatePacket } from './../network/packets/IdbUpdatePacket';
-import { NameSyncHandler } from './NameSyncHandler';
+import { NameSyncHandler } from './handler/NameSyncHandler';
 import { ISyncHandler, SyncType } from './ISyncHandler';
 
 export class SyncManager {

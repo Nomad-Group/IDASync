@@ -18,7 +18,7 @@ export class ProjectsManager {
         }
 
         // Client
-        client.active_project = project;
+        client.activeProject = project;
 
         // Client
         // TODO: check if one user is connected multiple times?
@@ -27,11 +27,11 @@ export class ProjectsManager {
     }
 
     public removeActive(client:NetworkClient) {
-        if(client.active_project == null || client.active_project == undefined) {
+        if(client.activeProject == null || client.activeProject == undefined) {
             return;
         }
 
-        var index = this.active_projects.findIndex(prj => prj.data.binary_md5 == client.active_project.data.binary_md5);
+        var index = this.active_projects.findIndex(prj => prj.data.binary_md5 == client.activeProject.data.binary_md5);
         if(index < 0) {
             return;
         }
@@ -39,7 +39,7 @@ export class ProjectsManager {
         var project = this.active_projects[index];
         project.onClientLeft(client);
 
-        if(project.active_clients.length == 0) {
+        if(project.activeClients.length == 0) {
             this.active_projects.splice(index);
         }
     }

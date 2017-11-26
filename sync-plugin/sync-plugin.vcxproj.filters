@@ -33,6 +33,12 @@
     <Filter Include="Source\sync">
       <UniqueIdentifier>{ad6a73d5-1c79-447e-aafb-30f0d3b39f30}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header\sync\handler">
+      <UniqueIdentifier>{9bc1a5ce-a5a1-4778-b467-b193a83ca09d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\sync\handler">
+      <UniqueIdentifier>{afc0b9f5-f87c-4c78-984b-70b4dba35636}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp">
@@ -68,8 +74,8 @@
     <ClCompile Include="src\sync\SyncManager.cpp">
       <Filter>Source\sync</Filter>
     </ClCompile>
-    <ClCompile Include="src\sync\NameSyncHandler.cpp">
-      <Filter>Source\sync</Filter>
+    <ClCompile Include="src\sync\handler\NameSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -127,11 +133,11 @@
     <ClInclude Include="include\sync\IdbUpdate.h">
       <Filter>Header\sync</Filter>
     </ClInclude>
-    <ClInclude Include="include\sync\NameSyncHandler.h">
-      <Filter>Header\sync</Filter>
-    </ClInclude>
     <ClInclude Include="include\ida\IdaNotification.h">
       <Filter>Header\ida</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\NameSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

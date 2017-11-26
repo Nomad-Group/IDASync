@@ -68,7 +68,7 @@ export class Server {
             }
 
             case PacketType.Heartbeat: {
-                client.last_heartbeat = Date.now();
+                client.lastHeartbeat = Date.now();
                 return;
             }
 
@@ -92,7 +92,7 @@ export class Server {
         }
 
         // Project: Handle Packet
-        if(client.active_project && client.active_project.onClientData(client, packet)) {
+        if(client.activeProject && client.activeProject.onClientData(client, packet)) {
             return;
         }
 
@@ -127,7 +127,7 @@ export class Server {
         }
 
         // Packet Size
-        packet.packetSize = buffer.getSize();
+        packet.packetSize = packet.buffer.getSize();
         packet.buffer.buffer.writeUInt16LE(packet.packetSize, 0);
 
         // Send

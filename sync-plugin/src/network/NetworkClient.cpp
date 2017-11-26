@@ -137,10 +137,16 @@ bool NetworkClient::ReadPacketInternal(PacketType ePacketType, NetworkBufferT<Ba
 	if (remainingSize == 0)
 		return true;
 
-	return ErrorCheck(m_socket.Receive(
+	bool success = ErrorCheck(m_socket.Receive(
 		(char*) pPacket->WritePtr(remainingSize),
 		remainingSize
 	));
+
+	// Offset
+	pPacket->SetOffset(sizeof(BasePacket));
+
+	// Done
+	return success;
 }
 
 bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
@@ -154,8 +160,6 @@ bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 			delete pBuffer;
 			return false;
 		}
-
-		pBuffer->SetOffset(sizeof(BasePacket));
 
 		// Listener
 		return m_listener->OnPacket(pBuffer);

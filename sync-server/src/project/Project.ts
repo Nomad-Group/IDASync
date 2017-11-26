@@ -9,20 +9,20 @@ import { NetworkClient } from './../network/NetworkClient';
 import { ProjectData } from './../database/ProjectData';
 
 export class Project {
-    public active_clients:NetworkClient[] = [];
+    public activeClients:NetworkClient[] = [];
     public constructor(public data:ProjectData) {}
 
     public onClientJoined(client:NetworkClient, firstTime:boolean, localVersion:number) {
         // Join
-        this.active_clients.push(client);
-        client.active_project = this;
+        this.activeClients.push(client);
+        client.activeProject = this;
 
         // Join Broadcast
         var broadcast = new BroadcastMessagePacket();
         broadcast.messageType = firstTime ? BroadcastMessageType.ClientFirstJoin : BroadcastMessageType.ClientJoin;
         broadcast.data = client.user.username;
-
-        //server.sendPackets(this.active_clients, broadcast);
+        
+        server.sendPackets(this.activeClients, broadcast);
 
         // First Time?
         if(firstTime) {
@@ -32,12 +32,10 @@ export class Project {
         }
 
         // Log
-        console.log("[Users] " + client.user.username + " joined " + this.data.name + (firstTime ? " (for the first time)" : ""));
+        console.log("[Project] " + client.user.username + " joined " + this.data.name + (firstTime ? " (for the first time)" : ""));
 
         // Version
-        console.log("Version " + localVersion + " (client) vs. " + this.data.binary_version + " (server)");
         if(localVersion < this.data.binary_version) {
-
             this.sendUpdates(client, localVersion, this.data.binary_version);
         }
     }
@@ -55,12 +53,12 @@ export class Project {
     }
 
     public onClientLeft(client:NetworkClient) {
-        var index = this.active_clients.indexOf(client);
+        var index = this.activeClients.indexOf(client);
         if(index > -1) {
-            this.active_clients.slice(index);
+            this.activeClients.slice(index);
         }
 
-        client.active_project = null;
+        client.activeProject = null;
     }
 
     private onIdbUpdatePacket(client:NetworkClient, packet:IdbUpdatePacket) {
@@ -76,7 +74,9 @@ export class Project {
         updateData.user_id = client.user._id;
 
         // Store
-        this.applyUpdate(updateData);
+        this.applyUpdate(updateData).then(() => {
+            this.broadcastUpdate(updateData, client);
+        });
     }
 
     private applyUpdate(update:IdbUpdate):Promise<ObjectID> {
@@ -102,5 +102,15 @@ export class Project {
     private sendUpdate(update:IdbUpdate, client:NetworkClient) {
         var updatePacket = syncManager.encodePacket(update);
         server.sendPacket(client, updatePacket, false);
+    }
+
+    private broadcastUpdate(update:IdbUpdate, exception:NetworkClient) {
+        var targetClients = this.activeClients;
+        if(exception) {
+            targetClients.splice(this.activeClients.indexOf(exception));
+        }
+
+        var updatePacket = syncManager.encodePacket(update);
+        server.sendPackets(targetClients, updatePacket, false);
     }
 }

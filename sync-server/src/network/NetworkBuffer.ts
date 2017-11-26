@@ -1,8 +1,9 @@
+import { BasePacket } from './packets/BasePacket';
 
 export class NetworkBuffer {
     public offset:number = 0;
 
-    public constructor(public buffer:Buffer = new Buffer(4)) {}
+    public constructor(public buffer:Buffer = new Buffer(BasePacket.HEADER_SIZE)) {}
 
     public resize(newSize:number) {
         if(this.buffer.length == newSize) {
@@ -119,6 +120,8 @@ export class NetworkBuffer {
     }
     public writeString(str:string):number {
         this.writeCharArray(str, str.length);
-        return str.length;
+        this.writeUInt8(0);
+        
+        return str.length + 1;
     }
 }

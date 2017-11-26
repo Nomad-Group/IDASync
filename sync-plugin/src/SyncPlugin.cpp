@@ -11,8 +11,6 @@ SyncPlugin* g_plugin = nullptr;
 
 bool SyncPlugin::Init()
 {
-	bool isX86 = strncmp(inf.procName, "metapc", 8) != 0;
-
 	// Idb Manager
 	g_idb = new IdbManager();
 	if (!g_idb->Initialize())
@@ -67,22 +65,30 @@ void SyncPlugin::Run()
 	// Handshake
 	auto packet = new NetworkBufferT<BasePacket>();
 
-	// User
+	// Hardware ID
 	packet->Write(Networking::GetHardwareId().c_str(), 38);
 	
-	char username[64] = { 0 };
+	// Username
+	{
+		char username[64] = { 0 };
 
-	DWORD stUsernameSize = sizeof(username);
-	GetUserName(username, &stUsernameSize);
-	packet->Write(username, stUsernameSize);
+		DWORD stUsernameSize = sizeof(username);
+		GetUserName(username, &stUsernameSize);
+		packet->Write(username, stUsernameSize);
+	}
 
 	// Binary
+	// md6
 	retrieve_input_file_md5((uchar*) packet->WritePtr(16));
 	
-	char buffer[128];
-	size_t stFilenameSize = get_root_filename(buffer, sizeof(buffer) - 1) + 1;
-	packet->WriteString(buffer);
+	// Filename
+	{
+		char buffer[128];
+		size_t stFilenameSize = get_root_filename(buffer, sizeof(buffer) - 1) + 1;
+		packet->WriteString(buffer);
+	}
 
+	// Idb Version
 	packet->Write(g_idb->GetVersion());
 
 	// Handshake Packet
@@ -119,7 +125,10 @@ void SyncPlugin::Run()
 	}
 
 	// Connected!
-	g_plugin->Log("Successfully connected");// as " + std::string(packetResponse->username) + " (project: " + std::string(packetResponse->project_name) + ")");
+	const char* username = packetResponse->ReadString();
+	const char* project  = packetResponse->ReadString();
+
+	g_plugin->Log("Successfully connected as " + std::string(username) + " (project: " + std::string(project) + ")");
 	delete packetResponse;
 }
 

@@ -1,4 +1,4 @@
-#include "sync/NameSyncHandler.h"
+#include "sync/handler/NameSyncHandler.h"
 #include "sync/SyncManager.h"
 #include <name.hpp>
 

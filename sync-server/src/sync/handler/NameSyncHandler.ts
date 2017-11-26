@@ -1,9 +1,9 @@
-import { IdbUpdate } from './../database/IdbUpdate';
-import { NetworkBuffer } from './../network/NetworkBuffer';
-import { IdbUpdatePacket } from './../network/packets/IdbUpdatePacket';
-import { BasePacket } from './../network/packets/BasePacket';
-import { NetworkClient } from './../network/NetworkClient';
-import { ISyncHandler, SyncType } from './ISyncHandler';
+import { IdbUpdate } from './../../database/IdbUpdate';
+import { NetworkBuffer } from './../../network/NetworkBuffer';
+import { IdbUpdatePacket } from './../../network/packets/IdbUpdatePacket';
+import { BasePacket } from './../../network/packets/BasePacket';
+import { NetworkClient } from './../../network/NetworkClient';
+import { ISyncHandler, SyncType } from './../ISyncHandler';
 
 class NameSyncUpdateData extends IdbUpdate {
     public ptr:number;

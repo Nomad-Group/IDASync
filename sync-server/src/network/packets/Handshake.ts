@@ -53,14 +53,14 @@ export class HandshakeResponse extends BasePacket {
     public decode(buffer:NetworkBuffer) {
         super.decode(buffer);
 
-        this.username = buffer.readCharArray(32);
-        this.project_name = buffer.readCharArray(64);
+        this.username = buffer.readString();
+        this.project_name = buffer.readString();
     }
 
     public encode(buffer:NetworkBuffer) {
         super.encode(buffer);
 
-        buffer.writeCharArray(this.username, 32);
-        buffer.writeCharArray(this.project_name, 64);
+        buffer.writeString(this.username);
+        buffer.writeString(this.project_name);
     }
 }

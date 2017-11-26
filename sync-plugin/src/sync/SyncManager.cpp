@@ -2,7 +2,7 @@
 #include "sync/IdbUpdate.h"
 #include "network/NetworkClient.h"
 
-#include "sync/NameSyncHandler.h"
+#include "sync/handler/NameSyncHandler.h"
 
 #include "loader.hpp"
 

@@ -10,7 +10,7 @@ private:
 	NetworkDispatcher m_dispatcher;
 
 	// Packet Handler
-	bool HandleBroadcastMessagePacket(NetworkBufferT<BroadcastMessagePacket>*);
+	bool HandleBroadcastMessagePacket(NetworkBufferT<BasePacket>*);
 	bool HandleIdbUpdatePacket(NetworkBufferT<BasePacket>*);
 	bool HandleHeartbeat();
 

@@ -1,3 +1,4 @@
+import { NetworkClientDisconnectReason } from './../network/NetworkClient';
 import { server } from './../app';
 import { Heartbeat } from './../network/packets/Heartbeat';
 
@@ -12,13 +13,14 @@ export class HeartbeatService {
     private onHeartbeat() {
         // Check last Hearbeat on Clients
         server.clients.forEach(client => {
-            if((Date.now() - client.last_heartbeat) > HeartbeatKickAfter && client.last_heartbeat > 2) {
+            if((Date.now() - client.lastHeartbeat) > HeartbeatKickAfter && client.lastHeartbeat > 2) {
+                client.disconnectReason = NetworkClientDisconnectReason.KickTimeout;
                 client.socket.destroy();
                 return;
             }
 
             // in case our client is a massive cunt and never responds to any heartbeats
-            client.last_heartbeat++;
+            client.lastHeartbeat++;
         });
 
         // Send Heartbeat

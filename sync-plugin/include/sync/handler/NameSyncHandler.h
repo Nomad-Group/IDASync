@@ -1,6 +1,6 @@
 #pragma once
-#include "ISyncHandler.h"
-#include "IdbUpdate.h"
+#include "sync/ISyncHandler.h"
+#include "sync/IdbUpdate.h"
 
 #include <string>
 

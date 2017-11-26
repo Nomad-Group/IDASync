@@ -53,8 +53,11 @@ const char* NetworkBuffer::ReadString()
 	size_t stStringLength = 0;
 	while(m_stOffset < m_stActualSize)
 	{
-		if (m_buffer[m_stOffset] == '\0')
-			return (const char*)&m_buffer[m_stOffset - stStringLength];
+		if (m_buffer[m_stOffset] == '\0') {
+			m_stOffset++;
+
+			return (const char*)&m_buffer[m_stOffset - stStringLength - 1];
+		}
 
 		stStringLength++;
 		m_stOffset++;

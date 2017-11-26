@@ -11,8 +11,6 @@ export class HandshakeHandler {
                 .then(user => {
                     // User
                     if(user != null) {
-                        console.log("[Users] " + user.username + " connected");
-
                         resolve({ newlyCreated: false, user: user });
                         return;
                     }
@@ -25,7 +23,7 @@ export class HandshakeHandler {
                     // Create
                     database.users.create(user)
                         .then(id => {
-                            console.log("[Users] User connected for the first time: " + user.hardware_id);
+                            console.log("[Users] Created user " + user.username + " (" + user.hardware_id + ")");
                             resolve({ newlyCreated: false, user: user });
                         })
                         .catch(reason => reject(reason));
