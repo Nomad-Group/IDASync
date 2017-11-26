@@ -4,7 +4,8 @@ import { NetworkBuffer } from './../network/NetworkBuffer';
 import { NetworkClient } from './../network/NetworkClient';
 
 export enum SyncType {
-    Name = 0
+    Name = 0,
+    ItemComment
 }
 
 export interface ISyncHandler {

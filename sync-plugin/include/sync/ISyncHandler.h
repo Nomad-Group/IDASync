@@ -7,6 +7,7 @@
 enum class SyncType : uint16_t
 {
 	Name = 0,
+	ItemComment,
 
 	_Count
 };

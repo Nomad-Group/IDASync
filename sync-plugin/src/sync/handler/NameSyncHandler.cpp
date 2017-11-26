@@ -1,10 +1,14 @@
 #include "sync/handler/NameSyncHandler.h"
 #include "sync/SyncManager.h"
+#include "SyncPlugin.h"
+#include "Utility.h"
 #include <name.hpp>
 
 bool NameSyncHandler::ApplyUpdate(IdbUpdate* _updateData)
 {
 	auto updateData = (NameSyncUpdateData*)_updateData;
+	g_plugin->Log(number2hex(updateData->ptr) + " was named " + updateData->name);
+
 	return set_name(static_cast<ea_t>(updateData->ptr), updateData->name.c_str(), (updateData->local ? SN_LOCAL : 0) | SN_NOWARN);
 }
 
@@ -21,6 +25,8 @@ bool NameSyncHandler::OnIdaNotification(IdaNotification& notification)
 
 	// Update
 	auto update = new NameSyncUpdateData();
+	update->syncType = SyncType::Name;
+
 	update->ptr = static_cast<decltype(update->ptr)>(ea);
 	update->name = name;
 	update->local = local;
