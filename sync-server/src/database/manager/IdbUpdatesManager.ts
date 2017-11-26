@@ -30,4 +30,12 @@ export class IdbUpdatesManager extends BaseCollectionManager {
 
         return this.collection.find<IdbUpdate>(query).toArray();
     }
+
+    public find(query) {
+        return this.collection.find<IdbUpdate>(query).toArray();
+    }
+
+    public update(update:IdbUpdate) {
+        return this.collection.updateOne({ _id: update._id }, update);
+    }
 }

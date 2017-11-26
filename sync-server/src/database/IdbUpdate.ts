@@ -8,5 +8,7 @@ export class IdbUpdate {
     public userId:ObjectID;
 
     public type:SyncType;
+
     public version:number;
+    public shouldSync:boolean = true;
 }

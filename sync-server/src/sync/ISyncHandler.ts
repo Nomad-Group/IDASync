@@ -12,4 +12,6 @@ export interface ISyncHandler {
 
     decodePacket(updateData:any, packet:IdbUpdatePacket);
     encodePacket(packet:IdbUpdatePacket, updateData:any);
+    
+    getUniqueIdentifier(update:any):any;
 }

@@ -22,4 +22,10 @@ export class NameSyncHandler implements ISyncHandler {
         packet.buffer.writeUInt64(updateData.ptr);
         packet.buffer.writeString(updateData.name);
     }
+
+    public getUniqueIdentifier(update:NameSyncUpdateData) {
+        return {
+            ptr: update.ptr
+        }
+    }
 }

@@ -83,6 +83,28 @@ export class Project {
 
             // Broadcast
             this.broadcastUpdate(updateData, client);
+
+            // Disable old IdbUpdate entries which have been overridden
+            var syncHandler = syncManager.syncHandlers[updateData.type];
+
+            var queryParams = {
+                projectId: this.data._id,
+                type: updateData.type,
+                version: { $lt : updateData.version },
+                shouldSync: true
+            };
+            queryParams = Object.assign(queryParams, syncHandler.getUniqueIdentifier(updateData));
+
+            // Find
+            database.idbUpdates.find(queryParams).then(updates => {
+                updates.forEach(update => {
+                    // Should no longer be synced
+                    update.shouldSync = false;
+
+                    // Update
+                    database.idbUpdates.update(update);
+                })
+            })
         });
     }
 
@@ -107,6 +129,10 @@ export class Project {
     }
 
     private sendUpdate(update:IdbUpdate, client:NetworkClient) {
+        if(!update.shouldSync) {
+            return;
+        }
+
         var updatePacket = syncManager.encodePacket(update);
         server.sendPacket(client, updatePacket, false);
     }
