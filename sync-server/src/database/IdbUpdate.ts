@@ -4,8 +4,8 @@ import { ObjectID } from 'mongodb';
 export class IdbUpdate {
     public _id:ObjectID;
 
-    public project_id:ObjectID;
-    public user_id:ObjectID;
+    public projectId:ObjectID;
+    public userId:ObjectID;
 
     public type:SyncType;
     public version:number;

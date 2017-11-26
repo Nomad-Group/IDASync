@@ -1,5 +1,6 @@
 #include "SyncPlugin.h"
 #include "sync/SyncManager.h"
+#include "ida/IdbManager.h"
 #include "Utility.h"
 
 #include "network/packets/HeartbeatPacket.h"
@@ -24,6 +25,9 @@ bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 
 	case PacketType::IdbUpdate:
 		return HandleIdbUpdatePacket(packet);
+
+	case PacketType::IdbUpdateResponse:
+		return HandleIdbUpdateResponsePacket(packet);
 
 	default:
 		return false;
@@ -96,5 +100,15 @@ bool SyncPlugin::HandleIdbUpdatePacket(NetworkBufferT<BasePacket>* packet)
 
 	// Done
 	delete updateData;
+	return true;
+}
+
+bool SyncPlugin::HandleIdbUpdateResponsePacket(NetworkBufferT<BasePacket>* packet)
+{
+	uint32_t version;
+	if (!packet->Read(&version))
+		return false;
+
+	g_idb->SetVersion(version);
 	return true;
 }

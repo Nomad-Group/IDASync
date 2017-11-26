@@ -28,3 +28,25 @@ export class IdbUpdatePacket extends BasePacket {
         this.syncType = buffer.readUInt16();
     }
 }
+
+export class IdbUpdateResponsePacket extends BasePacket {
+    public version:number;
+
+    public constructor() {
+        super();
+
+        this.packetType = PacketType.IdbUpdateResponse;
+    }
+
+    public encode(buffer:NetworkBuffer) {
+        super.encode(buffer);
+
+        buffer.writeUInt32(this.version);
+    }
+
+    public decode(buffer:NetworkBuffer) {
+        super.decode(buffer);
+
+        this.version = buffer.readUInt32();
+    }
+}

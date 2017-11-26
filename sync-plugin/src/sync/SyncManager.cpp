@@ -1,6 +1,7 @@
 #include "sync/SyncManager.h"
 #include "sync/IdbUpdate.h"
 #include "network/NetworkClient.h"
+#include "ida/IdbManager.h"
 
 #include "sync/handler/NameSyncHandler.h"
 
@@ -59,6 +60,10 @@ bool SyncManager::ApplyUpdate(IdbUpdate* updateData)
 	m_notificationLock = true;
 	bool success = syncHandler->ApplyUpdate(updateData);
 	m_notificationLock = false;
+
+	// Update Version
+	if (success)
+		g_idb->SetVersion(updateData->version);
 
 	return success;
 }

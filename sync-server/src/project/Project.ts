@@ -1,5 +1,5 @@
 import { SyncType } from './../sync/ISyncHandler';
-import { IdbUpdatePacket } from './../network/packets/IdbUpdatePacket';
+import { IdbUpdatePacket, IdbUpdateResponsePacket } from './../network/packets/IdbUpdatePacket';
 import { ObjectID } from 'mongodb';
 import { IdbUpdate } from './../database/IdbUpdate';
 import { BroadcastMessagePacket, BroadcastMessageType } from './../network/packets/BroadcastMessagePacket';
@@ -35,8 +35,8 @@ export class Project {
         console.log("[Project] " + client.user.username + " joined " + this.data.name + (firstTime ? " (for the first time)" : ""));
 
         // Version
-        if(localVersion < this.data.binary_version) {
-            this.sendUpdates(client, localVersion, this.data.binary_version);
+        if(localVersion < this.data.binaryVersion) {
+            this.sendUpdates(client, localVersion, this.data.binaryVersion);
         }
     }
 
@@ -70,19 +70,26 @@ export class Project {
             return;
         }
 
-        updateData.project_id = this.data._id;
-        updateData.user_id = client.user._id;
+        updateData.projectId = this.data._id;
+        updateData.userId = client.user._id;
 
         // Store
         this.applyUpdate(updateData).then(() => {
+            // Acknowledge
+            var response = new IdbUpdateResponsePacket();
+            response.version = updateData.version;
+
+            server.sendPacket(client, response);
+
+            // Broadcast
             this.broadcastUpdate(updateData, client);
         });
     }
 
     private applyUpdate(update:IdbUpdate):Promise<ObjectID> {
         // Binary Version
-        this.data.binary_version++;
-        update.version = this.data.binary_version;
+        this.data.binaryVersion++;
+        update.version = this.data.binaryVersion;
         
         // Database
         return new Promise<ObjectID>((resolve, reject) => {
@@ -105,9 +112,9 @@ export class Project {
     }
 
     private broadcastUpdate(update:IdbUpdate, exception:NetworkClient) {
-        var targetClients = this.activeClients;
+        var targetClients = this.activeClients.concat();
         if(exception) {
-            targetClients.splice(this.activeClients.indexOf(exception));
+            targetClients = targetClients.filter(client => client != exception);
         }
 
         var updatePacket = syncManager.encodePacket(update);

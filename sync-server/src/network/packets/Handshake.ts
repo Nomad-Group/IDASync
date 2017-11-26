@@ -3,12 +3,12 @@ import { PacketType } from './PacketType';
 import { BasePacket } from './BasePacket';
 
 export class Handshake extends BasePacket {
-    public user_guid:string;
-    public user_name:string;
+    public userGuid:string;
+    public userName:string;
 
-    public binary_md5:string;
-    public binary_name:string;
-    public binary_version:number;
+    public binaryMD5:string;
+    public binaryName:string;
+    public binaryVersion:number;
 
     public constructor() {
         super();
@@ -19,29 +19,30 @@ export class Handshake extends BasePacket {
     public decode(buffer:NetworkBuffer) {
         super.decode(buffer);
 
-        this.user_guid = buffer.readCharArray(38);
-        this.user_name = buffer.readString();
+        this.userGuid = buffer.readCharArray(38);
+        this.userName = buffer.readString();
 
-        this.binary_md5 = buffer.readCharArray(16);
-        this.binary_name = buffer.readString();
-        this.binary_version = buffer.readUInt32();
+        this.binaryMD5 = buffer.readCharArray(16);
+        this.binaryName = buffer.readString();
+        this.binaryVersion = buffer.readUInt32();
     }
 
     public encode(buffer:NetworkBuffer) {
         super.encode(buffer);
 
-        buffer.writeCharArray(this.user_guid, 38);
-        buffer.writeString(this.user_name);
+        buffer.writeCharArray(this.userGuid, 38);
+        buffer.writeString(this.userName);
 
-        buffer.writeCharArray(this.binary_md5, 16);
-        buffer.writeString(this.binary_name);
-        buffer.writeUInt32(this.binary_version);
+        buffer.writeCharArray(this.binaryMD5, 16);
+        buffer.writeString(this.binaryName);
+        buffer.writeUInt32(this.binaryVersion);
     }
 }
 
 export class HandshakeResponse extends BasePacket {
     public username:string;
-    public project_name:string;
+    public projectName:string;
+    public projectVersion:number;
 
     public constructor() {
         super();
@@ -54,13 +55,15 @@ export class HandshakeResponse extends BasePacket {
         super.decode(buffer);
 
         this.username = buffer.readString();
-        this.project_name = buffer.readString();
+        this.projectName = buffer.readString();
+        this.projectVersion = buffer.readUInt32();
     }
 
     public encode(buffer:NetworkBuffer) {
         super.encode(buffer);
 
         buffer.writeString(this.username);
-        buffer.writeString(this.project_name);
+        buffer.writeString(this.projectName);
+        buffer.writeUInt32(this.projectVersion);
     }
 }

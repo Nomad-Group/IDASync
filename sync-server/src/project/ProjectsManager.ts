@@ -9,7 +9,7 @@ export class ProjectsManager {
         // Project
         var project:Project = null;
 
-        var index = this.active_projects.findIndex(prj => prj.data.binary_md5 == projectData.binary_md5);
+        var index = this.active_projects.findIndex(prj => prj.data.binaryMD5 == projectData.binaryMD5);
         if(index < 0) {
             project = new Project(projectData);
             this.active_projects.push(project);
@@ -31,7 +31,7 @@ export class ProjectsManager {
             return;
         }
 
-        var index = this.active_projects.findIndex(prj => prj.data.binary_md5 == client.activeProject.data.binary_md5);
+        var index = this.active_projects.findIndex(prj => prj.data.binaryMD5 == client.activeProject.data.binaryMD5);
         if(index < 0) {
             return;
         }
@@ -40,7 +40,7 @@ export class ProjectsManager {
         project.onClientLeft(client);
 
         if(project.activeClients.length == 0) {
-            this.active_projects.splice(index);
+            this.active_projects.splice(index, 1);
         }
     }
 }

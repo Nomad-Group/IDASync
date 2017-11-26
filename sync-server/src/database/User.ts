@@ -4,5 +4,5 @@ export class User {
     public _id:ObjectID;
 
     public username:string;
-    public hardware_id:string;
+    public hardwareId:string;
 }

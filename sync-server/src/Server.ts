@@ -41,7 +41,7 @@ export class Server {
         console.log("[Server] Client disconnected (" + client.name + ")");
         projectsManager.removeActive(client);
 
-        this.clients.splice(this.clients.indexOf(client));
+        this.clients.splice(this.clients.indexOf(client), 1);
     }
 
     private onConnectionError(client:NetworkClient, error:Error) {

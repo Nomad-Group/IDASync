@@ -10,8 +10,8 @@ export class UserManager extends BaseCollectionManager {
         this.collectionName = "users";
     }
 
-    public findByHardwareId(hardware_id:string):Promise<User> {
-        var query = { hardware_id: hardware_id };
+    public findByHardwareId(hardwareId:string):Promise<User> {
+        var query = { hardwareId: hardwareId };
         return this.collection.findOne(query);
     }
 

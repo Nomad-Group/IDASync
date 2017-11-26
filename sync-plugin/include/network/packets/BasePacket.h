@@ -10,6 +10,7 @@ enum class PacketType : uint16_t
 	BroadcastMessage,
 
 	IdbUpdate,
+	IdbUpdateResponse,
 
 	UnknownAny = UINT16_MAX
 };
@@ -34,6 +35,9 @@ static const char* PacketTypeToString(PacketType packetType)
 	case PacketType::IdbUpdate:
 		return "PacketType::IdbUpdate";
 
+	case PacketType::IdbUpdateResponse:
+		return "PacketType::IdbUpdateResponse";
+
 	default:
 		return "PacketType::_Unknown[Error]";
 	}
@@ -57,4 +61,3 @@ static_assert(sizeof(BasePacketEnumType<PacketType::Heartbeat>) == sizeof(BasePa
 struct HandshakePacket;
 struct HeartbeatPacket;
 struct BroadcastMessagePacket;
-struct IdbUpdatePacket;

@@ -11,8 +11,8 @@ export class ProjectDataManager extends BaseCollectionManager {
         this.collectionName = "projects";
     }
 
-    public findByMd5(md5_hash:string):Promise<ProjectData> {
-        var query = { binary_md5: md5_hash };
+    public findByMd5(binaryMD5:string):Promise<ProjectData> {
+        var query = { binaryMD5: binaryMD5 };
         return this.collection.findOne(query);
     }
 

@@ -17,13 +17,13 @@ export class HandshakeHandler {
 
                     // Setup
                     user = new User();
-                    user.hardware_id = hardware_id;
+                    user.hardwareId = hardware_id;
                     user.username = name;
 
                     // Create
                     database.users.create(user)
                         .then(id => {
-                            console.log("[Users] Created user " + user.username + " (" + user.hardware_id + ")");
+                            console.log("[Users] Created user " + user.username + " (" + user.hardwareId + ")");
                             resolve({ newlyCreated: false, user: user });
                         })
                         .catch(reason => reject(reason));
@@ -44,7 +44,7 @@ export class HandshakeHandler {
 
                     // Setup
                     project = new ProjectData();
-                    project.binary_md5 = binary_md5;
+                    project.binaryMD5 = binary_md5;
                     project.name = name;
 
                     // Create
@@ -61,8 +61,8 @@ export class HandshakeHandler {
 
     public static handle(client:NetworkClient, packet:Handshake) {
         Promise.all([
-            this.getUser(packet.user_guid, packet.user_name),
-            this.getProject(packet.binary_md5, packet.binary_name)
+            this.getUser(packet.userGuid, packet.userName),
+            this.getProject(packet.binaryMD5, packet.binaryName)
         ])
             .then((results) => {
                 var response = new HandshakeResponse();
@@ -76,13 +76,15 @@ export class HandshakeHandler {
 
                 // Project
                 var project = <ProjectData> results[1].project;
-                response.project_name = project.name;
+
+                response.projectName = project.name;
+                response.projectVersion = project.binaryVersion;
 
                 // Send
                 server.sendPacket(client, response);
                 
                 // Join Project as Active
-                projectsManager.addActive(project, client, packet.binary_version);
+                projectsManager.addActive(project, client, packet.binaryVersion);
             })
     }
 }
