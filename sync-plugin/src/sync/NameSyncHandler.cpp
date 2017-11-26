@@ -1,13 +1,32 @@
 #include "sync/NameSyncHandler.h"
-
-#include <ida.hpp>
-#include <idp.hpp>
+#include "sync/SyncManager.h"
 #include <name.hpp>
 
 bool NameSyncHandler::ApplyUpdate(IdbUpdate* _updateData)
 {
 	auto updateData = (NameSyncUpdateData*)_updateData;
 	return set_name(static_cast<ea_t>(updateData->ptr), updateData->name.c_str(), SN_NOWARN);// (packet->local ? SN_LOCAL : 0) | SN_NOWARN));
+}
+
+bool NameSyncHandler::OnIdaNotification(IdaNotification& notification)
+{
+	// Renamed Notification
+	if (notification.type != IdaNotificationType::idp || notification.code != processor_t::renamed)
+		return false;
+
+	// Args
+	ea_t ea = va_arg(notification.args, ea_t);
+	const char *name = va_arg(notification.args, const char *);
+	bool local = va_arg(notification.args, int) != 0;
+
+	// Update
+	auto update = new NameSyncUpdateData();
+	update->ptr = static_cast<decltype(update->ptr)>(ea);
+	update->name = name;
+
+	// Send
+	g_syncManager->SendUpdate(update);
+	return true;
 }
 
 IdbUpdate* NameSyncHandler::DecodePacket(NetworkBufferT<BasePacket>* packet)

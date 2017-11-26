@@ -156,7 +156,6 @@
   <ItemGroup>
     <ClCompile Include="src\client\NetworkDispatcher.cpp" />
     <ClCompile Include="src\ida\IdbManager.cpp" />
-    <ClCompile Include="src\IDBHook.cpp" />
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\network\NetworkBuffer.cpp" />
     <ClCompile Include="src\network\NetworkClient.cpp" />
@@ -170,6 +169,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\client\NetworkDispatcher.h" />
+    <ClInclude Include="include\ida\IdaNotification.h" />
     <ClInclude Include="include\ida\IdbManager.h" />
     <ClInclude Include="include\ida\idb_events_strings.h" />
     <ClInclude Include="include\ida\idp_events_strings.h" />

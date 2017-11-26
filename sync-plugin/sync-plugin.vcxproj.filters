@@ -41,9 +41,6 @@
     <ClCompile Include="src\SyncPlugin.cpp">
       <Filter>Source</Filter>
     </ClCompile>
-    <ClCompile Include="src\IDBHook.cpp">
-      <Filter>Source</Filter>
-    </ClCompile>
     <ClCompile Include="src\network\Socket.cpp">
       <Filter>Source\network</Filter>
     </ClCompile>
@@ -132,6 +129,9 @@
     </ClInclude>
     <ClInclude Include="include\sync\NameSyncHandler.h">
       <Filter>Header\sync</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ida\IdaNotification.h">
+      <Filter>Header\ida</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

@@ -21,13 +21,6 @@ bool SyncPlugin::Init()
 		return false;
 	}
 
-	// Idb Hook
-	if (!InstallIDBHook())
-	{
-		Log("Error: Failed to install Idb Hook!");
-		return false;
-	}
-
 	// Sync Manager
 	g_syncManager = new SyncManager();
 	if (!g_syncManager->Initialize())

@@ -9,9 +9,6 @@ private:
 	// Network
 	NetworkDispatcher m_dispatcher;
 
-	// IDA
-	bool InstallIDBHook();
-
 	// Packet Handler
 	bool HandleBroadcastMessagePacket(NetworkBufferT<BroadcastMessagePacket>*);
 	bool HandleIdbUpdatePacket(NetworkBufferT<BasePacket>*);

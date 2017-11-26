@@ -1,7 +1,10 @@
 #include "sync/SyncManager.h"
 #include "sync/IdbUpdate.h"
+#include "network/NetworkClient.h"
 
 #include "sync/NameSyncHandler.h"
+
+#include "loader.hpp"
 
 SyncManager* g_syncManager = nullptr;
 
@@ -11,10 +14,27 @@ SyncManager::~SyncManager()
 		delete m_syncHandler[i];
 }
 
+int idaapi SyncManager::ida_notification_point(void* ud, int notificationCode, va_list args)
+{
+	IdaNotification notification;
+
+	notification.type = (IdaNotificationType) ((uintptr_t)(ud));
+	notification.code = notificationCode;
+	notification.args = args;
+
+	g_syncManager->OnIdaNotification(notification);
+	return 0;
+}
+
 bool SyncManager::Initialize()
 {
 	// Handler
 	m_syncHandler[(size_t) SyncType::Name] = new NameSyncHandler();
+
+	// Notification Point
+	if (!hook_to_notification_point(hook_type_t::HT_IDB, ida_notification_point, (void*)IdaNotificationType::idb) ||
+		!hook_to_notification_point(hook_type_t::HT_IDP, ida_notification_point, (void*)IdaNotificationType::idp))
+		return false;
 
 	// Done
 	return true;
@@ -26,6 +46,45 @@ ISyncHandler* SyncManager::GetSyncHandler(SyncType syncType)
 		return nullptr;
 
 	return m_syncHandler[(size_t) syncType];
+}
+
+bool SyncManager::ApplyUpdate(IdbUpdate* updateData)
+{
+	// Sync Handler
+	auto syncHandler = GetSyncHandler(updateData->syncType);
+	if (syncHandler == nullptr)
+		return false;
+
+	// Apply
+	m_notificationLock = true;
+	bool success = syncHandler->ApplyUpdate(updateData);
+	m_notificationLock = false;
+
+	return success;
+}
+
+bool SyncManager::SendUpdate(IdbUpdate* updateData)
+{
+	// Packet
+	auto packet = EncodePacket(updateData);
+	if (packet == nullptr)
+		return false;
+
+	// Send
+	return g_client->Send(packet);
+}
+
+void SyncManager::OnIdaNotification(IdaNotification& notification)
+{
+	if (g_client == nullptr || m_notificationLock)
+		return;
+
+	for (int i = 0; i < NumSyncHandlers; i++)
+	{
+		auto syncHandler = m_syncHandler[i];
+		if (syncHandler->OnIdaNotification(notification))
+			break;
+	}
 }
 
 IdbUpdate* SyncManager::DecodePacket(NetworkBufferT<BasePacket>* packet)
@@ -81,15 +140,4 @@ NetworkBufferT<BasePacket>* SyncManager::EncodePacket(IdbUpdate* updateData)
 
 	// Done
 	return packet;
-}
-
-bool SyncManager::ApplyUpdate(IdbUpdate* updateData)
-{
-	// Sync Handler
-	auto syncHandler = GetSyncHandler(updateData->syncType);
-	if (syncHandler == nullptr)
-		return false;
-
-	// Apply
-	return syncHandler->ApplyUpdate(updateData);
 }
