@@ -32,6 +32,13 @@ export class NetworkBuffer {
         return this.offset;
     }
 
+    public readBoolean():boolean {
+        return this.readUInt8() == 1;
+    }
+    public writeBoolean(val:boolean) {
+        this.writeUInt8(val == true ? 1 : 0);
+    }
+
     public readUInt8():number {
         var result = this.buffer.readUInt8(this.offset);
         this.offset += 1;

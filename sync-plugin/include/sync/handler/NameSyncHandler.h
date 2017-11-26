@@ -8,6 +8,7 @@ struct NameSyncUpdateData : IdbUpdate
 {
 	uint64_t ptr;
 	std::string name;
+	bool local;
 };
 
 class NameSyncHandler : public ISyncHandler

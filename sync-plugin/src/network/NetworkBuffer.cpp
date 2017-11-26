@@ -67,6 +67,14 @@ const char* NetworkBuffer::ReadString()
 	return nullptr;
 }
 
+bool NetworkBuffer::ReadBool()
+{
+	uint8_t val = 0;
+	Read(&val);
+
+	return val == 1;
+}
+
 void NetworkBuffer::WriteString(const char* str)
 {
 	if (str == nullptr)
@@ -81,6 +89,12 @@ void NetworkBuffer::WriteString(const char* str)
 
 	m_stOffset += stringSize;
 	m_stSize += stringSize;
+}
+
+void NetworkBuffer::WriteBool(bool val)
+{
+	uint8_t nval = val == true ? 1 : 0;
+	Write(&nval);
 }
 
 void NetworkBuffer::Write(int8_t* memory, size_t stSize)

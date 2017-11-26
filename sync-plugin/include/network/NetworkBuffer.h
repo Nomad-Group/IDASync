@@ -30,7 +30,7 @@ public:
 	template <typename T> inline bool Read(T* out, size_t stSize = sizeof(T)) { return Read((int8_t*)out, stSize); };
 
 	const char* ReadString();
-	void WriteString(const char*);
+	bool ReadBool();
 
 	// Write
 	void Write(int8_t*, size_t);
@@ -38,6 +38,8 @@ public:
 	template <typename T> inline void Write(T in, size_t stSize = sizeof(T)) { Write((int8_t*) &in, stSize); };
 
 	int8_t* WritePtr(size_t); // returns buffer[offset] and reserves x
+	void WriteString(const char*);
+	void WriteBool(bool);
 };
 
 template <class T>

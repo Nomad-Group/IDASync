@@ -8,6 +8,7 @@ import { ISyncHandler, SyncType } from './../ISyncHandler';
 class NameSyncUpdateData extends IdbUpdate {
     public ptr:number;
     public name:string;
+    public local:boolean;
 }
 
 export class NameSyncHandler implements ISyncHandler {
@@ -16,11 +17,13 @@ export class NameSyncHandler implements ISyncHandler {
     public decodePacket(updateData:NameSyncUpdateData, packet:IdbUpdatePacket) {
         updateData.ptr = packet.buffer.readUInt64();
         updateData.name = packet.buffer.readString();
+        updateData.local = packet.buffer.readBoolean();
     }
 
     public encodePacket(packet:IdbUpdatePacket, updateData:NameSyncUpdateData) {
         packet.buffer.writeUInt64(updateData.ptr);
         packet.buffer.writeString(updateData.name);
+        packet.buffer.writeBoolean(updateData.local);
     }
 
     public getUniqueIdentifier(update:NameSyncUpdateData) {

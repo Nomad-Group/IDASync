@@ -5,7 +5,7 @@
 bool NameSyncHandler::ApplyUpdate(IdbUpdate* _updateData)
 {
 	auto updateData = (NameSyncUpdateData*)_updateData;
-	return set_name(static_cast<ea_t>(updateData->ptr), updateData->name.c_str(), SN_NOWARN);// (packet->local ? SN_LOCAL : 0) | SN_NOWARN));
+	return set_name(static_cast<ea_t>(updateData->ptr), updateData->name.c_str(), (updateData->local ? SN_LOCAL : 0) | SN_NOWARN);
 }
 
 bool NameSyncHandler::OnIdaNotification(IdaNotification& notification)
@@ -16,13 +16,14 @@ bool NameSyncHandler::OnIdaNotification(IdaNotification& notification)
 
 	// Args
 	ea_t ea = va_arg(notification.args, ea_t);
-	const char *name = va_arg(notification.args, const char *);
+	const char *name = va_arg(notification.args, const char*);
 	bool local = va_arg(notification.args, int) != 0;
 
 	// Update
 	auto update = new NameSyncUpdateData();
 	update->ptr = static_cast<decltype(update->ptr)>(ea);
 	update->name = name;
+	update->local = local;
 
 	// Send
 	g_syncManager->SendUpdate(update);
@@ -38,9 +39,13 @@ IdbUpdate* NameSyncHandler::DecodePacket(NetworkBufferT<BasePacket>* packet)
 
 	auto str = packet->ReadString();
 	if (str == nullptr)
+	{
+		delete updateData;
 		return nullptr;
-	
+	}
+
 	updateData->name = str;
+	updateData->local = packet->ReadBool();
 	return updateData;
 }
 
@@ -51,6 +56,7 @@ bool NameSyncHandler::EncodePacket(NetworkBufferT<BasePacket>* packet, IdbUpdate
 	// Data
 	packet->Write(updateData->ptr);
 	packet->WriteString(updateData->name.c_str());
+	packet->WriteBool(updateData->local);
 
 	return true;
 }
