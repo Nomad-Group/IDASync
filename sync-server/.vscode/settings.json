@@ -1,0 +1,35 @@
+// Place your settings in this file to overwrite the default settings
+{
+    "editor.cursorBlinking": "blink",
+    "editor.tabSize": 2,
+    "editor.detectIndentation": false,
+    "files.exclude": {
+      "**/.git": true,
+      "**/.svn": true,
+      "**/.hg": true,
+      "**/.DS_Store": true,
+      "**/tmp": true,
+      "**/etc": true
+    },
+    "editor.tabCompletion": true,
+    "window.zoomLevel": 0,
+    "beautify.tabSize": 2,
+    "vsicons.dontShowNewVersionMessage": true,
+    "typescript.format.enable": true,
+    "typescript.referencesCodeLens.enabled": true,
+    "typescript.validate.enable": true,
+    "[typescript]": {
+      "editor.formatOnSave": true,
+      "editor.formatOnPaste": true,
+      "editor.acceptSuggestionOnCommitCharacter": true,
+      "editor.autoClosingBrackets": true,
+      "editor.acceptSuggestionOnEnter": "on",
+      "editor.codeLens": true
+    },
+    "editor.wordWrap": "on",
+    "editor.renderControlCharacters": false,
+    "typescript.tsdk": "node_modules/typescript/lib",
+    "files.associations": {
+      "*.svg": "html"
+    }
+  }
