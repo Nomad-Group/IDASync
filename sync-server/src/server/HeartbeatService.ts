@@ -2,7 +2,7 @@ import { NetworkClientDisconnectReason } from './../network/NetworkClient';
 import { server } from './../app';
 import { Heartbeat } from './../network/packets/Heartbeat';
 
-const HeartbeatInterval  = 2500; // ms
+const HeartbeatInterval = 2500; // ms
 const HeartbeatKickAfter = 5100; // ms
 
 export class HeartbeatService {
@@ -13,7 +13,7 @@ export class HeartbeatService {
     private onHeartbeat() {
         // Check last Hearbeat on Clients
         server.clients.forEach(client => {
-            if((Date.now() - client.lastHeartbeat) > HeartbeatKickAfter && client.lastHeartbeat > 2) {
+            if ((Date.now() - client.lastHeartbeat) > HeartbeatKickAfter && client.lastHeartbeat > 2) {
                 client.disconnectReason = NetworkClientDisconnectReason.KickTimeout;
                 client.socket.destroy();
                 return;
@@ -26,5 +26,5 @@ export class HeartbeatService {
         // Send Heartbeat
         var heartbeat = new Heartbeat();
         server.sendPackets(server.clients, heartbeat);
-    }    
+    }
 }

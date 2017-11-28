@@ -9,10 +9,10 @@ export enum SyncType {
 }
 
 export interface ISyncHandler {
-    syncType:SyncType;
+    syncType: SyncType;
 
-    decodePacket(updateData:any, packet:IdbUpdatePacket);
-    encodePacket(packet:IdbUpdatePacket, updateData:any);
-    
-    getUniqueIdentifier(update:any):any;
+    decodePacket(updateData: any, packet: IdbUpdatePacket);
+    encodePacket(packet: IdbUpdatePacket, updateData: any);
+
+    getUniqueIdentifier(update: any): any;
 }

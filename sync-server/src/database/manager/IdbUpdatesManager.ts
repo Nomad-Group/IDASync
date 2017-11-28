@@ -12,17 +12,17 @@ export class IdbUpdatesManager extends BaseCollectionManager {
         this.collectionName = "idb_updates";
     }
 
-    public create(update:IdbUpdate) {
+    public create(update: IdbUpdate) {
         return new Promise<ObjectID>((resolve, reject) =>
-             this.collection.insertOne(update)
-             .then(result => resolve(result.insertedId))
-             .catch(reason => reject(reason))
+            this.collection.insertOne(update)
+                .then(result => resolve(result.insertedId))
+                .catch(reason => reject(reason))
         );
     }
 
-    public findUpdates(projectId:ObjectID, fromVersion:number, toVersion?:number) {
-        var query:any = { projectId: projectId };
-        if(!toVersion) {
+    public findUpdates(projectId: ObjectID, fromVersion: number, toVersion?: number) {
+        var query: any = { projectId: projectId };
+        if (!toVersion) {
             query.version = fromVersion;
         } else {
             query.version = { $gt: fromVersion, $lte: toVersion };
@@ -35,7 +35,7 @@ export class IdbUpdatesManager extends BaseCollectionManager {
         return this.collection.find<IdbUpdate>(query).toArray();
     }
 
-    public update(update:IdbUpdate) {
+    public update(update: IdbUpdate) {
         return this.collection.updateOne({ _id: update._id }, update);
     }
 }

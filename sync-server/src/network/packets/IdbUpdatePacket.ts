@@ -5,8 +5,8 @@ import { BasePacket } from './BasePacket';
 import { IdbUpdate } from './../../database/IdbUpdate';
 
 export class IdbUpdatePacket extends BasePacket {
-    public binaryVersion:number;
-    public syncType:SyncType;
+    public binaryVersion: number;
+    public syncType: SyncType;
 
     public constructor() {
         super();
@@ -14,14 +14,14 @@ export class IdbUpdatePacket extends BasePacket {
         this.packetType = PacketType.IdbUpdate;
     }
 
-    public encode(buffer:NetworkBuffer) {
+    public encode(buffer: NetworkBuffer) {
         super.encode(buffer);
 
         buffer.writeUInt32(this.binaryVersion);
         buffer.writeUInt16(this.syncType);
     }
 
-    public decode(buffer:NetworkBuffer) {
+    public decode(buffer: NetworkBuffer) {
         super.decode(buffer);
 
         this.binaryVersion = buffer.readUInt32();
@@ -30,7 +30,7 @@ export class IdbUpdatePacket extends BasePacket {
 }
 
 export class IdbUpdateResponsePacket extends BasePacket {
-    public version:number;
+    public version: number;
 
     public constructor() {
         super();
@@ -38,13 +38,13 @@ export class IdbUpdateResponsePacket extends BasePacket {
         this.packetType = PacketType.IdbUpdateResponse;
     }
 
-    public encode(buffer:NetworkBuffer) {
+    public encode(buffer: NetworkBuffer) {
         super.encode(buffer);
 
         buffer.writeUInt32(this.version);
     }
 
-    public decode(buffer:NetworkBuffer) {
+    public decode(buffer: NetworkBuffer) {
         super.decode(buffer);
 
         this.version = buffer.readUInt32();

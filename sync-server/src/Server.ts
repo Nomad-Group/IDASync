@@ -12,16 +12,16 @@ import { PacketType } from './network/packets/PacketType';
 import * as net from 'net';
 
 export class Server {
-    public static readonly PORT:number = 4523;
-    public server:net.Server;
-    public clients:NetworkClient[] = [];
-    private heartbeatService:HeartbeatService = new HeartbeatService();
+    public static readonly PORT: number = 4523;
+    public server: net.Server;
+    public clients: NetworkClient[] = [];
+    private heartbeatService: HeartbeatService = new HeartbeatService();
 
     public startServer() {
         this.server = net.createServer(this.onConnection.bind(this)).listen(Server.PORT);
     }
 
-    private onConnection(socket:net.Socket) {
+    private onConnection(socket: net.Socket) {
         // Client
         var client = new NetworkClient();
         client.socket = socket;
@@ -37,26 +37,25 @@ export class Server {
         socket.on("error", this.onConnectionError.bind(this, client));
     }
 
-    private onConnectionClosed(client:NetworkClient) {
+    private onConnectionClosed(client: NetworkClient) {
         console.log("[Server] Client disconnected (" + client.name + ")");
         projectsManager.removeActive(client);
 
         this.clients.splice(this.clients.indexOf(client), 1);
     }
 
-    private onConnectionError(client:NetworkClient, error:Error) {
+    private onConnectionError(client: NetworkClient, error: Error) {
         //console.error("[Server] Client (" + client.name + ") caused error: " + error.name + "\n" + error.message);
     }
 
-    private onClientData(client:NetworkClient, dataBuffer:Buffer) {
+    private onClientData(client: NetworkClient, dataBuffer: Buffer) {
         var data = new NetworkBuffer(dataBuffer);
         //console.log("[Server] Data: " + dataBuffer.toString());
 
-        var packet:BasePacket = null;
-        var packetType:PacketType = dataBuffer.readUInt16LE(2);
+        var packet: BasePacket = null;
+        var packetType: PacketType = dataBuffer.readUInt16LE(2);
 
-        switch(packetType)
-        {
+        switch (packetType) {
             case PacketType.Handshake: {
                 packet = new Handshake();
                 break;
@@ -85,14 +84,13 @@ export class Server {
         // DEBUG
         //console.log(packet);
 
-        if(packet.packetType == PacketType.Handshake)
-        {
-            HandshakeHandler.handle(client, <Handshake> packet);
+        if (packet.packetType == PacketType.Handshake) {
+            HandshakeHandler.handle(client, <Handshake>packet);
             return;
         }
 
         // Project: Handle Packet
-        if(client.activeProject && client.activeProject.onClientData(client, packet)) {
+        if (client.activeProject && client.activeProject.onClientData(client, packet)) {
             return;
         }
 
@@ -100,9 +98,9 @@ export class Server {
         console.error("[Server] Unhandled Packet from " + client.name + " (Type: " + PacketType[packet.packetType] + ")");
     }
 
-    public sendPacket(client:NetworkClient, packet:BasePacket, encode:boolean = true) {        
-       // Network Buffer
-        if(encode){
+    public sendPacket(client: NetworkClient, packet: BasePacket, encode: boolean = true) {
+        // Network Buffer
+        if (encode) {
             var buffer = new NetworkBuffer();
             packet.encode(buffer);
 
@@ -117,9 +115,9 @@ export class Server {
         return client.socket.write(packet.buffer.buffer);
     }
 
-    public sendPackets(clients:NetworkClient[], packet:BasePacket, encode:boolean = true) {
+    public sendPackets(clients: NetworkClient[], packet: BasePacket, encode: boolean = true) {
         // Network Buffer
-        if(encode) { 
+        if (encode) {
             var buffer = new NetworkBuffer();
             packet.encode(buffer);
 

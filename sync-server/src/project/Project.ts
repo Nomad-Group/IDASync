@@ -9,10 +9,10 @@ import { NetworkClient } from './../network/NetworkClient';
 import { ProjectData } from './../database/ProjectData';
 
 export class Project {
-    public activeClients:NetworkClient[] = [];
-    public constructor(public data:ProjectData) {}
+    public activeClients: NetworkClient[] = [];
+    public constructor(public data: ProjectData) { }
 
-    public onClientJoined(client:NetworkClient, firstTime:boolean, localVersion:number) {
+    public onClientJoined(client: NetworkClient, firstTime: boolean, localVersion: number) {
         // Join
         this.activeClients.push(client);
         client.activeProject = this;
@@ -21,29 +21,29 @@ export class Project {
         var broadcast = new BroadcastMessagePacket();
         broadcast.messageType = firstTime ? BroadcastMessageType.ClientFirstJoin : BroadcastMessageType.ClientJoin;
         broadcast.data = client.user.username;
-        
+
         server.sendPackets(this.activeClients, broadcast);
 
         // First Time?
-        if(firstTime) {
+        if (firstTime) {
             this.data.users.push(client.user._id);
             database.projects.update(this.data)
-            .then(result => console.log(result))
+                .then(result => console.log(result))
         }
 
         // Log
         console.log("[Project] " + client.user.username + " joined " + this.data.name + (firstTime ? " (for the first time)" : ""));
 
         // Version
-        if(localVersion < this.data.binaryVersion) {
+        if (localVersion < this.data.binaryVersion) {
             this.sendUpdates(client, localVersion, this.data.binaryVersion);
         }
     }
 
-    public onClientData(client:NetworkClient, packet:BasePacket):boolean {
+    public onClientData(client: NetworkClient, packet: BasePacket): boolean {
         // Idb Update
         var idbUpdatePacket = packet as IdbUpdatePacket;
-        if(idbUpdatePacket) {
+        if (idbUpdatePacket) {
             this.onIdbUpdatePacket(client, idbUpdatePacket);
             return true;
         }
@@ -52,21 +52,21 @@ export class Project {
         return false;
     }
 
-    public onClientLeft(client:NetworkClient) {
+    public onClientLeft(client: NetworkClient) {
         var index = this.activeClients.indexOf(client);
-        if(index > -1) {
+        if (index > -1) {
             this.activeClients.slice(index);
         }
 
         client.activeProject = null;
     }
 
-    private onIdbUpdatePacket(client:NetworkClient, packet:IdbUpdatePacket) {
+    private onIdbUpdatePacket(client: NetworkClient, packet: IdbUpdatePacket) {
         console.log("[Project] " + client.name + " sent update (" + SyncType[packet.syncType] + ")");
 
         // Update Data
         var updateData = syncManager.decodePacket(packet);
-        if(updateData == null) {
+        if (updateData == null) {
             return;
         }
 
@@ -90,7 +90,7 @@ export class Project {
             var queryParams = {
                 projectId: this.data._id,
                 type: updateData.type,
-                version: { $lt : updateData.version },
+                version: { $lt: updateData.version },
                 shouldSync: true
             };
             queryParams = Object.assign(queryParams, syncHandler.getUniqueIdentifier(updateData));
@@ -108,11 +108,11 @@ export class Project {
         });
     }
 
-    private applyUpdate(update:IdbUpdate):Promise<ObjectID> {
+    private applyUpdate(update: IdbUpdate): Promise<ObjectID> {
         // Binary Version
         this.data.binaryVersion++;
         update.version = this.data.binaryVersion;
-        
+
         // Database
         return new Promise<ObjectID>((resolve, reject) => {
             database.projects.update(this.data)
@@ -121,15 +121,15 @@ export class Project {
         });
     }
 
-    private sendUpdates(client:NetworkClient, version_start:number, version_to:number) {
+    private sendUpdates(client: NetworkClient, version_start: number, version_to: number) {
         database.idbUpdates.findUpdates(this.data._id, version_start, version_to)
             .then(updates => {
                 updates.forEach(update => this.sendUpdate(update, client))
             });
     }
 
-    private sendUpdate(update:IdbUpdate, client:NetworkClient) {
-        if(!update.shouldSync) {
+    private sendUpdate(update: IdbUpdate, client: NetworkClient) {
+        if (!update.shouldSync) {
             return;
         }
 
@@ -137,9 +137,9 @@ export class Project {
         server.sendPacket(client, updatePacket, false);
     }
 
-    private broadcastUpdate(update:IdbUpdate, exception:NetworkClient) {
+    private broadcastUpdate(update: IdbUpdate, exception: NetworkClient) {
         var targetClients = this.activeClients.concat();
-        if(exception) {
+        if (exception) {
             targetClients = targetClients.filter(client => client != exception);
         }
 

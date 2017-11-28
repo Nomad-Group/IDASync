@@ -3,12 +3,12 @@ import { PacketType } from './PacketType';
 import { BasePacket } from './BasePacket';
 
 export class Handshake extends BasePacket {
-    public userGuid:string;
-    public userName:string;
+    public userGuid: string;
+    public userName: string;
 
-    public binaryMD5:string;
-    public binaryName:string;
-    public binaryVersion:number;
+    public binaryMD5: string;
+    public binaryName: string;
+    public binaryVersion: number;
 
     public constructor() {
         super();
@@ -16,7 +16,7 @@ export class Handshake extends BasePacket {
         this.packetType = PacketType.Handshake;
     }
 
-    public decode(buffer:NetworkBuffer) {
+    public decode(buffer: NetworkBuffer) {
         super.decode(buffer);
 
         this.userGuid = buffer.readCharArray(38);
@@ -27,7 +27,7 @@ export class Handshake extends BasePacket {
         this.binaryVersion = buffer.readUInt32();
     }
 
-    public encode(buffer:NetworkBuffer) {
+    public encode(buffer: NetworkBuffer) {
         super.encode(buffer);
 
         buffer.writeCharArray(this.userGuid, 38);
@@ -40,9 +40,9 @@ export class Handshake extends BasePacket {
 }
 
 export class HandshakeResponse extends BasePacket {
-    public username:string;
-    public projectName:string;
-    public projectVersion:number;
+    public username: string;
+    public projectName: string;
+    public projectVersion: number;
 
     public constructor() {
         super();
@@ -51,7 +51,7 @@ export class HandshakeResponse extends BasePacket {
         this.packetSize = BasePacket.HEADER_SIZE + 96;
     }
 
-    public decode(buffer:NetworkBuffer) {
+    public decode(buffer: NetworkBuffer) {
         super.decode(buffer);
 
         this.username = buffer.readString();
@@ -59,7 +59,7 @@ export class HandshakeResponse extends BasePacket {
         this.projectVersion = buffer.readUInt32();
     }
 
-    public encode(buffer:NetworkBuffer) {
+    public encode(buffer: NetworkBuffer) {
         super.encode(buffer);
 
         buffer.writeString(this.username);

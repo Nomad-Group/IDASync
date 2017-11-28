@@ -10,16 +10,16 @@ export class UserManager extends BaseCollectionManager {
         this.collectionName = "users";
     }
 
-    public findByHardwareId(hardwareId:string):Promise<User> {
+    public findByHardwareId(hardwareId: string): Promise<User> {
         var query = { hardwareId: hardwareId };
         return this.collection.findOne(query);
     }
 
-    public create(user:User) {
+    public create(user: User) {
         return new Promise<ObjectID>((resolve, reject) =>
-             this.collection.insertOne(user)
-             .then(result => resolve(result.insertedId))
-             .catch(reason => reject(reason))
+            this.collection.insertOne(user)
+                .then(result => resolve(result.insertedId))
+                .catch(reason => reject(reason))
         );
     }
 }

@@ -8,12 +8,12 @@ export enum NetworkClientDisconnectReason {
 }
 
 export class NetworkClient {
-    public socket:net.Socket;
-    public name:string;
+    public socket: net.Socket;
+    public name: string;
 
-    public user:User;
-    public activeProject:Project;
+    public user: User;
+    public activeProject: Project;
 
-    public lastHeartbeat:number = 0;
-    public disconnectReason:NetworkClientDisconnectReason;
+    public lastHeartbeat: number = 0;
+    public disconnectReason: NetworkClientDisconnectReason;
 }

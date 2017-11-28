@@ -7,28 +7,27 @@ import { NetworkClient } from './../../network/NetworkClient';
 import { ISyncHandler, SyncType } from './../ISyncHandler';
 
 class NameSyncUpdateData extends IdbUpdate {
-    public ptr:number;
-    public name:string;
-    public local:boolean;
     public ptr: Long;
+    public name: string;
+    public local: boolean;
 }
 
 export class NameSyncHandler implements ISyncHandler {
-    public syncType:SyncType = SyncType.Name;
+    public syncType: SyncType = SyncType.Name;
 
-    public decodePacket(updateData:NameSyncUpdateData, packet:IdbUpdatePacket) {
+    public decodePacket(updateData: NameSyncUpdateData, packet: IdbUpdatePacket) {
         updateData.ptr = packet.buffer.readUInt64();
         updateData.name = packet.buffer.readString();
         updateData.local = packet.buffer.readBoolean();
     }
 
-    public encodePacket(packet:IdbUpdatePacket, updateData:NameSyncUpdateData) {
+    public encodePacket(packet: IdbUpdatePacket, updateData: NameSyncUpdateData) {
         packet.buffer.writeUInt64(updateData.ptr);
         packet.buffer.writeString(updateData.name);
         packet.buffer.writeBoolean(updateData.local);
     }
 
-    public getUniqueIdentifier(update:NameSyncUpdateData) {
+    public getUniqueIdentifier(update: NameSyncUpdateData) {
         return {
             ptr: update.ptr
         }

@@ -4,28 +4,28 @@ import { BasePacket } from './BasePacket';
 
 export enum BroadcastMessageType {
     ClientFirstJoin = 0,
-    ClientJoin ,
+    ClientJoin,
     ClientDisconnect
 }
 
 export class BroadcastMessagePacket extends BasePacket {
-    public messageType:BroadcastMessageType;
-    public data:string;
-    
+    public messageType: BroadcastMessageType;
+    public data: string;
+
     public constructor() {
         super();
 
         this.packetType = PacketType.BroadcastMessage;
     }
 
-    public decode(buffer:NetworkBuffer) {
+    public decode(buffer: NetworkBuffer) {
         super.decode(buffer);
 
         this.messageType = buffer.readUInt8();
         this.data = buffer.readCharArray(64);
     }
 
-    public encode(buffer:NetworkBuffer) {
+    public encode(buffer: NetworkBuffer) {
         super.encode(buffer);
 
         buffer.writeUInt8(this.messageType);

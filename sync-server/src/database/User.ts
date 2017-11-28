@@ -1,8 +1,8 @@
 import { ObjectID } from 'mongodb';
 
 export class User {
-    public _id:ObjectID;
+    public _id: ObjectID;
 
-    public username:string;
-    public hardwareId:string;
+    public username: string;
+    public hardwareId: string;
 }

@@ -6,13 +6,13 @@ import { NameSyncHandler } from './handler/NameSyncHandler';
 import { ISyncHandler, SyncType } from './ISyncHandler';
 
 export class SyncManager {
-    public syncHandlers:ISyncHandler[] = [
+    public syncHandlers: ISyncHandler[] = [
         new NameSyncHandler(),
         new ItemCommentSyncHandler()
     ];
 
-    public decodePacket(packet:IdbUpdatePacket):IdbUpdate {
-        if(packet.syncType >= this.syncHandlers.length) {
+    public decodePacket(packet: IdbUpdatePacket): IdbUpdate {
+        if (packet.syncType >= this.syncHandlers.length) {
             return null;
         }
 
@@ -28,7 +28,7 @@ export class SyncManager {
         return updateData;
     }
 
-    public encodePacket(updateData:IdbUpdate):IdbUpdatePacket {
+    public encodePacket(updateData: IdbUpdate): IdbUpdatePacket {
         // Update Packet
         var updatePacket = new IdbUpdatePacket();
         updatePacket.syncType = updateData.type;

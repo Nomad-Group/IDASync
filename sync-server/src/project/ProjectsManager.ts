@@ -3,14 +3,14 @@ import { ProjectData } from './../database/ProjectData';
 import { Project } from "./Project";
 
 export class ProjectsManager {
-    public active_projects:Project[] = [];
+    public active_projects: Project[] = [];
 
-    public addActive(projectData:ProjectData, client:NetworkClient, localVersion:number) {
+    public addActive(projectData: ProjectData, client: NetworkClient, localVersion: number) {
         // Project
-        var project:Project = null;
+        var project: Project = null;
 
         var index = this.active_projects.findIndex(prj => prj.data.binaryMD5 == projectData.binaryMD5);
-        if(index < 0) {
+        if (index < 0) {
             project = new Project(projectData);
             this.active_projects.push(project);
         } else {
@@ -26,20 +26,20 @@ export class ProjectsManager {
         project.onClientJoined(client, firstTimeJoin, localVersion);
     }
 
-    public removeActive(client:NetworkClient) {
-        if(client.activeProject == null || client.activeProject == undefined) {
+    public removeActive(client: NetworkClient) {
+        if (client.activeProject == null || client.activeProject == undefined) {
             return;
         }
 
         var index = this.active_projects.findIndex(prj => prj.data.binaryMD5 == client.activeProject.data.binaryMD5);
-        if(index < 0) {
+        if (index < 0) {
             return;
         }
 
         var project = this.active_projects[index];
         project.onClientLeft(client);
 
-        if(project.activeClients.length == 0) {
+        if (project.activeClients.length == 0) {
             this.active_projects.splice(index, 1);
         }
     }
