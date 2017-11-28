@@ -143,7 +143,6 @@
     <ClInclude Include="include\network\Networking.h" />
     <ClInclude Include="include\network\packets\BasePacket.h" />
     <ClInclude Include="include\network\packets\BroadcastMessagePacket.h" />
-    <ClInclude Include="include\network\packets\HeartbeatPacket.h" />
     <ClInclude Include="include\network\Socket.h" />
     <ClInclude Include="include\network\SocketEventDispatcher.h" />
     <ClInclude Include="include\network\SocketEvent.h" />

@@ -161,6 +161,18 @@ bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 			return false;
 		}
 
+		// Heartbeat
+		if (pBuffer->t->packetType == PacketType::Heartbeat)
+		{
+			auto packet = new NetworkBufferT<BasePacket>();
+			packet->t->packetType = PacketType::Heartbeat;
+
+			g_client->Send(packet);
+			delete packet;
+
+			return true;
+		}
+
 		// Listener
 		return m_listener->OnPacket(pBuffer);
 	}

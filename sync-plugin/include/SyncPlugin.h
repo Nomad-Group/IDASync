@@ -13,7 +13,6 @@ private:
 	bool HandleBroadcastMessagePacket(NetworkBufferT<BasePacket>*);
 	bool HandleIdbUpdatePacket(NetworkBufferT<BasePacket>*);
 	bool HandleIdbUpdateResponsePacket(NetworkBufferT<BasePacket>*);
-	bool HandleHeartbeat();
 
 public:
 	// IDA Callbacks

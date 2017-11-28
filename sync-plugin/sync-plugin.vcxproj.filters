@@ -115,9 +115,6 @@
     <ClInclude Include="include\network\packets\BasePacket.h">
       <Filter>Header\network\packets</Filter>
     </ClInclude>
-    <ClInclude Include="include\network\packets\HeartbeatPacket.h">
-      <Filter>Header\network\packets</Filter>
-    </ClInclude>
     <ClInclude Include="include\client\NetworkDispatcher.h">
       <Filter>Header\client</Filter>
     </ClInclude>
