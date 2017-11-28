@@ -2,11 +2,15 @@
 #include "sync/IdbUpdate.h"
 #include "network/NetworkClient.h"
 #include "ida/IdbManager.h"
+#include "SyncPlugin.h"
 
 #include "sync/handler/NameSyncHandler.h"
 #include "sync/handler/ItemCommentSyncHandler.h"
 #include "sync/handler/ItemTypeSyncHandler.h"
 #include "sync/handler/AddFuncSyncHandler.h"
+
+#include "ida/idb_events_strings.h"
+#include "ida/idp_events_strings.h"
 
 #include "loader.hpp"
 
@@ -85,6 +89,12 @@ bool SyncManager::SendUpdate(IdbUpdate* updateData)
 	return g_client->Send(packet);
 }
 
+void _unhandled_notification(const char* type)
+{
+	g_plugin->Log("WARNING: You just triggered an event that collabreate would sync! THIS PLUGIN DOES NOT!");
+	g_plugin->Log("Event: " + std::string(type));
+}
+
 void SyncManager::OnIdaNotification(IdaNotification& notification)
 {
 	if (g_client == nullptr || m_notificationLock)
@@ -95,6 +105,114 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 		auto syncHandler = m_syncHandler[i];
 		if (syncHandler->OnIdaNotification(notification))
 			break;
+	}
+
+	// Unhandled Notification
+	// idp
+	if (notification.type == IdaNotificationType::idp)
+	{
+		switch (notification.code)
+		{
+			case processor_t::undefine:
+			case processor_t::make_code:
+			case processor_t::make_data:
+			case processor_t::move_segm:
+			case processor_t::renamed:
+			case processor_t::add_func:
+			case processor_t::del_func:
+			case processor_t::set_func_start:
+			case processor_t::set_func_end:
+			//case processor_t::validate_flirt_func:
+			case processor_t::add_cref:
+			case processor_t::add_dref:
+			case processor_t::del_cref:
+			case processor_t::del_dref:
+			//case processor_t::auto_empty:
+			//case processor_t::auto_queue_empty:
+			//case processor_t::auto_empty_finally:
+			{
+				_unhandled_notification(idp_events_strings[notification.code]);
+				return;
+			}
+
+			default:
+				return;
+		}
+	}
+
+	// idb
+	if (notification.type == IdaNotificationType::idb)
+	{
+		switch (notification.code)
+		{
+			case idb_event::byte_patched:
+			case idb_event::cmt_changed:
+			case idb_event::ti_changed:
+			case idb_event::op_ti_changed:
+			case idb_event::op_type_changed:
+			case idb_event::enum_created:
+			case idb_event::enum_deleted:
+			case idb_event::enum_bf_changed:
+			case idb_event::enum_renamed:
+			case idb_event::enum_cmt_changed:
+			//case idb_event::enum_member_created:
+			case idb_event::enum_const_created:
+			//case idb_event::enum_member_deleted:
+			case idb_event::enum_const_deleted:
+			case idb_event::struc_created:
+			case idb_event::struc_deleted:
+			case idb_event::struc_renamed:
+			case idb_event::struc_expanded:
+			case idb_event::struc_cmt_changed:
+			case idb_event::struc_member_created:
+			case idb_event::struc_member_deleted:
+			case idb_event::struc_member_renamed:
+			case idb_event::struc_member_changed:
+			case idb_event::thunk_func_created:
+			case idb_event::func_tail_appended:
+			case idb_event::func_tail_removed:
+			case idb_event::tail_owner_changed:
+			case idb_event::func_noret_changed:
+			case idb_event::segm_added:
+			case idb_event::segm_deleted:
+			case idb_event::segm_start_changed:
+			case idb_event::segm_end_changed:
+			case idb_event::segm_moved:
+			//case idb_event::area_cmt_changed:
+			/*case idb_event::changing_cmt:
+			case idb_event::changing_ti:
+			case idb_event::changing_op_ti:
+			case idb_event::changing_op_type:
+			case idb_event::deleting_enum:
+			case idb_event::changing_enum_bf:
+			case idb_event::renaming_enum:
+			case idb_event::changing_enum_cmt:
+			//case idb_event::deleting_enum_member:
+			case idb_event::deleting_enum_const:
+			case idb_event::deleting_struc:
+			case idb_event::renaming_struc:
+			case idb_event::expanding_struc:
+			case idb_event::changing_struc_cmt:
+			case idb_event::deleting_struc_member:
+			case idb_event::renaming_struc_member:
+			case idb_event::changing_struc_member:
+			case idb_event::removing_func_tail:
+			case idb_event::deleting_segm:
+			case idb_event::changing_segm_start:
+			case idb_event::changing_segm_end:
+			case idb_event::changing_area_cmt:
+			case idb_event::changing_segm_name:
+			case idb_event::changing_segm_class:
+			case idb_event::segm_name_changed:
+			case idb_event::segm_class_changed:*/
+			{
+				_unhandled_notification(idb_events_strings[notification.code]);
+				return;
+			}
+
+			default:
+				return;
+		}
 	}
 }
 
