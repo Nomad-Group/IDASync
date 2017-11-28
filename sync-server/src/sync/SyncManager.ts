@@ -1,3 +1,4 @@
+import { AddFuncSyncHandler } from './handler/AddFuncSyncHandler';
 import { ItemTypeSyncHandler } from './handler/ItemTypeSyncHandler';
 import { ItemCommentSyncHandler } from './handler/ItemCommentSyncHandler';
 import { NetworkBuffer } from './../network/NetworkBuffer';
@@ -10,7 +11,8 @@ export class SyncManager {
     public syncHandlers: ISyncHandler[] = [
         new NameSyncHandler(),
         new ItemCommentSyncHandler(),
-        new ItemTypeSyncHandler()
+        new ItemTypeSyncHandler(),
+        new AddFuncSyncHandler()
     ];
 
     public decodePacket(packet: IdbUpdatePacket): IdbUpdate {

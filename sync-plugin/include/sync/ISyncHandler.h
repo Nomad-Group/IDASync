@@ -11,6 +11,8 @@ enum class SyncType : uint16_t
 	ItemComment,
 	ItemType,
 
+	AddFunc,
+
 	_Count
 };
 

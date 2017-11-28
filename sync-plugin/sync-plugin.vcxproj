@@ -127,6 +127,7 @@
     <ClCompile Include="src\network\SocketEventDispatcher.cpp" />
     <ClCompile Include="src\SyncPacketHandler.cpp" />
     <ClCompile Include="src\SyncPlugin.cpp" />
+    <ClCompile Include="src\sync\handler\AddFuncSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\CommentSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\ItemTypeSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\NameSyncHandler.cpp" />
@@ -147,6 +148,7 @@
     <ClInclude Include="include\network\SocketEventDispatcher.h" />
     <ClInclude Include="include\network\SocketEvent.h" />
     <ClInclude Include="include\SyncPlugin.h" />
+    <ClInclude Include="include\sync\handler\AddFuncSyncHandler.h" />
     <ClInclude Include="include\sync\handler\ItemCommentSyncHandler.h" />
     <ClInclude Include="include\sync\handler\ItemTypeSyncHandler.h" />
     <ClInclude Include="include\sync\handler\NameSyncHandler.h" />

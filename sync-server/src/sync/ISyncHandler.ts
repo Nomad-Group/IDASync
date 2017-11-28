@@ -7,7 +7,9 @@ export enum SyncType {
     Name = 0,
 
     ItemComment,
-    ItemType
+    ItemType,
+
+    AddFunc
 }
 
 export interface ISyncHandler {

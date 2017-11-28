@@ -83,6 +83,9 @@
     <ClCompile Include="src\sync\handler\ItemTypeSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
+    <ClCompile Include="src\sync\handler\AddFuncSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\SyncPlugin.h">
@@ -146,6 +149,9 @@
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
     <ClInclude Include="include\sync\handler\ItemTypeSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\AddFuncSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
   </ItemGroup>
