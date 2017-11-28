@@ -125,12 +125,21 @@ export class NetworkBuffer {
             }
         }
 
+        if (size == 0) {
+            this.offset++;
+            return null;
+        }
 
         var result = this.buffer.toString("utf8", this.offset, this.offset + size);
         this.offset += size + 1;
         return result;
     }
     public writeString(str: string): number {
+        if (str == null || str.length == 0) {
+            this.writeUInt8(0);
+            return 1;
+        }
+
         this.writeCharArray(str, str.length);
         this.writeUInt8(0);
 

@@ -5,7 +5,9 @@ import { NetworkClient } from './../network/NetworkClient';
 
 export enum SyncType {
     Name = 0,
-    ItemComment
+
+    ItemComment,
+    ItemType
 }
 
 export interface ISyncHandler {

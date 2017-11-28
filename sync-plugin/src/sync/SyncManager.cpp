@@ -5,6 +5,7 @@
 
 #include "sync/handler/NameSyncHandler.h"
 #include "sync/handler/ItemCommentSyncHandler.h"
+#include "sync/handler/ItemTypeSyncHandler.h"
 
 #include "loader.hpp"
 
@@ -33,6 +34,7 @@ bool SyncManager::Initialize()
 	// Handler
 	m_syncHandler[(size_t) SyncType::Name] = new NameSyncHandler();
 	m_syncHandler[(size_t) SyncType::ItemComment] = new ItemCommentSyncHandler();
+	m_syncHandler[(size_t) SyncType::ItemType] = new ItemTypeSyncHandler();
 
 	// Notification Point
 	if (!hook_to_notification_point(hook_type_t::HT_IDB, ida_notification_point, (void*)IdaNotificationType::idb) ||

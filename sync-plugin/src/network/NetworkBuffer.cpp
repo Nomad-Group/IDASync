@@ -56,6 +56,9 @@ const char* NetworkBuffer::ReadString()
 		if (m_buffer[m_stOffset] == '\0') {
 			m_stOffset++;
 
+			if (stStringLength == 0)
+				return nullptr;
+
 			return (const char*)&m_buffer[m_stOffset - stStringLength - 1];
 		}
 
@@ -78,7 +81,10 @@ bool NetworkBuffer::ReadBool()
 void NetworkBuffer::WriteString(const char* str)
 {
 	if (str == nullptr)
+	{
+		Write<uint8_t>(0);
 		return;
+	}
 
 	auto stringSize = strlen(str) + 1;
 	auto requiredSize = m_stOffset + stringSize;
