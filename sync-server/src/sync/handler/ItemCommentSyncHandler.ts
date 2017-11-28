@@ -1,3 +1,4 @@
+import { Long } from 'mongodb';
 import { IdbUpdatePacket } from './../../network/packets/IdbUpdatePacket';
 import { ISyncHandler, SyncType } from './../ISyncHandler';
 import { IdbUpdate } from './../../database/IdbUpdate';
@@ -6,6 +7,7 @@ export class ItemCommentSyncUpdateData extends IdbUpdate {
     public ptr:number;
     public repeatable:boolean;
     public text:string;
+    public ptr: Long;
 }
 
 export class ItemCommentSyncHandler implements ISyncHandler {

@@ -1,3 +1,4 @@
+import { Long } from 'mongodb';
 import { IdbUpdate } from './../../database/IdbUpdate';
 import { NetworkBuffer } from './../../network/NetworkBuffer';
 import { IdbUpdatePacket } from './../../network/packets/IdbUpdatePacket';
@@ -9,6 +10,7 @@ class NameSyncUpdateData extends IdbUpdate {
     public ptr:number;
     public name:string;
     public local:boolean;
+    public ptr: Long;
 }
 
 export class NameSyncHandler implements ISyncHandler {

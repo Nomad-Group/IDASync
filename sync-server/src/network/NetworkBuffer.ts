@@ -1,4 +1,5 @@
 import { BasePacket } from './packets/BasePacket';
+import { Long } from 'mongodb';
 
 export class NetworkBuffer {
     public offset:number = 0;
@@ -77,10 +78,19 @@ export class NetworkBuffer {
 
     public readUInt64():number {
         return (this.readUInt32() << 8) + this.readUInt32();
+    public readUInt64(): Long {
+        return Long.fromBits(this.readUInt32(), this.readUInt32());
     }
     public writeUInt64(num:number) {
         this.writeUInt32(num >> 8);
         this.writeUInt32(num & 0x00ff);
+    public writeUInt64(num: Long) {
+        if (typeof (num) != typeof (Long)) {
+            num = Long.fromNumber(<any>num);
+        }
+
+        this.writeUInt32(num.getLowBits());
+        this.writeUInt32(num.getHighBits());
     }
 
     public readCharArray(size:number):string {
