@@ -97,7 +97,7 @@ void _unhandled_notification(const char* type)
 
 void SyncManager::OnIdaNotification(IdaNotification& notification)
 {
-	if (g_client == nullptr || m_notificationLock)
+	if (g_client == nullptr || !g_client->IsConnected() || m_notificationLock)
 		return;
 
 	for (int i = 0; i < NumSyncHandlers; i++)
