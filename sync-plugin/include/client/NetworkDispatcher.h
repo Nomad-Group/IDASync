@@ -2,20 +2,38 @@
 #include "network/NetworkClient.h"
 #include "idp.hpp"
 
+#include <mutex>
+#include <vector>
+
 class NetworkDispatcher : public INetworkClientEventListener
 {
 private:
-	struct OnPacketEvent : exec_request_t
+	enum class NetworkEventType
 	{
-		NetworkBufferT<BasePacket>* m_packet;
-		virtual int idaapi execute() override;
+		OnPacket,
+		OnConnectionClosed
 	};
-	struct OnConnectionClosedEvent : exec_request_t
+
+	struct NetworkEvent
 	{
-		virtual int idaapi execute() override;
+		NetworkEventType type;
+
+		union
+		{
+			NetworkBufferT<BasePacket>* packet;
+		} data;
 	};
-	
-	void QueueEvent(exec_request_t*);
+
+	struct NetworkEventQueue : exec_request_t
+	{
+		std::mutex lock;
+		std::vector<NetworkEvent*> events;
+
+		NetworkEvent* Dequeue();
+		virtual int idaapi execute() override;
+	} m_eventQueue;
+
+	void EnqueueNetworkEvent(NetworkEvent*);
 
 public:
 	virtual bool OnPacket(NetworkBufferT<BasePacket>*) override;
