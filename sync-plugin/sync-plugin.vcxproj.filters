@@ -77,13 +77,13 @@
     <ClCompile Include="src\sync\handler\NameSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
-    <ClCompile Include="src\sync\handler\CommentSyncHandler.cpp">
-      <Filter>Source\sync\handler</Filter>
-    </ClCompile>
     <ClCompile Include="src\sync\handler\ItemTypeSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
     <ClCompile Include="src\sync\handler\AddFuncSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
+    <ClCompile Include="src\sync\handler\ItemCommentSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
   </ItemGroup>
@@ -136,9 +136,6 @@
     <ClInclude Include="include\sync\ISyncHandler.h">
       <Filter>Header\sync</Filter>
     </ClInclude>
-    <ClInclude Include="include\sync\IdbUpdate.h">
-      <Filter>Header\sync</Filter>
-    </ClInclude>
     <ClInclude Include="include\ida\IdaNotification.h">
       <Filter>Header\ida</Filter>
     </ClInclude>
@@ -153,6 +150,12 @@
     </ClInclude>
     <ClInclude Include="include\sync\handler\AddFuncSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\IdbUpdateData.h">
+      <Filter>Header\sync</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\SyncHandlerImpl.h">
+      <Filter>Header\sync</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

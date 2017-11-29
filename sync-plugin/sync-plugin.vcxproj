@@ -128,7 +128,7 @@
     <ClCompile Include="src\SyncPacketHandler.cpp" />
     <ClCompile Include="src\SyncPlugin.cpp" />
     <ClCompile Include="src\sync\handler\AddFuncSyncHandler.cpp" />
-    <ClCompile Include="src\sync\handler\CommentSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\ItemCommentSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\ItemTypeSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\NameSyncHandler.cpp" />
     <ClCompile Include="src\sync\SyncManager.cpp" />
@@ -152,8 +152,9 @@
     <ClInclude Include="include\sync\handler\ItemCommentSyncHandler.h" />
     <ClInclude Include="include\sync\handler\ItemTypeSyncHandler.h" />
     <ClInclude Include="include\sync\handler\NameSyncHandler.h" />
-    <ClInclude Include="include\sync\IdbUpdate.h" />
+    <ClInclude Include="include\sync\IdbUpdateData.h" />
     <ClInclude Include="include\sync\ISyncHandler.h" />
+    <ClInclude Include="include\sync\SyncHandlerImpl.h" />
     <ClInclude Include="include\sync\SyncManager.h" />
     <ClInclude Include="include\Utility.h" />
   </ItemGroup>

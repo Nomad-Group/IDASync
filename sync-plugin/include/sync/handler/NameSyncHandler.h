@@ -1,23 +1,23 @@
 #pragma once
-#include "sync/ISyncHandler.h"
-#include "sync/IdbUpdate.h"
+#include "sync/SyncHandlerImpl.h"
 
-#include <string>
-
-struct NameSyncUpdateData : IdbUpdate
+struct NameSyncUpdateData : IdbUpdateData
 {
 	uint64_t ptr;
 	std::string name;
 	bool local;
 };
 
-class NameSyncHandler : public ISyncHandler
+class NameSyncHandler : public SyncHandlerImpl<NameSyncUpdateData, SyncType::Name>
 {
 public:
-	virtual bool ApplyUpdate(IdbUpdate*) override;
+	NameSyncHandler() : SyncHandlerImpl(IdaNotificationType::idp, processor_t::renamed)
+	{}
 
-	virtual bool OnIdaNotification(IdaNotification&) override;
+protected:
+	virtual bool ApplyUpdateImpl(NameSyncUpdateData*) override;
+	virtual bool HandleNotification(IdaNotification&, NameSyncUpdateData*) override;
 
-	virtual IdbUpdate* DecodePacket(NetworkBufferT<BasePacket>*) override;
-	virtual bool EncodePacket(NetworkBufferT<BasePacket>*, IdbUpdate*) override;
+	virtual void DecodePacketImpl(NameSyncUpdateData*, NetworkBufferT<BasePacket>*) override;
+	virtual void EncodePacketImpl(NetworkBufferT<BasePacket>*, NameSyncUpdateData*) override;
 };

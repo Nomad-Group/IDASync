@@ -4,7 +4,7 @@
 
 #include "network/packets/BasePacket.h"
 
-struct IdbUpdate;
+struct IdbUpdateData;
 class SyncManager
 {
 	// Sync Handler
@@ -28,12 +28,12 @@ public:
 	ISyncHandler* GetSyncHandler(SyncType);
 
 	// Apply Update
-	bool ApplyUpdate(IdbUpdate*);
-	bool SendUpdate(IdbUpdate*);
+	bool ApplyUpdate(IdbUpdateData*);
+	bool SendUpdate(IdbUpdateData*);
 
 	// Packets
-	IdbUpdate* DecodePacket(NetworkBufferT<BasePacket>*);
-	NetworkBufferT<BasePacket>* EncodePacket(IdbUpdate*);
+	IdbUpdateData* DecodePacket(NetworkBufferT<BasePacket>*);
+	NetworkBufferT<BasePacket>* EncodePacket(IdbUpdateData*);
 };
 
 extern SyncManager* g_syncManager;

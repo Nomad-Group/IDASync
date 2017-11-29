@@ -16,18 +16,18 @@ enum class SyncType : uint16_t
 	_Count
 };
 
-struct IdbUpdate;
+struct IdbUpdateData;
 struct ISyncHandler
 {
 	virtual ~ISyncHandler() = default;
 
 	// Update
-	virtual bool ApplyUpdate(IdbUpdate*) = 0;
+	virtual bool ApplyUpdate(IdbUpdateData*) = 0;
 
 	// Ida Notifications
 	virtual bool OnIdaNotification(IdaNotification&) = 0;
 
 	// Packet
-	virtual IdbUpdate* DecodePacket(NetworkBufferT<BasePacket>*) = 0;
-	virtual bool EncodePacket(NetworkBufferT<BasePacket>*, IdbUpdate*) = 0;
+	virtual IdbUpdateData* DecodePacket(NetworkBufferT<BasePacket>*) = 0;
+	virtual void EncodePacket(NetworkBufferT<BasePacket>*, IdbUpdateData*) = 0;
 }; 

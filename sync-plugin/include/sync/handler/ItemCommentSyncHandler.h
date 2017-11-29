@@ -1,23 +1,23 @@
 #pragma once
-#include "sync/ISyncHandler.h"
-#include "sync/IdbUpdate.h"
+#include "sync/SyncHandlerImpl.h"
 
-#include <string>
-
-struct ItemCommentSyncUpdateData : IdbUpdate
+struct ItemCommentSyncUpdateData : IdbUpdateData
 {
 	uint64_t ptr;
 	bool repeatable;
 	std::string text;
 };
 
-class ItemCommentSyncHandler : public ISyncHandler
+class ItemCommentSyncHandler : public SyncHandlerImpl<ItemCommentSyncUpdateData, SyncType::ItemComment>
 {
 public:
-	virtual bool ApplyUpdate(IdbUpdate*) override;
+	ItemCommentSyncHandler() : SyncHandlerImpl(IdaNotificationType::idb, idb_event::cmt_changed)
+	{}
 
-	virtual bool OnIdaNotification(IdaNotification&) override;
+protected:
+	virtual bool ApplyUpdateImpl(ItemCommentSyncUpdateData*) override;
+	virtual bool HandleNotification(IdaNotification&, ItemCommentSyncUpdateData*) override;
 
-	virtual IdbUpdate* DecodePacket(NetworkBufferT<BasePacket>*) override;
-	virtual bool EncodePacket(NetworkBufferT<BasePacket>*, IdbUpdate*) override;
+	virtual void DecodePacketImpl(ItemCommentSyncUpdateData*, NetworkBufferT<BasePacket>*) override;
+	virtual void EncodePacketImpl(NetworkBufferT<BasePacket>*, ItemCommentSyncUpdateData*) override;
 };

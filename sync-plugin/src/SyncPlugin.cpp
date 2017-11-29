@@ -125,12 +125,13 @@ void SyncPlugin::Run()
 	}
 
 	// Connected!
-	const char* username = packetResponse->ReadString();
-	const char* project  = packetResponse->ReadString();
+	auto username = packetResponse->ReadString();
+	auto project  = packetResponse->ReadString();
+
 	uint32_t remoteVersion = 0;
 	packetResponse->Read(&remoteVersion);
 
-	g_plugin->Log("Successfully connected as " + std::string(username) + " (project: " + std::string(project) + ")");
+	g_plugin->Log("Successfully connected as " + username + " (project: " + project + ")");
 	g_plugin->Log("Local Version: " + std::to_string(g_idb->GetVersion()) + ", Remote Version: " + std::to_string(remoteVersion));
 
 	delete packetResponse;

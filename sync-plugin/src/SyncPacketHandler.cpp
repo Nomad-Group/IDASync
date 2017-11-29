@@ -4,7 +4,7 @@
 #include "Utility.h"
 
 #include "network/packets/BroadcastMessagePacket.h"
-#include "sync/IdbUpdate.h"
+#include "sync/IdbUpdateData.h"
 
 #include <ida.hpp>
 #include <idp.hpp>
@@ -46,15 +46,15 @@ bool SyncPlugin::HandleBroadcastMessagePacket(NetworkBufferT<BasePacket>* packet
 	switch (messageType)
 	{
 	case BroadcastMessageType::ClientFirstJoin:
-		Log(std::string(packet->ReadString()) + " joined this project!");
+		Log(packet->ReadString() + " joined this project!");
 		break;
 
 	case BroadcastMessageType::ClientJoin:
-		Log(std::string(packet->ReadString()) + " connected.");
+		Log(packet->ReadString() + " connected.");
 		break;
 
 	case BroadcastMessageType::ClientDisconnect:
-		Log(std::string(packet->ReadString()) + " disconnected.");
+		Log(packet->ReadString() + " disconnected.");
 		break;
 
 	default:

@@ -1,5 +1,5 @@
 #include "sync/SyncManager.h"
-#include "sync/IdbUpdate.h"
+#include "sync/IdbUpdateData.h"
 #include "network/NetworkClient.h"
 #include "ida/IdbManager.h"
 #include "SyncPlugin.h"
@@ -59,7 +59,7 @@ ISyncHandler* SyncManager::GetSyncHandler(SyncType syncType)
 	return m_syncHandler[(size_t) syncType];
 }
 
-bool SyncManager::ApplyUpdate(IdbUpdate* updateData)
+bool SyncManager::ApplyUpdate(IdbUpdateData* updateData)
 {
 	// Sync Handler
 	auto syncHandler = GetSyncHandler(updateData->syncType);
@@ -78,7 +78,7 @@ bool SyncManager::ApplyUpdate(IdbUpdate* updateData)
 	return success;
 }
 
-bool SyncManager::SendUpdate(IdbUpdate* updateData)
+bool SyncManager::SendUpdate(IdbUpdateData* updateData)
 {
 	// Packet
 	auto packet = EncodePacket(updateData);
@@ -216,9 +216,9 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 	}
 }
 
-IdbUpdate* SyncManager::DecodePacket(NetworkBufferT<BasePacket>* packet)
+IdbUpdateData* SyncManager::DecodePacket(NetworkBufferT<BasePacket>* packet)
 {
-	IdbUpdate updateDataHeader;
+	IdbUpdateData updateDataHeader;
 
 	// Generic Data
 	if (packet == nullptr ||
@@ -243,7 +243,7 @@ IdbUpdate* SyncManager::DecodePacket(NetworkBufferT<BasePacket>* packet)
 	return updateData;
 }
 
-NetworkBufferT<BasePacket>* SyncManager::EncodePacket(IdbUpdate* updateData)
+NetworkBufferT<BasePacket>* SyncManager::EncodePacket(IdbUpdateData* updateData)
 {
 	if (updateData == nullptr)
 		return nullptr;
@@ -258,14 +258,13 @@ NetworkBufferT<BasePacket>* SyncManager::EncodePacket(IdbUpdate* updateData)
 	// Sync Handler
 	auto syncHandler = GetSyncHandler(updateData->syncType);
 	if (syncHandler == nullptr)
-		return nullptr;
-
-	// Encode
-	if (!syncHandler->EncodePacket(packet, updateData))
 	{
 		delete packet;
 		return nullptr;
 	}
+
+	// Encode
+	syncHandler->EncodePacket(packet, updateData);
 
 	// Done
 	return packet;

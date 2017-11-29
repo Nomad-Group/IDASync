@@ -45,10 +45,10 @@ bool NetworkBuffer::Read(int8_t* memory, size_t stSize)
 	return true;
 }
 
-const char* NetworkBuffer::ReadString()
+std::string NetworkBuffer::ReadString()
 {
 	if (m_stOffset >= m_stActualSize)
-		return nullptr;
+		return std::string();
 
 	size_t stStringLength = 0;
 	while(m_stOffset < m_stActualSize)
@@ -57,9 +57,9 @@ const char* NetworkBuffer::ReadString()
 			m_stOffset++;
 
 			if (stStringLength == 0)
-				return nullptr;
+				return std::string();
 
-			return (const char*)&m_buffer[m_stOffset - stStringLength - 1];
+			return std::string((const char*)&m_buffer[m_stOffset - stStringLength - 1]);
 		}
 
 		stStringLength++;
@@ -67,7 +67,7 @@ const char* NetworkBuffer::ReadString()
 	}
 
 	// Shit, string is not null-terminated. we failed
-	return nullptr;
+	return std::string();
 }
 
 bool NetworkBuffer::ReadBool()

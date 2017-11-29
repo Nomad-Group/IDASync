@@ -1,24 +1,25 @@
 #pragma once
-#include "sync/ISyncHandler.h"
-#include "sync/IdbUpdate.h"
+#include "sync/SyncHandlerImpl.h"
 
 #include <typeinf.hpp>
-#include <string>
 
-struct ItemTypeSyncUpdateData : IdbUpdate
+struct ItemTypeSyncUpdateData : IdbUpdateData
 {
 	uint64_t ptr;
 	std::string type; // const type_t*
 	std::string fnames; // const p_list*
 };
 
-class ItemTypeSyncHandler : public ISyncHandler
+class ItemTypeSyncHandler : public SyncHandlerImpl<ItemTypeSyncUpdateData, SyncType::ItemType>
 {
 public:
-	virtual bool ApplyUpdate(IdbUpdate*) override;
+	ItemTypeSyncHandler() : SyncHandlerImpl(IdaNotificationType::idb, idb_event::ti_changed)
+	{}
 
-	virtual bool OnIdaNotification(IdaNotification&) override;
+protected:
+	virtual bool ApplyUpdateImpl(ItemTypeSyncUpdateData*) override;
+	virtual bool HandleNotification(IdaNotification&, ItemTypeSyncUpdateData*) override;
 
-	virtual IdbUpdate* DecodePacket(NetworkBufferT<BasePacket>*) override;
-	virtual bool EncodePacket(NetworkBufferT<BasePacket>*, IdbUpdate*) override;
+	virtual void DecodePacketImpl(ItemTypeSyncUpdateData*, NetworkBufferT<BasePacket>*) override;
+	virtual void EncodePacketImpl(NetworkBufferT<BasePacket>*, ItemTypeSyncUpdateData*) override;
 };

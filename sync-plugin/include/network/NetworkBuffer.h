@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <string>
 
 class NetworkBuffer
 {
@@ -29,7 +30,7 @@ public:
 	bool Read(int8_t*, size_t);
 	template <typename T> inline bool Read(T* out, size_t stSize = sizeof(T)) { return Read((int8_t*)out, stSize); };
 
-	const char* ReadString();
+	std::string ReadString();
 	bool ReadBool();
 
 	// Write
