@@ -12,6 +12,7 @@ enum class SyncType : uint16_t
 	ItemType,
 
 	AddFunc,
+	Undefine,
 
 	_Count
 };

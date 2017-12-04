@@ -1,18 +1,22 @@
-import { AddFuncSyncHandler } from './handler/AddFuncSyncHandler';
-import { ItemTypeSyncHandler } from './handler/ItemTypeSyncHandler';
-import { ItemCommentSyncHandler } from './handler/ItemCommentSyncHandler';
 import { NetworkBuffer } from './../network/NetworkBuffer';
 import { IdbUpdate } from './../database/IdbUpdate';
 import { IdbUpdatePacket } from './../network/packets/IdbUpdatePacket';
-import { NameSyncHandler } from './handler/NameSyncHandler';
 import { ISyncHandler, SyncType } from './ISyncHandler';
+
+import { NameSyncHandler } from './handler/NameSyncHandler';
+import { ItemCommentSyncHandler } from './handler/ItemCommentSyncHandler';
+import { ItemTypeSyncHandler } from './handler/ItemTypeSyncHandler';
+import { AddFuncSyncHandler } from './handler/AddFuncSyncHandler';
+import { UndefineSyncHandler } from './handler/UndefineSyncHandler';
+
 
 export class SyncManager {
     public syncHandlers: ISyncHandler[] = [
         new NameSyncHandler(),
         new ItemCommentSyncHandler(),
         new ItemTypeSyncHandler(),
-        new AddFuncSyncHandler()
+        new AddFuncSyncHandler(),
+        new UndefineSyncHandler()
     ];
 
     public decodePacket(packet: IdbUpdatePacket): IdbUpdate {

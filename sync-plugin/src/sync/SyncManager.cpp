@@ -8,6 +8,7 @@
 #include "sync/handler/ItemCommentSyncHandler.h"
 #include "sync/handler/ItemTypeSyncHandler.h"
 #include "sync/handler/AddFuncSyncHandler.h"
+#include "sync/handler/UndefineSyncHandler.h"
 
 #include "ida/idb_events_strings.h"
 #include "ida/idp_events_strings.h"
@@ -41,6 +42,7 @@ bool SyncManager::Initialize()
 	m_syncHandler[(size_t) SyncType::ItemComment] = new ItemCommentSyncHandler();
 	m_syncHandler[(size_t) SyncType::ItemType] = new ItemTypeSyncHandler();
 	m_syncHandler[(size_t) SyncType::AddFunc] = new AddFuncSyncHandler();
+	m_syncHandler[(size_t) SyncType::Undefine] = new UndefineSyncHandler();
 
 	// Notification Point
 	if (!hook_to_notification_point(hook_type_t::HT_IDB, ida_notification_point, (void*)IdaNotificationType::idb) ||

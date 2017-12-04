@@ -12,7 +12,7 @@ class AddFuncSyncUpdate extends IdbUpdate {
 }
 
 export class AddFuncSyncHandler implements ISyncHandler {
-    public syncType: SyncType = SyncType.Name;
+    public syncType: SyncType = SyncType.AddFunc;
 
     public decodePacket(updateData: AddFuncSyncUpdate, packet: IdbUpdatePacket) {
         updateData.ptrStart = packet.buffer.readUInt64();
