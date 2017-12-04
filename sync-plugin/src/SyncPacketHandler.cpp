@@ -77,7 +77,7 @@ bool SyncPlugin::HandleIdbUpdatePacket(NetworkBufferT<BasePacket>* packet)
 	// Apply
 	if (!g_syncManager->ApplyUpdate(updateData))
 	{
-		Log("ERROR: Failed to apply IdbUpdate! Version: " + updateData->version);
+		Log("ERROR: Failed to apply IdbUpdate! Version: " + std::to_string(updateData->version));
 
 		delete updateData;
 		return false;

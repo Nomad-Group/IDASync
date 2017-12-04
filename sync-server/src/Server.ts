@@ -4,7 +4,7 @@ import { BroadcastMessagePacket } from './network/packets/BroadcastMessagePacket
 import { projectsManager } from './app';
 import { HandshakeHandler } from './server/HandshakeHandler';
 import { NetworkBuffer } from './network/NetworkBuffer';
-import { NetworkClient } from './network/NetworkClient';
+import { NetworkClient, NetworkClientDisconnectReason } from './network/NetworkClient';
 import { Heartbeat } from './network/packets/Heartbeat';
 import { BasePacket } from './network/packets/BasePacket';
 import { Handshake, HandshakeResponse } from './network/packets/Handshake';
@@ -29,7 +29,7 @@ export class Server {
         this.clients.push(client);
 
         // Log
-        console.log("[Server] Client connected (" + client.name + ")");
+        console.log("[Server] Incomming connection " + client.name);
 
         // Event Handler
         socket.on("close", this.onConnectionClosed.bind(this, client));
@@ -38,14 +38,15 @@ export class Server {
     }
 
     private onConnectionClosed(client: NetworkClient) {
-        console.log("[Server] Client disconnected (" + client.name + ")");
+        console.log("[Server] Client " + client.name + " disconnected (" + NetworkClientDisconnectReason[client.disconnectReason] + ")");
         projectsManager.removeActive(client);
 
         this.clients.splice(this.clients.indexOf(client), 1);
     }
 
     private onConnectionError(client: NetworkClient, error: Error) {
-        //console.error("[Server] Client (" + client.name + ") caused error: " + error.name + "\n" + error.message);
+        //console.error("[Server] Client (" + client.name + ") caused error: " + error.name + "\n" + error.);
+        client.disconnectReason = NetworkClientDisconnectReason.Error;
     }
 
     private onClientData(client: NetworkClient, dataBuffer: Buffer) {

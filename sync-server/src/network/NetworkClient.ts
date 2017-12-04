@@ -5,6 +5,7 @@ import * as net from 'net';
 export enum NetworkClientDisconnectReason {
     Disconnected,
     KickTimeout,
+    Error
 }
 
 export class NetworkClient {
@@ -15,5 +16,5 @@ export class NetworkClient {
     public activeProject: Project;
 
     public lastHeartbeat: number = 0;
-    public disconnectReason: NetworkClientDisconnectReason;
+    public disconnectReason: NetworkClientDisconnectReason = NetworkClientDisconnectReason.Disconnected;
 }
