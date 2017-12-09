@@ -101,6 +101,9 @@
     <ClCompile Include="src\sync\handler\DeleteReferenceSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
+    <ClCompile Include="src\sync\handler\MakeDataSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\SyncPlugin.h">
@@ -185,6 +188,9 @@
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
     <ClInclude Include="include\sync\handler\DeleteReferenceSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\MakeDataSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
   </ItemGroup>

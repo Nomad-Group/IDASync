@@ -133,6 +133,7 @@
     <ClCompile Include="src\sync\handler\ItemCommentSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\ItemTypeSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\MakeCodeSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\MakeDataSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\NameSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\OperandTypeSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\UndefineSyncHandler.cpp" />
@@ -159,6 +160,7 @@
     <ClInclude Include="include\sync\handler\ItemCommentSyncHandler.h" />
     <ClInclude Include="include\sync\handler\ItemTypeSyncHandler.h" />
     <ClInclude Include="include\sync\handler\MakeCodeSyncHandler.h" />
+    <ClInclude Include="include\sync\handler\MakeDataSyncHandler.h" />
     <ClInclude Include="include\sync\handler\NameSyncHandler.h" />
     <ClInclude Include="include\sync\handler\OperandTypeSyncHandler.h" />
     <ClInclude Include="include\sync\handler\UndefineSyncHandler.h" />

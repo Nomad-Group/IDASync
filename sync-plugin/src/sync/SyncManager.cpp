@@ -13,6 +13,7 @@
 #include "sync/handler/MakeCodeSyncHandler.h"
 #include "sync/handler/AddReferenceSyncHandler.h"
 #include "sync/handler/DeleteReferenceSyncHandler.h"
+#include "sync/handler/MakeDataSyncHandler.h"
 
 #include "ida/idb_events_strings.h"
 #include "ida/idp_events_strings.h"
@@ -51,6 +52,7 @@ bool SyncManager::Initialize()
 	m_syncHandler[(size_t) SyncType::MakeCode] = new MakeCodeSyncHandler();
 	m_syncHandler[(size_t) SyncType::AddReference] = new AddReferenceSyncHandler();
 	m_syncHandler[(size_t) SyncType::DeleteReference] = new DeleteReferenceSyncHandler();
+	m_syncHandler[(size_t) SyncType::MakeData] = new MakeDataSyncHandler();
 
 	// Notification Point
 	if (!hook_to_notification_point(hook_type_t::HT_IDB, ida_notification_point, (void*)IdaNotificationType::idb) ||

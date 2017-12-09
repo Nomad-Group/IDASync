@@ -10,6 +10,7 @@ import { AddFuncSyncHandler } from './handler/AddFuncSyncHandler';
 import { UndefineSyncHandler } from './handler/UndefineSyncHandler';
 import { OperandTypeSyncHandler } from './handler/OperandTypeSyncHandler';
 import { MakeCodeSyncHandler } from './handler/MakeCodeSyncHandler';
+import { MakeDataSyncHandler } from './handler/MakeDataSyncHandler';
 import { AddReferenceSyncHandler } from './handler/AddReferenceSyncHandler';
 import { DeleteReferenceSyncHandler } from './handler/DeleteReferenceSyncHandler';
 
@@ -23,6 +24,7 @@ export class SyncManager {
         new UndefineSyncHandler(),
         new OperandTypeSyncHandler(),
         new MakeCodeSyncHandler(),
+        new MakeDataSyncHandler(),
         new AddReferenceSyncHandler(),
         new DeleteReferenceSyncHandler()
     ];

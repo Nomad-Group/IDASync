@@ -14,6 +14,7 @@ export enum SyncType {
 
     OperandType,
     MakeCode,
+    MakeData,
 
     AddReference,
     DeleteReference
