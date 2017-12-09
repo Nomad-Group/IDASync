@@ -70,6 +70,8 @@ export class Project {
             return;
         }
 
+        console.log(updateData);
+
         updateData.projectId = this.data._id;
         updateData.userId = client.user._id;
 
@@ -87,13 +89,18 @@ export class Project {
             // Disable old IdbUpdate entries which have been overridden
             var syncHandler = syncManager.syncHandlers[updateData.type];
 
+            var uniqueIdentifier = syncHandler.getUniqueIdentifier(updateData);
+            if (uniqueIdentifier == null) {
+                return; // unsupported, always sync
+            }
+
             var queryParams = {
                 projectId: this.data._id,
                 type: updateData.type,
                 version: { $lt: updateData.version },
                 shouldSync: true
             };
-            queryParams = Object.assign(queryParams, syncHandler.getUniqueIdentifier(updateData));
+            queryParams = Object.assign(queryParams, uniqueIdentifier);
 
             // Find
             database.idbUpdates.find(queryParams).then(updates => {

@@ -9,6 +9,8 @@
 #include "sync/handler/ItemTypeSyncHandler.h"
 #include "sync/handler/AddFuncSyncHandler.h"
 #include "sync/handler/UndefineSyncHandler.h"
+#include "sync/handler/OperandTypeSyncHandler.h"
+#include "sync/handler/MakeCodeSyncHandler.h"
 
 #include "ida/idb_events_strings.h"
 #include "ida/idp_events_strings.h"
@@ -43,6 +45,8 @@ bool SyncManager::Initialize()
 	m_syncHandler[(size_t) SyncType::ItemType] = new ItemTypeSyncHandler();
 	m_syncHandler[(size_t) SyncType::AddFunc] = new AddFuncSyncHandler();
 	m_syncHandler[(size_t) SyncType::Undefine] = new UndefineSyncHandler();
+	m_syncHandler[(size_t) SyncType::OperandType] = new OperandTypeSyncHandler();
+	m_syncHandler[(size_t) SyncType::MakeCode] = new MakeCodeSyncHandler();
 
 	// Notification Point
 	if (!hook_to_notification_point(hook_type_t::HT_IDB, ida_notification_point, (void*)IdaNotificationType::idb) ||
@@ -106,7 +110,7 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 	{
 		auto syncHandler = m_syncHandler[i];
 		if (syncHandler->OnIdaNotification(notification))
-			break;
+			return;
 	}
 
 	// Unhandled Notification

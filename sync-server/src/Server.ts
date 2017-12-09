@@ -15,7 +15,7 @@ export class Server {
     public static readonly PORT: number = 4523;
     public server: net.Server;
     public clients: NetworkClient[] = [];
-    private heartbeatService: HeartbeatService = new HeartbeatService();
+    //private heartbeatService: HeartbeatService = new HeartbeatService();
 
     public startServer() {
         this.server = net.createServer(this.onConnection.bind(this)).listen(Server.PORT);

@@ -86,6 +86,15 @@
     <ClCompile Include="src\sync\handler\ItemCommentSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
+    <ClCompile Include="src\sync\handler\UndefineSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
+    <ClCompile Include="src\sync\handler\OperandTypeSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
+    <ClCompile Include="src\sync\handler\MakeCodeSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\SyncPlugin.h">
@@ -156,6 +165,15 @@
     </ClInclude>
     <ClInclude Include="include\sync\SyncHandlerImpl.h">
       <Filter>Header\sync</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\UndefineSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\OperandTypeSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\MakeCodeSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

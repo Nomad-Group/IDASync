@@ -10,7 +10,10 @@ export enum SyncType {
     ItemType,
 
     AddFunc,
-    Undefine
+    Undefine,
+
+    OperandType,
+    MakeCode
 }
 
 export interface ISyncHandler {

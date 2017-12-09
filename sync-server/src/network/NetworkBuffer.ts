@@ -64,16 +64,40 @@ export class NetworkBuffer {
         this.offset += 2;
     }
 
+    public readInt32(): number {
+        var result = this.buffer.readInt32LE(this.offset);
+        this.offset += 4;
+        return result;
+    }
+    public writeInt32(num: number) {
+        this.adjustSizeFor(4);
+
+        this.buffer.writeInt32LE(num, this.offset);
+        this.offset += 4;
+    }
+
     public readUInt32(): number {
-        var result = this.buffer.readUInt32LE(this.offset);
+        var result = this.buffer.readUInt32LE(this.offset, true);
         this.offset += 4;
         return result;
     }
     public writeUInt32(num: number) {
         this.adjustSizeFor(4);
 
-        this.buffer.writeUInt32LE(num, this.offset);
+        this.buffer.writeUInt32LE(num, this.offset, true);
         this.offset += 4;
+    }
+
+    public readInt64(): Long {
+        return Long.fromBits(this.readInt32(), this.readInt32());
+    }
+    public writeInt64(num: Long) {
+        if (typeof (num) != typeof (Long)) {
+            num = Long.fromNumber(<any>num);
+        }
+
+        this.writeInt32(num.getLowBits());
+        this.writeInt32(num.getHighBits());
     }
 
     public readUInt64(): Long {
@@ -84,7 +108,7 @@ export class NetworkBuffer {
             num = Long.fromNumber(<any>num);
         }
 
-        this.writeUInt32(num.getLowBits());
+        this.writeUInt32(num.getLowBitsUnsigned());
         this.writeUInt32(num.getHighBits());
     }
 
