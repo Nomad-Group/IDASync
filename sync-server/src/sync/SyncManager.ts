@@ -10,6 +10,8 @@ import { AddFuncSyncHandler } from './handler/AddFuncSyncHandler';
 import { UndefineSyncHandler } from './handler/UndefineSyncHandler';
 import { OperandTypeSyncHandler } from './handler/OperandTypeSyncHandler';
 import { MakeCodeSyncHandler } from './handler/MakeCodeSyncHandler';
+import { AddReferenceSyncHandler } from './handler/AddReferenceSyncHandler';
+import { DeleteReferenceSyncHandler } from './handler/DeleteReferenceSyncHandler';
 
 
 export class SyncManager {
@@ -20,7 +22,9 @@ export class SyncManager {
         new AddFuncSyncHandler(),
         new UndefineSyncHandler(),
         new OperandTypeSyncHandler(),
-        new MakeCodeSyncHandler()
+        new MakeCodeSyncHandler(),
+        new AddReferenceSyncHandler(),
+        new DeleteReferenceSyncHandler()
     ];
 
     public decodePacket(packet: IdbUpdatePacket): IdbUpdate {

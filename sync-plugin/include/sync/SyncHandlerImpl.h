@@ -24,12 +24,21 @@ class SyncHandlerImpl : public ISyncHandler
 	}
 
 protected:
+	SyncHandlerImpl() = default;
+
 	SyncHandlerImpl(IdaNotificationType notificationType, int notificationCode) :
 		m_notificationType(notificationType),
 		m_notificationCode(notificationCode)
 	{}
 
 	virtual bool ApplyUpdateImpl(TUpdateDataType*) = 0;
+
+	virtual bool ShouldHandleNotification(IdaNotification& notification)
+	{
+		return
+			notification.type == m_notificationType &&
+			notification.code == m_notificationCode;
+	}
 	virtual bool HandleNotification(IdaNotification&, TUpdateDataType*) = 0;
 
 	virtual void DecodePacketImpl(TUpdateDataType*, NetworkBufferT<BasePacket>*) = 0;
@@ -43,7 +52,7 @@ public:
 
 	virtual bool OnIdaNotification(IdaNotification& notification) override
 	{
-		if (notification.type != m_notificationType || notification.code != m_notificationCode)
+		if (!ShouldHandleNotification(notification))
 			return false;
 
 		auto updateData = CreateUpdateData();

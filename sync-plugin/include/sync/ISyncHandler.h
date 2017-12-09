@@ -17,6 +17,9 @@ enum class SyncType : uint16_t
 	OperandType,
 	MakeCode,
 
+	AddReference,
+	DeleteReference,
+
 	_Count
 };
 

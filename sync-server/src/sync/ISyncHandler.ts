@@ -13,7 +13,10 @@ export enum SyncType {
     Undefine,
 
     OperandType,
-    MakeCode
+    MakeCode,
+
+    AddReference,
+    DeleteReference
 }
 
 export interface ISyncHandler {

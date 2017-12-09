@@ -128,6 +128,8 @@
     <ClCompile Include="src\SyncPacketHandler.cpp" />
     <ClCompile Include="src\SyncPlugin.cpp" />
     <ClCompile Include="src\sync\handler\AddFuncSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\AddReferenceSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\DeleteReferenceSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\ItemCommentSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\ItemTypeSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\MakeCodeSyncHandler.cpp" />
@@ -152,6 +154,8 @@
     <ClInclude Include="include\network\SocketEvent.h" />
     <ClInclude Include="include\SyncPlugin.h" />
     <ClInclude Include="include\sync\handler\AddFuncSyncHandler.h" />
+    <ClInclude Include="include\sync\handler\AddReferenceSyncHandler.h" />
+    <ClInclude Include="include\sync\handler\DeleteReferenceSyncHandler.h" />
     <ClInclude Include="include\sync\handler\ItemCommentSyncHandler.h" />
     <ClInclude Include="include\sync\handler\ItemTypeSyncHandler.h" />
     <ClInclude Include="include\sync\handler\MakeCodeSyncHandler.h" />
