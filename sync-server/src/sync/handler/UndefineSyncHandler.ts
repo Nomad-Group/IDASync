@@ -26,4 +26,8 @@ export class UndefineSyncHandler implements ISyncHandler {
             ptr: update.ptr,
         }
     }
+
+    public updateToString(updateData: any): string {
+        return "undefined " + updateData.ptr.toString(16);
+    }
 }

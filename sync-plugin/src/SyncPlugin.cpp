@@ -58,7 +58,12 @@ void SyncPlugin::Shutdown()
 
 void SyncPlugin::Run()
 {
+#ifdef _DEBUG
 	std::string ip = "127.0.0.1";
+#else
+	std::string ip = "62.75.142.79";
+#endif
+
 	if (!g_client->Connect(ip))
 		return;
 

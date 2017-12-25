@@ -32,4 +32,8 @@ export class NameSyncHandler implements ISyncHandler {
             ptr: update.ptr
         }
     }
+
+    public updateToString(updateData: any): string {
+        return "renamed " + updateData.ptr.toString(16) + " to **" + updateData.name + "**";
+    }
 }

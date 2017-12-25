@@ -44,4 +44,8 @@ export class DeleteReferenceSyncHandler implements ISyncHandler {
     public getUniqueIdentifier(update: DeleteReferenceSyncUpdate) {
         return null;
     }
+
+    public updateToString(updateData: any): string {
+        return null;
+    }
 }

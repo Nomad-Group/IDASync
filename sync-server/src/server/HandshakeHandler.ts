@@ -1,6 +1,6 @@
 import { ProjectData } from './../database/ProjectData';
 import { User } from './../database/User';
-import { database, server, projectsManager } from './../app';
+import { database, server, projectsManager, publicFeed } from './../app';
 import { NetworkClient } from './../network/NetworkClient';
 import { Handshake, HandshakeResponse } from './../network/packets/Handshake';
 
@@ -24,6 +24,8 @@ export class HandshakeHandler {
                     database.users.create(user)
                         .then(id => {
                             console.log("[Users] Created user " + user.username + " (" + user.hardwareId + ")");
+                            publicFeed.postUserActivity(user, "joined for the first time!");
+
                             resolve({ newlyCreated: false, user: user });
                         })
                         .catch(reason => reject(reason));
@@ -51,6 +53,8 @@ export class HandshakeHandler {
                     database.projects.create(project)
                         .then(id => {
                             console.log("[Projects] Virgin idb detected: " + project.name);
+                            publicFeed.postActivity("Project **" + project.name + "** was created!");
+
                             resolve({ newlyCreated: true, project: project });
                         })
                         .catch(reason => reject(reason));

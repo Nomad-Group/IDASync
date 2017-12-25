@@ -3,7 +3,7 @@ import { IdbUpdatePacket, IdbUpdateResponsePacket } from './../network/packets/I
 import { ObjectID } from 'mongodb';
 import { IdbUpdate } from './../database/IdbUpdate';
 import { BroadcastMessagePacket, BroadcastMessageType } from './../network/packets/BroadcastMessagePacket';
-import { server, projectsManager, database, syncManager } from './../app';
+import { server, projectsManager, database, syncManager, publicFeed } from './../app';
 import { BasePacket } from './../network/packets/BasePacket';
 import { NetworkClient } from './../network/NetworkClient';
 import { ProjectData } from './../database/ProjectData';
@@ -28,7 +28,9 @@ export class Project {
         if (firstTime) {
             this.data.users.push(client.user._id);
             database.projects.update(this.data)
-                .then(result => console.log(result))
+                .then(result => console.log(result));
+
+            publicFeed.postUserActivity(client.user, "joined project " + this.data.name);
         }
 
         // Log
@@ -86,9 +88,15 @@ export class Project {
             // Broadcast
             this.broadcastUpdate(updateData, client);
 
-            // Disable old IdbUpdate entries which have been overridden
+            // Feed
             var syncHandler = syncManager.syncHandlers[updateData.type];
 
+            var updateText = syncHandler.updateToString(updateData);
+            if (updateText != null) {
+                publicFeed.postUserActivity(client.user, updateText);
+            }
+
+            // Disable old IdbUpdate entries which have been overridden
             var uniqueIdentifier = syncHandler.getUniqueIdentifier(updateData);
             if (uniqueIdentifier == null) {
                 return; // unsupported, always sync

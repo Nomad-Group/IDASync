@@ -29,4 +29,8 @@ export class ItemCommentSyncHandler implements ISyncHandler {
             ptr: update.ptr
         }
     }
+
+    public updateToString(updateData: any): string {
+        return "added comment at " + updateData.ptr.toString(16) + ": " + updateData.text;
+    }
 }

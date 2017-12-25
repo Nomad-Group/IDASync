@@ -30,4 +30,8 @@ export class AddFuncSyncHandler implements ISyncHandler {
             ptrEnd: update.ptrEnd
         }
     }
+
+    public updateToString(updateData: any): string {
+        return "created function at " + updateData.ptrStart.toString(16);
+    }
 }

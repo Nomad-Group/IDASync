@@ -33,4 +33,8 @@ export class MakeDataSyncHandler implements ISyncHandler {
     public getUniqueIdentifier(update: MakeDataSyncUpdate) {
         return null;
     }
+
+    public updateToString(updateData: any): string {
+        return null;
+    }
 }

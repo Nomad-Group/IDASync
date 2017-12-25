@@ -41,4 +41,8 @@ export class AddReferenceSyncHandler implements ISyncHandler {
     public getUniqueIdentifier(update: AddReferenceSyncUpdate) {
         return null;
     }
+
+    public updateToString(updateData: any): string {
+        return null;
+    }
 }

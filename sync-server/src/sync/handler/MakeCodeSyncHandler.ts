@@ -26,4 +26,8 @@ export class MakeCodeSyncHandler implements ISyncHandler {
             ptr: update.ptr,
         }
     }
+
+    public updateToString(updateData: any): string {
+        return null;
+    }
 }

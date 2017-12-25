@@ -77,4 +77,8 @@ export class OperandTypeSyncHandler implements ISyncHandler {
             ptr: update.ptr,
         }
     }
+
+    public updateToString(updateData: any): string {
+        return null;
+    }
 }
