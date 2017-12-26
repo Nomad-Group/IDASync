@@ -59,8 +59,14 @@ export class Project {
         if (index > -1) {
             this.activeClients.slice(index);
         }
-
         client.activeProject = null;
+
+        // Join Broadcast
+        var broadcast = new BroadcastMessagePacket();
+        broadcast.messageType = BroadcastMessageType.ClientDisconnect;
+        broadcast.data = client.user.username;
+
+        server.sendPackets(this.activeClients, broadcast);
     }
 
     private onIdbUpdatePacket(client: NetworkClient, packet: IdbUpdatePacket) {

@@ -2,7 +2,7 @@ import { SyncManager } from './sync/SyncManager';
 import { ProjectsManager } from './project/ProjectsManager';
 import { ProjectData } from './database/ProjectData';
 import { Database } from './Database';
-import { Server } from './server';
+import { Server } from './Server';
 import { DiscordBot } from './DiscordBot';
 import { PublicFeed } from './PublicFeed';
 

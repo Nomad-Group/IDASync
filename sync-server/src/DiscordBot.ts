@@ -15,7 +15,7 @@ export class DiscordBot {
 
     private onReady() {
         console.log("[DiscordBot] Ready!");
-        console.log(client.channels);
+        //console.log(client.channels);
     }
 
     private onMessage(msg: Discord.Message) {
