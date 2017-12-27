@@ -7,8 +7,8 @@ IdbManager::IdbManager()
 
 bool IdbManager::Initialize()
 {
-	bool existed = m_persistentData.create("$ syncplugin_data");
-	if (!existed)
+	bool newlyCreated = m_persistentData.create("$ syncplugin_data");
+	if (newlyCreated)
 	{
 		static const uint32_t SyncPlugin_VersionIndex = 0;
 		if (!m_persistentData.supset((uint32_t)PersistentDataIndex::SyncPluginVersion, &SyncPlugin_VersionIndex, sizeof(SyncPlugin_VersionIndex)))
