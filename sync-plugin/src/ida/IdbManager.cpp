@@ -22,6 +22,11 @@ bool IdbManager::Initialize()
 	return true;
 }
 
+bool IdbManager::HasPersistentData()
+{
+	return netnode_exist(m_persistentData);
+}
+
 uint32_t IdbManager::GetVersion()
 {
 	uint32_t uiVersion = 0;

@@ -22,6 +22,8 @@ public:
 	bool Initialize();
 
 	// Persistent Data
+	bool HasPersistentData();
+
 	uint32_t GetVersion();
 	bool SetVersion(uint32_t);
 };

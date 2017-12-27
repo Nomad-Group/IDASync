@@ -7,16 +7,18 @@
 #include <ida.hpp>
 #include <idp.hpp>
 
+#include "UI/UIFunctions.h"
+
 SyncPlugin* g_plugin = nullptr;
 
 bool SyncPlugin::Init()
 {
 	// Idb Manager
 	g_idb = new IdbManager();
-	if (!g_idb->Initialize())
+	if (g_idb->HasPersistentData())
 	{
-		Log("Error: Failed to initialize IdbManager!");
-		return false;
+		UIShowStatusBar();
+		UIStatusBarSetColor("red");
 	}
 
 	// Sync Manager
@@ -42,6 +44,9 @@ bool SyncPlugin::Init()
 
 void SyncPlugin::Shutdown()
 {
+	// Status Bar
+	UIHideStatusBar();
+
 	// Idb Manager
 	delete g_idb;
 	g_idb = nullptr;
@@ -56,20 +61,30 @@ void SyncPlugin::Shutdown()
 	Networking::GlobalShutdown();
 }
 
-void Test();
-
 void SyncPlugin::Run()
 {
-	Test();
+	// Idb Manager
+	if (!g_idb->Initialize())
+	{
+		Log("Error: Failed to initialize IdbManager!");
+		return;
+	}
 
+	// Connect
 #ifdef _DEBUG
 	std::string ip = "127.0.0.1";
 #else
 	std::string ip = "62.75.142.79";
 #endif
 
+	ip = "62.75.142.79";
+
 	if (!g_client->Connect(ip))
 		return;
+
+	// Status Bar
+	UIShowStatusBar();
+	UIStatusBarSetColor("orange");
 
 	// Handshake
 	auto packet = new NetworkBufferT<BasePacket>();
@@ -144,6 +159,9 @@ void SyncPlugin::Run()
 	g_plugin->Log("Local Version: " + std::to_string(g_idb->GetVersion()) + ", Remote Version: " + std::to_string(remoteVersion));
 
 	delete packetResponse;
+
+	// Status Bar
+	UIStatusBarSetColor("green");
 }
 
 // Logging

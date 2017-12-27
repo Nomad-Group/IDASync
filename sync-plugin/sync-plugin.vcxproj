@@ -151,22 +151,22 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_ExampleDialog.cpp">
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIStatusBar.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_ExampleDialog.cpp">
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIStatusBar.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_ExampleDialog.cpp">
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIStatusBar.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_ExampleDialog.cpp">
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIStatusBar.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">true</ExcludedFromBuild>
@@ -192,28 +192,10 @@
     <ClCompile Include="src\sync\handler\OperandTypeSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\UndefineSyncHandler.cpp" />
     <ClCompile Include="src\sync\SyncManager.cpp" />
-    <ClCompile Include="Test.cpp" />
+    <ClCompile Include="src\UI\UIStatusBar.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="ExampleDialog.h">
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">Moc%27ing ExampleDialog.h...</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DBUILD_IDA_64BIT=1 -D__EA64__ -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">Moc%27ing ExampleDialog.h...</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">Moc%27ing ExampleDialog.h...</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">Moc%27ing ExampleDialog.h...</Message>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
-      <Command Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DBUILD_IDA_64BIT=1 -D__EA64__ -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
-    </CustomBuild>
-    <ClInclude Include="GeneratedFiles\ui_TestDialog.h" />
+    <ClInclude Include="GeneratedFiles\ui_StatusBar.h" />
     <ClInclude Include="include\client\NetworkDispatcher.h" />
     <ClInclude Include="include\ida\IdaNotification.h" />
     <ClInclude Include="include\ida\IdbManager.h" />
@@ -242,10 +224,29 @@
     <ClInclude Include="include\sync\ISyncHandler.h" />
     <ClInclude Include="include\sync\SyncHandlerImpl.h" />
     <ClInclude Include="include\sync\SyncManager.h" />
+    <CustomBuild Include="include\UI\UIStatusBar.h">
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">Moc%27ing UIStatusBar.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DQT_DLL -DQT_GUI_LIB -DQT_XML_LIB -DQT_CORE_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -DBUILD_IDA_64BIT=1 -D__EA64__ -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">Moc%27ing UIStatusBar.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DQT_DLL -DQT_GUI_LIB -DQT_XML_LIB -DQT_CORE_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">Moc%27ing UIStatusBar.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DQT_DLL -DQT_GUI_LIB -DQT_XML_LIB -DQT_CORE_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">Moc%27ing UIStatusBar.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DQT_DLL -DQT_GUI_LIB -DQT_XML_LIB -DQT_CORE_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -DBUILD_IDA_64BIT=1 -D__EA64__ -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
+    </CustomBuild>
+    <ClInclude Include="include\UI\UIFunctions.h" />
     <ClInclude Include="include\Utility.h" />
   </ItemGroup>
   <ItemGroup>
-    <CustomBuild Include="TestDialog.ui">
+    <CustomBuild Include="StatusBar.ui">
       <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">$(QTDIR)\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">Uic%27ing %(Identity)...</Message>
       <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">.\GeneratedFiles\ui_%(Filename).h;%(Outputs)</Outputs>
