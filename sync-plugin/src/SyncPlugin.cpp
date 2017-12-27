@@ -56,8 +56,12 @@ void SyncPlugin::Shutdown()
 	Networking::GlobalShutdown();
 }
 
+void Test();
+
 void SyncPlugin::Run()
 {
+	Test();
+
 #ifdef _DEBUG
 	std::string ip = "127.0.0.1";
 #else

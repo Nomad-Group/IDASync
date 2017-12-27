@@ -39,6 +39,16 @@
     <Filter Include="Source\sync\handler">
       <UniqueIdentifier>{afc0b9f5-f87c-4c78-984b-70b4dba35636}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Form Files">
+      <UniqueIdentifier>{99349809-55BA-4b9d-BF79-8FDBB0286EB3}</UniqueIdentifier>
+      <Extensions>ui</Extensions>
+      <ParseFiles>true</ParseFiles>
+    </Filter>
+    <Filter Include="Generated Files">
+      <UniqueIdentifier>{71ED8ED8-ACB9-4CE9-BBE1-E00B30144E11}</UniqueIdentifier>
+      <Extensions>moc;h;cpp</Extensions>
+      <ParseFiles>true</ParseFiles>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp">
@@ -103,6 +113,21 @@
     </ClCompile>
     <ClCompile Include="src\sync\handler\MakeDataSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
+    </ClCompile>
+    <ClCompile Include="Test.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_ExampleDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_ExampleDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_ExampleDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_ExampleDialog.cpp">
+      <Filter>Generated Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -193,5 +218,16 @@
     <ClInclude Include="include\sync\handler\MakeDataSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
+    <ClInclude Include="GeneratedFiles\ui_TestDialog.h">
+      <Filter>Generated Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="TestDialog.ui">
+      <Filter>Form Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="ExampleDialog.h">
+      <Filter>Header</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>
