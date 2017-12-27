@@ -2,6 +2,7 @@
 #include "sync/SyncManager.h"
 #include "ida/IdbManager.h"
 #include "Utility.h"
+#include "UI/UIFunctions.h"
 
 #include "network/packets/BroadcastMessagePacket.h"
 #include "sync/IdbUpdateData.h"
@@ -36,6 +37,9 @@ void SyncPlugin::HandleDisconnect()
 
 	// Log
 	Log("Connection lost!");
+
+	// Status Bar
+	UIStatusBarSetColor("red");
 }
 
 bool SyncPlugin::HandleBroadcastMessagePacket(NetworkBufferT<BasePacket>* packet)

@@ -22,6 +22,7 @@
     <VCProjectVersion>15.0</VCProjectVersion>
     <ProjectGuid>{399EA364-0A63-41F5-B2C2-932F64BEFEAE}</ProjectGuid>
     <RootNamespace>syncplugin</RootNamespace>
+    <Keyword>Qt4VSv1.0</Keyword>
     <WindowsTargetPlatformVersion>10.0.16299.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -94,13 +95,12 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../idasdk/include/;include/</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__NT__;__IDP__;__VC__=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <CallingConvention>StdCall</CallingConvention>
+      <AdditionalIncludeDirectories>../idasdk/include/;include/;.\GeneratedFiles;$(QTDIR)\include</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__NT__;__IDP__;__VC__=1;QT_DLL;QT_GUI_LIB;QT_XML_LIB;QT_CORE_LIB;QT_NAMESPACE=QT;QT_THREAD_SUPPORT;%(PreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>../idasdk/lib/x86_win_vc_32/</AdditionalLibraryDirectories>
-      <AdditionalDependencies>ida.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\idasdk\lib\x86_win_qt;../idasdk/lib/x86_win_vc_32/</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ida.lib;QtCore4.lib;QtGui4.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">
@@ -108,13 +108,12 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../idasdk/include/;include/</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__NT__;__IDP__;__VC__=1;BUILD_IDA_64BIT=1;__EA64__ ;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <CallingConvention>StdCall</CallingConvention>
+      <AdditionalIncludeDirectories>../idasdk/include/;include/;.\GeneratedFiles;$(QTDIR)\include</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__NT__;__IDP__;__VC__=1;QT_DLL;QT_GUI_LIB;QT_XML_LIB;QT_CORE_LIB;QT_NAMESPACE=QT;QT_THREAD_SUPPORT;BUILD_IDA_64BIT=1;__EA64__ ;%(PreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>../idasdk/lib/x86_win_vc_64/</AdditionalLibraryDirectories>
-      <AdditionalDependencies>ida.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\idasdk\lib\x86_win_qt;../idasdk/lib/x86_win_vc_64/</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ida.lib;QtCore4.lib;QtGui4.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">
@@ -124,15 +123,14 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../idasdk/include/;include/</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__NT__;__IDP__;__VC__=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <CallingConvention>StdCall</CallingConvention>
+      <AdditionalIncludeDirectories>../idasdk/include/;include/;.\GeneratedFiles;$(QTDIR)\include</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__NT__;__IDP__;__VC__=1;QT_DLL;QT_GUI_LIB;QT_XML_LIB;QT_CORE_LIB;QT_NAMESPACE=QT;QT_THREAD_SUPPORT;%(PreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>../idasdk/lib/x86_win_vc_32/</AdditionalLibraryDirectories>
-      <AdditionalDependencies>ida.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\idasdk\lib\x86_win_qt;../idasdk/lib/x86_win_vc_32/</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ida.lib;QtCore4.lib;QtGui4.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">
@@ -142,18 +140,37 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <AdditionalIncludeDirectories>../idasdk/include/;include/</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>__NT__;__IDP__;__VC__=1;BUILD_IDA_64BIT=1;__EA64__ ;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <CallingConvention>StdCall</CallingConvention>
+      <AdditionalIncludeDirectories>../idasdk/include/;include/;.\GeneratedFiles;$(QTDIR)\include</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>__NT__;__IDP__;__VC__=1;QT_DLL;QT_GUI_LIB;QT_XML_LIB;QT_CORE_LIB;QT_NAMESPACE=QT;QT_THREAD_SUPPORT;BUILD_IDA_64BIT=1;__EA64__ ;%(PreprocessorDefinitions);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>../idasdk/lib/x86_win_vc_64/</AdditionalLibraryDirectories>
-      <AdditionalDependencies>ida.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\idasdk\lib\x86_win_qt;../idasdk/lib/x86_win_vc_64/</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ida.lib;QtCore4.lib;QtGui4.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIStatusBar.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIStatusBar.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIStatusBar.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIStatusBar.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="src\client\NetworkDispatcher.cpp" />
     <ClCompile Include="src\ida\IdbManager.cpp" />
     <ClCompile Include="src\Main.cpp" />
@@ -175,8 +192,10 @@
     <ClCompile Include="src\sync\handler\OperandTypeSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\UndefineSyncHandler.cpp" />
     <ClCompile Include="src\sync\SyncManager.cpp" />
+    <ClCompile Include="src\UI\UIStatusBar.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="GeneratedFiles\ui_StatusBar.h" />
     <ClInclude Include="include\client\NetworkDispatcher.h" />
     <ClInclude Include="include\ida\IdaNotification.h" />
     <ClInclude Include="include\ida\IdbManager.h" />
@@ -205,9 +224,53 @@
     <ClInclude Include="include\sync\ISyncHandler.h" />
     <ClInclude Include="include\sync\SyncHandlerImpl.h" />
     <ClInclude Include="include\sync\SyncManager.h" />
+    <CustomBuild Include="include\UI\UIStatusBar.h">
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">Moc%27ing UIStatusBar.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DQT_DLL -DQT_GUI_LIB -DQT_XML_LIB -DQT_CORE_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -DBUILD_IDA_64BIT=1 -D__EA64__ -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">Moc%27ing UIStatusBar.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DQT_DLL -DQT_GUI_LIB -DQT_XML_LIB -DQT_CORE_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">Moc%27ing UIStatusBar.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DQT_DLL -DQT_GUI_LIB -DQT_XML_LIB -DQT_CORE_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">$(QTDIR)\bin\moc.exe;%(FullPath)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">Moc%27ing UIStatusBar.h...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">.\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">"$(QTDIR)\bin\moc.exe"  "%(FullPath)" -o ".\GeneratedFiles\$(ConfigurationName)\moc_%(Filename).cpp"  -D__NT__ -D__IDP__ -D__VC__=1 -DQT_DLL -DQT_GUI_LIB -DQT_XML_LIB -DQT_CORE_LIB -DQT_NAMESPACE=QT -DQT_THREAD_SUPPORT -DBUILD_IDA_64BIT=1 -D__EA64__ -D_WINDLL -D_MBCS "-I.\..\idasdk\include" "-I.\include" "-I.\GeneratedFiles" "-I$(QTDIR)\include" "-I$(NOINHERIT)\."</Command>
+    </CustomBuild>
+    <ClInclude Include="include\UI\UIFunctions.h" />
     <ClInclude Include="include\Utility.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="StatusBar.ui">
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">$(QTDIR)\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">Uic%27ing %(Identity)...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">.\GeneratedFiles\ui_%(Filename).h;%(Outputs)</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">"$(QTDIR)\bin\uic.exe" -o ".\GeneratedFiles\ui_%(Filename).h" "%(FullPath)"</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">$(QTDIR)\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">Uic%27ing %(Identity)...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">.\GeneratedFiles\ui_%(Filename).h;%(Outputs)</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">"$(QTDIR)\bin\uic.exe" -o ".\GeneratedFiles\ui_%(Filename).h" "%(FullPath)"</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">$(QTDIR)\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">Uic%27ing %(Identity)...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">.\GeneratedFiles\ui_%(Filename).h;%(Outputs)</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">"$(QTDIR)\bin\uic.exe" -o ".\GeneratedFiles\ui_%(Filename).h" "%(FullPath)"</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">$(QTDIR)\bin\uic.exe;%(AdditionalInputs)</AdditionalInputs>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">Uic%27ing %(Identity)...</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">.\GeneratedFiles\ui_%(Filename).h;%(Outputs)</Outputs>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">"$(QTDIR)\bin\uic.exe" -o ".\GeneratedFiles\ui_%(Filename).h" "%(FullPath)"</Command>
+    </CustomBuild>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
+  <ProjectExtensions>
+    <VisualStudio>
+      <UserProperties Qt5Version_x0020_Win32="4.8.4" />
+    </VisualStudio>
+  </ProjectExtensions>
 </Project>

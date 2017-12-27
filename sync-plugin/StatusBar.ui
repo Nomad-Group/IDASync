@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DockWidget</class>
+ <widget class="QDockWidget" name="DockWidget">
+  <property name="windowModality">
+   <enum>Qt::NonModal</enum>
+  </property>
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>400</width>
+    <height>38</height>
+   </rect>
+  </property>
+  <property name="contextMenuPolicy">
+   <enum>Qt::NoContextMenu</enum>
+  </property>
+  <property name="autoFillBackground">
+   <bool>false</bool>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">QDockWidget
+{
+	background-color:rgb(255, 0, 0)
+}</string>
+  </property>
+  <property name="floating">
+   <bool>false</bool>
+  </property>
+  <property name="windowTitle">
+   <string>IDA Sync-Plugin</string>
+  </property>
+  <widget class="QWidget" name="dockWidgetContents"/>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

@@ -39,12 +39,25 @@
     <Filter Include="Source\sync\handler">
       <UniqueIdentifier>{afc0b9f5-f87c-4c78-984b-70b4dba35636}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Form Files">
+      <UniqueIdentifier>{99349809-55BA-4b9d-BF79-8FDBB0286EB3}</UniqueIdentifier>
+      <Extensions>ui</Extensions>
+      <ParseFiles>true</ParseFiles>
+    </Filter>
+    <Filter Include="Generated Files">
+      <UniqueIdentifier>{71ED8ED8-ACB9-4CE9-BBE1-E00B30144E11}</UniqueIdentifier>
+      <Extensions>moc;h;cpp</Extensions>
+      <ParseFiles>true</ParseFiles>
+    </Filter>
+    <Filter Include="Header\UI">
+      <UniqueIdentifier>{2163aa2c-17d9-4ec5-a271-ae506739ebc6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\UI">
+      <UniqueIdentifier>{4379d29b-7457-4d5e-99f2-ddd5a31ee186}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp">
-      <Filter>Source</Filter>
-    </ClCompile>
-    <ClCompile Include="src\SyncPlugin.cpp">
       <Filter>Source</Filter>
     </ClCompile>
     <ClCompile Include="src\network\Socket.cpp">
@@ -103,6 +116,24 @@
     </ClCompile>
     <ClCompile Include="src\sync\handler\MakeDataSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SyncPlugin.cpp">
+      <Filter>Source</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIStatusBar.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIStatusBar.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIStatusBar.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIStatusBar.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UI\UIStatusBar.cpp">
+      <Filter>Source\UI</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -193,5 +224,19 @@
     <ClInclude Include="include\sync\handler\MakeDataSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
+    <ClInclude Include="GeneratedFiles\ui_StatusBar.h">
+      <Filter>Generated Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\UI\UIFunctions.h">
+      <Filter>Header\UI</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="StatusBar.ui">
+      <Filter>Form Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="include\UI\UIStatusBar.h">
+      <Filter>Header\UI</Filter>
+    </CustomBuild>
   </ItemGroup>
 </Project>
