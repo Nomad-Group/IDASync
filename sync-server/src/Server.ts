@@ -33,7 +33,7 @@ export class Server {
 
         // Event Handler
         socket.on("close", this.onConnectionClosed.bind(this, client));
-        socket.on("data", this.onClientData.bind(this, client));
+        socket.on("data", this.onClientData_wrap.bind(this, client));
         socket.on("error", this.onConnectionError.bind(this, client));
     }
 
@@ -97,6 +97,15 @@ export class Server {
 
         // Unhandled Packet
         console.error("[Server] Unhandled Packet from " + client.name + " (Type: " + PacketType[packet.packetType] + ")");
+    }
+
+    private onClientData_wrap(client: NetworkClient, dataBuffer: Buffer) {
+        try {
+            this.onClientData(client, dataBuffer);
+        } catch (err) {
+            client.socket.destroy();
+            console.log("ERROR: Client " + client.name + ": " + err);
+        }
     }
 
     public sendPacket(client: NetworkClient, packet: BasePacket, encode: boolean = true) {
