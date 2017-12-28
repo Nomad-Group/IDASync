@@ -1,6 +1,9 @@
 #include "UI/UIFunctions.h"
 #include "UI/UIStatusBar.h"
 
+#include <QtGui/QMainWindow>
+#include <QtGui/QStatusBar>
+
 UIStatusBar* uiStatusBar = nullptr;
 
 void UIShowStatusBar()
@@ -10,6 +13,15 @@ void UIShowStatusBar()
 
 	uiStatusBar = new UIStatusBar();
 	uiStatusBar->show();
+
+	// Dock to Status Bar
+	auto mainWindow = qobject_cast<QMainWindow*>(QApplication::activeWindow()->topLevelWidget());
+	if (mainWindow)
+	{
+		auto statusBar = mainWindow->statusBar();
+		if(statusBar)
+			statusBar->addPermanentWidget(uiStatusBar);
+	}
 }
 
 void UIHideStatusBar()
@@ -23,6 +35,6 @@ void UIStatusBarSetColor(const char* color)
 	if (uiStatusBar == nullptr)
 		return;
 
-	std::string col = "QDockWidget { background-color: " + std::string(color) + "; }";
+	std::string col = "QWidget { background-color: " + std::string(color) + "; }";
 	uiStatusBar->setStyleSheet(col.c_str());
 }

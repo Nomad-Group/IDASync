@@ -7,6 +7,11 @@
 #include <ida.hpp>
 #include <idp.hpp>
 
+
+#include <ida.hpp>
+#include <kernwin.hpp>
+
+
 #include "UI/UIFunctions.h"
 
 SyncPlugin* g_plugin = nullptr;
@@ -63,6 +68,10 @@ void SyncPlugin::Shutdown()
 
 void SyncPlugin::Run()
 {
+	// Status Bar
+	UIShowStatusBar();
+	UIStatusBarSetColor("orange");
+
 	// Idb Manager
 	if (!g_idb->Initialize())
 	{
@@ -77,14 +86,8 @@ void SyncPlugin::Run()
 	std::string ip = "62.75.142.79";
 #endif
 
-	ip = "62.75.142.79";
-
 	if (!g_client->Connect(ip))
 		return;
-
-	// Status Bar
-	UIShowStatusBar();
-	UIStatusBarSetColor("orange");
 
 	// Handshake
 	auto packet = new NetworkBufferT<BasePacket>();

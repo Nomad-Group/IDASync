@@ -24,7 +24,14 @@ bool IdbManager::Initialize()
 
 bool IdbManager::HasPersistentData()
 {
-	return netnode_exist(m_persistentData);
+	bool newlyCreated = m_persistentData.create("$ syncplugin_data");
+	if (newlyCreated) {
+		netnode_kill(&m_persistentData);
+
+		return false;
+	}
+
+	return true;
 }
 
 uint32_t IdbManager::GetVersion()
