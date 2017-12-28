@@ -4,27 +4,32 @@
 #include "network/Networking.h"
 #include "network/NetworkClient.h"
 #include "network/NetworkBuffer.h"
-#include <ida.hpp>
-#include <idp.hpp>
-
-
-#include <ida.hpp>
-#include <kernwin.hpp>
-
-
 #include "UI/UIFunctions.h"
 
+#include <ida.hpp>
+#include <idp.hpp>
+#include <ida.hpp>
+#include <kernwin.hpp>
+#include <loader.hpp>
+
 SyncPlugin* g_plugin = nullptr;
+
+int idaapi ui_event(void *user_data, int notification_code, va_list va)
+{
+	if (notification_code == ui_notification_t::ui_ready_to_run && g_idb->HasPersistentData())
+	{
+		UIShowStatusBar();
+		UIStatusBarSetColor("red");
+	}
+
+	return 0;
+}
 
 bool SyncPlugin::Init()
 {
 	// Idb Manager
 	g_idb = new IdbManager();
-	if (g_idb->HasPersistentData())
-	{
-		UIShowStatusBar();
-		UIStatusBarSetColor("red");
-	}
+	hook_to_notification_point(hook_type_t::HT_UI, ui_event, nullptr);
 
 	// Sync Manager
 	g_syncManager = new SyncManager();
