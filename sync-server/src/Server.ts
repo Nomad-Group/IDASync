@@ -51,11 +51,16 @@ export class Server {
 
     private onClientData(client: NetworkClient, dataBuffer: Buffer) {
         var data = new NetworkBuffer(dataBuffer);
-        //console.log("[Server] Data: " + dataBuffer.toString());
 
-        var packet: BasePacket = null;
+        // Packet-Type Check
         var packetType: PacketType = dataBuffer.readUInt16LE(2);
+        if (packetType != PacketType.Handshake && client.user == null) {
+            client.socket.destroy();
+            return;
+        }
 
+        // Packet
+        var packet: BasePacket = null;
         switch (packetType) {
             case PacketType.Handshake: {
                 packet = new Handshake();
@@ -100,11 +105,19 @@ export class Server {
     }
 
     private onClientData_wrap(client: NetworkClient, dataBuffer: Buffer) {
+        // Accumulate
+        var packet = client.accumulatingBuffer.onData(dataBuffer);
+        if (packet == null) {
+            return;
+        }
+
+        // Package
         try {
-            this.onClientData(client, dataBuffer);
+            this.onClientData(client, packet);
         } catch (err) {
+            client.disconnectReason = NetworkClientDisconnectReason.Error;
             client.socket.destroy();
-            console.log("ERROR: Client " + client.name + ": " + err);
+            console.error("ERROR: Client " + client.name + ": " + err);
         }
     }
 

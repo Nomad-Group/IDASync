@@ -97,6 +97,8 @@ bool SyncManager::SendUpdate(IdbUpdateData* updateData)
 	if (packet == nullptr)
 		return false;
 
+	packet->t->packetSize = packet->GetSize();
+
 	// Send
 	return g_client->Send(packet);
 }

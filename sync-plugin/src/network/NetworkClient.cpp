@@ -89,13 +89,21 @@ BasePacket* NetworkClient::ReadPacketInternal()
 
 	if (remainingSize > 0)
 	{
-		if (!ErrorCheck(m_socket.Receive(
-			((char*)pPacket) + sizeof(BasePacket),
-			pPacket->packetSize - sizeof(BasePacket)
-		)))
+		size_t bytesRead = 0;
+
+		while(remainingSize > 0)
 		{
-			delete pPacket;
-			return nullptr;
+			if (!ErrorCheck(m_socket.Receive(
+				((char*)pPacket) + sizeof(BasePacket),
+				pPacket->packetSize - sizeof(BasePacket),
+				&bytesRead
+			)))
+			{
+				delete pPacket;
+				return nullptr;
+			}
+
+			remainingSize -= bytesRead;
 		}
 	}
 
@@ -137,10 +145,18 @@ bool NetworkClient::ReadPacketInternal(PacketType ePacketType, NetworkBufferT<Ba
 	if (remainingSize == 0)
 		return true;
 
-	bool success = ErrorCheck(m_socket.Receive(
-		(char*) pPacket->WritePtr(remainingSize),
-		remainingSize
-	));
+	bool success = true;
+	while (remainingSize > 0)
+	{
+		size_t bytesRead = 0;
+		ErrorCheck(m_socket.Receive(
+			(char*)pPacket->WritePtr(remainingSize),
+			remainingSize,
+			&bytesRead
+		));
+
+		remainingSize -= bytesRead;
+	}
 
 	// Offset
 	pPacket->SetOffset(sizeof(BasePacket));

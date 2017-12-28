@@ -13,7 +13,9 @@
 
 bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 {
+#ifdef _DEBUG
 	g_plugin->Log("DEBUG: Incoming " + std::string(PacketTypeToString(packet->t->packetType)));
+#endif
 
 	switch (packet->t->packetType)
 	{

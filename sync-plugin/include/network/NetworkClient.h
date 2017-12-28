@@ -67,12 +67,11 @@ public:
 	/*
 	 * Packets
 	 */
-	template <class T>
+	/*template <class T>
 	inline bool Send(T* pPacket, size_t stSize = sizeof(T))
 	{
-		pPacket->packetType = T::Enum;
 		return SendPacketInternal((BasePacket*) pPacket, stSize);
-	}
+	}*/
 
 	template <class T>
 	inline bool ReadPacket(NetworkBufferT<T>* pPacket)
