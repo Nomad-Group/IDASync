@@ -117,11 +117,11 @@ export class Server {
         try {
             this.onClientData(client, packet);
         } catch (err) {
+            console.error("ERROR: Client " + client.name + ": " + err);
+            console.error(err.stack);
+
             client.disconnectReason = NetworkClientDisconnectReason.Error;
             client.socket.destroy();
-
-            console.error("ERROR: Client " + client.name + ": " + err);
-            console.error(err);
         }
     }
 

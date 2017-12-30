@@ -20,6 +20,9 @@ int idaapi ui_event(void *user_data, int notification_code, va_list va)
 	{
 		UIShowStatusBar();
 		UIStatusBarSetColor("red");
+
+		if (UIShowAutoConnectStartupDialog())
+			g_plugin->Run();
 	}
 
 	return 0;

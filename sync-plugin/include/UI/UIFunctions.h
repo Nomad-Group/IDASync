@@ -3,3 +3,5 @@
 void UIShowStatusBar();
 void UIHideStatusBar();
 void UIStatusBarSetColor(const char* color);
+
+bool UIShowAutoConnectStartupDialog(); // true => Connect
