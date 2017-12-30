@@ -3,20 +3,21 @@
 #include <stdint.h>
 #include <thread>
 
+#include "Socket.h"
 #include "SocketEvent.h"
 
 class Socket;
 class SocketEventDispatcher
 {
-	int32_t m_socket;
-	inline bool IsSocketValid() { return m_socket != UINT32_MAX && m_socket != INVALID_SOCKET; }
+	socket_t m_socket;
+	inline bool IsSocketValid() { return m_socket != SOCKET_T_INVALID && m_socket != SOCKET_T_ERROR; }
 
 	std::thread m_thread;
 	HANDLE m_hEvent = nullptr;
 	void _WorkerThread(ISocketEventListener* socketEventListener);
 
 public:
-	SocketEventDispatcher(int32_t);
+	SocketEventDispatcher(socket_t);
 	~SocketEventDispatcher();
 
 	bool StartListening(ISocketEventListener*);

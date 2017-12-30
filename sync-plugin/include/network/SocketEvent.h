@@ -14,4 +14,5 @@ struct ISocketEventListener
 	virtual ~ISocketEventListener() = default;
 
 	virtual bool OnSocketEvent(SocketEvent) = 0;
+	virtual void OnEventTimeout() = 0;
 };

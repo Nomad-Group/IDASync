@@ -11,7 +11,8 @@ private:
 	enum class NetworkEventType
 	{
 		OnPacket,
-		OnConnectionClosed
+		OnConnectionClosed,
+		OnDisconnect
 	};
 
 	struct NetworkEvent
@@ -37,5 +38,7 @@ private:
 
 public:
 	virtual bool OnPacket(NetworkBufferT<BasePacket>*) override;
+
 	virtual void OnConnectionClosed() override;
+	virtual void OnDisconnect() override;
 };

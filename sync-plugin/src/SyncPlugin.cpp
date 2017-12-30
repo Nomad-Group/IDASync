@@ -73,6 +73,16 @@ void SyncPlugin::Shutdown()
 
 void SyncPlugin::Run()
 {
+	// Disconnect?
+	if (g_client->IsConnected())
+	{
+		g_client->Disconnect();
+		return;
+	}
+
+	// Reset Heartbeat Service
+	m_heartbeatService.Reset();
+
 	// Status Bar
 	UIShowStatusBar();
 	UIStatusBarSetColor("orange");
@@ -81,6 +91,8 @@ void SyncPlugin::Run()
 	if (!g_idb->Initialize())
 	{
 		Log("Error: Failed to initialize IdbManager!");
+		UIStatusBarSetColor("red");
+
 		return;
 	}
 
@@ -92,7 +104,10 @@ void SyncPlugin::Run()
 #endif
 
 	if (!g_client->Connect(ip))
+	{
+		UIStatusBarSetColor("red");
 		return;
+	}
 
 	// Handshake
 	auto packet = new NetworkBufferT<BasePacket>();
@@ -123,6 +138,9 @@ void SyncPlugin::Run()
 	// Idb Version
 	packet->Write(g_idb->GetVersion());
 
+	// Client Version
+	packet->Write(VERSION_NUMBER);
+
 	// Handshake Packet
 	packet->t->packetType = PacketType::Handshake;
 	packet->t->packetSize = static_cast<uint16_t>(packet->GetSize());
@@ -130,6 +148,7 @@ void SyncPlugin::Run()
 	if (!g_client->Send(packet))
 	{
 		g_plugin->Log("Handshake failed!");
+		UIStatusBarSetColor("red");
 
 		delete packet;
 		return;
@@ -143,6 +162,8 @@ void SyncPlugin::Run()
 	if (!g_client->ReadPacket(packetResponse))
 	{
 		g_plugin->Log("Handshake failed!");
+		UIStatusBarSetColor("red");
+
 		delete packetResponse;
 		return;
 	}
@@ -152,6 +173,8 @@ void SyncPlugin::Run()
 	{
 		g_plugin->Log("Unable to start Network Listener.. Disconnecting!");
 		g_client->Disconnect();
+		UIStatusBarSetColor("red");
+
 		delete packetResponse;
 		return;
 	}

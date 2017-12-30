@@ -16,7 +16,9 @@ struct INetworkClientEventListener
 	virtual ~INetworkClientEventListener() = default;
 
 	virtual bool OnPacket(NetworkBufferT<BasePacket>*) = 0;
+
 	virtual void OnConnectionClosed() = 0;
+	virtual void OnDisconnect() = 0;
 };
 
 class SocketEventDispatcher;
@@ -51,6 +53,7 @@ public:
 	// Socket Events
 	bool StartListening(INetworkClientEventListener*);
 	virtual bool OnSocketEvent(SocketEvent) override;
+	virtual void OnEventTimeout() override;
 
 	// Send
 	bool Send(NetworkBuffer*);

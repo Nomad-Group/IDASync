@@ -2,9 +2,19 @@
 #include <stdint.h>
 #include <string>
 
+/**/
+// WinSock2
+// typedef UINT_PTR        SOCKET;
+// #define INVALID_SOCKET  (SOCKET)(~0)
+// #define SOCKET_ERROR            (-1)
+using socket_t = uintptr_t;
+const socket_t SOCKET_T_INVALID = (socket_t)(~0);
+const socket_t SOCKET_T_ERROR = -1;
+/**/
+
 class Socket
 {
-	int32_t m_socket = INT32_MAX;
+	socket_t m_socket = SOCKET_T_INVALID;
 
 public:
 	enum class StatusCode : uint8_t
@@ -35,6 +45,6 @@ public:
 	bool Close();
 
 	// Validity-Check
-	inline bool IsValid() const { return m_socket != INT32_MAX; };
-	inline int32_t GetHandle() const { return m_socket; };
+	inline bool IsValid() const { return m_socket != SOCKET_T_INVALID; };
+	inline socket_t GetHandle() const { return m_socket; };
 };

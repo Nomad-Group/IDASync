@@ -2,7 +2,7 @@
 #include "network/Socket.h"
 #include "network/SocketEventDispatcher.h"
 
-SocketEventDispatcher::SocketEventDispatcher(int32_t socket) :
+SocketEventDispatcher::SocketEventDispatcher(socket_t socket) :
 	m_socket(socket)
 {}
 
@@ -30,6 +30,9 @@ bool SocketEventDispatcher::StartListening(ISocketEventListener* socketEventList
 	setsockopt(m_socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&dwTimeout, sizeof(dwTimeout));
 
 	// Create Thread
+	if (m_thread.joinable())
+		m_thread.join();
+
 	m_thread = std::thread([=]() {
 		this->_WorkerThread(socketEventListener);
 	});
@@ -48,7 +51,13 @@ void SocketEventDispatcher::_WorkerThread(ISocketEventListener* socketEventListe
 	// Event Loop
 	while (IsSocketValid())
 	{
-		auto dwEvent = WSAWaitForMultipleEvents(1, &m_hEvent, false, WSA_INFINITE, false);
+		auto dwEvent = WSAWaitForMultipleEvents(1, &m_hEvent, false, 250, false);
+		if (dwEvent == WSA_WAIT_TIMEOUT)
+		{
+			socketEventListener->OnEventTimeout();
+			continue;
+		}
+
 		if (WSAEnumNetworkEvents(m_socket, m_hEvent, &wsaNetworkEvents) != 0)
 			continue; // Is this a good idea?
 
@@ -65,6 +74,10 @@ void SocketEventDispatcher::_WorkerThread(ISocketEventListener* socketEventListe
 
 		// Trigger
 		socketEventListener->OnSocketEvent(socketEvent);
+
+		// Terminate Thread
+		if (socketEvent == SocketEvent::Close)
+			break;
 	}
 }
 
@@ -74,12 +87,16 @@ void SocketEventDispatcher::StopListening()
 		return;
 
 	// Socket
-	if (m_socket != INVALID_SOCKET)
-		WSAEventSelect(m_socket, nullptr, 0);
-	
-	m_socket = UINT32_MAX;
+	WSAEventSelect(m_socket, nullptr, 0);
+
+	// Invalidate
+	m_socket = SOCKET_T_INVALID;
 
 	// Join Thread
-	if(m_thread.joinable())
+	if (m_thread.joinable())
 		m_thread.join();
+
+	// Event
+	WSACloseEvent(m_hEvent);
+	m_hEvent = nullptr;
 }

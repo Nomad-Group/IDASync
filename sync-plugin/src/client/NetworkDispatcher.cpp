@@ -37,6 +37,10 @@ int idaapi NetworkDispatcher::NetworkEventQueue::execute()
 		} break;
 
 		case NetworkEventType::OnConnectionClosed:
+			g_plugin->HandleConnectionClosed();
+			break;
+
+		case NetworkEventType::OnDisconnect:
 			g_plugin->HandleDisconnect();
 			break;
 
@@ -67,6 +71,14 @@ void NetworkDispatcher::OnConnectionClosed()
 {
 	auto networkEvent = new NetworkEvent();
 	networkEvent->type = NetworkEventType::OnConnectionClosed;
+
+	EnqueueNetworkEvent(networkEvent);
+}
+
+void NetworkDispatcher::OnDisconnect()
+{
+	auto networkEvent = new NetworkEvent();
+	networkEvent->type = NetworkEventType::OnDisconnect;
 
 	EnqueueNetworkEvent(networkEvent);
 }

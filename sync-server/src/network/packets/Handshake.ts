@@ -5,6 +5,7 @@ import { BasePacket } from './BasePacket';
 export class Handshake extends BasePacket {
     public userGuid: string;
     public userName: string;
+    public clientVersion: number;
 
     public binaryMD5: string;
     public binaryName: string;
@@ -25,6 +26,8 @@ export class Handshake extends BasePacket {
         this.binaryMD5 = buffer.readCharArray(16);
         this.binaryName = buffer.readString();
         this.binaryVersion = buffer.readUInt32();
+
+        this.clientVersion = buffer.readUInt8();
     }
 
     public encode(buffer: NetworkBuffer) {
@@ -36,6 +39,8 @@ export class Handshake extends BasePacket {
         buffer.writeCharArray(this.binaryMD5, 16);
         buffer.writeString(this.binaryName);
         buffer.writeUInt32(this.binaryVersion);
+
+        buffer.writeUInt8(this.clientVersion);
     }
 }
 

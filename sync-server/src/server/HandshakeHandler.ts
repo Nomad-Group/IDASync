@@ -3,6 +3,7 @@ import { User } from './../database/User';
 import { database, server, projectsManager, publicFeed } from './../app';
 import { NetworkClient } from './../network/NetworkClient';
 import { Handshake, HandshakeResponse } from './../network/packets/Handshake';
+import { Server } from '../Server';
 
 export class HandshakeHandler {
     private static getUser(hardware_id: string, name: string): Promise<any> {
@@ -64,6 +65,14 @@ export class HandshakeHandler {
     }
 
     public static handle(client: NetworkClient, packet: Handshake) {
+        // Version
+        if (packet.clientVersion != Server.VERSION_NUMBER) {
+            client.socket.destroy();
+            console.log("[Server] Dropped client " + packet.userName + " for version mismatch!");
+            return;
+        }
+
+        // User/Project
         Promise.all([
             this.getUser(packet.userGuid, packet.userName),
             this.getProject(packet.binaryMD5, packet.binaryName)

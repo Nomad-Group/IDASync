@@ -15,7 +15,9 @@ export class Server {
     public static readonly PORT: number = 4523;
     public server: net.Server;
     public clients: NetworkClient[] = [];
-    //private heartbeatService: HeartbeatService = new HeartbeatService();
+    private heartbeatService: HeartbeatService = new HeartbeatService();
+
+    static readonly VERSION_NUMBER: number = 1;
 
     public startServer() {
         this.server = net.createServer(this.onConnection.bind(this)).listen(Server.PORT);
@@ -29,7 +31,7 @@ export class Server {
         this.clients.push(client);
 
         // Log
-        console.log("[Server] Incomming connection " + client.name);
+        console.log("[Server] Incoming connection " + client.name);
 
         // Event Handler
         socket.on("close", this.onConnectionClosed.bind(this, client));
@@ -117,7 +119,9 @@ export class Server {
         } catch (err) {
             client.disconnectReason = NetworkClientDisconnectReason.Error;
             client.socket.destroy();
+
             console.error("ERROR: Client " + client.name + ": " + err);
+            console.error(err);
         }
     }
 

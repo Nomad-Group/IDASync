@@ -1,5 +1,9 @@
 #include "network/Socket.h"
 
+#undef SOCKET
+#undef INVALID_SOCKET
+#undef SOCKET_ERROR
+
 #include <WinSock2.h>
 #include <ws2tcpip.h>
 
@@ -33,19 +37,15 @@ Socket::StatusCode Socket::Connect(const std::string& ip, uint16_t port)
 	{
 		// Socket
 		m_socket = socket(ptr->ai_family, ptr->ai_socktype, ptr->ai_protocol);
-		if (m_socket == INVALID_SOCKET) {
+		if (m_socket == SOCKET_T_INVALID) {
 			freeaddrinfo(result);
-
-			m_socket = UINT32_MAX;
 			return StatusCode::CreateSocketFailed;
 		}
 
 		// Connect
 		resultCode = connect(m_socket, ptr->ai_addr, (int)ptr->ai_addrlen);
-		if (resultCode == SOCKET_ERROR) {
-			closesocket(m_socket);
-			m_socket = UINT32_MAX;
-
+		if (resultCode == SOCKET_T_ERROR) {
+			Close();
 			continue;
 		}
 
@@ -56,11 +56,8 @@ Socket::StatusCode Socket::Connect(const std::string& ip, uint16_t port)
 	freeaddrinfo(result);
 
 	// Check
-	if (m_socket == INVALID_SOCKET)
-	{
-		m_socket = UINT32_MAX;
+	if (m_socket == SOCKET_T_INVALID)
 		return StatusCode::ConnectFailed;
-	}
 
 	// Socket Timeout
 	DWORD dwTimeout = 200;
@@ -79,11 +76,12 @@ Socket::StatusCode Socket::Send(const char* buffer, size_t stSize, size_t* stByt
 		*stBytesSent = 0;
 
 	auto resultCode = send(m_socket, buffer, stSize, 0);
-	if (resultCode == SOCKET_ERROR)
+	if (resultCode == SOCKET_T_ERROR)
 		return StatusCode::SendFailed;
 
 	if(stBytesSent)
 		*stBytesSent = resultCode;
+
 	return StatusCode::Success;
 }
 
@@ -96,20 +94,21 @@ Socket::StatusCode Socket::Receive(char* buffer, size_t stSize, size_t* stBytesR
 		*stBytesRead = 0;
 
 	auto resultCode = recv(m_socket, buffer, stSize, 0);
-	if (resultCode == SOCKET_ERROR)
+	if (resultCode == SOCKET_T_ERROR)
 		return StatusCode::RecvFailed;
 
 	if(stBytesRead)
 		*stBytesRead = resultCode;
+
 	return StatusCode::Success;
 }
 
 bool Socket::Close()
 {
 	auto s = m_socket;
-	m_socket = UINT32_MAX;
+	m_socket = SOCKET_T_INVALID;
 
-	if (IsValid())
+	if (s != SOCKET_T_INVALID)
 		return closesocket(s) == 0;
 	
 	return true;

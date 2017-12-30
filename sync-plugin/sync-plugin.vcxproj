@@ -171,6 +171,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="src\client\HeartbeatService.cpp" />
     <ClCompile Include="src\client\NetworkDispatcher.cpp" />
     <ClCompile Include="src\ida\IdbManager.cpp" />
     <ClCompile Include="src\Main.cpp" />
@@ -196,6 +197,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="GeneratedFiles\ui_StatusBar.h" />
+    <ClInclude Include="include\client\HeartbeatService.h" />
     <ClInclude Include="include\client\NetworkDispatcher.h" />
     <ClInclude Include="include\ida\IdaNotification.h" />
     <ClInclude Include="include\ida\IdbManager.h" />
@@ -206,6 +208,7 @@
     <ClInclude Include="include\network\Networking.h" />
     <ClInclude Include="include\network\packets\BasePacket.h" />
     <ClInclude Include="include\network\packets\BroadcastMessagePacket.h" />
+    <ClInclude Include="include\network\packets\HeartbeatPackage.h" />
     <ClInclude Include="include\network\Socket.h" />
     <ClInclude Include="include\network\SocketEventDispatcher.h" />
     <ClInclude Include="include\network\SocketEvent.h" />

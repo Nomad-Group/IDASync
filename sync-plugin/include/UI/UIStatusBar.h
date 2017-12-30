@@ -1,10 +1,9 @@
 #pragma once
 
-//#include <Windows.h>
 #include <QtGui/QDockWidget>
 #include "ui_StatusBar.h"
 
-class UIStatusBar : public QDockWidget, public Ui::DockWidget
+class UIStatusBar : public QDockWidget, public Ui::StatusBar
 {
 	Q_OBJECT
 

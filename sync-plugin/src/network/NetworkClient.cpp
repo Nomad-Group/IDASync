@@ -29,6 +29,9 @@ bool NetworkClient::Disconnect()
 	if(m_eventDispatcher)
 		m_eventDispatcher->StopListening();
 
+	if(m_listener)
+		m_listener->OnDisconnect();
+
 	return success;
 }
 
@@ -179,15 +182,7 @@ bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 
 		// Heartbeat
 		if (pBuffer->t->packetType == PacketType::Heartbeat)
-		{
-			auto packet = new NetworkBufferT<BasePacket>();
-			packet->t->packetType = PacketType::Heartbeat;
-
-			g_client->Send(packet);
-			delete packet;
-
-			return true;
-		}
+			return g_plugin->GetHeartbeatService()->HandleHeartbeat((NetworkBufferT<HeartbeatPackage>*) pBuffer);
 
 		// Listener
 		return m_listener->OnPacket(pBuffer);
@@ -202,6 +197,11 @@ bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 
 	// Done
 	return false;
+}
+
+void NetworkClient::OnEventTimeout()
+{
+	g_plugin->GetHeartbeatService()->Update();
 }
 
 bool NetworkClient::ErrorCheck(Socket::StatusCode statusCode)

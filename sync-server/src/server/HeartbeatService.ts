@@ -25,6 +25,8 @@ export class HeartbeatService {
 
         // Send Heartbeat
         var heartbeat = new Heartbeat();
+        heartbeat.timestamp = Date.now();
+
         server.sendPackets(server.clients, heartbeat);
     }
 }

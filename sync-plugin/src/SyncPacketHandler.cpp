@@ -35,10 +35,15 @@ bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 
 void SyncPlugin::HandleDisconnect()
 {
-	g_client->Disconnect();
+	Log("Disconnected");
 
-	// Log
-	Log("Connection lost!");
+	// Status Bar
+	UIStatusBarSetColor("red");
+}
+
+void SyncPlugin::HandleConnectionClosed()
+{
+	Log("Connection Closed!");
 
 	// Status Bar
 	UIStatusBarSetColor("red");
