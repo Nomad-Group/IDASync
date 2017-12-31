@@ -11,4 +11,8 @@ export class PublicFeed {
     public postUserActivity(user: User, text: string) {
         discordBot.sendMessage("**" + user.username + "** " + text);
     }
+
+    public postServerError(error: Error, user: User = null) {
+        discordBot.sendServerError(error, user);
+    }
 }

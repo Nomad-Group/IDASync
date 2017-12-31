@@ -15,6 +15,10 @@ export class UserManager extends BaseCollectionManager {
         return this.collection.findOne(query);
     }
 
+    public find(query: any = {}): Promise<User[]> {
+        return this.collection.find(query).toArray();
+    }
+
     public create(user: User) {
         return new Promise<ObjectID>((resolve, reject) =>
             this.collection.insertOne(user)

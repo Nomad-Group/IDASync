@@ -16,6 +16,10 @@ export class ProjectDataManager extends BaseCollectionManager {
         return this.collection.findOne(query);
     }
 
+    public find(query: any = {}): Promise<ProjectData[]> {
+        return this.collection.find(query).toArray();
+    }
+
     public create(project: ProjectData) {
         return new Promise<ObjectID>((resolve, reject) =>
             this.collection.insertOne(project)
