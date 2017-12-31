@@ -11,16 +11,19 @@ void UIShowStatusBar()
 	if (uiStatusBar)
 		return;
 
-	uiStatusBar = new UIStatusBar();
-	uiStatusBar->show();
-
 	// Dock to Status Bar
 	auto mainWindow = qobject_cast<QMainWindow*>(QApplication::activeWindow()->topLevelWidget());
 	if (mainWindow)
 	{
 		auto statusBar = mainWindow->statusBar();
-		if(statusBar)
+		if (statusBar)
+		{
+			uiStatusBar = new UIStatusBar();
+			uiStatusBar->show();
+
 			statusBar->addPermanentWidget(uiStatusBar);
+			return;
+		}
 	}
 }
 

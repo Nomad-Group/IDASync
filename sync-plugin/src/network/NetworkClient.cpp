@@ -191,6 +191,7 @@ bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 	// Close
 	if (socketEvent == SocketEvent::Close)
 	{
+		m_socket.Close();
 		m_listener->OnConnectionClosed();
 		return true;
 	}
