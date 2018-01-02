@@ -35,6 +35,8 @@ bool AddReferenceSyncHandler::HandleNotification(IdaNotification& notification, 
 	updateData->ptrTo = static_cast<uint64_t>(va_arg(notification.args, ea_t));
 	updateData->referenceDataType = va_arg(notification.args, uint32_t); // cref_t / dref_t
 
+	g_plugin->Log("Add: " + number2hex(updateData->ptrFrom) + "-" + number2hex(updateData->ptrTo));
+
 	return true;
 }
 

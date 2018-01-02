@@ -41,6 +41,8 @@ bool DeleteReferenceSyncHandler::HandleNotification(IdaNotification& notificatio
 	if (updateData->referenceType == ReferenceType::Code)
 		updateData->expand = va_arg(notification.args, int) != 0;
 
+	g_plugin->Log("Del: " + number2hex(updateData->ptrFrom) + "-" + number2hex(updateData->ptrTo));
+
 	return true;
 }
 
