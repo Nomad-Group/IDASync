@@ -96,7 +96,6 @@ export class Project {
             response.version = updateData.version;
 
             server.sendPacket(client, response);
-            console.log("New update #", response.version);
 
             // Broadcast
             this.broadcastUpdate(updateData, client);
