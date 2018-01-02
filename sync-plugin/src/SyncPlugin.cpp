@@ -108,8 +108,6 @@ void SyncPlugin::Run()
 	std::string ip = "62.75.142.79";
 #endif
 
-	//ip = "62.75.142.79";
-
 	if (!g_client->Connect(ip))
 	{
 		UIStatusBarSetColor("red");

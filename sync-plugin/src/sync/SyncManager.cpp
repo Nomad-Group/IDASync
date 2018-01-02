@@ -99,7 +99,9 @@ bool SyncManager::SendUpdate(IdbUpdateData* updateData)
 		return false;
 
 	packet->t->packetSize = packet->GetSize();
+#ifdef _DEBUG
 	g_plugin->Log("Sending IdbUpdate, type " + std::to_string((uint16_t) updateData->syncType));
+#endif
 
 	// Send
 	return g_client->Send(packet);
