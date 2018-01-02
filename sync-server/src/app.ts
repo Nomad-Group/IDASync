@@ -18,7 +18,6 @@ export const publicFeed: PublicFeed = new PublicFeed();
 database.initialize()
     .then(() => {
         console.log("[Database] Connected!");
-        database.idbUpdates.check();
 
         server.startServer();
         discordBot.initialize();
