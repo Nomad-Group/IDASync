@@ -75,11 +75,13 @@ Socket::StatusCode Socket::Send(const char* buffer, size_t stSize, size_t* stByt
 	if (stBytesSent)
 		*stBytesSent = 0;
 
+	std::lock_guard<std::mutex> lock(m_sendMutex);
+
 	auto resultCode = send(m_socket, buffer, stSize, 0);
 	if (resultCode == SOCKET_T_ERROR)
 		return StatusCode::SendFailed;
 
-	if(stBytesSent)
+	if (stBytesSent)
 		*stBytesSent = resultCode;
 
 	return StatusCode::Success;
@@ -93,6 +95,7 @@ Socket::StatusCode Socket::Receive(char* buffer, size_t stSize, size_t* stBytesR
 	if (stBytesRead)
 		*stBytesRead = 0;
 
+	std::lock_guard<std::mutex> lock(m_recvMutex);
 	auto resultCode = recv(m_socket, buffer, stSize, 0);
 	if (resultCode == SOCKET_T_ERROR)
 		return StatusCode::RecvFailed;

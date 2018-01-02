@@ -127,6 +127,10 @@ export class Server {
     }
 
     public sendPacket(client: NetworkClient, packet: BasePacket, encode: boolean = true) {
+        if (client.socket.destroyed) {
+            return false;
+        }
+
         // Network Buffer
         if (encode) {
             var buffer = new NetworkBuffer();
@@ -157,6 +161,10 @@ export class Server {
         packet.buffer.buffer.writeUInt16LE(packet.packetSize, 0);
 
         // Send
-        clients.forEach(client => client.socket.write(packet.buffer.buffer));
+        clients.forEach(client => {
+            if (!client.socket.destroyed) {
+                client.socket.write(packet.buffer.buffer);
+            }
+        });
     }
 }

@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <string>
 
+#include <mutex>
+
 /**/
 // WinSock2
 // typedef UINT_PTR        SOCKET;
@@ -15,6 +17,8 @@ const socket_t SOCKET_T_ERROR = -1;
 class Socket
 {
 	socket_t m_socket = SOCKET_T_INVALID;
+	std::mutex m_sendMutex;
+	std::mutex m_recvMutex;
 
 public:
 	enum class StatusCode : uint8_t

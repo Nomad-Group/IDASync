@@ -42,6 +42,7 @@ export class Project {
             this.sendUpdates(client, localVersion, this.data.binaryVersion);
         }*/
         client.updateOperation = new UpdateClientOperation(client);
+        console.log(client.name + " local: " + localVersion + ", remote: " + this.data.binaryVersion);
         client.updateOperation.start(localVersion);
     }
 
@@ -65,10 +66,7 @@ export class Project {
         }
 
         // Active Project
-        var index = this.activeClients.indexOf(client);
-        if (index > -1) {
-            this.activeClients.slice(index);
-        }
+        this.activeClients.splice(this.activeClients.indexOf(client));
         client.activeProject = null;
 
         // Join Broadcast
@@ -98,6 +96,7 @@ export class Project {
             response.version = updateData.version;
 
             server.sendPacket(client, response);
+            console.log("New update #", response.version);
 
             // Broadcast
             this.broadcastUpdate(updateData, client);

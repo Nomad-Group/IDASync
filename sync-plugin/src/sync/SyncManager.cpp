@@ -84,8 +84,9 @@ bool SyncManager::ApplyUpdate(IdbUpdateData* updateData)
 	m_notificationLock = false;
 
 	// Update Version
-	if (success)
-		g_idb->SetVersion(updateData->version);
+	//if (success)
+	// ..not all updates succeed - and that is fine
+	g_idb->SetVersion(updateData->version);
 
 	return success;
 }
@@ -98,6 +99,7 @@ bool SyncManager::SendUpdate(IdbUpdateData* updateData)
 		return false;
 
 	packet->t->packetSize = packet->GetSize();
+	g_plugin->Log("Sending IdbUpdate, type " + std::to_string((uint16_t) updateData->syncType));
 
 	// Send
 	return g_client->Send(packet);
@@ -111,7 +113,7 @@ void _unhandled_notification(const char* type)
 
 void SyncManager::OnIdaNotification(IdaNotification& notification)
 {
-	if (g_client == nullptr || !g_client->IsConnected() || m_notificationLock)
+	if (g_client == nullptr || !g_client->IsConnected() || m_notificationLock || g_plugin->IsUpdateOperationActive())
 		return;
 
 	for (int i = 0; i < NumSyncHandlers; i++)

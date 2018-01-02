@@ -140,6 +140,11 @@ bool SyncPlugin::HandleUpdateOperationPacket(NetworkBufferT<BasePacket>* packet)
 
 	case PacketType::UpdateOperationStop:
 	{
+		m_uiUpdateOperationTotalUpdates = 0;
+
+		auto pPacket = (NetworkBufferT<UpdateOperationStopPacket>*) packet;
+		g_idb->SetVersion(pPacket->t->version);
+
 		UIHideUpdateOperationDialog();
 		return true;
 	}

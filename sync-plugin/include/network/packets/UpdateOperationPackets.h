@@ -12,4 +12,6 @@ struct UpdateOperationProgressPacket : BasePacketEnumType<PacketType::UpdateOper
 };
 
 struct UpdateOperationStopPacket : BasePacketEnumType<PacketType::UpdateOperationStop>
-{};
+{
+	uint32_t version;
+};

@@ -4,6 +4,7 @@ import { ProjectData } from "../database/ProjectData";
 import { IdbUpdate } from "../database/IdbUpdate";
 import { setInterval, clearInterval } from "timers";
 import { UpdateOperationStartPacket, UpdateOperationStopPacket, UpdateOperationProgressPacket } from "../network/packets/UpdateOperationPackets";
+import { IdbUpdateResponsePacket } from "../network/packets/IdbUpdatePacket";
 
 const UPDATE_BURST_INTERVAL = 75;
 const UPDATE_BURST_SIZE = 1;
@@ -73,7 +74,10 @@ export class UpdateClientOperation {
         }
 
         // Stop Operation
-        const packet = new UpdateOperationStopPacket();
-        server.sendPacket(this.client, packet);
+        if (!this.client.socket.destroyed) {
+            const packet = new UpdateOperationStopPacket();
+            packet.version = this.client.activeProject.data.binaryVersion;
+            server.sendPacket(this.client, packet);
+        }
     }
 }

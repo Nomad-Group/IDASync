@@ -34,6 +34,7 @@ public:
 	void HandleDisconnect();
 
 	HeartbeatService* GetHeartbeatService() { return &m_heartbeatService; };
+	bool IsUpdateOperationActive() const { return m_uiUpdateOperationTotalUpdates > 0; };
 
 	// Logging
 	void Log(const std::string& message);
