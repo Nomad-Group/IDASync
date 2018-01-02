@@ -12,6 +12,11 @@ enum class PacketType : uint16_t
 	IdbUpdate,
 	IdbUpdateResponse,
 
+	// Update Operation
+	UpdateOperationStart = 1000,
+	UpdateOperationProgress,
+	UpdateOperationStop,
+
 	UnknownAny = UINT16_MAX
 };
 static_assert(sizeof(PacketType) == 2, "PacketType size mismatch!");
@@ -37,6 +42,15 @@ static const char* PacketTypeToString(PacketType packetType)
 
 	case PacketType::IdbUpdateResponse:
 		return "PacketType::IdbUpdateResponse";
+
+	case PacketType::UpdateOperationStart:
+		return "PacketType::UpdateOperationStart";
+
+	case PacketType::UpdateOperationProgress:
+		return "PacketType::UpdateOperationProgress";
+
+	case PacketType::UpdateOperationStop:
+		return "PacketType::UpdateOperationStop";
 
 	default:
 		return "PacketType::_Unknown[Error]";

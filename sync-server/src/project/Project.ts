@@ -7,6 +7,7 @@ import { server, projectsManager, database, syncManager, publicFeed } from './..
 import { BasePacket } from './../network/packets/BasePacket';
 import { NetworkClient } from './../network/NetworkClient';
 import { ProjectData } from './../database/ProjectData';
+import { UpdateClientOperation } from './UpdateClientOperation';
 
 export class Project {
     public activeClients: NetworkClient[] = [];
@@ -37,9 +38,11 @@ export class Project {
         console.log("[Project] " + client.user.username + " joined " + this.data.name + (firstTime ? " (for the first time)" : ""));
 
         // Version
-        if (localVersion < this.data.binaryVersion) {
+        /*if (localVersion < this.data.binaryVersion) {
             this.sendUpdates(client, localVersion, this.data.binaryVersion);
-        }
+        }*/
+        client.updateOperation = new UpdateClientOperation(client);
+        client.updateOperation.start(localVersion);
     }
 
     public onClientData(client: NetworkClient, packet: BasePacket): boolean {
@@ -55,6 +58,13 @@ export class Project {
     }
 
     public onClientLeft(client: NetworkClient) {
+        // Update Operation
+        if (client.updateOperation) {
+            client.updateOperation.stop();
+            client.updateOperation = null;
+        }
+
+        // Active Project
         var index = this.activeClients.indexOf(client);
         if (index > -1) {
             this.activeClients.slice(index);
@@ -77,8 +87,6 @@ export class Project {
         if (updateData == null) {
             return;
         }
-
-        console.log(updateData);
 
         updateData.projectId = this.data._id;
         updateData.userId = client.user._id;
@@ -149,7 +157,7 @@ export class Project {
             });
     }
 
-    private sendUpdate(update: IdbUpdate, client: NetworkClient) {
+    public sendUpdate(update: IdbUpdate, client: NetworkClient) {
         if (!update.shouldSync) {
             return;
         }

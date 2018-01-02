@@ -6,5 +6,10 @@ export enum PacketType {
     BroadcastMessage,
 
     IdbUpdate,
-    IdbUpdateResponse
+    IdbUpdateResponse,
+
+    // Update Operation
+    UpdateOperationStart = 1000,
+    UpdateOperationProgress,
+    UpdateOperationStop
 }

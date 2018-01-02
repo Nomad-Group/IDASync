@@ -58,15 +58,18 @@ export class IdbUpdatesManager extends BaseCollectionManager {
         })
     }
 
-    public findUpdates(projectId: ObjectID, fromVersion: number, toVersion?: number) {
+    public findUpdates(projectId: ObjectID, fromVersion: number, toVersion?: number, shouldSyncTrueOnly: boolean = false) {
         var query: any = { projectId: projectId };
         if (!toVersion) {
             query.version = fromVersion;
         } else {
             query.version = { $gt: fromVersion, $lte: toVersion };
         }
+        if (shouldSyncTrueOnly) {
+            query.shouldSync = true;
+        }
 
-        return this.collection.find<IdbUpdate>(query).toArray();
+        return this.collection.find<IdbUpdate>(query).sort({ "version": 1 }).toArray();
     }
 
     public find(query) {
@@ -77,7 +80,10 @@ export class IdbUpdatesManager extends BaseCollectionManager {
         return this.collection.aggregate([
             {
                 "$group": {
-                    "_id": "$userId",
+                    "_id": {
+                        "userId:": "$userId",
+                        "projectId": "$projectId"
+                    },
                     "count": {
                         "$sum": 1
                     }

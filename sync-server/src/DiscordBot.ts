@@ -7,8 +7,8 @@ import { ProjectData } from './database/ProjectData';
 const client = new Discord.Client();
 const token = 'Mzk0MTU5Mjg4Mjc0MjU1ODcy.DSAQ-w.lQ3VQCOg5TYGAOxpvJxMJcFP6SE';
 const targetChannels = [
-    //"394808588079726616",   // ida-log in Nomad Group
-    "394796278476832768"    // internal in watchdogs2modding
+    //"394808588079726616"   // ida-log in Nomad Group
+    //"394796278476832768"    // internal in watchdogs2modding
 ];
 
 export class DiscordBot {
@@ -21,21 +21,12 @@ export class DiscordBot {
 
     private onReady() {
         console.log("[DiscordBot] Ready!");
-
-        console.log(client.channels)
-
-        /*try {
-            let x: User = null;
-            x.username = "x is null..";
-        } catch (error) {
-            publicFeed.postServerError(error);
-        }*/
     }
 
     private onMessage(msg: Discord.Message) {
-        if (msg.content == "!stats") {
+        /*if (msg.content == "!stats") {
             this.postStats();
-        }
+        }*/
     }
 
     public sendMessage(text: string | Discord.RichEmbed) {

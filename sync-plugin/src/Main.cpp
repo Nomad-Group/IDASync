@@ -4,17 +4,22 @@
 
 #include "SyncPlugin.h"
 
-int __stdcall IDAP_init(void)
+int idaapi IDAP_init(void)
 {
 	g_plugin = new SyncPlugin();
 	return g_plugin->Init() ? PLUGIN_KEEP : PLUGIN_SKIP;
 }
-void __stdcall IDAP_term(void)
+void idaapi IDAP_term(void)
 {
 	if (g_plugin)
+	{
 		g_plugin->Shutdown();
+		
+		delete g_plugin;
+		g_plugin = nullptr;
+	}
 }
-void __stdcall IDAP_run(int arg)
+void idaapi IDAP_run(int arg)
 {
 	if (g_plugin)
 		g_plugin->Run();

@@ -120,15 +120,6 @@
     <ClCompile Include="src\SyncPlugin.cpp">
       <Filter>Source</Filter>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIStatusBar.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIStatusBar.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIStatusBar.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
     <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIStatusBar.cpp">
       <Filter>Generated Files</Filter>
     </ClCompile>
@@ -138,19 +129,16 @@
     <ClCompile Include="src\client\HeartbeatService.cpp">
       <Filter>Source\client</Filter>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIAutoConnectStartupDialog.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIAutoConnectStartupDialog.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIAutoConnectStartupDialog.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
     <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIAutoConnectStartupDialog.cpp">
       <Filter>Generated Files</Filter>
     </ClCompile>
     <ClCompile Include="src\UI\UIAutoConnectStartupDialog.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIUpdateOperationDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UI\UIUpdateOperationDialog.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
   </ItemGroup>
@@ -257,6 +245,12 @@
     <ClInclude Include="GeneratedFiles\ui_AutoConnectStartupDialog.h">
       <Filter>Generated Files</Filter>
     </ClInclude>
+    <ClInclude Include="GeneratedFiles\ui_UpdateOperationDialog.h">
+      <Filter>Generated Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\network\packets\UpdateOperationPackets.h">
+      <Filter>Header\network\packets</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="include\UI\UIStatusBar.h">
@@ -270,6 +264,12 @@
     </CustomBuild>
     <CustomBuild Include="AutoConnectStartupDialog.ui">
       <Filter>Form Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="UpdateOperationDialog.ui">
+      <Filter>Form Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="include\UI\UIUpdateOperationDialog.h">
+      <Filter>Header\UI</Filter>
     </CustomBuild>
   </ItemGroup>
 </Project>

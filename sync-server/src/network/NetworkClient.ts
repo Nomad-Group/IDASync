@@ -1,6 +1,7 @@
 import { Project } from './../project/Project';
 import { User } from './../database/User';
 import * as net from 'net';
+import { UpdateClientOperation } from '../project/UpdateClientOperation';
 
 export enum NetworkClientDisconnectReason {
     Disconnected,
@@ -41,6 +42,7 @@ export class NetworkClient {
 
     public user: User;
     public activeProject: Project;
+    public updateOperation: UpdateClientOperation = null;
 
     public lastHeartbeat: number = 0;
     public disconnectReason: NetworkClientDisconnectReason = NetworkClientDisconnectReason.Disconnected;

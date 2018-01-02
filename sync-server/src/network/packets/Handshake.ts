@@ -45,6 +45,8 @@ export class Handshake extends BasePacket {
 }
 
 export class HandshakeResponse extends BasePacket {
+    public success: boolean = true;
+    public errorMessage: string;
     public username: string;
     public projectName: string;
     public projectVersion: number;
@@ -53,22 +55,31 @@ export class HandshakeResponse extends BasePacket {
         super();
 
         this.packetType = PacketType.HandshakeResponse;
-        this.packetSize = BasePacket.HEADER_SIZE + 96;
     }
 
     public decode(buffer: NetworkBuffer) {
         super.decode(buffer);
 
-        this.username = buffer.readString();
-        this.projectName = buffer.readString();
-        this.projectVersion = buffer.readUInt32();
+        this.success = buffer.readBoolean();
+        if (this.success) {
+            this.username = buffer.readString();
+            this.projectName = buffer.readString();
+            this.projectVersion = buffer.readUInt32();
+        } else {
+            this.errorMessage = buffer.readString();
+        }
     }
 
     public encode(buffer: NetworkBuffer) {
         super.encode(buffer);
 
-        buffer.writeString(this.username);
-        buffer.writeString(this.projectName);
-        buffer.writeUInt32(this.projectVersion);
+        buffer.writeBoolean(this.success);
+        if (this.success) {
+            buffer.writeString(this.username);
+            buffer.writeString(this.projectName);
+            buffer.writeUInt32(this.projectVersion);
+        } else {
+            buffer.writeString(this.errorMessage);
+        }
     }
 }

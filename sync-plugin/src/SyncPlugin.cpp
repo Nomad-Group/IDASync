@@ -69,6 +69,7 @@ void SyncPlugin::Shutdown()
 	{
 		g_client->Disconnect();
 		delete g_client;
+		g_client = nullptr;
 	}
 
 	Networking::GlobalShutdown();
@@ -167,6 +168,16 @@ void SyncPlugin::Run()
 		g_plugin->Log("Handshake failed!");
 		UIStatusBarSetColor("red");
 
+		delete packetResponse;
+		return;
+	}
+
+	// Success?
+	if (!packetResponse->ReadBool())
+	{
+		g_plugin->Log("Handshake failed: " + packetResponse->ReadString());
+		UIStatusBarSetColor("red");
+		
 		delete packetResponse;
 		return;
 	}

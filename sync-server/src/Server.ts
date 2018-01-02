@@ -1,7 +1,7 @@
 import { HeartbeatService } from './server/HeartbeatService';
 import { IdbUpdatePacket } from './network/packets/IdbUpdatePacket';
 import { BroadcastMessagePacket } from './network/packets/BroadcastMessagePacket';
-import { projectsManager } from './app';
+import { projectsManager, publicFeed } from './app';
 import { HandshakeHandler } from './server/HandshakeHandler';
 import { NetworkBuffer } from './network/NetworkBuffer';
 import { NetworkClient, NetworkClientDisconnectReason } from './network/NetworkClient';
@@ -17,7 +17,7 @@ export class Server {
     public clients: NetworkClient[] = [];
     private heartbeatService: HeartbeatService = new HeartbeatService();
 
-    static readonly VERSION_NUMBER: number = 1;
+    static readonly VERSION_NUMBER: number = 2;
 
     public startServer() {
         this.server = net.createServer(this.onConnection.bind(this)).listen(Server.PORT);
@@ -49,6 +49,8 @@ export class Server {
     private onConnectionError(client: NetworkClient, error: Error) {
         //console.error("[Server] Client (" + client.name + ") caused error: " + error.name + "\n" + error.);
         client.disconnectReason = NetworkClientDisconnectReason.Error;
+
+        publicFeed.postServerError(error, client.user);
     }
 
     private onClientData(client: NetworkClient, dataBuffer: Buffer) {
@@ -117,8 +119,7 @@ export class Server {
         try {
             this.onClientData(client, packet);
         } catch (err) {
-            console.error("ERROR: Client " + client.name + ": " + err);
-            console.error(err.stack);
+            publicFeed.postServerError(err, client.user);
 
             client.disconnectReason = NetworkClientDisconnectReason.Error;
             client.socket.destroy();

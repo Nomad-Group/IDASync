@@ -16,8 +16,12 @@ private:
 	bool HandleIdbUpdatePacket(NetworkBufferT<BasePacket>*);
 	bool HandleIdbUpdateResponsePacket(NetworkBufferT<BasePacket>*);
 
+	// Update Operation
+	uint32_t m_uiUpdateOperationTotalUpdates = 0;
+	bool HandleUpdateOperationPacket(NetworkBufferT<BasePacket>*);
+
 public:
-	static const uint32_t VERSION_NUMBER = 1;
+	static const uint32_t VERSION_NUMBER = 2;
 
 	// IDA Callbacks
 	bool Init();

@@ -67,8 +67,14 @@ export class HandshakeHandler {
     public static handle(client: NetworkClient, packet: Handshake) {
         // Version
         if (packet.clientVersion != Server.VERSION_NUMBER) {
+            console.log("[Server] Dropping client " + packet.userName + " for version mismatch!");
+
+            let response = new HandshakeResponse();
+            response.success = false;
+            response.errorMessage = "Version mismatch (expected Version " + Server.VERSION_NUMBER + ", got " + packet.clientVersion + ")";
+            server.sendPacket(client, response);
+
             client.socket.destroy();
-            console.log("[Server] Dropped client " + packet.userName + " for version mismatch!");
             return;
         }
 
