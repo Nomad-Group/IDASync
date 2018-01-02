@@ -11,5 +11,6 @@ export enum PacketType {
     // Update Operation
     UpdateOperationStart = 1000,
     UpdateOperationProgress,
-    UpdateOperationStop
+    UpdateOperationStop,
+    UpdateOperationUpdateBurst
 }

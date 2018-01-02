@@ -1,6 +1,7 @@
 import { BasePacket } from "./BasePacket";
 import { PacketType } from "./PacketType";
 import { NetworkBuffer } from "../NetworkBuffer";
+import { IdbUpdatePacket } from "./IdbUpdatePacket";
 
 
 export class UpdateOperationStartPacket extends BasePacket {
@@ -66,5 +67,32 @@ export class UpdateOperationStopPacket extends BasePacket {
         super.decode(buffer);
 
         this.version = buffer.readUInt32();
+    }
+}
+
+export class UpdateOperationUpdateBurstPacket extends BasePacket {
+    public updates: IdbUpdatePacket[];
+
+    public constructor() {
+        super();
+
+        this.packetType = PacketType.UpdateOperationUpdateBurst;
+    }
+
+    public encode(buffer: NetworkBuffer) {
+        super.encode(buffer);
+
+        buffer.writeUInt8(this.updates.length);
+        this.updates.forEach(update => {
+            let initialSize: number = buffer.getSize();
+            update.encode(buffer);
+
+            update.packetSize = buffer.getSize() - initialSize;
+            buffer.buffer.writeUInt16LE(update.packetSize, initialSize);
+        });
+    }
+
+    public decode(buffer: NetworkBuffer) {
+        throw "not implemented";
     }
 }

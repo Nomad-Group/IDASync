@@ -50,8 +50,8 @@ bool SyncManager::Initialize()
 	m_syncHandler[(size_t) SyncType::Undefine] = new UndefineSyncHandler();
 	m_syncHandler[(size_t) SyncType::OperandType] = new OperandTypeSyncHandler();
 	m_syncHandler[(size_t) SyncType::MakeCode] = new MakeCodeSyncHandler();
-	m_syncHandler[(size_t) SyncType::AddReference] = new AddReferenceSyncHandler();
-	m_syncHandler[(size_t) SyncType::DeleteReference] = new DeleteReferenceSyncHandler();
+	m_syncHandler[(size_t) SyncType::AddReference] = nullptr;// new AddReferenceSyncHandler();
+	m_syncHandler[(size_t) SyncType::DeleteReference] = nullptr;// new DeleteReferenceSyncHandler();
 	m_syncHandler[(size_t) SyncType::MakeData] = new MakeDataSyncHandler();
 
 	// Notification Point
@@ -121,7 +121,7 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 	for (int i = 0; i < NumSyncHandlers; i++)
 	{
 		auto syncHandler = m_syncHandler[i];
-		if (syncHandler->OnIdaNotification(notification))
+		if (syncHandler && syncHandler->OnIdaNotification(notification))
 			return;
 	}
 
