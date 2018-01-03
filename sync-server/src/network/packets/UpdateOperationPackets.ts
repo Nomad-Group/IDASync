@@ -88,7 +88,7 @@ export class UpdateOperationUpdateBurstPacket extends BasePacket {
             update.buffer.buffer.writeUInt16LE(update.packetSize, 0);
 
             buffer.reserve(update.packetSize);
-            update.buffer.buffer.copy(buffer.buffer, buffer.getSize(), 0, update.packetSize);
+            update.buffer.buffer.copy(buffer.buffer, buffer.getSize() - update.packetSize, 0, update.packetSize);
         });
     }
 

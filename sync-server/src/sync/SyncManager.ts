@@ -11,8 +11,6 @@ import { UndefineSyncHandler } from './handler/UndefineSyncHandler';
 import { OperandTypeSyncHandler } from './handler/OperandTypeSyncHandler';
 import { MakeCodeSyncHandler } from './handler/MakeCodeSyncHandler';
 import { MakeDataSyncHandler } from './handler/MakeDataSyncHandler';
-import { AddReferenceSyncHandler } from './handler/AddReferenceSyncHandler';
-import { DeleteReferenceSyncHandler } from './handler/DeleteReferenceSyncHandler';
 
 
 export class SyncManager {
@@ -25,8 +23,8 @@ export class SyncManager {
         new OperandTypeSyncHandler(),
         new MakeCodeSyncHandler(),
         new MakeDataSyncHandler(),
-        new AddReferenceSyncHandler(),
-        new DeleteReferenceSyncHandler()
+        null,
+        null
     ];
 
     public decodePacket(packet: IdbUpdatePacket): IdbUpdate {
