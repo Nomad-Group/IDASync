@@ -24,18 +24,9 @@ SyncManager::~SyncManager()
 {
 	for (int i = 0; i < NumSyncHandlers; i++)
 		delete m_syncHandler[i];
-}
 
-int idaapi SyncManager::ida_notification_point(void* ud, int notificationCode, va_list args)
-{
-	IdaNotification notification;
-
-	notification.type = (IdaNotificationType) ((uintptr_t)(ud));
-	notification.code = notificationCode;
-	notification.args = args;
-
-	g_syncManager->OnIdaNotification(notification);
-	return 0;
+	unhook_from_notification_point(hook_type_t::HT_IDB, ida_notification_point, (void*)IdaNotificationType::idb);
+	unhook_from_notification_point(hook_type_t::HT_IDP, ida_notification_point, (void*)IdaNotificationType::idp);
 }
 
 bool SyncManager::Initialize()
@@ -103,6 +94,18 @@ bool SyncManager::SendUpdate(IdbUpdateData* updateData)
 
 	// Send
 	return g_client->Send(packet);
+}
+
+int idaapi SyncManager::ida_notification_point(void* ud, int notificationCode, va_list args)
+{
+	IdaNotification notification;
+
+	notification.type = (IdaNotificationType)((uintptr_t)(ud));
+	notification.code = notificationCode;
+	notification.args = args;
+
+	g_syncManager->OnIdaNotification(notification);
+	return 0;
 }
 
 void _unhandled_notification(const char* type)

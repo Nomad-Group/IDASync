@@ -59,6 +59,7 @@ void SyncPlugin::Shutdown()
 {
 	// Status Bar
 	UIHideStatusBar();
+	unhook_from_notification_point(HT_UI, ui_event, nullptr);
 
 	// Idb Manager
 	delete g_idb;
