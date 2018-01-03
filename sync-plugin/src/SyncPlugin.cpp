@@ -61,6 +61,10 @@ void SyncPlugin::Shutdown()
 	UIHideStatusBar();
 	unhook_from_notification_point(HT_UI, ui_event, nullptr);
 
+	// Sync Manager
+	delete g_syncManager;
+	g_syncManager = nullptr;
+
 	// Idb Manager
 	delete g_idb;
 	g_idb = nullptr;

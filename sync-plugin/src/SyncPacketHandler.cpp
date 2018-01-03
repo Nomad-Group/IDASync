@@ -164,10 +164,10 @@ bool SyncPlugin::HandleUpdateOperationPacket(NetworkBufferT<BasePacket>* packet)
 			packet->Read(&uiPacketType);
 
 			if (uiPacketSize == 0 ||
-				uiPacketType != PacketType::IdbUpdate ||
-				!HandleIdbUpdatePacket(packet))
+				uiPacketType != PacketType::IdbUpdate)
 				return false;
 
+			HandleIdbUpdatePacket(packet);
 			uiNumUpdates--;
 		}
 
