@@ -21,7 +21,7 @@ private:
 	bool HandleUpdateOperationPacket(NetworkBufferT<BasePacket>*);
 
 public:
-	static const uint32_t VERSION_NUMBER = 2;
+	static const uint32_t VERSION_NUMBER = 3;
 
 	// IDA Callbacks
 	bool Init();

@@ -11,8 +11,6 @@
 #include "sync/handler/UndefineSyncHandler.h"
 #include "sync/handler/OperandTypeSyncHandler.h"
 #include "sync/handler/MakeCodeSyncHandler.h"
-#include "sync/handler/AddReferenceSyncHandler.h"
-#include "sync/handler/DeleteReferenceSyncHandler.h"
 #include "sync/handler/MakeDataSyncHandler.h"
 
 #include "ida/idb_events_strings.h"
@@ -50,8 +48,8 @@ bool SyncManager::Initialize()
 	m_syncHandler[(size_t) SyncType::Undefine] = new UndefineSyncHandler();
 	m_syncHandler[(size_t) SyncType::OperandType] = new OperandTypeSyncHandler();
 	m_syncHandler[(size_t) SyncType::MakeCode] = new MakeCodeSyncHandler();
-	m_syncHandler[(size_t) SyncType::AddReference] = nullptr;// new AddReferenceSyncHandler();
-	m_syncHandler[(size_t) SyncType::DeleteReference] = nullptr;// new DeleteReferenceSyncHandler();
+	m_syncHandler[(size_t) SyncType::AddReference] = nullptr;
+	m_syncHandler[(size_t) SyncType::DeleteReference] = nullptr;
 	m_syncHandler[(size_t) SyncType::MakeData] = new MakeDataSyncHandler();
 
 	// Notification Point

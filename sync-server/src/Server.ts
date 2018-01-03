@@ -17,7 +17,7 @@ export class Server {
     public clients: NetworkClient[] = [];
     private heartbeatService: HeartbeatService = new HeartbeatService();
 
-    static readonly VERSION_NUMBER: number = 2;
+    static readonly VERSION_NUMBER: number = 3;
 
     public startServer() {
         this.server = net.createServer(this.onConnection.bind(this)).listen(Server.PORT);
@@ -91,9 +91,7 @@ export class Server {
         packet.buffer = data;
         packet.decode(data);
 
-        // DEBUG
-        //console.log(packet);
-
+        // Handshake
         if (packet.packetType == PacketType.Handshake) {
             HandshakeHandler.handle(client, <Handshake>packet);
             return;
@@ -105,7 +103,8 @@ export class Server {
         }
 
         // Unhandled Packet
-        console.error("[Server] Unhandled Packet from " + client.name + " (Type: " + PacketType[packet.packetType] + ")");
+        // Error & => Drop client
+        throw new Error("Unhandled Packet from " + client.name + " (Type: " + PacketType[packet.packetType] + ")");
     }
 
     private onClientData_wrap(client: NetworkClient, dataBuffer: Buffer) {

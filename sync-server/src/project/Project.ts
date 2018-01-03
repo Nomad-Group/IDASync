@@ -38,11 +38,7 @@ export class Project {
         console.log("[Project] " + client.user.username + " joined " + this.data.name + (firstTime ? " (for the first time)" : ""));
 
         // Version
-        /*if (localVersion < this.data.binaryVersion) {
-            this.sendUpdates(client, localVersion, this.data.binaryVersion);
-        }*/
         client.updateOperation = new UpdateClientOperation(client);
-        console.log(client.name + " local: " + localVersion + ", remote: " + this.data.binaryVersion);
         client.updateOperation.start(localVersion);
     }
 

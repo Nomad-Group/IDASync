@@ -108,12 +108,6 @@
     <ClCompile Include="src\sync\handler\MakeCodeSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
-    <ClCompile Include="src\sync\handler\AddReferenceSyncHandler.cpp">
-      <Filter>Source\sync\handler</Filter>
-    </ClCompile>
-    <ClCompile Include="src\sync\handler\DeleteReferenceSyncHandler.cpp">
-      <Filter>Source\sync\handler</Filter>
-    </ClCompile>
     <ClCompile Include="src\sync\handler\MakeDataSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
@@ -228,12 +222,6 @@
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
     <ClInclude Include="include\sync\handler\MakeCodeSyncHandler.h">
-      <Filter>Header\sync\handler</Filter>
-    </ClInclude>
-    <ClInclude Include="include\sync\handler\AddReferenceSyncHandler.h">
-      <Filter>Header\sync\handler</Filter>
-    </ClInclude>
-    <ClInclude Include="include\sync\handler\DeleteReferenceSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
     <ClInclude Include="include\sync\handler\MakeDataSyncHandler.h">
