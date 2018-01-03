@@ -32,6 +32,7 @@ bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 	case PacketType::UpdateOperationStart:
 	case PacketType::UpdateOperationProgress:
 	case PacketType::UpdateOperationStop:
+	case PacketType::UpdateOperationUpdateBurst:
 		return HandleUpdateOperationPacket(packet);
 
 	default:
@@ -146,6 +147,30 @@ bool SyncPlugin::HandleUpdateOperationPacket(NetworkBufferT<BasePacket>* packet)
 		g_idb->SetVersion(pPacket->t->version);
 
 		UIHideUpdateOperationDialog();
+		return true;
+	}
+
+	case PacketType::UpdateOperationUpdateBurst:
+	{
+		uint8_t uiNumUpdates = 0;
+		packet->Read(&uiNumUpdates);
+
+		while (uiNumUpdates > 0)
+		{
+			uint16_t uiPacketSize = 0;
+			packet->Read(&uiPacketSize);
+
+			PacketType uiPacketType = PacketType::UnknownAny;
+			packet->Read(&uiPacketType);
+
+			if (uiPacketSize == 0 ||
+				uiPacketType != PacketType::IdbUpdate ||
+				!HandleIdbUpdatePacket(packet))
+				return false;
+
+			uiNumUpdates--;
+		}
+
 		return true;
 	}
 

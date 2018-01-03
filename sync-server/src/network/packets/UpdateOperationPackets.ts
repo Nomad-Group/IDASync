@@ -71,7 +71,7 @@ export class UpdateOperationStopPacket extends BasePacket {
 }
 
 export class UpdateOperationUpdateBurstPacket extends BasePacket {
-    public updates: IdbUpdatePacket[];
+    public updates: IdbUpdatePacket[] = [];
 
     public constructor() {
         super();
@@ -84,11 +84,11 @@ export class UpdateOperationUpdateBurstPacket extends BasePacket {
 
         buffer.writeUInt8(this.updates.length);
         this.updates.forEach(update => {
-            let initialSize: number = buffer.getSize();
-            update.encode(buffer);
+            update.packetSize = update.buffer.getSize();
+            update.buffer.buffer.writeUInt16LE(update.packetSize, 0);
 
-            update.packetSize = buffer.getSize() - initialSize;
-            buffer.buffer.writeUInt16LE(update.packetSize, initialSize);
+            buffer.reserve(update.packetSize);
+            update.buffer.buffer.copy(buffer.buffer, buffer.getSize(), 0, update.packetSize);
         });
     }
 

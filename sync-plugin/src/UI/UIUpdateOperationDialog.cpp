@@ -4,11 +4,11 @@ UIUpdateOperationDialog* uiUpdateOperationDialog = nullptr;
 
 void UIShowUpdateOperationDialog()
 {
-	if (uiUpdateOperationDialog)
-		return;
+	if (uiUpdateOperationDialog == nullptr)
+		uiUpdateOperationDialog = new UIUpdateOperationDialog();
 
-	uiUpdateOperationDialog = new UIUpdateOperationDialog();
-	uiUpdateOperationDialog->show();
+	if(!uiUpdateOperationDialog->isVisible())
+		uiUpdateOperationDialog->show();
 }
 
 void UIProgressUpdateOperationDialog(int progress, const char* label)

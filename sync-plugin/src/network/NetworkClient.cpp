@@ -149,10 +149,10 @@ bool NetworkClient::ReadPacketInternal(PacketType ePacketType, NetworkBufferT<Ba
 		return true;
 
 	bool success = true;
-	while (remainingSize > 0)
+	while (success && remainingSize > 0)
 	{
 		size_t bytesRead = 0;
-		ErrorCheck(m_socket.Receive(
+		success = ErrorCheck(m_socket.Receive(
 			(char*)pPacket->WritePtr(remainingSize),
 			remainingSize,
 			&bytesRead
@@ -162,7 +162,8 @@ bool NetworkClient::ReadPacketInternal(PacketType ePacketType, NetworkBufferT<Ba
 	}
 
 	// Offset
-	pPacket->SetOffset(sizeof(BasePacket));
+	if(success)
+		pPacket->SetOffset(sizeof(BasePacket));
 
 	// Done
 	return success;

@@ -16,6 +16,7 @@ enum class PacketType : uint16_t
 	UpdateOperationStart = 1000,
 	UpdateOperationProgress,
 	UpdateOperationStop,
+	UpdateOperationUpdateBurst,
 
 	UnknownAny = UINT16_MAX
 };
@@ -51,6 +52,9 @@ static const char* PacketTypeToString(PacketType packetType)
 
 	case PacketType::UpdateOperationStop:
 		return "PacketType::UpdateOperationStop";
+
+	case PacketType::UpdateOperationUpdateBurst:
+		return "PacketType::UpdateOperationUpdateBurst";
 
 	default:
 		return "PacketType::_Unknown[Error]";

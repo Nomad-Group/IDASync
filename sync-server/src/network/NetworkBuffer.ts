@@ -21,11 +21,17 @@ export class NetworkBuffer {
         return oldSize;
     }
 
-    private adjustSizeFor(size: number) {
+    public adjustSizeFor(size: number) {
         var requiredSize = this.offset + size;
         if (requiredSize > this.buffer.length) {
             this.resize(requiredSize);
         }
+    }
+
+    // adjustSizeFor + add to offset
+    public reserve(size: number) {
+        this.adjustSizeFor(size);
+        this.offset += size;
     }
 
     public getSize(): number {

@@ -168,7 +168,11 @@
     </ClCompile>
     <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIAutoConnectStartupDialog.cpp" />
     <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIStatusBar.cpp" />
-    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIUpdateOperationDialog.cpp" />
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIUpdateOperationDialog.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="src\client\HeartbeatService.cpp" />
     <ClCompile Include="src\client\NetworkDispatcher.cpp" />
     <ClCompile Include="src\ida\IdbManager.cpp" />
