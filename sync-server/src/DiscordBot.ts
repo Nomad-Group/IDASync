@@ -3,6 +3,7 @@ import { Collection, GuildChannel, TextChannel } from 'discord.js';
 import { User } from './database/User';
 import { publicFeed, database } from './app';
 import { ProjectData } from './database/ProjectData';
+import { SyncType } from './sync/ISyncHandler';
 
 const client = new Discord.Client();
 const token = 'Mzk0MTU5Mjg4Mjc0MjU1ODcy.DSAQ-w.lQ3VQCOg5TYGAOxpvJxMJcFP6SE';
@@ -24,9 +25,13 @@ export class DiscordBot {
     }
 
     private onMessage(msg: Discord.Message) {
-        /*if (msg.content == "!stats") {
-            this.postStats();
-        }*/
+        if (targetChannels.indexOf(msg.channel.id) < 0) {
+            return;
+        }
+
+        if (msg.content == "!stats") {
+            this.postStats(msg);
+        }
     }
 
     public sendMessage(text: string | Discord.RichEmbed) {
@@ -48,7 +53,7 @@ export class DiscordBot {
         this.sendMessage(embed);
     }
 
-    public postStats() {
+    public postStats(msg: Discord.Message) {
         let promises: any = [
             database.users.find(),
             database.projects.find(),
@@ -57,31 +62,48 @@ export class DiscordBot {
 
         Promise.all(promises)
             .then((results) => {
-                this.postStatsEmbed(results[0] as User[], results[1] as ProjectData[], results[2]);
+                this.postStatsEmbed(msg, results[0] as User[], results[1] as ProjectData[], results[2]);
             })
     }
 
-    private postStatsEmbed(users: User[], projects: ProjectData[], updates: any) {
+    private postStatsEmbed(msg: Discord.Message, users: User[], projects: ProjectData[], updates: any) {
         const embed = new Discord.RichEmbed();
-        embed.setTitle("Server Stats")
+        embed.setTitle(":regional_indicator_i: Server Stats")
             .setColor([46, 204, 113]);
 
-        // Users
-        let usersText: string = "";
-        users.forEach(user => usersText += user.username + "\n");
+        // Updates
+        let content = "";
+        updates.updates.forEach(info => {
+            content += "**" + SyncType[info._id.type] + "**: " + info.count + "\n";
+        })
 
-        embed.addField("Users", usersText);
+        embed.setDescription(content);
 
         // Projects
         projects.forEach(project => {
-            embed.addField("Project: " + project.name,
+            embed.addField(":regional_indicator_p: **" + project.name + "**",
                 "**Updates:** " + project.binaryVersion + "\n" +
                 "**Users:** " + project.users.length + "\n"
             );
         });
 
-        embed.addField("Updates", JSON.stringify(updates));
+        users.forEach(user => {
+            let infos = updates.userProjects.filter(info => info._id.userId.equals(user._id));
 
-        this.sendMessage(embed);
+            let text = "";
+            infos.forEach(info => {
+                let project = projects.find(prj => prj._id.equals(info._id.projectId));
+                text += "**" + info.count + "** updates in **" + project.name + "**\n";
+            });
+
+            embed.addField(":regional_indicator_u: **" + user.username + "**", text);
+        });
+
+        // Author
+        embed.setAuthor("IDA-Sync Stats", client.user.avatarURL);
+        embed.setThumbnail(client.user.avatarURL);
+
+        // Send
+        msg.channel.send(embed);
     }
 }

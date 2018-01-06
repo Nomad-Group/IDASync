@@ -40,19 +40,53 @@ export class IdbUpdatesManager extends BaseCollectionManager {
     }
 
     public countForStats() {
-        return this.collection.aggregate([
-            {
-                "$group": {
-                    "_id": {
-                        "userId:": "$userId",
-                        "projectId": "$projectId"
-                    },
-                    "count": {
-                        "$sum": 1
+        return new Promise<any>((resolve, reject) => {
+            let promises: any = [];
+
+            // User Updates
+            promises.push(this.collection.aggregate([
+                {
+                    "$group": {
+                        "_id": {
+                            "userId": "$userId",
+                            "projectId": "$projectId"
+                        },
+                        "count": {
+                            "$sum": 1
+                        }
+                    }
+                },
+                {
+                    "$sort": {
+                        "count": -1
                     }
                 }
-            }
-        ]).toArray();
+            ]).toArray());
+
+            // Updates
+            promises.push(this.collection.aggregate([
+                {
+                    "$group": {
+                        "_id": {
+                            "type": "$type"
+                        },
+                        "count": {
+                            "$sum": 1
+                        }
+                    }
+                },
+                {
+                    "$sort": {
+                        "count": -1
+                    }
+                }
+            ]).toArray());
+
+            // Promise
+            Promise.all(promises)
+                .then((results) => resolve({ userProjects: results[0], updates: results[1] }))
+                .catch((err) => reject(err))
+        })
     }
 
     public update(update: IdbUpdate) {
