@@ -2,23 +2,23 @@
 #include "network/packets/BasePacket.h"
 #include "client/NetworkDispatcher.h"
 #include "client/HeartbeatService.h"
+#include "client/UpdateOperation.h"
 #include <string>
 
 class SyncPlugin
 {
+	friend class UpdateOperation;
+
 private:
-	// Network
+	// Components
 	NetworkDispatcher m_dispatcher;
 	HeartbeatService m_heartbeatService;
+	UpdateOperation m_updateOperation;
 
 	// Packet Handler
 	bool HandleBroadcastMessagePacket(NetworkBufferT<BasePacket>*);
 	bool HandleIdbUpdatePacket(NetworkBufferT<BasePacket>*);
 	bool HandleIdbUpdateResponsePacket(NetworkBufferT<BasePacket>*);
-
-	// Update Operation
-	uint32_t m_uiUpdateOperationTotalUpdates = 0;
-	bool HandleUpdateOperationPacket(NetworkBufferT<BasePacket>*);
 
 public:
 	static const uint32_t VERSION_NUMBER = 3;
@@ -34,7 +34,7 @@ public:
 	void HandleDisconnect();
 
 	HeartbeatService* GetHeartbeatService() { return &m_heartbeatService; };
-	bool IsUpdateOperationActive() const { return m_uiUpdateOperationTotalUpdates > 0; };
+	UpdateOperation* GetUpdateOperation() { return &m_updateOperation; };
 
 	// Logging
 	void Log(const std::string& message);

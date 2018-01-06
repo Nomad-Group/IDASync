@@ -175,6 +175,7 @@
     </ClCompile>
     <ClCompile Include="src\client\HeartbeatService.cpp" />
     <ClCompile Include="src\client\NetworkDispatcher.cpp" />
+    <ClCompile Include="src\client\UpdateOperation.cpp" />
     <ClCompile Include="src\ida\IdbManager.cpp" />
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\network\NetworkBuffer.cpp" />
@@ -203,6 +204,7 @@
     <ClInclude Include="GeneratedFiles\ui_UpdateOperationDialog.h" />
     <ClInclude Include="include\client\HeartbeatService.h" />
     <ClInclude Include="include\client\NetworkDispatcher.h" />
+    <ClInclude Include="include\client\UpdateOperation.h" />
     <ClInclude Include="include\ida\IdaNotification.h" />
     <ClInclude Include="include\ida\IdbManager.h" />
     <ClInclude Include="include\ida\idb_events_strings.h" />

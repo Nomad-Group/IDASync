@@ -57,8 +57,9 @@ bool SyncPlugin::Init()
 
 void SyncPlugin::Shutdown()
 {
-	// Status Bar
+	// UI
 	UIHideStatusBar();
+	UIHideUpdateOperationDialog();
 	unhook_from_notification_point(HT_UI, ui_event, nullptr);
 
 	// Sync Manager
@@ -91,7 +92,7 @@ void SyncPlugin::Run()
 
 	// Reset
 	m_heartbeatService.Reset();
-	m_uiUpdateOperationTotalUpdates = 0;
+	m_updateOperation.Reset();
 
 	// Status Bar
 	UIShowStatusBar();

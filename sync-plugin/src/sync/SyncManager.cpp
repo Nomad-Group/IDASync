@@ -116,7 +116,7 @@ void _unhandled_notification(const char* type)
 
 void SyncManager::OnIdaNotification(IdaNotification& notification)
 {
-	if (g_client == nullptr || !g_client->IsConnected() || m_notificationLock || g_plugin->IsUpdateOperationActive())
+	if (g_client == nullptr || !g_client->IsConnected() || m_notificationLock || g_plugin->GetUpdateOperation()->IsActive())
 		return;
 
 	for (int i = 0; i < NumSyncHandlers; i++)
@@ -142,10 +142,10 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 			case processor_t::set_func_start:
 			case processor_t::set_func_end:
 			//case processor_t::validate_flirt_func:
-			case processor_t::add_cref:
+			/*case processor_t::add_cref:				// NOTE: Code/Data References are not synced!
 			case processor_t::add_dref:
 			case processor_t::del_cref:
-			case processor_t::del_dref:
+			case processor_t::del_dref:*/
 			//case processor_t::auto_empty:
 			//case processor_t::auto_queue_empty:
 			//case processor_t::auto_empty_finally:

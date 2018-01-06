@@ -144,6 +144,9 @@
     <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIUpdateOperationDialog.cpp">
       <Filter>Generated Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\client\UpdateOperation.cpp">
+      <Filter>Source\client</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\SyncPlugin.h">
@@ -247,6 +250,9 @@
     </ClInclude>
     <ClInclude Include="include\network\packets\UpdateOperationPackets.h">
       <Filter>Header\network\packets</Filter>
+    </ClInclude>
+    <ClInclude Include="include\client\UpdateOperation.h">
+      <Filter>Header\client</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

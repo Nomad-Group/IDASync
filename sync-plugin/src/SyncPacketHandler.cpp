@@ -33,7 +33,7 @@ bool SyncPlugin::HandleNetworkPacket(NetworkBufferT<BasePacket>* packet)
 	case PacketType::UpdateOperationProgress:
 	case PacketType::UpdateOperationStop:
 	case PacketType::UpdateOperationUpdateBurst:
-		return HandleUpdateOperationPacket(packet);
+		return m_updateOperation.HandlePacket(packet);
 
 	default:
 		return false;
@@ -114,67 +114,4 @@ bool SyncPlugin::HandleIdbUpdateResponsePacket(NetworkBufferT<BasePacket>* packe
 
 	g_idb->SetVersion(version);
 	return true;
-}
-
-bool SyncPlugin::HandleUpdateOperationPacket(NetworkBufferT<BasePacket>* packet)
-{
-	switch (packet->t->packetType)
-	{
-	case PacketType::UpdateOperationStart:
-	{
-		auto pPacket = (NetworkBufferT<UpdateOperationStartPacket>*) packet;
-		m_uiUpdateOperationTotalUpdates = pPacket->t->numTotalUpdates;
-
-		UIShowUpdateOperationDialog();
-		return true;
-	}
-
-	case PacketType::UpdateOperationProgress:
-	{
-		auto pPacket = (NetworkBufferT<UpdateOperationProgressPacket>*) packet;
-		auto progress = ((float)(pPacket->t->numUpdatesSynced) / (float)m_uiUpdateOperationTotalUpdates) * 100.0f;
-		auto text = std::to_string(pPacket->t->numUpdatesSynced) + " / " + std::to_string(m_uiUpdateOperationTotalUpdates);
-
-		UIProgressUpdateOperationDialog(static_cast<int>(progress), text.c_str());
-		return true;
-	}
-
-	case PacketType::UpdateOperationStop:
-	{
-		m_uiUpdateOperationTotalUpdates = 0;
-
-		auto pPacket = (NetworkBufferT<UpdateOperationStopPacket>*) packet;
-		g_idb->SetVersion(pPacket->t->version);
-
-		UIHideUpdateOperationDialog();
-		return true;
-	}
-
-	case PacketType::UpdateOperationUpdateBurst:
-	{
-		uint8_t uiNumUpdates = 0;
-		packet->Read(&uiNumUpdates);
-
-		while (uiNumUpdates > 0)
-		{
-			uint16_t uiPacketSize = 0;
-			packet->Read(&uiPacketSize);
-
-			PacketType uiPacketType = PacketType::UnknownAny;
-			packet->Read(&uiPacketType);
-
-			if (uiPacketSize == 0 ||
-				uiPacketType != PacketType::IdbUpdate)
-				return false;
-
-			HandleIdbUpdatePacket(packet);
-			uiNumUpdates--;
-		}
-
-		return true;
-	}
-
-	default:
-		return false;
-	}
 }
