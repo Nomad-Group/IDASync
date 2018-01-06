@@ -96,7 +96,9 @@ export class DiscordBot {
                 text += "**" + info.count + "** updates in **" + project.name + "**\n";
             });
 
-            embed.addField(":regional_indicator_u: **" + user.username + "**", text);
+            if (text.length > 0) {
+                embed.addField(":regional_indicator_u: **" + user.username + "**", text);
+            }
         });
 
         // Author
