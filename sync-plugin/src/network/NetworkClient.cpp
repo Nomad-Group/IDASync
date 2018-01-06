@@ -203,6 +203,9 @@ bool NetworkClient::OnSocketEvent(SocketEvent socketEvent)
 
 void NetworkClient::OnEventTimeout()
 {
+	if (g_plugin == nullptr)
+		return;
+
 	g_plugin->GetHeartbeatService()->Update();
 }
 
