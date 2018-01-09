@@ -88,6 +88,9 @@ export class DiscordBot {
             .then((results) => {
                 this.postStatsEmbed(msg, results[0] as User[], results[1] as ProjectData[], results[2]);
             })
+            .catch((err) => {
+                publicFeed.postServerError(err);
+            })
     }
 
     private postStatsEmbed(msg: Discord.Message, users: User[], projects: ProjectData[], updates: any) {
