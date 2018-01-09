@@ -35,7 +35,7 @@ export class IdbUpdatesManager extends BaseCollectionManager {
         return this.collection.find<IdbUpdate>(query).sort({ "version": 1 }).toArray();
     }
 
-    public find(query) {
+    public find(query): Promise<IdbUpdate[]> {
         return this.collection.find<IdbUpdate>(query).toArray();
     }
 

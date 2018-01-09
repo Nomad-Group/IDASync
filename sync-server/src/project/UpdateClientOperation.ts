@@ -20,14 +20,14 @@ export class UpdateClientOperation {
     }
 
     public start(localVersion: number) {
-        console.log("[UpdateClientOperation] Client " + this.client.name + " needs " + (this.project.binaryVersion - localVersion) + " updates");
-
         // Find updates to sync
         database.idbUpdates.findUpdates(this.client.activeProject.data._id, localVersion, this.project.binaryVersion, true)
             .then(this.startInternal.bind(this))
     }
 
     private startInternal(updates: IdbUpdate[]) {
+        console.log("[UpdateClientOperation] Client " + this.client.name + " needs " + updates.length + " updates");
+
         // Updates
         this.updates = updates;
         this.numTotalUpdates = this.updates.length;

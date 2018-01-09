@@ -32,6 +32,30 @@ export class DiscordBot {
         if (msg.content == "!stats") {
             this.postStats(msg);
         }
+
+        if (msg.content.startsWith("!disable-update ")) {
+            let updateNumber = parseInt(msg.content.replace("!disable-update ", ""));
+            if (updateNumber && updateNumber != NaN && updateNumber > 0) {
+                database.idbUpdates.find({ version: updateNumber })
+                    .then(updates => {
+                        if (updates.length == 0) {
+                            msg.reply("Did not find :/");
+                            return;
+                        }
+
+                        if (updates.length > 1) {
+                            msg.reply("Found multiple :/");
+                            return;
+                        }
+
+                        let update = updates[0];
+                        update.shouldSync = false;
+                        database.idbUpdates.update(update)
+                            .then(() => msg.reply("Ok"))
+                            .catch(() => msg.reply("Error :/"))
+                    })
+            }
+        }
     }
 
     public sendMessage(text: string | Discord.RichEmbed) {
