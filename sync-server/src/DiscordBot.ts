@@ -115,7 +115,12 @@ export class DiscordBot {
         });
 
         users.forEach(user => {
-            let infos = updates.userProjects.filter(info => info._id.userId.equals(user._id));
+            let infos = updates.userProjects.filter(info => {
+                if (info._id.userId)
+                    return info._id.userId.equals(user._id);
+
+                return false;
+            });
 
             let text = "";
             infos.forEach(info => {
