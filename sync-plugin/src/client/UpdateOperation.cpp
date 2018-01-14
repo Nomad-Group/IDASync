@@ -79,8 +79,6 @@ bool UpdateOperation::OnUpdateBurst(NetworkBufferT<BasePacket>* packet)
 
 bool UpdateOperation::OnEnd(NetworkBufferT<UpdateOperationStopPacket>* packet)
 {
-	Reset();
-
 	// UI
 	UIHideUpdateOperationDialog();
 
@@ -89,5 +87,7 @@ bool UpdateOperation::OnEnd(NetworkBufferT<UpdateOperationStopPacket>* packet)
 	g_plugin->Log("Update Operation finished! Synced " + std::to_string(m_uiTotalUpdates) + " updates!");
 	g_plugin->Log("Local Version: " + std::to_string(packet->t->version));
 
+	// Reset
+	Reset();
 	return true;
 }
