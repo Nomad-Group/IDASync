@@ -6,7 +6,7 @@ import { ProjectData } from './database/ProjectData';
 import { SyncType } from './sync/ISyncHandler';
 
 const client = new Discord.Client();
-const token = 'Mzk0MTU5Mjg4Mjc0MjU1ODcy.DSAQ-w.lQ3VQCOg5TYGAOxpvJxMJcFP6SE';
+const token = 'NDA4NjY3ODA5NDA1NDY4Njcy.DVTZFQ.PP9-XqQZfH0D7lfLNpafyh8rwSI';
 const targetChannels = [
     "400025688062558210"   // ida-log in Nomad Group
     //"394796278476832768"    // internal in watchdogs2modding
