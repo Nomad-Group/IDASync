@@ -6,7 +6,7 @@ import { BasePacket } from './../../network/packets/BasePacket';
 import { NetworkClient } from './../../network/NetworkClient';
 import { ISyncHandler, SyncType } from './../ISyncHandler';
 
-class NameSyncUpdateData extends IdbUpdate {
+export class NameSyncUpdateData extends IdbUpdate {
     public ptr: Long;
     public name: string;
     public local: boolean;
@@ -34,6 +34,10 @@ export class NameSyncHandler implements ISyncHandler {
     }
 
     public updateToString(updateData: any): string {
+        if (updateData.name == null) {
+            return null;
+        }
+
         return "renamed " + updateData.ptr.toString(16) + " to **" + updateData.name + "**";
     }
 }
