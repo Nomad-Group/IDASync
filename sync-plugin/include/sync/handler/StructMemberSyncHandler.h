@@ -25,10 +25,10 @@ struct StructMemberUpdateData : IdbUpdateData
 	refinfo_t offsetRefInfo;
 };
 
-class CreateStructMemberSyncHandler : public SyncHandlerImpl<StructMemberUpdateData, SyncType::CreateStructMember>
+class StructMemberSyncHandler : public SyncHandlerImpl<StructMemberUpdateData, SyncType::CreateStructMember>
 {
 public:
-	CreateStructMemberSyncHandler() : SyncHandlerImpl(IdaNotificationType::idb, idb_event::struc_member_created)
+	StructMemberSyncHandler() : SyncHandlerImpl(IdaNotificationType::idb, idb_event::struc_member_created)
 	{}
 
 	virtual bool ShouldHandleNotification(IdaNotification& notification)

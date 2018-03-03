@@ -1,10 +1,10 @@
-#include "sync/handler/CreateStructMemberSyncHandler.h"
+#include "sync/handler/StructMemberSyncHandler.h"
 #include "sync/SyncManager.h"
 #include "SyncPlugin.h"
 
 #include "struct.hpp"
 
-bool CreateStructMemberSyncHandler::ApplyUpdateImpl(StructMemberUpdateData* updateData)
+bool StructMemberSyncHandler::ApplyUpdateImpl(StructMemberUpdateData* updateData)
 {
 	// Struct
 	tid_t t = get_struc_id(updateData->structName.c_str());
@@ -28,7 +28,8 @@ bool CreateStructMemberSyncHandler::ApplyUpdateImpl(StructMemberUpdateData* upda
 		break;
 	}
 
-	// Create
+	// Create / Change
+	// TODO: Error Handling
 	if (updateData->syncType == SyncType::CreateStructMember)
 		add_struc_member(s, updateData->memberName.c_str(), updateData->offset, updateData->flag, &ti, updateData->size);
 	else
@@ -37,7 +38,7 @@ bool CreateStructMemberSyncHandler::ApplyUpdateImpl(StructMemberUpdateData* upda
 	return true;
 }
 
-bool CreateStructMemberSyncHandler::HandleNotification(IdaNotification& notification, StructMemberUpdateData* updateData)
+bool StructMemberSyncHandler::HandleNotification(IdaNotification& notification, StructMemberUpdateData* updateData)
 {
 	struc_t* pStruct = va_arg(notification.args, struc_t*);
 	member_t* pMember = va_arg(notification.args, member_t*);
@@ -96,7 +97,7 @@ bool CreateStructMemberSyncHandler::HandleNotification(IdaNotification& notifica
 	return true;
 }
 
-void CreateStructMemberSyncHandler::DecodePacketImpl(StructMemberUpdateData* updateData, NetworkBufferT<BasePacket>* packet)
+void StructMemberSyncHandler::DecodePacketImpl(StructMemberUpdateData* updateData, NetworkBufferT<BasePacket>* packet)
 {
 	updateData->structName = packet->ReadString();
 	updateData->memberName = packet->ReadString();
@@ -126,7 +127,7 @@ void CreateStructMemberSyncHandler::DecodePacketImpl(StructMemberUpdateData* upd
 	}
 }
 
-void CreateStructMemberSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, StructMemberUpdateData* updateData)
+void StructMemberSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, StructMemberUpdateData* updateData)
 {
 	packet->WriteString(updateData->structName.c_str());
 	packet->WriteString(updateData->memberName.c_str());

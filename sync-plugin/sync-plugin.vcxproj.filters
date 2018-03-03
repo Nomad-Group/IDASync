@@ -171,16 +171,13 @@
     <ClCompile Include="src\sync\handler\RenameStructSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
-    <ClCompile Include="src\sync\handler\CreateStructMemberSyncHandler.cpp">
-      <Filter>Source\sync\handler</Filter>
-    </ClCompile>
     <ClCompile Include="src\sync\handler\RenameStructMemberSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
     <ClCompile Include="src\sync\handler\DeleteStructMemberSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
-    <ClCompile Include="src\sync\handler\ChangeStructMemberSyncHandler.cpp">
+    <ClCompile Include="src\sync\handler\StructMemberSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
     </ClCompile>
   </ItemGroup>
@@ -302,16 +299,13 @@
     <ClInclude Include="include\sync\handler\RenameStructSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
-    <ClInclude Include="include\sync\handler\CreateStructMemberSyncHandler.h">
-      <Filter>Header\sync\handler</Filter>
-    </ClInclude>
     <ClInclude Include="include\sync\handler\RenameStructMemberSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
     <ClInclude Include="include\sync\handler\DeleteStructMemberSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
-    <ClInclude Include="include\sync\handler\ChangeStructMemberSyncHandler.h">
+    <ClInclude Include="include\sync\handler\StructMemberSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
     </ClInclude>
   </ItemGroup>

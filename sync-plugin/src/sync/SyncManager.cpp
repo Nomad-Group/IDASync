@@ -15,9 +15,8 @@
 #include "sync/handler/CreateStructSyncHandler.h"
 #include "sync/handler/RenameStructSyncHandler.h"
 #include "sync/handler/DeleteStructSyncHandler.h"
-#include "sync/handler/CreateStructMemberSyncHandler.h"
+#include "sync/handler/StructMemberSyncHandler.h"
 #include "sync/handler/RenameStructMemberSyncHandler.h"
-#include "sync/handler/ChangeStructMemberSyncHandler.h"
 #include "sync/handler/DeleteStructMemberSyncHandler.h"
 
 #include "ida/idb_events_strings.h"
@@ -53,9 +52,9 @@ bool SyncManager::Initialize()
 	m_syncHandler[(size_t) SyncType::CreateStruct] = new CreateStructSyncHandler();
 	m_syncHandler[(size_t) SyncType::RenameStruct] = new RenameStructSyncHandler();
 	m_syncHandler[(size_t) SyncType::DeleteStruct] = new DeleteStructSyncHandler();
-	m_syncHandler[(size_t) SyncType::CreateStructMember] = new CreateStructMemberSyncHandler();
+	m_syncHandler[(size_t) SyncType::CreateStructMember] = new StructMemberSyncHandler();
 	m_syncHandler[(size_t) SyncType::RenameStructMember] = new RenameStructMemberSyncHandler();
-	m_syncHandler[(size_t) SyncType::ChangeStructMember] = new CreateStructMemberSyncHandler();
+	m_syncHandler[(size_t) SyncType::ChangeStructMember] = new StructMemberSyncHandler();
 	m_syncHandler[(size_t) SyncType::DeleteStructMember] = new DeleteStructMemberSyncHandler();
 
 	// Notification Point

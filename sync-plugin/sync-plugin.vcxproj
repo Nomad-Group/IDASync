@@ -206,8 +206,7 @@
     <ClCompile Include="src\SyncPacketHandler.cpp" />
     <ClCompile Include="src\SyncPlugin.cpp" />
     <ClCompile Include="src\sync\handler\AddFuncSyncHandler.cpp" />
-    <ClCompile Include="src\sync\handler\ChangeStructMemberSyncHandler.cpp" />
-    <ClCompile Include="src\sync\handler\CreateStructMemberSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\StructMemberSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\CreateStructSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\DeleteStructMemberSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\DeleteStructSyncHandler.cpp" />
@@ -250,8 +249,7 @@
     <ClInclude Include="include\network\SocketEvent.h" />
     <ClInclude Include="include\SyncPlugin.h" />
     <ClInclude Include="include\sync\handler\AddFuncSyncHandler.h" />
-    <ClInclude Include="include\sync\handler\ChangeStructMemberSyncHandler.h" />
-    <ClInclude Include="include\sync\handler\CreateStructMemberSyncHandler.h" />
+    <ClInclude Include="include\sync\handler\StructMemberSyncHandler.h" />
     <ClInclude Include="include\sync\handler\CreateStructSyncHandler.h" />
     <ClInclude Include="include\sync\handler\DeleteStructMemberSyncHandler.h" />
     <ClInclude Include="include\sync\handler\DeleteStructSyncHandler.h" />
