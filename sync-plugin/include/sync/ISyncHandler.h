@@ -25,6 +25,11 @@ enum class SyncType : uint16_t
 	RenameStruct,
 	DeleteStruct,
 
+	CreateStructMember,
+	RenameStructMember,
+	ChangeStructMember,
+	DeleteStructMember,
+
 	_Count
 };
 

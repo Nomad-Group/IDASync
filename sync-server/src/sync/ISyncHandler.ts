@@ -21,7 +21,12 @@ export enum SyncType {
 
     CreateStruct,
     RenameStruct,
-    DeleteStruct
+    DeleteStruct,
+
+    CreateStructMember,
+    RenameStructMember,
+    ChangeStructMember,
+    DeleteStructMember
 }
 
 export interface ISyncHandler {

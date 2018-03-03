@@ -14,6 +14,10 @@ import { MakeDataSyncHandler } from './handler/MakeDataSyncHandler';
 import { CreateStructSyncHandler } from './handler/CreateStructSyncHandler';
 import { RenameStructSyncHandler } from './handler/RenameStructSyncHandler';
 import { DeleteStructSyncHandler } from './handler/DeleteStructSyncHandler';
+import { CreateStructMemberSyncHandler } from './handler/CreateStructMemberSyncHandler';
+import { RenameStructMemberSyncHandler } from './handler/RenameStructMemberSyncHandler';
+import { ChangeStructMemberSyncHandler } from './handler/ChangeStructMemberSyncHandler';
+import { DeleteStructMemberSyncHandler } from './handler/DeleteStructMemberSyncHandler';
 
 
 export class SyncManager {
@@ -30,7 +34,11 @@ export class SyncManager {
         null,
         new CreateStructSyncHandler(),
         new RenameStructSyncHandler(),
-        new DeleteStructSyncHandler()
+        new DeleteStructSyncHandler(),
+        new CreateStructMemberSyncHandler(),
+        new RenameStructMemberSyncHandler(),
+        new ChangeStructMemberSyncHandler(),
+        new DeleteStructMemberSyncHandler()
     ];
 
     public decodePacket(packet: IdbUpdatePacket): IdbUpdate {

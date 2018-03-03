@@ -15,6 +15,10 @@
 #include "sync/handler/CreateStructSyncHandler.h"
 #include "sync/handler/RenameStructSyncHandler.h"
 #include "sync/handler/DeleteStructSyncHandler.h"
+#include "sync/handler/CreateStructMemberSyncHandler.h"
+#include "sync/handler/RenameStructMemberSyncHandler.h"
+#include "sync/handler/ChangeStructMemberSyncHandler.h"
+#include "sync/handler/DeleteStructMemberSyncHandler.h"
 
 #include "ida/idb_events_strings.h"
 #include "ida/idp_events_strings.h"
@@ -49,6 +53,10 @@ bool SyncManager::Initialize()
 	m_syncHandler[(size_t) SyncType::CreateStruct] = new CreateStructSyncHandler();
 	m_syncHandler[(size_t) SyncType::RenameStruct] = new RenameStructSyncHandler();
 	m_syncHandler[(size_t) SyncType::DeleteStruct] = new DeleteStructSyncHandler();
+	m_syncHandler[(size_t) SyncType::CreateStructMember] = new CreateStructMemberSyncHandler();
+	m_syncHandler[(size_t) SyncType::RenameStructMember] = new RenameStructMemberSyncHandler();
+	m_syncHandler[(size_t) SyncType::ChangeStructMember] = new CreateStructMemberSyncHandler();
+	m_syncHandler[(size_t) SyncType::DeleteStructMember] = new DeleteStructMemberSyncHandler();
 
 	// Notification Point
 	if (!hook_to_notification_point(hook_type_t::HT_IDB, ida_notification_point, (void*)IdaNotificationType::idb) ||
@@ -193,7 +201,7 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 			//case idb_event::struc_created:
 			//case idb_event::struc_deleted:
 			//case idb_event::struc_renamed:
-			case idb_event::struc_expanded:
+			//case idb_event::struc_expanded:
 			case idb_event::struc_cmt_changed:
 			case idb_event::struc_member_created:
 			case idb_event::struc_member_deleted:

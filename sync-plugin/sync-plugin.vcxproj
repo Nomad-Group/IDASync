@@ -206,7 +206,10 @@
     <ClCompile Include="src\SyncPacketHandler.cpp" />
     <ClCompile Include="src\SyncPlugin.cpp" />
     <ClCompile Include="src\sync\handler\AddFuncSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\ChangeStructMemberSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\CreateStructMemberSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\CreateStructSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\DeleteStructMemberSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\DeleteStructSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\ItemCommentSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\ItemTypeSyncHandler.cpp" />
@@ -214,6 +217,7 @@
     <ClCompile Include="src\sync\handler\MakeDataSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\NameSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\OperandTypeSyncHandler.cpp" />
+    <ClCompile Include="src\sync\handler\RenameStructMemberSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\RenameStructSyncHandler.cpp" />
     <ClCompile Include="src\sync\handler\UndefineSyncHandler.cpp" />
     <ClCompile Include="src\sync\SyncManager.cpp" />
@@ -246,7 +250,10 @@
     <ClInclude Include="include\network\SocketEvent.h" />
     <ClInclude Include="include\SyncPlugin.h" />
     <ClInclude Include="include\sync\handler\AddFuncSyncHandler.h" />
+    <ClInclude Include="include\sync\handler\ChangeStructMemberSyncHandler.h" />
+    <ClInclude Include="include\sync\handler\CreateStructMemberSyncHandler.h" />
     <ClInclude Include="include\sync\handler\CreateStructSyncHandler.h" />
+    <ClInclude Include="include\sync\handler\DeleteStructMemberSyncHandler.h" />
     <ClInclude Include="include\sync\handler\DeleteStructSyncHandler.h" />
     <ClInclude Include="include\sync\handler\ItemCommentSyncHandler.h" />
     <ClInclude Include="include\sync\handler\ItemTypeSyncHandler.h" />
@@ -254,6 +261,7 @@
     <ClInclude Include="include\sync\handler\MakeDataSyncHandler.h" />
     <ClInclude Include="include\sync\handler\NameSyncHandler.h" />
     <ClInclude Include="include\sync\handler\OperandTypeSyncHandler.h" />
+    <ClInclude Include="include\sync\handler\RenameStructMemberSyncHandler.h" />
     <ClInclude Include="include\sync\handler\RenameStructSyncHandler.h" />
     <ClInclude Include="include\sync\handler\UndefineSyncHandler.h" />
     <ClInclude Include="include\sync\IdbUpdateData.h" />

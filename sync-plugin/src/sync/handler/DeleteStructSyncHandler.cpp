@@ -1,6 +1,7 @@
 #include "sync/handler/DeleteStructSyncHandler.h"
 #include "sync/SyncManager.h"
 #include "SyncPlugin.h"
+#include "ida/IdbManager.h"
 
 #include "struct.hpp"
 
@@ -16,7 +17,7 @@ bool DeleteStructSyncHandler::HandleNotification(IdaNotification& notification, 
 {
 	tid_t t = va_arg(notification.args, tid_t);
 	
-	updateData->name = get_struc_name(t).c_str();
+	updateData->name = g_idb->GetStructName(t);
 	return true;
 }
 
