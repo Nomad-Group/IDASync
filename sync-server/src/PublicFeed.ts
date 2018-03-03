@@ -2,7 +2,7 @@ import { discordBot } from "./app";
 import { NetworkClient } from "./network/NetworkClient";
 import { User } from "./database/User";
 
-const FEED_ENABLED: boolean = true;
+const FEED_ENABLED: boolean = false;
 
 export class PublicFeed {
     public postActivity(text: string) {

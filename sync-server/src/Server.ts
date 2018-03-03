@@ -17,7 +17,7 @@ export class Server {
     public clients: NetworkClient[] = [];
     private heartbeatService: HeartbeatService = new HeartbeatService();
 
-    static readonly VERSION_NUMBER: number = 3;
+    static readonly VERSION_NUMBER: number = 4;
 
     public startServer() {
         this.server = net.createServer(this.onConnection.bind(this)).listen(Server.PORT);

@@ -162,6 +162,15 @@
     <ClCompile Include="src\ui\UIMainMenu.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
+    <ClCompile Include="src\sync\handler\CreateStructSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
+    <ClCompile Include="src\sync\handler\DeleteStructSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
+    <ClCompile Include="src\sync\handler\RenameStructSyncHandler.cpp">
+      <Filter>Source\sync\handler</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\SyncPlugin.h">
@@ -271,6 +280,15 @@
     </ClInclude>
     <ClInclude Include="GeneratedFiles\ui_MenuMain.h">
       <Filter>Generated Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\CreateStructSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\DeleteStructSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
+    </ClInclude>
+    <ClInclude Include="include\sync\handler\RenameStructSyncHandler.h">
+      <Filter>Header\sync\handler</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

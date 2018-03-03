@@ -21,7 +21,7 @@ private:
 	bool HandleIdbUpdateResponsePacket(NetworkBufferT<BasePacket>*);
 
 public:
-	static const uint32_t VERSION_NUMBER = 3;
+	static const uint32_t VERSION_NUMBER = 4;
 
 	// IDA Callbacks
 	bool Init();

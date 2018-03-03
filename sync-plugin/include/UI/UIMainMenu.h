@@ -16,6 +16,8 @@ public:
 		if(isCurrentlyConnected)
 			list->item(0)->setText("Disconnect");
 
+		list->setItemSelected(list->item(0), true);
+
 		connect(buttonOkay, SIGNAL(clicked()), this, SLOT(onClickOkay()));
 		connect(list, SIGNAL(itemDoubleClicked(QListWidgetItem*)), this, SLOT(onClickOkay()));
 		connect(buttonCancel, SIGNAL(clicked()), this, SLOT(close()));

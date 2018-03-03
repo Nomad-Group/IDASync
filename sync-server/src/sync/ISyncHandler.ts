@@ -17,7 +17,11 @@ export enum SyncType {
     MakeData,
 
     AddReference,
-    DeleteReference
+    DeleteReference,
+
+    CreateStruct,
+    RenameStruct,
+    DeleteStruct
 }
 
 export interface ISyncHandler {

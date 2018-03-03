@@ -12,7 +12,7 @@ bool IdbManager::Initialize()
 	if (newlyCreated)
 	{
 		static const uint32_t SyncPlugin_VersionIndex = SyncPlugin::VERSION_NUMBER;
-		if (!m_persistentData.supset((uint32_t)PersistentDataIndex::SyncPluginVersion, &SyncPlugin_VersionIndex, sizeof(SyncPlugin_VersionIndex)))
+		if (!m_persistentData.supset((nodeidx_t)PersistentDataIndex::SyncPluginVersion, &SyncPlugin_VersionIndex, sizeof(SyncPlugin_VersionIndex)))
 			return false;
 
 		static const uint32_t InitialVersionIndex = 0;
@@ -24,13 +24,13 @@ bool IdbManager::Initialize()
 
 	// Sync Plugin Version: Upgrade?
 	uint32_t CurrentVersion = 0;
-	m_persistentData.supval((uint32_t)PersistentDataIndex::SyncPluginVersion, &CurrentVersion, sizeof(CurrentVersion));
+	m_persistentData.supval((nodeidx_t)PersistentDataIndex::SyncPluginVersion, &CurrentVersion, sizeof(CurrentVersion));
 
 	if (CurrentVersion < SyncPlugin::VERSION_NUMBER)
 	{
 		// Upgrade
 		static const uint32_t SyncPlugin_VersionIndex = SyncPlugin::VERSION_NUMBER;
-		if (!m_persistentData.supset((uint32_t)PersistentDataIndex::SyncPluginVersion, &SyncPlugin_VersionIndex, sizeof(SyncPlugin_VersionIndex)))
+		if (!m_persistentData.supset((nodeidx_t)PersistentDataIndex::SyncPluginVersion, &SyncPlugin_VersionIndex, sizeof(SyncPlugin_VersionIndex)))
 			return false;
 
 		// Upgrade Operations go here
@@ -59,12 +59,25 @@ bool IdbManager::HasPersistentData()
 uint32_t IdbManager::GetVersion()
 {
 	uint32_t uiVersion = 0;
-	m_persistentData.supval((uint32_t)PersistentDataIndex::IdbVersion, &uiVersion, sizeof(uint32_t));
+	m_persistentData.supval((nodeidx_t)PersistentDataIndex::IdbVersion, &uiVersion, sizeof(uint32_t));
 
 	return uiVersion;
 }
 
 bool IdbManager::SetVersion(uint32_t idx)
 {
-	return m_persistentData.supset((uint32_t)PersistentDataIndex::IdbVersion, &idx, sizeof(uint32_t));
+	return m_persistentData.supset((nodeidx_t)PersistentDataIndex::IdbVersion, &idx, sizeof(uint32_t));
+}
+
+void IdbManager::StoreStructName(tid_t t, const std::string& name)
+{
+	m_persistentData.supset(t, name.c_str(), 0, STRUCT_NAMES_TAG);
+}
+
+std::string IdbManager::GetStructName(tid_t t)
+{
+	char buffer[MAXNAMESIZE];
+	m_persistentData.supstr(t, buffer, MAXNAMESIZE, STRUCT_NAMES_TAG);
+
+	return std::string(buffer);
 }
