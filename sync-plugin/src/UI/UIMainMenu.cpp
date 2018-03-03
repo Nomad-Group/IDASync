@@ -1,8 +1,8 @@
 #include "ui/UIMainMenu.h"
 
-UIMainMenuResult UIShowMainMenu()
+UIMainMenuResult UIShowMainMenu(bool isCurrentlyConnected)
 {
-	UIMainMenu mainMenu;
+	UIMainMenu mainMenu(isCurrentlyConnected);
 	mainMenu.exec();
 
 	return mainMenu.result;

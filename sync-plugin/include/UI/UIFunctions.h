@@ -22,4 +22,4 @@ enum class UIMainMenuResult
 	RequestUpdates
 };
 
-UIMainMenuResult UIShowMainMenu();
+UIMainMenuResult UIShowMainMenu(bool isCurrentlyConnected);

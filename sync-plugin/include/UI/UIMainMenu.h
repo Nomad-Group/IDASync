@@ -9,9 +9,12 @@ class UIMainMenu : public QDialog, public Ui::MainMenu
 	Q_OBJECT
 
 public:
-	UIMainMenu() : QDialog(QApplication::activeWindow())
+	UIMainMenu(bool isCurrentlyConnected) : QDialog(QApplication::activeWindow())
 	{
 		setupUi(this);
+
+		if(isCurrentlyConnected)
+			list->item(0)->setText("Disconnect");
 
 		connect(buttonOkay, SIGNAL(clicked()), this, SLOT(onClickOkay()));
 		connect(list, SIGNAL(itemDoubleClicked(QListWidgetItem*)), this, SLOT(onClickOkay()));
