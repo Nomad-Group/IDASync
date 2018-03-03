@@ -1,4 +1,5 @@
 #include "ida/IdbManager.h"
+#include "SyncPlugin.h"
 
 IdbManager* g_idb = nullptr;
 
@@ -10,15 +11,36 @@ bool IdbManager::Initialize()
 	bool newlyCreated = m_persistentData.create("$ syncplugin_data");
 	if (newlyCreated)
 	{
-		static const uint32_t SyncPlugin_VersionIndex = 0;
+		static const uint32_t SyncPlugin_VersionIndex = SyncPlugin::VERSION_NUMBER;
 		if (!m_persistentData.supset((uint32_t)PersistentDataIndex::SyncPluginVersion, &SyncPlugin_VersionIndex, sizeof(SyncPlugin_VersionIndex)))
 			return false;
 
 		static const uint32_t InitialVersionIndex = 0;
 		if (!SetVersion(InitialVersionIndex))
 			return false;
+
+		return true;
 	}
 
+	// Sync Plugin Version: Upgrade?
+	uint32_t CurrentVersion = 0;
+	m_persistentData.supval((uint32_t)PersistentDataIndex::SyncPluginVersion, &CurrentVersion, sizeof(CurrentVersion));
+
+	if (CurrentVersion < SyncPlugin::VERSION_NUMBER)
+	{
+		// Upgrade
+		static const uint32_t SyncPlugin_VersionIndex = SyncPlugin::VERSION_NUMBER;
+		if (!m_persistentData.supset((uint32_t)PersistentDataIndex::SyncPluginVersion, &SyncPlugin_VersionIndex, sizeof(SyncPlugin_VersionIndex)))
+			return false;
+
+		// Upgrade Operations go here
+		// ...
+
+		// Done
+		g_plugin->Log("Persistent Data: Upgraded version from " + std::to_string(CurrentVersion) + " to " + std::to_string(SyncPlugin::VERSION_NUMBER));
+	}
+
+	// Done
 	return true;
 }
 
