@@ -89,12 +89,20 @@ bool OperandTypeSyncHandler::HandleNotification(IdaNotification& notification, O
 	case OperandType::Offset:
 		return HandleOffset(updateData);
 
-	case OperandType::_Unsupported:
+	// Unsupported
+	case OperandType::StructOffset:
+	case OperandType::Enum:
+	{
+#ifdef _DEBUG
 		g_plugin->Log("ERROR: OperandTypeSyncHandler - Unsupported Operand Type!");
-		break;
+#endif
+
+		return true;
 	}
 
-	return false;
+	default:
+		return false;
+	}
 }
 
 void OperandTypeSyncHandler::DecodePacketImpl(OperandTypeSyncUpdateData* updateData, NetworkBufferT<BasePacket>* packet)

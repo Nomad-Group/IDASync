@@ -87,5 +87,8 @@ export class UpdateClientOperation {
             packet.version = this.client.activeProject.data.binaryVersion;
             server.sendPacket(this.client, packet);
         }
+
+        // Clear Update Array (gc)
+        this.updates = null;
     }
 }

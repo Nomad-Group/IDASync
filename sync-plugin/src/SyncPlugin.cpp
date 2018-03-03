@@ -22,7 +22,7 @@ int idaapi ui_event(void *user_data, int notification_code, va_list va)
 		UIStatusBarSetColor("red");
 
 		if (UIShowAutoConnectStartupDialog())
-			g_plugin->Run();
+			g_plugin->Connect();
 	}
 
 	return 0;
@@ -83,11 +83,24 @@ void SyncPlugin::Shutdown()
 
 void SyncPlugin::Run()
 {
+	switch (UIShowMainMenu())
+	{
+	case UIMainMenuResult::ConnectDisconnect:
+		Connect();
+		break;
+
+	default:
+		return;
+	}
+}
+
+bool SyncPlugin::Connect()
+{
 	// Disconnect?
 	if (g_client->IsConnected())
 	{
 		g_client->Disconnect();
-		return;
+		return true;
 	}
 
 	// Reset
@@ -104,7 +117,7 @@ void SyncPlugin::Run()
 		Log("Error: Failed to initialize IdbManager!");
 		UIStatusBarSetColor("red");
 
-		return;
+		return false;
 	}
 
 	// Connect
@@ -114,10 +127,12 @@ void SyncPlugin::Run()
 	std::string ip = "62.75.142.79";
 #endif
 
+	ip = "62.75.142.79";
+
 	if (!g_client->Connect(ip))
 	{
 		UIStatusBarSetColor("red");
-		return;
+		return false;
 	}
 
 	// Handshake
@@ -162,7 +177,7 @@ void SyncPlugin::Run()
 		UIStatusBarSetColor("red");
 
 		delete packet;
-		return;
+		return false;
 	}
 
 	delete packet;
@@ -176,7 +191,7 @@ void SyncPlugin::Run()
 		UIStatusBarSetColor("red");
 
 		delete packetResponse;
-		return;
+		return false;
 	}
 
 	// Success?
@@ -186,7 +201,7 @@ void SyncPlugin::Run()
 		UIStatusBarSetColor("red");
 		
 		delete packetResponse;
-		return;
+		return false;
 	}
 
 	// Listener
@@ -197,7 +212,7 @@ void SyncPlugin::Run()
 		UIStatusBarSetColor("red");
 
 		delete packetResponse;
-		return;
+		return false;
 	}
 
 	// Connected!
@@ -214,6 +229,7 @@ void SyncPlugin::Run()
 
 	// Status Bar
 	UIStatusBarSetColor("green");
+	return true;
 }
 
 // Logging

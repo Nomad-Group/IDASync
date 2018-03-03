@@ -15,6 +15,7 @@ bool ItemTypeSyncHandler::ApplyUpdateImpl(ItemTypeSyncUpdateData* updateData)
 	
 	tinfo_t tinf;
 	tinf.deserialize(idati, &type, &fnames);
+
 	return set_tinfo2(static_cast<ea_t>(updateData->ptr), &tinf);
 }
 

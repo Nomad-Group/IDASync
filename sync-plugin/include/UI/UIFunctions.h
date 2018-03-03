@@ -12,3 +12,14 @@ bool UIShowAutoConnectStartupDialog(); // true => Connect
 void UIShowUpdateOperationDialog();
 void UIProgressUpdateOperationDialog(int progress, const char* label);
 void UIHideUpdateOperationDialog();
+
+// Main Menu
+enum class UIMainMenuResult
+{
+	Cancel = 0,
+
+	ConnectDisconnect,
+	RequestUpdates
+};
+
+UIMainMenuResult UIShowMainMenu();

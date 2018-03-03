@@ -17,6 +17,7 @@
 #include "ida/idp_events_strings.h"
 
 #include "loader.hpp"
+#include "auto.hpp"
 
 SyncManager* g_syncManager = nullptr;
 
@@ -116,9 +117,14 @@ void _unhandled_notification(const char* type)
 
 void SyncManager::OnIdaNotification(IdaNotification& notification)
 {
-	if (g_client == nullptr || !g_client->IsConnected() || m_notificationLock || g_plugin->GetUpdateOperation()->IsActive())
+	if (g_client == nullptr ||								// Shutdown in progress?
+		!g_client->IsConnected() ||							// Is connected to server?
+		m_notificationLock ||								// Update currently being applied?
+		g_plugin->GetUpdateOperation()->IsActive() ||		// Update operation in progress?
+		auto_state != AU_NONE)								// Auto-Analysis in progress?
 		return;
 
+	// Notify
 	for (int i = 0; i < NumSyncHandlers; i++)
 	{
 		auto syncHandler = m_syncHandler[i];

@@ -28,6 +28,9 @@ public:
 	void Shutdown();
 	void Run();
 
+	//
+	bool Connect();
+
 	// Network Events
 	bool HandleNetworkPacket(NetworkBufferT<BasePacket>*);
 	void HandleConnectionClosed();

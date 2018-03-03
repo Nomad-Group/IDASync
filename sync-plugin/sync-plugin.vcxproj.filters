@@ -147,6 +147,21 @@
     <ClCompile Include="src\client\UpdateOperation.cpp">
       <Filter>Source\client</Filter>
     </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIMainMenu.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIMainMenu.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIMainMenu.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIMainMenu.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\UIMainMenu.cpp">
+      <Filter>Source\UI</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\SyncPlugin.h">
@@ -254,6 +269,9 @@
     <ClInclude Include="include\client\UpdateOperation.h">
       <Filter>Header\client</Filter>
     </ClInclude>
+    <ClInclude Include="GeneratedFiles\ui_MenuMain.h">
+      <Filter>Generated Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="include\UI\UIStatusBar.h">
@@ -272,6 +290,12 @@
       <Filter>Form Files</Filter>
     </CustomBuild>
     <CustomBuild Include="include\UI\UIUpdateOperationDialog.h">
+      <Filter>Header\UI</Filter>
+    </CustomBuild>
+    <CustomBuild Include="MenuMain.ui">
+      <Filter>Form Files</Filter>
+    </CustomBuild>
+    <CustomBuild Include="include\UI\UIMainMenu.h">
       <Filter>Header\UI</Filter>
     </CustomBuild>
   </ItemGroup>
