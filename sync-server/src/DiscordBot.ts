@@ -60,7 +60,6 @@ export class DiscordBot {
             }
         }
 
-
         if (msg.content.startsWith("!select")) {
             let name: string = msg.content.substr(7).trim();
             database.projects.find({ name: name })
@@ -78,7 +77,7 @@ export class DiscordBot {
                 })
         }
 
-        if (msg.content == "!import") {
+        /*if (msg.content == "!import") {
             if (this.selectedProject == null) {
                 msg.reply("No project selected, use !select [name] to select a project.");
                 return;
@@ -91,7 +90,7 @@ export class DiscordBot {
             }
 
             TempImport(project);
-        }
+        }*/
     }
 
     public sendMessage(text: string | Discord.RichEmbed) {
