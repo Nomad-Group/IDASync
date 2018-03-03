@@ -131,7 +131,7 @@ export class Project {
         });
     }
 
-    private applyUpdate(update: IdbUpdate): Promise<ObjectID> {
+    public applyUpdate(update: IdbUpdate): Promise<ObjectID> {
         // Binary Version
         this.data.binaryVersion++;
         update.version = this.data.binaryVersion;
@@ -142,13 +142,6 @@ export class Project {
                 .then(() => database.idbUpdates.create(update))
                 .then(resolve)
         });
-    }
-
-    private sendUpdates(client: NetworkClient, version_start: number, version_to: number) {
-        database.idbUpdates.findUpdates(this.data._id, version_start, version_to)
-            .then(updates => {
-                updates.forEach(update => this.sendUpdate(update, client))
-            });
     }
 
     public sendUpdate(update: IdbUpdate, client: NetworkClient) {

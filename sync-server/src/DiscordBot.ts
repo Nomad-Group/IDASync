@@ -1,9 +1,10 @@
 import * as Discord from 'discord.js';
 import { Collection, GuildChannel, TextChannel } from 'discord.js';
 import { User } from './database/User';
-import { publicFeed, database } from './app';
+import { publicFeed, database, projectsManager } from './app';
 import { ProjectData } from './database/ProjectData';
 import { SyncType } from './sync/ISyncHandler';
+import { TempImport } from './TempImporter';
 
 const client = new Discord.Client();
 const token = 'NDA4NjY3ODA5NDA1NDY4Njcy.DVTZFQ.PP9-XqQZfH0D7lfLNpafyh8rwSI';
@@ -13,6 +14,8 @@ const targetChannels = [
 ];
 
 export class DiscordBot {
+    private selectedProject: ProjectData;
+
     public initialize() {
         client.on('ready', this.onReady.bind(this));
         client.on('message', this.onMessage.bind(this));
@@ -55,6 +58,39 @@ export class DiscordBot {
                             .catch(() => msg.reply("Error :/"))
                     })
             }
+        }
+
+
+        if (msg.content.startsWith("!select")) {
+            let name: string = msg.content.substr(7).trim();
+            database.projects.find({ name: name })
+                .then(prj => {
+                    if (prj.length != 1) {
+                        msg.reply("Failed");
+                        return;
+                    }
+
+                    this.selectedProject = prj[0];
+                    msg.reply("Project selected!");
+                })
+                .catch(() => {
+                    msg.reply("Failed");
+                })
+        }
+
+        if (msg.content == "!import") {
+            if (this.selectedProject == null) {
+                msg.reply("No project selected, use !select [name] to select a project.");
+                return;
+            }
+
+            let project = projectsManager.activeProjects.find(p => p.data._id.equals(this.selectedProject._id));
+            if (project == null) {
+                msg.reply("At least one user has to be connected!");
+                return;
+            }
+
+            TempImport(project);
         }
     }
 
