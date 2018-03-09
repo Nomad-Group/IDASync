@@ -33,8 +33,8 @@ void RenameStructMemberSyncHandler::DecodePacketImpl(RenameStructMemberUpdateDat
 
 void RenameStructMemberSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, RenameStructMemberUpdateData* updateData)
 {
-	packet->WriteString(updateData->structName.c_str());
+	packet->WriteString(updateData->structName);
 
 	packet->Write(&updateData->offset);
-	packet->WriteString(updateData->memberName.c_str());
+	packet->WriteString(updateData->memberName);
 }

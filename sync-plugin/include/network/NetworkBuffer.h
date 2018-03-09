@@ -39,7 +39,7 @@ public:
 	template <typename T> inline void Write(T in, size_t stSize = sizeof(T)) { Write((int8_t*) &in, stSize); };
 
 	int8_t* WritePtr(size_t); // returns buffer[offset] and reserves x
-	void WriteString(const char*);
+	void WriteString(const std::string&);
 	void WriteBool(bool);
 };
 

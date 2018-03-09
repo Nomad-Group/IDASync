@@ -16,6 +16,7 @@ bool StructMemberSyncHandler::ApplyUpdateImpl(StructMemberUpdateData* updateData
 	switch (updateData->memberType)
 	{
 	case StructMemberType::Struct:
+		// TODO: ohoh, i think this is broken
 		ti.tid = get_struc_id(updateData->targetStructName.c_str());
 		break;
 
@@ -29,13 +30,10 @@ bool StructMemberSyncHandler::ApplyUpdateImpl(StructMemberUpdateData* updateData
 	}
 
 	// Create / Change
-	// TODO: Error Handling
 	if (updateData->syncType == SyncType::CreateStructMember)
-		add_struc_member(s, updateData->memberName.c_str(), updateData->offset, updateData->flag, &ti, updateData->size);
-	else
-		set_member_type(s, updateData->offset, updateData->flag, &ti, updateData->size);
-
-	return true;
+		return add_struc_member(s, updateData->memberName.c_str(), updateData->offset, updateData->flag, &ti, updateData->size) == STRUC_ERROR_MEMBER_OK;
+	
+	return set_member_type(s, updateData->offset, updateData->flag, &ti, updateData->size);
 }
 
 bool StructMemberSyncHandler::HandleNotification(IdaNotification& notification, StructMemberUpdateData* updateData)
@@ -129,8 +127,8 @@ void StructMemberSyncHandler::DecodePacketImpl(StructMemberUpdateData* updateDat
 
 void StructMemberSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, StructMemberUpdateData* updateData)
 {
-	packet->WriteString(updateData->structName.c_str());
-	packet->WriteString(updateData->memberName.c_str());
+	packet->WriteString(updateData->structName);
+	packet->WriteString(updateData->memberName);
 	packet->Write(updateData->memberType);
 
 	packet->Write(&updateData->offset);
@@ -140,7 +138,7 @@ void StructMemberSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packe
 	switch (updateData->memberType)
 	{
 	case StructMemberType::Struct:
-		packet->WriteString(updateData->targetStructName.c_str());
+		packet->WriteString(updateData->targetStructName);
 		break;
 
 	case StructMemberType::String:

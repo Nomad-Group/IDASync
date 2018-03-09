@@ -41,6 +41,6 @@ void ItemTypeSyncHandler::DecodePacketImpl(ItemTypeSyncUpdateData* updateData, N
 void ItemTypeSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, ItemTypeSyncUpdateData* updateData)
 {
 	packet->Write(updateData->ptr);
-	packet->WriteString(updateData->type.c_str());
-	packet->WriteString(updateData->fnames.c_str());
+	packet->WriteString(updateData->type);
+	packet->WriteString(updateData->fnames);
 }

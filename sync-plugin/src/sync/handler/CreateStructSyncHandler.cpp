@@ -37,6 +37,6 @@ void CreateStructSyncHandler::DecodePacketImpl(CreateStructUpdateData* updateDat
 
 void CreateStructSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, CreateStructUpdateData* updateData)
 {
-	packet->WriteString(updateData->name.c_str());
+	packet->WriteString(updateData->name);
 	packet->WriteBool(updateData->isUnion);
 }

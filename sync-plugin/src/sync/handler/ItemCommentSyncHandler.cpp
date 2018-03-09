@@ -47,5 +47,5 @@ void ItemCommentSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet
 {
 	packet->Write(updateData->ptr);
 	packet->Write(updateData->repeatable);
-	packet->WriteString(updateData->text.c_str());
+	packet->WriteString(updateData->text);
 }

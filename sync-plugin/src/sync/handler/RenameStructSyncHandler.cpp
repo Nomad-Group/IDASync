@@ -36,6 +36,6 @@ void RenameStructSyncHandler::DecodePacketImpl(RenameStructUpdateData* updateDat
 
 void RenameStructSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, RenameStructUpdateData* updateData)
 {
-	packet->WriteString(updateData->oldName.c_str());
-	packet->WriteString(updateData->newName.c_str());
+	packet->WriteString(updateData->oldName);
+	packet->WriteString(updateData->newName);
 }

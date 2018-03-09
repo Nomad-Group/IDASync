@@ -31,6 +31,6 @@ void DeleteStructMemberSyncHandler::DecodePacketImpl(DeleteStructMemberUpdateDat
 
 void DeleteStructMemberSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, DeleteStructMemberUpdateData* updateData)
 {
-	packet->WriteString(updateData->structName.c_str());
+	packet->WriteString(updateData->structName);
 	packet->Write(&updateData->offset);
 }

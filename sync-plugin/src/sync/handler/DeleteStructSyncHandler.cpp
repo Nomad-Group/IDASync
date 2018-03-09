@@ -28,5 +28,5 @@ void DeleteStructSyncHandler::DecodePacketImpl(DeleteStructUpdateData* updateDat
 
 void DeleteStructSyncHandler::EncodePacketImpl(NetworkBufferT<BasePacket>* packet, DeleteStructUpdateData* updateData)
 {
-	packet->WriteString(updateData->name.c_str());
+	packet->WriteString(updateData->name);
 }

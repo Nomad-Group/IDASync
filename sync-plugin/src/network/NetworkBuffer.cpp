@@ -78,20 +78,20 @@ bool NetworkBuffer::ReadBool()
 	return val == 1;
 }
 
-void NetworkBuffer::WriteString(const char* str)
+void NetworkBuffer::WriteString(const std::string& str)
 {
-	if (str == nullptr)
+	if (str.empty())
 	{
 		Write<uint8_t>(0);
 		return;
 	}
 
-	auto stringSize = strlen(str) + 1;
+	auto stringSize = str.length() + 1;
 	auto requiredSize = m_stOffset + stringSize;
 	if (requiredSize > m_stActualSize)
 		Resize(requiredSize);
 
-	memcpy(&m_buffer[m_stOffset], str, stringSize);
+	memcpy(&m_buffer[m_stOffset], str.c_str(), stringSize);
 
 	m_stOffset += stringSize;
 	m_stSize += stringSize;
