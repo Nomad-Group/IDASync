@@ -44,16 +44,16 @@
       <Extensions>ui</Extensions>
       <ParseFiles>true</ParseFiles>
     </Filter>
-    <Filter Include="Generated Files">
-      <UniqueIdentifier>{71ED8ED8-ACB9-4CE9-BBE1-E00B30144E11}</UniqueIdentifier>
-      <Extensions>moc;h;cpp</Extensions>
-      <ParseFiles>true</ParseFiles>
-    </Filter>
     <Filter Include="Header\UI">
       <UniqueIdentifier>{2163aa2c-17d9-4ec5-a271-ae506739ebc6}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\UI">
       <UniqueIdentifier>{4379d29b-7457-4d5e-99f2-ddd5a31ee186}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Generated Files">
+      <UniqueIdentifier>{71ED8ED8-ACB9-4CE9-BBE1-E00B30144E11}</UniqueIdentifier>
+      <Extensions>moc;h;cpp</Extensions>
+      <ParseFiles>true</ParseFiles>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -114,50 +114,20 @@
     <ClCompile Include="src\SyncPlugin.cpp">
       <Filter>Source</Filter>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIStatusBar.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\UI\UIStatusBar.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
     <ClCompile Include="src\client\HeartbeatService.cpp">
       <Filter>Source\client</Filter>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIAutoConnectStartupDialog.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\UI\UIAutoConnectStartupDialog.cpp">
       <Filter>Source\UI</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIUpdateOperationDialog.cpp">
-      <Filter>Generated Files</Filter>
     </ClCompile>
     <ClCompile Include="src\UI\UIUpdateOperationDialog.cpp">
       <Filter>Source\UI</Filter>
     </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIAutoConnectStartupDialog.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIStatusBar.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIUpdateOperationDialog.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\client\UpdateOperation.cpp">
       <Filter>Source\client</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIMainMenu.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIMainMenu.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIMainMenu.cpp">
-      <Filter>Generated Files</Filter>
-    </ClCompile>
-    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIMainMenu.cpp">
-      <Filter>Generated Files</Filter>
     </ClCompile>
     <ClCompile Include="src\ui\UIMainMenu.cpp">
       <Filter>Source\UI</Filter>
@@ -179,6 +149,54 @@
     </ClCompile>
     <ClCompile Include="src\sync\handler\StructMemberSyncHandler.cpp">
       <Filter>Source\sync\handler</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIUpdateOperationDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIUpdateOperationDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIUpdateOperationDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIUpdateOperationDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIStatusBar.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIStatusBar.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIStatusBar.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIStatusBar.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIMainMenu.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIMainMenu.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIMainMenu.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIMainMenu.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq64)\moc_UIAutoConnectStartupDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Release (idaq32)\moc_UIAutoConnectStartupDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq32)\moc_UIAutoConnectStartupDialog.cpp">
+      <Filter>Generated Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GeneratedFiles\Debug (idaq64)\moc_UIAutoConnectStartupDialog.cpp">
+      <Filter>Generated Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -266,29 +284,17 @@
     <ClInclude Include="include\UI\UIFunctions.h">
       <Filter>Header\UI</Filter>
     </ClInclude>
-    <ClInclude Include="GeneratedFiles\ui_StatusBar.h">
-      <Filter>Generated Files</Filter>
-    </ClInclude>
     <ClInclude Include="include\client\HeartbeatService.h">
       <Filter>Header\client</Filter>
     </ClInclude>
     <ClInclude Include="include\network\packets\HeartbeatPackage.h">
       <Filter>Header\network\packets</Filter>
     </ClInclude>
-    <ClInclude Include="GeneratedFiles\ui_AutoConnectStartupDialog.h">
-      <Filter>Generated Files</Filter>
-    </ClInclude>
-    <ClInclude Include="GeneratedFiles\ui_UpdateOperationDialog.h">
-      <Filter>Generated Files</Filter>
-    </ClInclude>
     <ClInclude Include="include\network\packets\UpdateOperationPackets.h">
       <Filter>Header\network\packets</Filter>
     </ClInclude>
     <ClInclude Include="include\client\UpdateOperation.h">
       <Filter>Header\client</Filter>
-    </ClInclude>
-    <ClInclude Include="GeneratedFiles\ui_MenuMain.h">
-      <Filter>Generated Files</Filter>
     </ClInclude>
     <ClInclude Include="include\sync\handler\CreateStructSyncHandler.h">
       <Filter>Header\sync\handler</Filter>
@@ -322,9 +328,6 @@
     <CustomBuild Include="AutoConnectStartupDialog.ui">
       <Filter>Form Files</Filter>
     </CustomBuild>
-    <CustomBuild Include="UpdateOperationDialog.ui">
-      <Filter>Form Files</Filter>
-    </CustomBuild>
     <CustomBuild Include="include\UI\UIUpdateOperationDialog.h">
       <Filter>Header\UI</Filter>
     </CustomBuild>
@@ -333,6 +336,9 @@
     </CustomBuild>
     <CustomBuild Include="include\UI\UIMainMenu.h">
       <Filter>Header\UI</Filter>
+    </CustomBuild>
+    <CustomBuild Include="UpdateOperationDialog.ui">
+      <Filter>Form Files</Filter>
     </CustomBuild>
   </ItemGroup>
 </Project>
