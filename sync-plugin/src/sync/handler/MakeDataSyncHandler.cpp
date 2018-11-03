@@ -7,7 +7,7 @@ bool MakeDataSyncHandler::ApplyUpdateImpl(MakeDataSyncUpdateData* updateData)
 {
 	g_plugin->Log(number2hex(updateData->ptr) + " make data");
 
-	return do_data_ex(static_cast<ea_t>(updateData->ptr), (flags_t) updateData->flags, static_cast<asize_t>(updateData->len), BADNODE);
+	return create_data(static_cast<ea_t>(updateData->ptr), (flags_t) updateData->flags, static_cast<asize_t>(updateData->len), BADNODE);
 }
 
 bool MakeDataSyncHandler::HandleNotification(IdaNotification& notification, MakeDataSyncUpdateData* updateData)

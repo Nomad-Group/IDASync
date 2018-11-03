@@ -18,7 +18,7 @@ bool RenameStructMemberSyncHandler::HandleNotification(IdaNotification& notifica
 	updateData->structName = get_struc_name(pStruct->id).c_str();
 	
 	updateData->offset = pMember->soff;
-	updateData->memberName = get_member_name2(pMember->id).c_str();
+	updateData->memberName = get_member_name(pMember->id).c_str();
 
 	return true;
 }

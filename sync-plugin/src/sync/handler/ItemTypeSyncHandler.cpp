@@ -14,9 +14,9 @@ bool ItemTypeSyncHandler::ApplyUpdateImpl(ItemTypeSyncUpdateData* updateData)
 		fnames = (const p_list*)updateData->fnames.c_str();
 	
 	tinfo_t tinf;
-	tinf.deserialize(idati, &type, &fnames);
+	tinf.deserialize(get_idati(), &type, &fnames);
 
-	return set_tinfo2(static_cast<ea_t>(updateData->ptr), &tinf);
+	return set_tinfo(static_cast<ea_t>(updateData->ptr), &tinf);
 }
 
 bool ItemTypeSyncHandler::HandleNotification(IdaNotification& notification, ItemTypeSyncUpdateData* updateData)

@@ -130,11 +130,11 @@ void _unhandled_notification(const char* type)
 
 void SyncManager::OnIdaNotification(IdaNotification& notification)
 {
-	if (g_client == nullptr ||								// Shutdown in progress?
-		!g_client->IsConnected() ||							// Is connected to server?
-		m_notificationLock ||								// Update currently being applied?
-		g_plugin->GetUpdateOperation()->IsActive() ||		// Update operation in progress?
-		auto_state != AU_NONE)								// Auto-Analysis in progress?
+	if (g_client == nullptr ||										// Shutdown in progress?
+		!g_client->IsConnected() ||									// Is connected to server?
+		m_notificationLock ||										// Update currently being applied?
+		g_plugin->GetUpdateOperation()->IsActive() ||				// Update operation in progress?
+		get_auto_state() != AU_NONE)								// Auto-Analysis in progress?
 		return;
 
 	// Notify
@@ -151,15 +151,9 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 	{
 		switch (notification.code)
 		{
-			case processor_t::undefine:
-			case processor_t::make_code:
-			case processor_t::make_data:
-			case processor_t::move_segm:
-			case processor_t::renamed:
-			case processor_t::add_func:
-			case processor_t::del_func:
-			case processor_t::set_func_start:
-			case processor_t::set_func_end:
+			case processor_t::ev_undefine:
+			case processor_t::ev_moving_segm:
+			case processor_t::ev_rename:
 			//case processor_t::validate_flirt_func:
 			/*case processor_t::add_cref:				// NOTE: Code/Data References are not synced!
 			case processor_t::add_dref:
@@ -193,14 +187,6 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 			case idb_event::enum_bf_changed:
 			case idb_event::enum_renamed:
 			case idb_event::enum_cmt_changed:
-			//case idb_event::enum_member_created:
-			case idb_event::enum_const_created:
-			//case idb_event::enum_member_deleted:
-			case idb_event::enum_const_deleted:
-			//case idb_event::struc_created:
-			//case idb_event::struc_deleted:
-			//case idb_event::struc_renamed:
-			//case idb_event::struc_expanded:
 			case idb_event::struc_cmt_changed:
 			case idb_event::struc_member_created:
 			case idb_event::struc_member_deleted:
@@ -208,7 +194,7 @@ void SyncManager::OnIdaNotification(IdaNotification& notification)
 			case idb_event::struc_member_changed:
 			case idb_event::thunk_func_created:
 			case idb_event::func_tail_appended:
-			case idb_event::func_tail_removed:
+			case idb_event::func_tail_deleted:
 			case idb_event::tail_owner_changed:
 			case idb_event::func_noret_changed:
 			case idb_event::segm_added:

@@ -22,15 +22,11 @@ bool ItemCommentSyncHandler::HandleNotification(IdaNotification& notification, I
 	updateData->repeatable = rep;
 
 	// Comment Text
-	size_t stSize = get_cmt(ea, rep, nullptr, 0) + 1;
-	if (stSize == -1)
-		return false;
+	qstring out;
+	get_cmt(&out, ea, rep);
 
-	if (stSize > 0)
-	{
-		updateData->text.resize(stSize);
-		get_cmt(ea, rep, &updateData->text.front(), stSize);
-	}
+	if(out.length() > 0)
+		updateData->text = out.c_str();
 
 	// Send
 	return true;

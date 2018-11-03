@@ -44,7 +44,7 @@ bool StructMemberSyncHandler::HandleNotification(IdaNotification& notification, 
 	updateData->structName = get_struc_name(pStruct->id).c_str();
 		
 	// Member
-	updateData->memberName = get_member_name2(pMember->id).c_str();
+	updateData->memberName = get_member_name(pMember->id).c_str();
 
 	updateData->offset = pMember->unimem() ? 0 : pMember->soff;
 	updateData->size = (uint64_t)(pMember->unimem() ? pMember->eoff : (pMember->eoff - pMember->soff));
@@ -52,30 +52,30 @@ bool StructMemberSyncHandler::HandleNotification(IdaNotification& notification, 
 
 	// Value
 	opinfo_t ti;
-	opinfo_t* pti = retrieve_member_info(pMember, &ti);
+	opinfo_t* pti = retrieve_member_info(&ti, pMember);
 
 	if (pti)
 	{
 		// Struct
-		if (isStruct(pMember->flag))
+		if (is_struct(pMember->flag))
 		{
 			updateData->memberType = StructMemberType::Struct;
 			updateData->targetStructName = get_struc_name(ti.tid).c_str();
 		}
 		// String
-		else if (isASCII(pMember->flag))
+		else if (is_strlit(pMember->flag))
 		{
 			updateData->memberType = StructMemberType::String;
 			updateData->stringType = ti.strtype;
 		}
 		// Offset
-		else if (isOff0(pMember->flag) || isOff1(pMember->flag))
+		else if (is_off0(pMember->flag) || is_off1(pMember->flag))
 		{
 			updateData->memberType = StructMemberType::Offset;
 			updateData->offsetRefInfo = ti.ri;
 		}
 		// Enum (unsupported)
-		else if (isEnum0(pMember->flag) || isEnum1(pMember->flag))
+		else if (is_enum0(pMember->flag) || is_enum1(pMember->flag))
 		{
 			updateData->memberType = StructMemberType::Enum;
 		}

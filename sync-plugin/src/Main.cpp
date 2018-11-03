@@ -19,10 +19,12 @@ void idaapi IDAP_term(void)
 		g_plugin = nullptr;
 	}
 }
-void idaapi IDAP_run(int arg)
+bool idaapi IDAP_run(size_t arg)
 {
 	if (g_plugin)
 		g_plugin->Run();
+
+	return true;
 }
 
 char IDAP_comment[] = "Sync Plugin (Alpha)";

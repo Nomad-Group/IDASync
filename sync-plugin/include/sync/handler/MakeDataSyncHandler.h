@@ -12,7 +12,7 @@ struct MakeDataSyncUpdateData : IdbUpdateData
 class MakeDataSyncHandler : public SyncHandlerImpl<MakeDataSyncUpdateData, SyncType::MakeData>
 {
 public:
-	MakeDataSyncHandler() : SyncHandlerImpl(IdaNotificationType::idp, processor_t::make_data)
+	MakeDataSyncHandler() : SyncHandlerImpl(IdaNotificationType::idb, idb_event::make_data)
 	{}
 
 protected:

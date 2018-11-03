@@ -10,7 +10,7 @@ struct AddFuncSyncUpdateData : IdbUpdateData
 class AddFuncSyncHandler : public SyncHandlerImpl<AddFuncSyncUpdateData, SyncType::AddFunc>
 {
 public:
-	AddFuncSyncHandler() : SyncHandlerImpl(IdaNotificationType::idp, processor_t::add_func)
+	AddFuncSyncHandler() : SyncHandlerImpl(IdaNotificationType::idb, idb_event::func_added)
 	{}
 
 protected:

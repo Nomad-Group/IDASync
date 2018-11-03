@@ -35,7 +35,7 @@ bool HandleOffset(OperandTypeSyncUpdateData* updateData)
 {
 	// Gather refinfo
 	refinfo_t ri;
-	if (!get_refinfo(static_cast<ea_t>(updateData->ptr), updateData->numOperands, &ri))
+	if (!get_refinfo(&ri, static_cast<ea_t>(updateData->ptr), updateData->numOperands))
 	{
 		g_plugin->Log("ERROR: OperandTypeSyncHandler - Missing refinfo on offset " + number2hex(updateData->ptr));
 		return false;
@@ -57,29 +57,29 @@ bool OperandTypeSyncHandler::HandleNotification(IdaNotification& notification, O
 
 	updateData->ptr = static_cast<uint64_t>(ptr);
 	updateData->numOperands = va_arg(notification.args, int);
-	updateData->flags = get_flags_novalue(ptr);
+	updateData->flags = get_flags(ptr);
 
 	// Operand Type
 	if (updateData->numOperands == 0)
 	{
 		updateData->flags = get_optype_flags0(updateData->flags);
 
-		if (isEnum0(updateData->flags))
+		if (is_enum0(updateData->flags))
 			updateData->operandType = OperandType::_Unsupported; // OperandType::Enum;
-		else if (isStroff0(updateData->flags))
+		else if (is_stroff0(updateData->flags))
 			updateData->operandType = OperandType::_Unsupported; // OperandType::StructOffset;
-		else if (isOff0(updateData->flags))
+		else if (is_off0(updateData->flags))
 			updateData->operandType = OperandType::Offset;
 	}
 	else if (updateData->numOperands == 1)
 	{
 		updateData->flags = get_optype_flags1(updateData->flags);
 
-		if (isEnum1(updateData->flags))
+		if (is_enum1(updateData->flags))
 			updateData->operandType = OperandType::_Unsupported; // OperandType::Enum;
-		else if (isStroff1(updateData->flags))
+		else if (is_stroff1(updateData->flags))
 			updateData->operandType = OperandType::_Unsupported; // OperandType::StructOffset;
-		else if (isOff1(updateData->flags))
+		else if (is_off1(updateData->flags))
 			updateData->operandType = OperandType::Offset;
 	}
 

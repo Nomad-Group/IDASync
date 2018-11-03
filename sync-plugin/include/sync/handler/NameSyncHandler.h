@@ -11,7 +11,7 @@ struct NameSyncUpdateData : IdbUpdateData
 class NameSyncHandler : public SyncHandlerImpl<NameSyncUpdateData, SyncType::Name>
 {
 public:
-	NameSyncHandler() : SyncHandlerImpl(IdaNotificationType::idp, processor_t::renamed)
+	NameSyncHandler() : SyncHandlerImpl(IdaNotificationType::idb, idb_event::renamed)
 	{}
 
 protected:

@@ -9,7 +9,7 @@ struct UndefineSyncUpdateData : IdbUpdateData
 class UndefineSyncHandler : public SyncHandlerImpl<UndefineSyncUpdateData, SyncType::Undefine>
 {
 public:
-	UndefineSyncHandler() : SyncHandlerImpl(IdaNotificationType::idp, processor_t::undefine)
+	UndefineSyncHandler() : SyncHandlerImpl(IdaNotificationType::idp, processor_t::ev_undefine)
 	{}
 
 protected:

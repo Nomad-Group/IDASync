@@ -7,7 +7,7 @@ bool UndefineSyncHandler::ApplyUpdateImpl(UndefineSyncUpdateData* updateData)
 {
 	g_plugin->Log(number2hex(updateData->ptr) + " undefined");
 
-	return do_unknown(static_cast<ea_t>(updateData->ptr), DOUNK_SIMPLE);
+	return del_items(static_cast<ea_t>(updateData->ptr), DELIT_SIMPLE);
 }
 
 bool UndefineSyncHandler::HandleNotification(IdaNotification& notification, UndefineSyncUpdateData* updateData)

@@ -17,8 +17,8 @@ bool AddFuncSyncHandler::HandleNotification(IdaNotification& notification, AddFu
 	if (func == nullptr)
 		return false;
 
-	updateData->ptrStart = static_cast<uint64_t>(func->startEA);
-	updateData->ptrEnd = static_cast<uint64_t>(func->endEA);
+	updateData->ptrStart = static_cast<uint64_t>(func->start_ea);
+	updateData->ptrEnd = static_cast<uint64_t>(func->end_ea);
 
 	return true;
 }

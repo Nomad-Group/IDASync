@@ -10,7 +10,7 @@ struct MakeCodeSyncUpdateData : IdbUpdateData
 class MakeCodeSyncHandler : public SyncHandlerImpl<MakeCodeSyncUpdateData, SyncType::MakeCode>
 {
 public:
-	MakeCodeSyncHandler() : SyncHandlerImpl(IdaNotificationType::idp, processor_t::make_code)
+	MakeCodeSyncHandler() : SyncHandlerImpl(IdaNotificationType::idb, idb_event::make_code)
 	{}
 
 protected:
