@@ -9,7 +9,7 @@
 
 #ifndef __PILOT_H
 #define __PILOT_H
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
+#pragma pack(push, 1)
 
 #include <time.h>
 
@@ -65,7 +65,8 @@ typedef DWord LocalID;
 //      Header of PRC file:
 //
 
-struct DatabaseHdrType {
+struct DatabaseHdrType
+{
   Byte name[32];                        // name of database
 #define PILOT_CREATOR_PILA 0x616C6950L  // "Pila"
   Word attributes;                      // database attributes
@@ -100,8 +101,8 @@ struct DatabaseHdrType {
 //
 //      Each resource has the following entry:
 //
-
-struct ResourceMapEntry {
+struct ResourceMapEntry
+{
   uint32 fcType;
   ushort id;
   uint32 ulOffset;
@@ -109,8 +110,8 @@ struct ResourceMapEntry {
 
 
 // Pilot bitmap format (also format of icon)
-
-struct pilot_bitmap_t {
+struct pilot_bitmap_t
+{
   ushort cx;
   ushort cy;
   ushort cbRow;
@@ -123,14 +124,16 @@ struct pilot_bitmap_t {
  * code0000[long 0] nBytesAboveA5
  * code0000[long 1] nBytesBelowA5
  */
-struct code0000_t {
+struct code0000_t
+{
   uint32 nBytesAboveA5;
   uint32 nBytesBelowA5;
 };
 
 // pref0000
 
-struct pref0000_t {
+struct pref0000_t
+{
   ushort flags;
 #define sysAppLaunchFlagNewThread  0x0001
 #define sysAppLaunchFlagNewStack   0x0002

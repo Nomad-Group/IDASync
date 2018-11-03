@@ -6,117 +6,94 @@
 
 #include "tosh.hpp"
 
-static bool flow;       // флажок стопа
+static bool flow;
 //----------------------------------------------------------------------
-// поставим использование/изменение операндов
-static void TouchArg(op_t &x,int isAlt,int isload)
+static void handle_operand(const insn_t &insn, const op_t &x, bool is_forced, bool isload)
 {
-ea_t ea = toEA(codeSeg(x.addr,x.n), x.addr);
-switch ( x.type ) {
-// эта часть не используется !
-case o_void:  break;
-// тут тоже нечего делать
-case o_phrase:                // 2 registers or indirect addressing
-case o_reg:           break;
+  ea_t ea = map_code_ea(insn, x);
+  flags_t F = get_flags(insn.ea);
+  switch ( x.type )
+  {
+    case o_void:
+      break;
+    case o_phrase:                // 2 registers or indirect addressing
+    case o_reg:
+      break;
 
-// это пока тоже не анализируем
-case o_displ:         break;
+    case o_displ:
+      break;
 
-// непосредственный операнд
-case o_imm:     // непосредственный не может меняться
-                        if ( ! isload ) goto badTouch;
-                        // поставим флажок непосредственного операнда
-                        doImmd(cmd.ea);
-                        // если не форсирован и помечен смещением
-                        if ( !isAlt && isOff(uFlag,x.n) )
-                                // это смещение !
-                                ua_add_dref(x.offb,ea,dr_O);
-                        break;
+    case o_imm:
+      if ( !isload )
+        goto badTouch;
+      set_immd(insn.ea);
+      if ( !is_forced && is_off(F,x.n) )
+        insn.add_dref(ea, x.offb, dr_O);    // offset!
+      break;
 
-// переход или вызов
-case o_near:    // это вызов ? (или переход)
-                                if ( InstrIsSet(cmd.itype,CF_CALL) ){
-                                        // поставим ссылку на код
-                                        ua_add_cref(x.offb,ea,fl_CN);
-                                        // это функция без возврата ?
-#if IDP_INTERFACE_VERSION > 37
-                                        flow = func_does_return(ea);
-#else
-                                        // получим описатель функции
-                                        func_t *pfn = get_func(ea);
-                                        // если функция описана и не имеет возврата - остановим
-                                        if ( pfn != NULL && (pfn->flags & FUNC_NORET)  ) flow = false;
-#endif
-                                }
-                                else ua_add_cref(x.offb,ea,fl_JN);
-                break;
+    case o_near:
+      if ( has_insn_feature(insn.itype,CF_CALL) )
+      {
+        insn.add_cref(ea, x.offb, fl_CN);
+        flow = func_does_return(ea);
+      }
+      else
+      {
+        insn.add_cref(ea, x.offb, fl_JN);
+      }
+      break;
 
-// ссылка на память
-case o_mem:     if ( x.specflag1&URB_LDA ){
-                                if ( x.specflag1&URB_LDA2 ){
-                                        if ( isDefArg1(uFlag) ){
-                                                doImmd(cmd.ea);
-                                                // если не форсирован и помечен смещением
-                                                if ( !isAlt && isOff(uFlag,x.n) )
-                                                        // это смещение !
-                                                        ua_add_dref(x.offb,ea,dr_O);
-                                                break;
-                                        }
-                                }
-                                ua_add_dref(x.offb,x.addr, dr_O);
-                        }
-                        else{
-                                // сделаем данные по указанному адресу
-                                ua_dodata2(x.offb, ea, x.dtyp);
-                                // если изменяется - поставим переменную
-                                if ( ! isload ) doVar(ea);
-                                // добавим ссылку на память
-                                ua_add_dref(x.offb,ea,isload ? dr_R : dr_W);
-                        }
-                        break;
+    case o_mem:
+      if ( x.specflag1&URB_LDA )
+      {
+        if ( x.specflag1&URB_LDA2 )
+        {
+          if ( is_defarg1(F) )
+          {
+            set_immd(insn.ea);
+            if ( !is_forced && is_off(F,x.n) )
+              insn.add_dref(ea, x.offb, dr_O);
+            break;
+          }
+        }
+        insn.add_dref(x.addr, x.offb, dr_O);
+      }
+      else
+      {
+        insn.create_op_data(ea, x);
+        insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+      }
+      break;
 
-// прочее - сообщим ошибку
-default:
+    default:
 badTouch:
-#if IDP_INTERFACE_VERSION > 37
-                warning("%a %s,%d: bad optype %d",
-                                cmd.ea, cmd.get_canon_mnem(),
-#else
-                warning("%08lX %s,%d: bad optype (%x)",
-                                cmd.ea,(char far *)Instructions[cmd.itype].name,
-#endif
-                                x.n, x.type);
-                break;
-}
+      warning("%a %s,%d: bad optype %d", insn.ea, insn.get_canon_mnem(), x.n, x.type);
+      break;
+  }
 }
 
 //----------------------------------------------------------------------
-// емулятер
-int idaapi T900_emu(void)
+int idaapi T900_emu(const insn_t &insn)
 {
-#if IDP_INTERFACE_VERSION > 37
-uint32 Feature = cmd.get_canon_feature();
-#else
-uint32 Feature = Instructions[cmd.itype].feature;
-uFlag = getFlags(cmd.ea);
-#endif
-  // получим типы операндов
-  int flag1 = is_forced_operand(cmd.ea, 0);
-  int flag2 = is_forced_operand(cmd.ea, 1);
+  uint32 Feature = insn.get_canon_feature();
+
+  bool flag1 = is_forced_operand(insn.ea, 0);
+  bool flag2 = is_forced_operand(insn.ea, 1);
 
   flow = ((Feature & CF_STOP) == 0);
 
-  // пометим ссылки двух операндов
-  if ( Feature & CF_USE1) TouchArg(cmd.Op1, flag1, 1 );
-  if ( Feature & CF_USE2) TouchArg(cmd.Op2, flag2, 1 );
-  // поставим переход в очередь
-  if ( Feature & CF_JUMP) QueueSet(Q_jumps,cmd.ea );
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, flag1, true);
+  if ( Feature & CF_USE2 ) handle_operand(insn, insn.Op2, flag2, true);
 
-  // поставим изменения
-  if ( Feature & CF_CHG1) TouchArg(cmd.Op1, flag1, 0 );
-  if ( Feature & CF_CHG2) TouchArg(cmd.Op2, flag2, 0 );
-  // если не стоп - продолжим на след. инструкции
-  if ( flow) ua_add_cref(0,cmd.ea+cmd.size,fl_F );
+  if ( Feature & CF_JUMP )
+    remember_problem(PR_JUMP, insn.ea);
 
-  return(1);
+
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, flag1, false);
+  if ( Feature & CF_CHG2 ) handle_operand(insn, insn.Op2, flag2, false);
+
+  if ( flow )
+    add_cref(insn.ea, insn.ea+insn.size, fl_F);
+
+  return 1;
 }

@@ -597,116 +597,118 @@ static uchar find_opcode(uchar code, const opcode_t *table, size_t size)
 }
 
 //--------------------------------------------------------------------------
-inline void opmem(op_t &x, char dtyp)
+inline void opmem(insn_t &insn, op_t &x, char dtype)
 {
   x.type = o_mem;
-  x.dtyp = dtyp;
-  x.offb = (uchar)cmd.size;
-  x.addr = ua_next_byte();
+  x.dtype = dtype;
+  x.offb = (uchar)insn.size;
+  x.addr = insn.get_next_byte();
 }
 
-inline void opimm(op_t &x, uint32 value, char dtyp)
+inline void opimm(op_t &x, uint32 value, char dtype)
 {
   x.type = o_imm;
-  x.dtyp = dtyp;
+  x.dtype = dtype;
   x.value = value;
 }
 
-inline void oprel(op_t &x)
+inline void oprel(insn_t &insn, op_t &x)
 {
   x.type = o_near;
-  x.dtyp = dt_code;
-  x.offb = (uchar)cmd.size;
-  int32 disp = char(ua_next_byte());
-  x.addr = cmd.ip + cmd.size + disp;
+  x.dtype = dt_code;
+  x.offb = (uchar)insn.size;
+  int32 disp = char(insn.get_next_byte());
+  x.addr = insn.ip + insn.size + disp;
 }
 
 inline void opreg(op_t &x, uchar reg)
 {
   x.type = o_reg;
-  x.dtyp = dt_byte;
-  x.reg  = reg;
+  x.dtype = dt_byte;
+  x.reg = reg;
 }
 
-inline void opdsp(op_t &x, uchar reg, char dtyp)
+inline void opdsp(insn_t &insn, op_t &x, uchar reg, char dtype)
 {
   x.type = o_displ;
-  x.dtyp = dtyp;
+  x.dtype = dtype;
   x.reg  = reg;
-  x.offb = (uchar)cmd.size;
-  x.addr = ua_next_byte();
+  x.offb = (uchar)insn.size;
+  x.addr = insn.get_next_byte();
 }
 
-inline void oplng(op_t &x)
+inline void oplng(insn_t &insn, op_t &x)
 {
-  opmem(x, dt_word);
-  if ( (cmd.auxpref & aux_indir) == 0 )
+  opmem(insn, x, dt_word);
+  if ( (insn.auxpref & aux_indir) == 0 )
   {
-    cmd.auxpref |= aux_16;
-    x.dtyp = dt_byte;
+    insn.auxpref |= aux_16;
+    x.dtype = dt_byte;
     x.addr <<= 8;
-    x.addr |= ua_next_byte();
+    x.addr |= insn.get_next_byte();
   }
   else
   {
-    cmd.auxpref |= aux_long;
+    insn.auxpref |= aux_long;
   }
 }
 
 enum ndx_t { ndx_short, ndx_long, ndx_none };
 
-static void opndx(op_t &x, int type, uchar index)
+static void opndx(insn_t &insn, op_t &x, int type, uchar index)
 {
   switch ( type )
   {
     case ndx_short:
-      opmem(x, dt_byte);
+      opmem(insn, x, dt_byte);
       break;
     case ndx_long:
-      oplng(x);
+      oplng(insn, x);
       break;
     case ndx_none:
       x.type = o_phrase;
-      x.dtyp = dt_byte;
+      x.dtype = dt_byte;
       break;
   }
   if ( index )
   {
-    if ( type != ndx_none && (cmd.auxpref & aux_indir) == 0 )
+    if ( type != ndx_none && (insn.auxpref & aux_indir) == 0 )
       x.type = o_displ;
-    cmd.auxpref |= aux_index;
+    insn.auxpref |= aux_index;
     x.reg = index;
   }
 }
 
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi st7_ana(insn_t *_insn)
 {
-  uchar code = ua_next_byte();
+  insn_t &insn = *_insn;
+  uchar code = insn.get_next_byte();
   bool y = false;
   switch ( code )
   {
     case 0x90:
       y = true;
-      code = ua_next_byte();
-      cmd.itype = find_opcode(code, pre90, qnumber(pre90));
+      code = insn.get_next_byte();
+      insn.itype = find_opcode(code, pre90, qnumber(pre90));
       break;
     case 0x91:
       y = true;
-      cmd.auxpref |= aux_indir;
-      code = ua_next_byte();
-      cmd.itype = find_opcode(code, pre91, qnumber(pre91));
+      insn.auxpref |= aux_indir;
+      code = insn.get_next_byte();
+      insn.itype = find_opcode(code, pre91, qnumber(pre91));
       break;
     case 0x92:
-      cmd.auxpref |= aux_indir;
-      code = ua_next_byte();
-      cmd.itype = find_opcode(code, pre92, qnumber(pre92));
+      insn.auxpref |= aux_indir;
+      code = insn.get_next_byte();
+      insn.itype = find_opcode(code, pre92, qnumber(pre92));
       break;
     default:
-      cmd.itype = primary[code];
+      insn.itype = primary[code];
       break;
   }
-  if ( cmd.itype == ST7_null ) return 0;
+  if ( insn.itype == ST7_null )
+    return 0;
   uchar xy = y ? Y : X;
   uchar index;
   int ndx;
@@ -717,9 +719,9 @@ int idaapi ana(void)
 //        btjt [short], #p, br  ; 7 4 92 0n XX XX (n=00+2*p)
 //        btjf short, #p, brl   ; 5 3    0n XX XX (n=01+2*p)
 //        btjf [short], #p, br  ; 7 4 92 0n XX XX (n=01+2*p)
-      opmem(cmd.Op1, dt_byte);
-      opimm(cmd.Op2, (code>>1) & 7, dt_byte);
-      oprel(cmd.Op3);
+      opmem(insn, insn.Op1, dt_byte);
+      opimm(insn.Op2, (code>>1) & 7, dt_byte);
+      oprel(insn, insn.Op3);
       break;
 
     case 0x1:
@@ -727,8 +729,8 @@ int idaapi ana(void)
 //        bset [short], #p      ; 7 3 92 1n XX    (n=10+2*p)
 //        bres short, #p        ; 5 2    1n XX    (n=11+2*p)
 //        bres [short], #p      ; 7 3 92 1n XX    (n=11+2*p)
-      opmem(cmd.Op1, dt_byte);
-      opimm(cmd.Op2, (code>>1) & 7, dt_byte);
+      opmem(insn, insn.Op1, dt_byte);
+      opimm(insn.Op2, (code>>1) & 7, dt_byte);
       break;
 
     case 0x2:
@@ -771,10 +773,10 @@ int idaapi ana(void)
 //        jrih  rel             ; 3 2    2F XX
 //        jrih  [rel8]          ; 5 3 92 2F XX
 REL:
-      if ( cmd.auxpref & aux_indir )
-        opmem(cmd.Op1, dt_word);
+      if ( insn.auxpref & aux_indir )
+        opmem(insn, insn.Op1, dt_word);
       else
-        oprel(cmd.Op1);
+        oprel(insn, insn.Op1);
       break;
 
     case 0x3:
@@ -804,7 +806,7 @@ REL:
 //        swap [short]          ; 7 3 92 3E XX
 //        clr short             ; 5 2    3F XX
 //        clr [short]           ; 7 3 92 3F XX
-      opmem(cmd.Op1, dt_byte);
+      opmem(insn, insn.Op1, dt_byte);
       break;
 
     case 0x4:
@@ -823,14 +825,14 @@ REL:
 //        tnz a                 ; 3 1    4D
 //        swap a                ; 3 1    4E
 //        clr a                 ; 3 1    4F
-      if ( cmd.itype == ST7_mul )
+      if ( insn.itype == ST7_mul )
       {
-        opreg(cmd.Op1, xy);
-        opreg(cmd.Op2, A);
+        opreg(insn.Op1, xy);
+        opreg(insn.Op2, A);
       }
       else
       {
-        opreg(cmd.Op1, A);
+        opreg(insn.Op1, A);
       }
       break;
 
@@ -861,7 +863,7 @@ REL:
 //        swap y                ; 4 2 90 5E
 //        clr x                 ; 3 1    5F
 //        clr y                 ; 4 2 90 5F
-      opreg(cmd.Op1, xy);
+      opreg(insn.Op1, xy);
       break;
 
     case 0x6:
@@ -919,15 +921,15 @@ REL:
 //        clr ([short],x)       ; 8 3 92 6F XX
 // o_displ Short     Direct   Indexed  ld A,($10,X)             00..1FE                + 1
 // o_mem   Short     Indirect Indexed  ld A,([$10],X)           00..1FE    00..FF byte + 2
-      if ( cmd.auxpref & aux_indir )
+      if ( insn.auxpref & aux_indir )
       {
-        opmem(cmd.Op1, dt_byte);
-        cmd.auxpref |= aux_index;
-        cmd.Op1.reg = xy;
+        opmem(insn, insn.Op1, dt_byte);
+        insn.auxpref |= aux_index;
+        insn.Op1.reg = xy;
       }
       else
       {
-        opdsp(cmd.Op1, xy, dt_byte);
+        opdsp(insn, insn.Op1, xy, dt_byte);
       }
       break;
 
@@ -958,9 +960,9 @@ REL:
 //        swap (y)              ; 6 2 90 7E
 //        clr (x)               ; 5 1    7F
 //        clr (y)               ; 6 2 90 7F
-      cmd.Op1.type = o_phrase;
-      cmd.Op1.dtyp = dt_byte;
-      cmd.Op1.reg  = xy;
+      insn.Op1.type = o_phrase;
+      insn.Op1.dtype = dt_byte;
+      insn.Op1.reg = xy;
       break;
 
     case 0x8:
@@ -977,12 +979,14 @@ REL:
 //        push cc               ; 3 1    8A
 //        halt                  ; 2 1    8E
 //        wfi                   ; 2 1    8F
-      if ( cmd.itype == ST7_pop || cmd.itype == ST7_push )
+      if ( insn.itype == ST7_pop || insn.itype == ST7_push )
       {
         uchar c = (code - 0x84) & 3;
-        if ( c == 2 ) c = CC;
-        if ( c == 1 ) c = xy;
-        opreg(cmd.Op1, c);
+        if ( c == 2 )
+          c = CC;
+        else if ( c == 1 )
+          c = xy;
+        opreg(insn.Op1, c);
       }
       break;
 
@@ -992,31 +996,31 @@ REL:
         case 0x93:
 //        ld x, y               ; 2 1    93
 //        ld y, x               ; 3 2 90 93
-          opreg(cmd.Op1, y ? Y : X);
-          opreg(cmd.Op2, y ? X : Y);
+          opreg(insn.Op1, y ? Y : X);
+          opreg(insn.Op2, y ? X : Y);
           break;
         case 0x94:
 //        ld s, x               ; 2 1    94
 //        ld s, y               ; 3 2 90 94
-          opreg(cmd.Op1, S);
-          opreg(cmd.Op2, xy);
+          opreg(insn.Op1, S);
+          opreg(insn.Op2, xy);
           break;
         case 0x95:
 //        ld s, a               ; 2 1    95
-          opreg(cmd.Op1, S);
-          opreg(cmd.Op2, A);
+          opreg(insn.Op1, S);
+          opreg(insn.Op2, A);
           break;
         case 0x96:
 //        ld x, s               ; 2 1    96
 //        ld y, s               ; 3 2 90 96
-          opreg(cmd.Op1, xy);
-          opreg(cmd.Op2, S);
+          opreg(insn.Op1, xy);
+          opreg(insn.Op2, S);
           break;
         case 0x97:
 //        ld x, a               ; 2 1    97
 //        ld y, a               ; 3 2 90 97
-          opreg(cmd.Op1, xy);
-          opreg(cmd.Op2, A);
+          opreg(insn.Op1, xy);
+          opreg(insn.Op2, A);
           break;
         default:
 //        rcf                   ; 2 1    98
@@ -1028,14 +1032,14 @@ REL:
           break;
         case 0x9E:
 //        ld a, s               ; 2 1    9E
-          opreg(cmd.Op1, A);
-          opreg(cmd.Op2, S);
+          opreg(insn.Op1, A);
+          opreg(insn.Op2, S);
           break;
         case 0x9F:
 //        ld a, x               ; 2 1    9F
 //        ld a, y               ; 3 2 90 9F
-          opreg(cmd.Op1, A);
-          opreg(cmd.Op2, xy);
+          opreg(insn.Op1, A);
+          opreg(insn.Op2, xy);
           break;
       }
       break;
@@ -1057,9 +1061,10 @@ REL:
 //        callr [short]         ; 8 3 92 AD XX
 //        ld x, #byte           ; 2 2    AE XX
 //        ld y, #byte           ; 3 3 90 AE XX
-      if ( cmd.itype == ST7_callr ) goto REL;
-      opreg(cmd.Op1, (code==0xA3 || code==0xAE) ? xy : A);
-      opimm(cmd.Op2, ua_next_byte(), dt_byte);
+      if ( insn.itype == ST7_callr )
+        goto REL;
+      opreg(insn.Op1, (code == 0xA3 || code == 0xAE) ? xy : A);
+      opimm(insn.Op2, insn.get_next_byte(), dt_byte);
       break;
 
     case 0xB:
@@ -1095,8 +1100,8 @@ REL:
 //        or a, [short]         ; 5 3 92 BA XX
 //        add a, short          ; 3 2    BB XX
 //        add a, [short]        ; 5 3 92 BB XX
-          opreg(cmd.Op1, A);
-          opmem(cmd.Op2, dt_byte);
+          opreg(insn.Op1, A);
+          opmem(insn, insn.Op2, dt_byte);
           break;
         case 0xB3:
         case 0xBE:
@@ -1108,14 +1113,14 @@ REL:
 //        ld y, short           ; 4 3 90 BE XX
 //        ld y, [short]         ; 5 3 91 BE XX
 //        ld x, [short]         ; 5 3 92 BE XX
-          opreg(cmd.Op1, xy);
-          opmem(cmd.Op2, dt_byte);
+          opreg(insn.Op1, xy);
+          opmem(insn, insn.Op2, dt_byte);
           break;
         case 0xB7:
 //        ld short, a           ; 4 2    B7 XX
 //        ld [short], a         ; 6 3 92 B7 XX
-          opmem(cmd.Op1, dt_byte);
-          opreg(cmd.Op2, A);
+          opmem(insn, insn.Op1, dt_byte);
+          opreg(insn.Op2, A);
           break;
         case 0xBC:
         case 0xBD:
@@ -1123,11 +1128,11 @@ REL:
 //        jp [short]            ; 4 3 92 BC XX
 //        call short            ; 5 2    BD XX
 //        call [short]          ; 7 3 92 BD XX
-          opmem(cmd.Op1, dt_word);
-          if ( (cmd.auxpref & aux_indir) == 0 )
+          opmem(insn, insn.Op1, dt_word);
+          if ( (insn.auxpref & aux_indir) == 0 )
           {
-            cmd.Op1.type = o_near;
-            cmd.Op1.dtyp = dt_code;
+            insn.Op1.type = o_near;
+            insn.Op1.dtype = dt_code;
           }
           break;
         case 0xBF:
@@ -1135,8 +1140,8 @@ REL:
 //        ld short, y           ; 5 3 90 BF XX
 //        ld [short], y         ; 6 3 91 BF XX
 //        ld [short], x         ; 6 3 92 BF XX
-          opmem(cmd.Op1, dt_byte);
-          opreg(cmd.Op2, xy);
+          opmem(insn, insn.Op1, dt_byte);
+          opreg(insn.Op2, xy);
           break;
       }
       break;
@@ -1240,8 +1245,8 @@ COMMON:
 //        add a, (long,y)       ; 6 4 90 DB MS LS
 //        add a, ([short.w],y)  ; 7 3 91 DB XX
 //        add a, ([short.w],x)  ; 7 3 92 DB XX
-          opreg(cmd.Op1, A);
-          opndx(cmd.Op2, ndx, index);
+          opreg(insn.Op1, A);
+          opndx(insn, insn.Op2, ndx, index);
           break;
         case 0x3:
         case 0xE:
@@ -1253,16 +1258,16 @@ COMMON:
 //        ld y, (long,y)        ; 6 4 90 DE MS LS
 //        ld y, ([short.w],y)   ; 7 3 91 DE XX
 //        ld x, ([short.w],x)   ; 7 3 92 DE XX
-          opreg(cmd.Op1, xy);
-          opndx(cmd.Op2, ndx, index);
+          opreg(insn.Op1, xy);
+          opndx(insn, insn.Op2, ndx, index);
           break;
         case 0x7:
 //        ld (long,x), a        ; 6 3    D7 MS LS
 //        ld (long,y), a        ; 7 4 90 D7 MS LS
 //        ld ([short.w],y), a   ; 8 3 91 D7 XX
 //        ld ([short.w],x), a   ; 8 3 92 D7 XX
-          opndx(cmd.Op1, ndx, index);
-          opreg(cmd.Op2, A);
+          opndx(insn, insn.Op1, ndx, index);
+          opreg(insn.Op2, A);
           break;
         case 0xC:
         case 0xD:
@@ -1274,11 +1279,11 @@ COMMON:
 //        call (long,y)         ; 8 4 90 DD MS LS
 //        call ([short.w],y)    ; 9 3 91 DD XX
 //        call ([short.w],x)    ; 9 3 92 DD XX
-          opndx(cmd.Op1, ndx, index);
-          if ( (cmd.auxpref & aux_indir) == 0 && !index )
+          opndx(insn, insn.Op1, ndx, index);
+          if ( (insn.auxpref & aux_indir) == 0 && !index )
           {
-            cmd.Op1.type = o_near;
-            cmd.Op1.dtyp = dt_code;
+            insn.Op1.type = o_near;
+            insn.Op1.dtype = dt_code;
           }
           break;
         case 0xF:
@@ -1286,8 +1291,8 @@ COMMON:
 //        ld (long,y), y        ; 7 4 90 DF MS LS
 //        ld ([short.w],y), y   ; 8 3 91 DF XX
 //        ld ([short.w],x), x   ; 8 3 92 DF XX
-          opndx(cmd.Op1, ndx, index);
-          opreg(cmd.Op2, xy);
+          opndx(insn, insn.Op1, ndx, index);
+          opreg(insn.Op2, xy);
           break;
       }
       break;
@@ -1398,17 +1403,15 @@ COMMON:
 //        ld (x), x             ; 4 1    FF
 //        ld (y), y             ; 5 2 90 FF
   }
-  return cmd.size;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
-void interr(const char *module)
+void interr(const insn_t &insn, const char *module)
 {
   const char *name = NULL;
-  if ( cmd.itype < ph.instruc_end )
-    name = Instructions[cmd.itype].name;
-  else
-    cmd.itype = uint16(ph.instruc_start);
-  warning("%a(%s): internal error in %s", cmd.ea, name, module);
+  if ( insn.itype < ph.instruc_end )
+    name = Instructions[insn.itype].name;
+  warning("%a(%s): internal error in %s", insn.ea, name, module);
 }
 

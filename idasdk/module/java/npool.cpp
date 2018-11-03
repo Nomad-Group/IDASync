@@ -12,7 +12,7 @@
 #include "java.hpp"
 #include <loader.hpp>
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include "npooluti.hpp"
 
 #define _CUR_IDP_VER IDP_JDK16
@@ -23,6 +23,7 @@ static const char constant_pool[] = "$ Constant Pool ~";
 void myBase(const char *arg)
 {
   int i, v;
+  ssize_t size;
 
   if ( !arg ) // load old file
   {
@@ -46,13 +47,11 @@ void myBase(const char *arg)
         break;
     }
 
-    if ( i != (int)ConstantNode.supval(CNS_CLASS, NULL, (size_t)-1)
-      || ConstantNode.supval(CNS_CLASS, &curClass, sizeof(curClass)) <
-                                         (int32)offsetof(ClassInfo, MajVers)
-      || !curClass.ClassNode )
-    {
+    if ( i != (int)ConstantNode.supval(CNS_CLASS, NULL, (size_t)-1) )
       goto BADIDB;
-    }
+    size = ConstantNode.supval(CNS_CLASS, &curClass, sizeof(curClass));
+    if ( size < (int32)offsetof(ClassInfo, MajVers) || !curClass.ClassNode )
+      goto BADIDB;
     if ( curClass.xtrnNode )
     {
       if ( !curClass.xtrnCnt )
@@ -69,7 +68,7 @@ void myBase(const char *arg)
     {
       if ( curClass.MajVers < JDK_MIN_MAJOR )
         goto BADIDB;
-      if (curClass.MajVers > JDK_MAX_MAJOR )
+      if ( curClass.MajVers > JDK_MAX_MAJOR )
         goto BADIDB;
       if ( curClass.MajVers == JDK_MIN_MAJOR ) // JDK1.0/1.1
       {
@@ -85,7 +84,7 @@ void myBase(const char *arg)
       }
     }
 
-    make_NameChars(0);  // initialize and set enableExr_NameChar for upgrade
+    make_NameChars(/*on_load=*/ false);  // initialize and set enableExr_NameChar for upgrade
     if ( v != _CUR_IDP_VER )
     {
       ResW_init();  // prepare RW-find
@@ -129,7 +128,7 @@ BADIDB:
       }
     }
     disableExt_NameChar();  // set standart extension
-    loadpass = -1;  // no call QueueSet (and error type in fmtString)
+    loadpass = -1;  // no call remember_problem (and error type in fmtString)
     if ( curClass.extflg & XFL_C_DONE )
       sm_node = 0;
     if ( curClass.MajVers >= JDK_SMF_MAJOR_MIN )
@@ -323,7 +322,7 @@ static uchar attrStr(ushort index, uchar mode, char str[MAX_ATTR_NMSZ])
 //#endif
 
   str[0] = '\0';
-  if ( !LoadFieldName(index))
+  if ( !LoadFieldName(index) )
     return a_NONAME;
   if ( !fmtName(index, str, MAX_ATTR_NMSZ, fmt_name) )
     return a_TRUNCATED;
@@ -404,7 +403,7 @@ static uint LoadPool(void)
 badindex:
           loader_failure("Bad record in constant pool.\n"
                          "Record %u have reference to %u\n"
-                         "(maxnum %u, file offset after the read is 0x%X)",
+                         "(maxnum %u, file offset after the read is 0x%" FMT_64 "X)",
                          i, k, curClass.maxCPindex, qftell(myFile));
         }
         co->_class = k;     // _subnam for name & type
@@ -443,7 +442,7 @@ badindex:
 
   msg("checking...");
   loadpass = 2; // needed CR
-  for ( i = 1; (ushort)i <= curClass.maxCPindex; i++)
+  for ( i = 1; (ushort)i <= curClass.maxCPindex; i++ )
   {
     const_desc_t cr;
     ConstantNode.supval(i, co, sizeof(*co));
@@ -586,7 +585,7 @@ static void setPoolReference(void)
     uint j = (uint)XtrnNode.altval(i, '0');
     if ( j == 0 )
       continue;
-    showAddr(curClass.xtrnCnt - (ushort)i);
+    show_addr(curClass.xtrnCnt - (ushort)i);
     ConstantNode.supval(j, &co, sizeof(co));
     if ( co._class == curClass.This.Dscr )
     {
@@ -614,7 +613,7 @@ static void setPoolReference(void)
   }
   XtrnNode.altdel_all('0');
 
-  for ( uint i = 1; (ushort)i <= curClass.maxCPindex; i++)
+  for ( uint i = 1; (ushort)i <= curClass.maxCPindex; i++ )
   {
     ConstantNode.supval(i, &co, sizeof(co));
     switch ( co.type )
@@ -661,7 +660,7 @@ static void setPoolReference(void)
   if ( curClass.xtrnCnt != 0 )
   {
     set_segm_end(curClass.xtrnEA, curClass.xtrnEA + curClass.xtrnCnt + 1, SEGMOD_KILL);
-    doByte(curClass.xtrnEA, 1);
+    create_byte(curClass.xtrnEA, 1);
   }
   else
   {
@@ -781,7 +780,7 @@ static void ValidateStoreLocVar(ushort slot, LocVar & lv)
       }
       if ( (cnt % sizeof(LocVar))
         || cnt >= sizeof(vals)
-        || temp.supval(slot, vals, cnt+1) != cnt)
+        || temp.supval(slot, vals, cnt+1) != cnt )
       {
         goto interr;
       }
@@ -840,10 +839,10 @@ static void ValidateStoreLocVar(ushort slot, LocVar & lv)
 
     {
       ea_t dea = curSeg.DataBase + slot;
-      add_dref(dea, curSeg.startEA + lv.ScopeBeg, dr_I);
-      add_dref(dea, curSeg.startEA + lv.ScopeTop, dr_I);
+      add_dref(dea, curSeg.start_ea + lv.ScopeBeg, dr_I);
+      add_dref(dea, curSeg.start_ea + lv.ScopeTop, dr_I);
     }
-    xtrnRef_dscr(curSeg.startEA + lv.ScopeBeg, &opis);
+    xtrnRef_dscr(curSeg.start_ea + lv.ScopeBeg, &opis);
     if ( !cnt )
       set_lv_name(lv.var.Name, curSeg.DataBase + slot,
                   (loadMode & MLD_LOCVAR) ? 3 : 0);  // if not rename_on_load ONLY mark
@@ -961,7 +960,7 @@ bad:
       goto bad;
 
     case j_array:
-      if ( val && !is_array) // multidimensional array is not valid (javac )
+      if ( val && !is_array ) // multidimensional array is not valid (javac )
       {
         uchar *ps = p1;
         tag = 0;
@@ -1150,7 +1149,7 @@ static int sm_load(ushort declcnt, uint32 *pDopSize)
       if ( (uint32)off >= curSeg.CodeSize )
         goto declerr_w;
       prevoff = off;
-      refea = curSeg.startEA + off;
+      refea = curSeg.start_ea + off;
     }
     if ( temp.supval(refea, NULL, 0) != -1 ) // for CLDC only
     {
@@ -1232,7 +1231,7 @@ static void LoadAttrib(uchar mode)
   opis._name = 0;  // for vc
 
   j = read2();
-  for ( i = 0; i < j; i++)
+  for ( i = 0; i < j; i++ )
   {
     if ( savesize >= 0 && (savesize -= 6) < 0 )
     {
@@ -1260,8 +1259,8 @@ recurserr:
                 "Ignore zero length SourceDebugExtension attribute\n");
             break;
           }
-          uint32 pos = qftell(myFile), ssz = FileSize;
-          if ( LoadUtf8((ushort)-1, (const_desc_t*)dopsize) )
+          qoff64_t pos = qftell(myFile), ssz = FileSize;
+          if ( LoadUtf8((ushort)-1, (const_desc_t*)(size_t)dopsize) )
           {
             curClass.extflg |= XFL_C_DEBEXT;
             break;
@@ -1269,11 +1268,11 @@ recurserr:
           qfseek(myFile, pos, SEEK_SET);
           FileSize = ssz;
         }
-        if ( askyn_c(1,
-                     "HIDECANCEL\n"
-                     "SourceDebugExtension attribute have a non standard encoding\n"
-                     "or large size and can not be represented in assembler.\n\n"
-                     "\3Do you want to store it in external file?") == 1 )
+        if ( ask_yn(ASKBTN_YES,
+                    "HIDECANCEL\n"
+                    "SourceDebugExtension attribute have a non standard encoding\n"
+                    "or large size and can not be represented in assembler.\n\n"
+                    "\3Do you want to store it in external file?") > ASKBTN_NO )
           goto attr2file;
         goto skipAttr;
 
@@ -1294,10 +1293,10 @@ attr2file:
         if ( idpflags & IDM_REQUNK )
         {
           idpflags &= ~IDM_REQUNK;
-          if ( askyn_c(1,
-                       "HIDECANCEL\n"
-                       "\3File contains unknown attribute(s).\n"
-                       "Do you want store it in external files?\n\n") == 1 )
+          if ( ask_yn(ASKBTN_YES,
+                      "HIDECANCEL\n"
+                      "File contains unknown attribute(s).\n"
+                      "Do you want store it in external files?\n\n") > ASKBTN_NO )
           {
             loadMode |= MLD_EXTATR;
             goto attr2file;
@@ -1367,7 +1366,7 @@ declerr_w:
             temp.supset(++r, &opis, sizeof(opis));
             break;
           default:
-            BadRef(curClass.startEA + curField.id.Number, "value", k, mode);
+            BadRef(curClass.start_ea + curField.id.Number, "value", k, mode);
             temp.altset(++r, (((uint32)k) << 16) | 0xFFFF);
             break;
         }
@@ -1403,7 +1402,7 @@ duplerr_w:
           {
             segment_t *S = _add_seg(-1);  // expand size
             if ( curSeg.DataSize )
-              set_default_segreg_value(S, rVds, _add_seg(2)->sel); //dataSeg
+              set_default_sreg_value(S, rVds, _add_seg(2)->sel); // create data segment
           }
         }
 
@@ -1420,7 +1419,7 @@ duplerr_w:
           temp.create();
           curSeg.excNode = temp;
           temp.altset(0, k);
-          ea_t ea = curSeg.startEA + curSeg.CodeSize;
+          ea_t ea = curSeg.start_ea + curSeg.CodeSize;
           r = 1;
           uchar err = 0;
           do
@@ -1451,7 +1450,7 @@ duplerr_w:
           while ( (ushort)r <= k );
           if ( err )
           {
-            QueueSet(Q_noValid, ea);
+            remember_problem(PR_ILLADDR, ea);
             load_msg("Invalid address(es) in .catch%s\n",
                      mk_diag(mode, diastr));
           }
@@ -1486,12 +1485,12 @@ duplerr_w:
             uint32 refd = (uint32)k << 16;
             if ( !LoadNamedClass(k, &opis) )
             {
-              BadRef(curSeg.startEA, ".throws", k, mode);
+              BadRef(curSeg.start_ea, ".throws", k, mode);
             }
             else
             {
               refd |= opis._name;
-              xtrnRef(curSeg.startEA, opis);
+              xtrnRef(curSeg.start_ea, opis);
             }
             temp.altset(++r, refd);
           }
@@ -1521,7 +1520,7 @@ duplerr_w:
         {
           k = read2();
           if ( uint32(k) < curSeg.CodeSize )
-            set_source_linnum(curSeg.startEA + k, read2());
+            set_source_linnum(curSeg.start_ea + k, read2());
           else
             load_msg("Illegal address (%u) of source line %u%s\n", k,
                      read2(), mk_diag(mode, diastr));
@@ -1562,7 +1561,7 @@ duplerr_w:
           if ( eflg == 0 )  // LocalVariableTable/LocalVariableTypeTable
             lv.var.Dscr = read2();
           else
-            lv.utsign   = read2();
+            lv.utsign = read2();
           k = read2();   // slot (index)
           if ( !eflg )   // normal table
           {
@@ -1621,11 +1620,13 @@ duplerr_w:
           ic.inner = read2();
           if ( ic.inner && !LoadNamedClass(ic.inner, &opis) )
             k |= 0x101;
-          else ic.inner = opis._name;
+          else
+            ic.inner = opis._name;
           ic.outer = read2();
           if ( ic.outer && !LoadNamedClass(ic.outer, &opis) )
             k |= 0x101;
-          else ic.outer = opis._name;
+          else
+            ic.outer = opis._name;
           ic.name = read2();
           if ( ic.name && !LoadFieldName(ic.name) )
             k |= 0x101;
@@ -1672,7 +1673,7 @@ bad_encl:
         {
           if ( !LoadOpis(k, CONSTANT_NameAndType, &opis)
             || !(opis.flag & SUB_FLDNAME)
-            || !LoadCallDscr(opis._name))
+            || !LoadCallDscr(opis._name) )
           {
             goto bad_encl;
           }
@@ -1724,7 +1725,7 @@ bad_encl:
         k = read2();
         if ( CheckSignature(k, mode) )
         {
-          switch(mode )
+          switch ( mode )
           {
             case ARQ_FIELD:
               curField.id.utsign = k;
@@ -1741,6 +1742,7 @@ bad_encl:
 
       case a_StackMapTable:
         ++eflg;
+        // fallthrough
       case a_StackMap:
         if ( !eflg != (curClass.JDKsubver < 6) )
         {
@@ -1910,8 +1912,8 @@ bad:
     return 0;
   }
 
-  CASSERT(HAS_TYPEDSCR < 0x100 && HAS_CALLDSCR < 0x100);
-  if ( !((uchar)opis.flag & ((mode == ARQ_METHOD ) ? HAS_CALLDSCR : HAS_TYPEDSCR)))
+  CASSERT(HAS_TYPEDSCR < 0x100 && HAS_CALLDSCR < 0x100);    //-V590 expression is excessive
+  if ( !((uchar)opis.flag & ((mode == ARQ_METHOD ) ? HAS_CALLDSCR : HAS_TYPEDSCR)) )
   {
     if ( !opis._Ssize )
       goto bad; // PARANOYA
@@ -1949,8 +1951,8 @@ bad:
 //        or
 //          add_segm(uint short,ea_t,ea_t,char *,char *)
 //        see segment.hpp for explanations
-//      - set up inf.startIP,startCS to the starting address
-//      - set up inf.minEA,inf.maxEA
+//      - set up inf.start_ip,startCS to the starting address
+//      - set up inf.min_ea,inf.max_ea
 //
 //
 void loader(FILE *fp, bool manual)
@@ -1963,6 +1965,7 @@ void loader(FILE *fp, bool manual)
   eseek(fp, 0);   //rewind
   FileSize = qfsize(fp);
   myFile = fp;
+  enableExt_NameChar();
 
   if ( read4() != MAGICNUMBER )
     error("Illegal magic number");
@@ -2013,7 +2016,7 @@ BAD_VERSION:
   ConstantNode.create(constant_pool);
   --curClass.maxCPindex;  // last valid number
   XtrnNode.create();
-  make_NameChars(1);  // initialize and set 'load extension'
+  make_NameChars(/*on_load=*/ true);  // initialize and set 'load extension'
   ConstantNode.supset(CNS_UNIMAP, &unimap, sizeof(unimap));
   i = LoadPool();
   if ( !_add_seg(0) )
@@ -2053,14 +2056,14 @@ BAD_VERSION:
     errtrunc();
   qfseek(fp, i, SEEK_CUR);
   curClass.FieldCnt = read2();
-  qfseek(fp, -2 - i, SEEK_CUR);
+  qfseek(fp, -2 - qoff64_t(i), SEEK_CUR);
   _add_seg(3);          // class segment
+  enableExt_NameChar();
   if ( curClass.This.Dscr )
   {
-    enableExt_NameChar();
     curSeg.id.Number = 0;
-    SetName(curClass.This.Name, curClass.startEA, curClass.AccessFlag, 0);
-    hide_name(curClass.startEA);
+    SetName(curClass.This.Name, curClass.start_ea, curClass.AccessFlag, 0);
+    hide_name(curClass.start_ea);
   }
 
   if ( curClass.super.Ref )
@@ -2072,7 +2075,7 @@ BAD_VERSION:
     else
     {
       curClass.super.Name = opis._name;
-      xtrnRef(curClass.startEA, opis);
+      xtrnRef(curClass.start_ea, opis);
     }
   }
 //--
@@ -2099,7 +2102,7 @@ BAD_VERSION:
       }
       else
       {
-        xtrnRef(curClass.startEA, opis);
+        xtrnRef(curClass.start_ea, opis);
         refd |= opis._name;
       }
       temp.altset(++r, refd);
@@ -2116,7 +2119,7 @@ BAD_VERSION:
   curClass.ClassNode = ClassNode;
   qfseek(fp, 2, SEEK_CUR);
   if ( errload )
-    mark_access(curClass.startEA, (curClass.AccessFlag & ~ACC_THIS_MASK) ?
+    mark_access(curClass.start_ea, (curClass.AccessFlag & ~ACC_THIS_MASK) ?
                                                     curClass.AccessFlag : 0);
 //---
   for ( i = 1; (ushort)i <= curClass.FieldCnt; i++ )
@@ -2129,7 +2132,7 @@ BAD_VERSION:
     {
       load_msg("Illegal Field#%u Attribute 0x%04x\n", i, curField.id.access);
 //      curField.id.extflg |= EFL_ACCESS;
-      mark_access(curClass.startEA + i, curField.id.access);
+      mark_access(curClass.start_ea + i, curField.id.access);
     }
 
     curField.id.name = read2();
@@ -2140,7 +2143,7 @@ BAD_VERSION:
     if ( !CheckFieldDscr(curField.id.dscr, &opis) )
       curField.id.extflg |= EFL_TYPE;
     else
-      xtrnRef_dscr(curClass.startEA + curField.id.Number, &opis);
+      xtrnRef_dscr(curClass.start_ea + curField.id.Number, &opis);
     if ( curField.id.extflg & EFL_NAMETYPE )
       load_msg("Illegal NameAndType of field %u\n", i);
     LoadAttrib(ARQ_FIELD);
@@ -2149,7 +2152,7 @@ BAD_VERSION:
         ++curField.annNodes[n];
     ClassNode.supset(i, &curField, sizeof(curField));
     if ( !(curField.id.extflg & EFL_NAME) )
-      SetName(curField.id.name, curClass.startEA + i, curField.id.access, i);
+      SetName(curField.id.name, curClass.start_ea + i, curField.id.access, i);
   }
 //--
   curClass.MethodCnt = read2();
@@ -2165,7 +2168,7 @@ BAD_VERSION:
       load_msg("Illegal Method#%u Attribute 0x%04x\n", i, curSeg.id.access);
 //      curSeg.id.extflg |= EFL_ACCESS;
 
-    _add_seg(1);  //codeSeg create         // this for strnRef_dscr
+    _add_seg(1);  // create code segment // this for strnRef_dscr
     curSeg.id.name = read2();
     if ( !CheckFieldName(curSeg.id.name, NULL) )
       curSeg.id.extflg |= EFL_NAME;
@@ -2174,12 +2177,12 @@ BAD_VERSION:
     if ( !CheckCallDscr(curSeg.id.dscr, &opis) )
       curSeg.id.extflg |= EFL_TYPE;
     else
-      xtrnRef_dscr(curSeg.startEA, &opis, 1);
+      xtrnRef_dscr(curSeg.start_ea, &opis, 1);
     if ( curSeg.id.extflg & EFL_NAMETYPE )
       load_msg("Illegal NameAndType of method %u\n", i);
 //    if ( curSeg.id.extflg & EFL_ACCESS )
     if ( j )
-      mark_access(curSeg.startEA, curSeg.id.access);
+      mark_access(curSeg.start_ea, curSeg.id.access);
     LoadAttrib(ARQ_METHOD);
     if ( curSeg.smNode == BADNODE )
       curSeg.smNode = 0; // remove 'flagged' value
@@ -2208,19 +2211,19 @@ BAD_VERSION:
   if ( curClass.encClass == 0xFFFF )
     ++curClass.encClass;  // unification in out
   if ( FileSize )
-    warning("This file has extra information (pos=0x%x)", qftell(fp));
+    warning("This file has extra information (pos=0x%" FMT_64 "x)", qftell(fp));
 //---
   CheckPoolReference(0);
   endLoad_NameChar(); // set 'standart extension'
   if ( !set_parent_object() && (curClass.AccessFlag & ACC_INTERFACE) )
   {
     load_msg("This is interface, but superclass is not java.lang.Object!\n");
-    mark_and_comment(curClass.startEA, "Interface have nonstandart parent");
+    mark_and_comment(curClass.start_ea, "Interface have nonstandart parent");
   }
   if ( curClass.impNode && !curClass.super.Ref )
   {
     load_msg("This have implements without superclass!\n");
-    mark_and_comment(curClass.startEA, "Empty supperclass not for Object");
+    mark_and_comment(curClass.start_ea, "Empty supperclass not for Object");
   }
   if ( errload )
     curClass.extflg |= XFL_C_ERRLOAD;
@@ -2231,15 +2234,15 @@ BAD_VERSION:
   {
     msg("Analysing method %u...\n", i);
     ClassNode.supval(-(int)i, &curSeg, sizeof(curSeg));
-    ea_t ea = curSeg.startEA;
-    showAddr(ea);
+    ea_t ea = curSeg.start_ea;
+    show_addr(ea);
     ea_t end = ea + curSeg.CodeSize;
     segment_t *s = getseg(ea);
-    if ( s == NULL || end < ea || end > s->endEA )
+    if ( s == NULL || end < ea || end > s->end_ea )
       loader_failure("Bad method %u code size 0x%X", i, curSeg.CodeSize);
     if ( !curSeg.CodeSize )
     {
-      doByte(ea, 0x10);
+      create_byte(ea, 0x10);
     }
     else
     {
@@ -2253,13 +2256,13 @@ BAD_VERSION:
       while ( ea < end );
     }
     if ( (curSeg.id.extflg & EFL_NAME) == 0 )
-      SetName(curSeg.id.name, curSeg.startEA, curSeg.id.access,
+      SetName(curSeg.id.name, curSeg.start_ea, curSeg.id.access,
                                               curClass.FieldCnt + i);
-    add_func(curSeg.startEA, end + 1);
+    add_func(curSeg.start_ea, end + 1);
   }
   debugmode = 0;  // all references setting...
   CheckPoolReference(1);
-  loadpass = -1;  // no call QueueSet
+  loadpass = -1;  // no call remember_problem
   ConstantNode.altset(CNA_VERSION, _CUR_IDP_VER);
   ResW_newbase();
   create_filename_cmt();

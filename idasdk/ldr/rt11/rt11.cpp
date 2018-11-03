@@ -23,37 +23,43 @@
 //      and fill 'fileformatname'.
 //      otherwise return 0
 //
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *filename)
 {
-  if ( n) return(0 );
-  uint32 fsize = qlsize(li);
+  uint64 fsize = qlsize(li);
 
-  if ( (fsize % 512) || !fsize) return(0 );
+  if ( (fsize % 512) || !fsize )
+    return 0;
   qlseek(li, 040);
 
   ushort tmp;
   lread2bytes(li, &tmp, 0);
-  if ( tmp > fsize || (tmp & 1) || tmp < 0400) return(0 );
+  if ( tmp > fsize || (tmp & 1) || tmp < 0400 )
+    return 0;
   lread2bytes(li, &tmp, 0);
-  if ( tmp > fsize) return(0 );
+  if ( tmp > fsize )
+    return 0;
   qlseek(li, 050);
   lread2bytes(li, &tmp, 0);
-  if ( tmp & 1 || tmp > fsize) return(0 );
+  if ( tmp & 1 || tmp > fsize )
+    return 0;
 
 // 20.11.01, ig
 // got tired of too many false positives
 // now we'll check the file extension
 
-  char rf[QMAXFILE];
-  get_root_filename(rf, sizeof(rf));
-  const char *ext = get_file_ext(rf);
-  if ( ext == NULL || stricmp(ext, "sav") != 0 ) return 0;
+  const char *ext = get_file_ext(filename);
+  if ( ext == NULL || stricmp(ext, "sav") != 0 )
+    return 0;
 
-  qstrncpy(fileformatname, "RT11 (pdp11) sav-file", MAX_FILE_FORMAT_NAME);
+  *fileformatname = "RT11 (pdp11) sav-file";
+  *processor      = "pdp11";
   return f_LOADER;
 }
 
-//--------------------------------------------------------------------------
 //--------------------------------------------------------------------------
 static void loadchunk(
         linput_t *li,
@@ -63,7 +69,7 @@ static void loadchunk(
         int32 fpos,
         const char *sclass)
 {
-  int32 p = qltell(li);
+  qoff64_t p = qltell(li);
   file2base(li, fpos, ea, ea+size, FILEREG_PATCHABLE);
   add_segm(base, ea, ea+size, NULL, sclass);
   qlseek(li, p);
@@ -76,170 +82,237 @@ static void loadchunk(
 
 void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformatname*/)
 {
-  if ( ph.id != PLFM_PDP )
-    set_processor_type("pdp11", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("pdp11", SETPROC_LOADER);
+
   pdp_ml_t *ml = NULL;
   netnode  *ml_ovrtrans = NULL;
-  if ( ph.notify(ph.loader, &ml, &ml_ovrtrans ) ||
-      !ml || !ml_ovrtrans) error("Internal error in loader<->module link");
-
+  if ( !pdp11_module_t::get_ml_ptr(&ml, &ml_ovrtrans)
+    || !ml
+    || !ml_ovrtrans )
+  {
+    error("Internal error in loader<->module link");
+  }
 //
 //  Find out asect section and load it
 //
   int i;
   segment_t s;
-  s.startEA = toEA(inf.baseaddr, 0);
+  s.start_ea = to_ea(inf.baseaddr, 0);
   qlseek(li, 040);
   ushort startIP, topPrg, svrEnd, ovt;
   lread(li, &startIP, sizeof(ushort));
   lread(li, &ml->asect_top, sizeof(ushort));
-  if ( (startIP & 1) || startIP < 0400 ) startIP = 0;
-  else if ( startIP ) inf.startIP = startIP;
+  if ( (startIP & 1) || startIP < 0400 )
+    startIP = 0;
+  else if ( startIP )
+    inf.start_ip = startIP;
   qlseek(li, 050);
   lread(li, &topPrg, sizeof(ushort));
-  if ( topPrg & 1 || (uint32)topPrg > qlsize(li) ) topPrg = 0;
-  if ( topPrg > 01000 && ml->asect_top < (topPrg - 01000 ) &&
-     ml->asect_top > 0400) {
-      svrEnd = ml->asect_top;
-      if ( ml->asect_top > 01000 ) svrEnd = 01000;
-  } else ml->asect_top = svrEnd = 01000;
-  if ( startIP && ml->asect_top > startIP ) {
+  if ( topPrg & 1 || (uint64)topPrg > qlsize(li) )
+    topPrg = 0;
+  if ( topPrg > 01000
+    && ml->asect_top < (topPrg - 01000 )
+    && ml->asect_top > 0400 )
+  {
+    svrEnd = ml->asect_top;
+    if ( ml->asect_top > 01000 )
+      svrEnd = 01000;
+  }
+  else
+  {
+    ml->asect_top = svrEnd = 01000;
+  }
+  if ( startIP && ml->asect_top > startIP )
+  {
     svrEnd = 01000;
-    if ( svrEnd > startIP ) svrEnd = startIP;
-    s.endEA = s.startEA + svrEnd;
-  } else s.endEA = s.startEA + ml->asect_top;
+    if ( svrEnd > startIP )
+      svrEnd = startIP;
+    s.end_ea = s.start_ea + svrEnd;
+  }
+  else
+  {
+    s.end_ea = s.start_ea + ml->asect_top;
+  }
   inf.start_cs = inf.baseaddr;
-  file2base(li, 0, s.startEA, s.endEA, FILEREG_PATCHABLE);
+  file2base(li, 0, s.start_ea, s.end_ea, FILEREG_PATCHABLE);
   s.type = SEG_IMEM;
   s.sel  = find_selector(inf.baseaddr);
   add_segm_ex(&s, "asect", NULL, ADDSEG_NOSREG);
 
-  if ( inf.startIP != BADADDR) set_offset(s.startEA + 040, 0, s.startEA );
-  else                        doWord(s.startEA + 040, 2);
-  doWord(s.startEA + 042, 2);  // begin stack value
-  doWord(s.startEA + 044, 2);  // JSW
-  doWord(s.startEA + 046, 2);  // load USR address
-  doWord(s.startEA + 050, 2);  // top адрес загрузки программы
+  if ( inf.start_ip != BADADDR )
+    op_plain_offset(s.start_ea + 040, 0, s.start_ea);
+  else
+    create_word(s.start_ea + 040, 2);
+  create_word(s.start_ea + 042, 2);  // begin stack value
+  create_word(s.start_ea + 044, 2);  // JSW
+  create_word(s.start_ea + 046, 2);  // load USR address
+  create_word(s.start_ea + 050, 2);  // top адрес загрузки программы
 
-  ushort begovrtbl = get_word(s.startEA + 064);
+  ushort begovrtbl = get_word(s.start_ea + 064);
   ea_t ei;
-  for(ei = s.startEA; ei < s.startEA + 040; ei += 2)
-    if ( get_word(ei)) doWord(ei, 2 );
-    else { delValue(ei); delValue(ei+1); }
-  for(ei = s.startEA + 052; ei < s.endEA; ei += 2)
-    if ( get_word(ei)) doWord(ei, 2 );
-    else { delValue(ei); delValue(ei+1); }
+  for ( ei = s.start_ea; ei < s.start_ea + 040; ei += 2 )
+  {
+    if ( get_word(ei) )
+    {
+      create_word(ei, 2);
+    }
+    else
+    {
+      del_value(ei);
+      del_value(ei+1);
+    }
+  }
+  for ( ei = s.start_ea + 052; ei < s.end_ea; ei += 2 )
+  {
+    if ( get_word(ei) )
+    {
+      create_word(ei, 2);
+    }
+    else
+    {
+      del_value(ei);
+      del_value(ei+1);
+    }
+  }
 
   ovt = ml->asect_top;
-  if ( s.endEA != (s.startEA + ml->asect_top) ) {
-    loadchunk(li, s.endEA, ml->asect_top - svrEnd, inf.baseaddr, svrEnd, "USER");
-    s.endEA += (ml->asect_top - svrEnd);
+  if ( s.end_ea != (s.start_ea + ml->asect_top) )
+  {
+    loadchunk(li, s.end_ea, ml->asect_top - svrEnd, inf.baseaddr, svrEnd, "USER");
+    s.end_ea += (ml->asect_top - svrEnd);
     ml->asect_top = svrEnd;
   }
 
-  if ( get_word(s.startEA + 044) & 01000 ) {
-    if ( begovrtbl == 0 ) {
-      static const ushort chkold[] = {010046,010146,010246,0421,010001,062701};
+  if ( get_word(s.start_ea + 044) & 01000 )
+  {
+    if ( begovrtbl == 0 )
+    {
+      static const ushort chkold[] = { 010046, 010146, 010246, 0421, 010001, 062701 };
       qlseek(li, ovt);
       ushort temp;
-      for(i = 0; i < sizeof(chkold)/2; i++) {
+      for ( i = 0; i < sizeof(chkold)/2; i++ )
+      {
         lread(li, &temp, sizeof(ushort));
-        if ( temp != chkold[i] ) goto nons;
+        if ( temp != chkold[i] )
+          goto nons;
       }
       lread(li, &temp, sizeof(ushort));
-      if ( temp != ovt + 076 ) goto nons;
+      if ( temp != ovt + 076 )
+        goto nons;
       qlseek(li, ovt + 0100);
       lread(li, &temp, sizeof(ushort));
-      if ( temp != 0104376 ) goto nons;
+      if ( temp != 0104376 )
+        goto nons;
       lread(li, &temp, sizeof(ushort));
-      if ( temp != 0175400 ) {
+      if ( temp != 0175400 )
+      {
 nons:
         warning("OLD-style overlay not implemented.");
         goto stdload;
       }
       begovrtbl = ovt + 0104;
       warning("Loader overlay v3 is not fully tested.");
-    } else qlseek(li, begovrtbl);
-     ushort root_top;
-     lread(li, &root_top, sizeof(ushort));
-     if ( root_top == 0 || (root_top & 1) || root_top >= topPrg ) {
-       warning("Illegal overlay structure. Not implemented.");
-       goto stdload;
-     }
-     msg("loading overlay program...\n");
-     netnode temp;    // temporary array for overlay start addresses
-     temp.create();
-     // load root module at the end of asect (& USER)
-     loadchunk(li, s.endEA += 0x20, root_top - ovt,
-               inf.start_cs = inf.baseaddr+2, ovt, "ROOT");
-     add_segment_translation(inf.start_cs<<4,
-                             inf.baseaddr<<4); // translate to asect
-     ushort loadAddr = root_top, fileBlock, ovrsizeW,
-            oldBase = 0, numOvr = 0, numSeg = 0;
-     char name[8] = "ov";
-     for(i = 6; loadAddr != 04537; begovrtbl += 6, i += 6) {
-       if ( loadAddr != oldBase ) {
-         oldBase = loadAddr;
-         ++numOvr;
-         numSeg = 1;
-       } else ++numSeg;
-       qsnprintf(&name[2], sizeof(name)-2, "%02d_%02d", numOvr, numSeg);
-       lread(li, &fileBlock, sizeof(ushort));// Номер блока в файле
-       lread(li, &ovrsizeW, sizeof(ushort)); // Размер сегмента в словах
-       ovrsizeW <<= 1;      // in bytes
-            uint32 ovrstart = (inf.maxEA & ~0xF) + (loadAddr & 0xF) + 0x10;
-       uint32 sel_l = ushort((ovrstart >> 4) - (loadAddr >> 4));
-       loadchunk(li, ovrstart+2, ovrsizeW-2, sel_l, fileBlock*512L+2, "OVR");
-       add_segment_translation(sel_l<<4, inf.baseaddr<<4); // translate to asect
-       add_segment_translation(sel_l<<4, inf.start_cs<<4);  // translate to main
-       segment_t *s2 = getseg(ovrstart+2);
-       s2->ovrname = ((uint32)numOvr << 16) | numSeg;
-       set_segm_name(s2, "%s", name);
-       temp.altset(i, ovrstart - loadAddr);
-       lread(li, &loadAddr, sizeof(ushort)); // Адрес загрузки сегмента
-     }
-     // Здесь загрузка точек входа
-     ml->ovrcallbeg = begovrtbl;
-     for( ; loadAddr == 04537; begovrtbl += 8) {
-       ushort ovrentry, ovrind, ovraddr;
-       lread(li, &ovrentry, sizeof(ushort)); // Вход в оверлейщик - фиктивно
-       lread(li, &ovrind, sizeof(ushort));  // Индекс+6 в таблице сегментов
-       lread(li, &ovraddr, sizeof(ushort)); // Точка входа в сегмент
-       ml_ovrtrans->altset(begovrtbl, temp.altval(ovrind) + ovraddr);
-       lread(li, &loadAddr, sizeof(ushort)); // Следующий jsr R5,@#
-     }
-     ml->ovrcallend = begovrtbl - 8;
-     temp.kill();
-     ea_t base = s.endEA - ovt + ml->ovrcallbeg;
-     i = ml->ovrcallend - ml->ovrcallbeg + 8;
-     set_segm_start(s.endEA, base+i, SEGMOD_KILL);
-     set_segm_name(getseg(base+i),"main");
-     loadchunk(li, base -= 0x10, i, inf.baseaddr+1, ml->ovrcallbeg, "TBL");
-     ml->ovrtbl_base = (uint32)toEA(inf.baseaddr+1, 0);
-     set_segm_name(getseg(base),"ov_call");
-     char labname[17] = "cl_";
-     for(int j = 0; j < i; j += 8) {
-       uint32 trans = (uint32)ml_ovrtrans->altval(ml->ovrcallbeg+j);
-       get_segm_name(getseg(trans), name, sizeof(name));
-       labname[3+7] = '\0';
-       if ( !strcmp(name, &labname[3]) ) ++numSeg;
-       else {
-         numSeg = 1;
-         qstrncpy(&labname[3], name, sizeof(labname)-3);
-       }
-       qsnprintf(&labname[3+7], sizeof(labname)-3-7, "_en%02d", numSeg);
-       auto_make_code(trans);
-       set_name(trans, &labname[3]);
-       set_name(base + j, labname);
-       doWord(base + j, 2*3);
-       set_offset(base + j + 6, 0, get_segm_base(getseg(trans)));
-     }
-  } else {
+    }
+    else
+    {
+      qlseek(li, begovrtbl);
+    }
+    ushort root_top;
+    lread(li, &root_top, sizeof(ushort));
+    if ( root_top == 0 || (root_top & 1) || root_top >= topPrg )
+    {
+      warning("Illegal overlay structure. Not implemented.");
+      goto stdload;
+    }
+    msg("loading overlay program...\n");
+    netnode temp;    // temporary array for overlay start addresses
+    temp.create();
+    // load root module at the end of asect (& USER)
+    loadchunk(li, s.end_ea += 0x20, root_top - ovt,
+              inf.start_cs = inf.baseaddr+2, ovt, "ROOT");
+    add_segment_translation(inf.start_cs<<4,
+                            inf.baseaddr<<4); // translate to asect
+    ushort loadAddr = root_top, fileBlock, ovrsizeW,
+           oldBase = 0, numOvr = 0, numSeg = 0;
+    char name[8] = "ov";
+    for ( i = 6; loadAddr != 04537; begovrtbl += 6, i += 6 )
+    {
+      if ( loadAddr != oldBase )
+      {
+        oldBase = loadAddr;
+        ++numOvr;
+        numSeg = 1;
+      }
+      else
+      {
+        ++numSeg;
+      }
+      qsnprintf(&name[2], sizeof(name)-2, "%02d_%02d", numOvr, numSeg);
+      lread(li, &fileBlock, sizeof(ushort));// Номер блока в файле
+      lread(li, &ovrsizeW, sizeof(ushort)); // Размер сегмента в словах
+      ovrsizeW <<= 1;      // in bytes
+      uint32 ovrstart = (inf.max_ea & ~0xF) + (loadAddr & 0xF) + 0x10;
+      uint32 sel_l = ushort((ovrstart >> 4) - (loadAddr >> 4));
+      loadchunk(li, ovrstart+2, ovrsizeW-2, sel_l, fileBlock*512L+2, "OVR");
+      add_segment_translation(sel_l<<4, inf.baseaddr<<4); // translate to asect
+      add_segment_translation(sel_l<<4, inf.start_cs<<4);  // translate to main
+      segment_t *s2 = getseg(ovrstart+2);
+      s2->ovrname = ((uint32)numOvr << 16) | numSeg;
+      set_segm_name(s2, name);
+      temp.altset(i, ovrstart - loadAddr);
+      lread(li, &loadAddr, sizeof(ushort)); // Адрес загрузки сегмента
+    }
+    // Здесь загрузка точек входа
+    ml->ovrcallbeg = begovrtbl;
+    for ( ; loadAddr == 04537; begovrtbl += 8 )
+    {
+      ushort ovrentry, ovrind, ovraddr;
+      lread(li, &ovrentry, sizeof(ushort)); // Вход в оверлейщик - фиктивно
+      lread(li, &ovrind, sizeof(ushort));  // Индекс+6 в таблице сегментов
+      lread(li, &ovraddr, sizeof(ushort)); // Точка входа в сегмент
+      ml_ovrtrans->altset(begovrtbl, temp.altval(ovrind) + ovraddr);
+      lread(li, &loadAddr, sizeof(ushort)); // Следующий jsr R5,@#
+    }
+    ml->ovrcallend = begovrtbl - 8;
+    temp.kill();
+    ea_t base = s.end_ea - ovt + ml->ovrcallbeg;
+    i = ml->ovrcallend - ml->ovrcallbeg + 8;
+    set_segm_start(s.end_ea, base+i, SEGMOD_KILL);
+    set_segm_name(getseg(base+i), "main");
+    loadchunk(li, base -= 0x10, i, inf.baseaddr+1, ml->ovrcallbeg, "TBL");
+    ml->ovrtbl_base = (uint32)to_ea(inf.baseaddr+1, 0);
+    set_segm_name(getseg(base), "ov_call");
+    char labname[17] = "cl_";
+    for ( int j = 0; j < i; j += 8 )
+    {
+      uint32 trans = (uint32)ml_ovrtrans->altval(ml->ovrcallbeg+j);
+      qstring sname;
+      get_segm_name(&sname, getseg(trans));
+      labname[3+7] = '\0';
+      if ( sname == &labname[3] )
+      {
+        ++numSeg;
+      }
+      else
+      {
+        numSeg = 1;
+        qstrncpy(&labname[3], sname.c_str(), sizeof(labname)-3);
+      }
+      qsnprintf(&labname[3+7], sizeof(labname)-3-7, "_en%02d", numSeg);
+      auto_make_code(trans);
+      set_name(trans, &labname[3], SN_IDBENC);
+      set_name(base + j, labname, SN_IDBENC);
+      create_word(base + j, 2*3);
+      op_plain_offset(base + j + 6, 0, get_segm_base(getseg(trans)));
+    }
+  }
+  else
+  {
 //
 //      Load regular file/load root of overlay
 //
 stdload:
-    loadchunk(li, s.endEA, qlsize(li) - ovt, inf.baseaddr, ovt, "CODE");
+    loadchunk(li, s.end_ea, qlsize(li) - ovt, inf.baseaddr, ovt, "CODE");
   }
   ml_ovrtrans->altset(n_asect,  ml->asect_top);
   ml_ovrtrans->altset(n_ovrbeg, ml->ovrcallbeg);
@@ -273,5 +346,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

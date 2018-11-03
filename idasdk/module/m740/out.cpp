@@ -1,16 +1,25 @@
 
 #include "m740.hpp"
 
-//--------------------------------------------------------------------------
-// output register name
-inline static void outreg(const int n)
+//----------------------------------------------------------------------
+class out_m740_t : public outctx_t
 {
-  out_register(ph.regNames[n]);
-}
+  out_m740_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(const int n) { out_register(ph.reg_names[n]); }
+  void outaddr(const op_t &op, bool replace_with_label = true);
+  void outdispl(void);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_m740_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_m740_t)
 
 //--------------------------------------------------------------------------
 // output an address
-static void outaddr(op_t &op, bool replace_with_label = true)
+void out_m740_t::outaddr(const op_t &op, bool replace_with_label)
 {
   bool ind = is_addr_ind(op);      // is operand indirect ?
   bool sp = is_addr_sp(op);        // is operand special page ?
@@ -25,11 +34,11 @@ static void outaddr(op_t &op, bool replace_with_label = true)
     size = 8; /* just display the first 8 bits */
   }
 
-  if ( !out_name_expr(op, toEA(cmd.cs, op.addr), op.addr) || !replace_with_label )
+  if ( !out_name_expr(op, to_ea(insn.cs, op.addr), op.addr) || !replace_with_label )
   {
     if ( replace_with_label )
       out_tagon(COLOR_ERROR);
-    OutValue(op, OOF_ADDR | OOFS_NOSIGN | (size < 16 ? OOFW_8 : OOFW_16));
+    out_value(op, OOF_ADDR | OOFS_NOSIGN | (size < 16 ? OOFW_8 : OOFW_16));
     if ( replace_with_label )
       out_tagoff(COLOR_ERROR);
   }
@@ -40,35 +49,35 @@ static void outaddr(op_t &op, bool replace_with_label = true)
 
 //--------------------------------------------------------------------------
 // output a displacement
-static void outdispl(void)
+void out_m740_t::outdispl(void)
 {
-  if ( is_displ_indx() )
+  if ( is_displ_indx(insn) )
   {
     out_symbol('(');
-    outaddr(cmd.Op1, false);
+    outaddr(insn.Op1, false);
     out_symbol(',');
     if ( !(ash.uflag & UAS_INDX_NOSPACE) )
-      OutChar(' ');
-    outreg(cmd.Op1.reg);
+      out_char(' ');
+    outreg(insn.Op1.reg);
     out_symbol(')');
     return;
   }
-  if ( is_displ_indy() )
+  if ( is_displ_indy(insn) )
   {
     out_symbol('(');
-    outaddr(cmd.Op1, false);
+    outaddr(insn.Op1, false);
     out_symbol(')');
     out_symbol(',');
-    OutChar(' ');
-    outreg(cmd.Op1.reg);
+    out_char(' ');
+    outreg(insn.Op1.reg);
     return;
   }
-  if ( is_displ_zpx() || is_displ_zpy() || is_displ_absx() || is_displ_absy() )
+  if ( is_displ_zpx(insn) || is_displ_zpy(insn) || is_displ_absx(insn) || is_displ_absy(insn) )
   {
-    outaddr(cmd.Op1, false);
+    outaddr(insn.Op1, false);
     out_symbol(',');
-    OutChar(' ');
-    outreg(cmd.Op1.reg);
+    out_char(' ');
+    outreg(insn.Op1.reg);
     return;
   }
   INTERR(10023);
@@ -76,38 +85,36 @@ static void outdispl(void)
 
 //--------------------------------------------------------------------------
 // generate header
-void idaapi header(void)
+void idaapi m740_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device.c_str());
 }
 
 //--------------------------------------------------------------------------
 // generate footer
-void idaapi footer(void)
+void idaapi m740_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   if ( ash.end != NULL )
   {
-    MakeNull();
-    register char *p = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
-      APPCHAR(p, end, ' ');
-      APPEND(p, end, name.begin());
+      ctx.out_char(' ');
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-      gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }
 
 //--------------------------------------------------------------------------
 // output an operand
-bool idaapi outop(op_t &op)
+bool out_m740_t::out_operand(const op_t &op)
 {
   switch ( op.type )
   {
@@ -120,7 +127,7 @@ bool idaapi outop(op_t &op)
     case o_imm:
       if ( (op.specflag1 & OP_IMM_BIT) == 0 )
         out_symbol('#');
-      OutValue(op, OOFW_IMM);
+      out_value(op, OOFW_IMM);
       break;
 
     // data / code memory address
@@ -146,62 +153,50 @@ bool idaapi outop(op_t &op)
 
 //--------------------------------------------------------------------------
 // outputs an instruction
-void idaapi out(void)
+void out_m740_t::out_insn(void)
 {
-  char buf[MAXSTR];
-
-  init_output_buffer(buf, sizeof(buf));
-
-  OutMnem();
+  out_mnemonic();
   out_one_operand(0);        // output the first operand
 
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
   }
 
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(2);
   }
 
   // output a character representation of the immediate values
   // embedded in the instruction as comments
-  if ( isVoid(cmd.ea,uFlag,0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea,uFlag,1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea,uFlag,2) ) OutImmChar(cmd.Op3);
-
-  term_output_buffer();                   // terminate the output string
-  gl_comm = 1;                            // ask to attach a possible user-
-                                          // defined comment to it
-  MakeLine(buf);                          // pass the generated line to the
-                                          // kernel
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
 // generate segment header
-void idaapi gen_segm_header(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi m740_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  segment_t *Sarea = getseg(ea);
-
-  char sname[MAXNAMELEN];
-  get_segm_name(Sarea, sname, sizeof(sname));
-  char *segname = sname;
+  qstring sname;
+  get_visible_segm_name(&sname, Sarea);
 
   if ( ash.uflag & UAS_SEGM )
-    printf_line(inf.indent, COLSTR("SEGMENT %s", SCOLOR_ASMDIR), segname);
+    ctx.gen_printf(inf.indent, COLSTR("SEGMENT %s", SCOLOR_ASMDIR), sname.c_str());
   else if ( ash.uflag & UAS_RSEG )
-    printf_line(inf.indent, COLSTR("RSEG %s", SCOLOR_ASMDIR), segname);
+    ctx.gen_printf(inf.indent, COLSTR("RSEG %s", SCOLOR_ASMDIR), sname.c_str());
 
-  ea_t orgbase = ea - get_segm_para(Sarea);
+  ea_t orgbase = ctx.insn_ea - get_segm_para(Sarea);
   if ( orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }

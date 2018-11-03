@@ -8,36 +8,36 @@
  */
 
 #include "tms320c54.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <frame.hpp>
 
 static bool flow;
 
 //------------------------------------------------------------------------
-ea_t calc_code_mem(ea_t ea, bool is_near)
+ea_t calc_code_mem(const insn_t &insn, ea_t ea, bool is_near)
 {
   ea_t rv;
   if ( is_near )
   {
-    sel_t xpc = get_segreg(cmd.ea, XPC);
+    sel_t xpc = get_sreg(insn.ea, XPC);
     if ( xpc == BADSEL )
       xpc = 0;
     rv = ((xpc & 0x7F) << 16) | (ea & 0xFFFF);
   }
   else
   {
-    rv = toEA(cmd.cs, ea);
+    rv = to_ea(insn.cs, ea);
   }
   return use_mapping(rv);
 }
 
 //------------------------------------------------------------------------
-ea_t calc_data_mem(ea_t ea, bool is_mem)
+ea_t calc_data_mem(const insn_t &insn, ea_t ea, bool is_mem)
 {
   ea_t rv;
   if ( is_mem )
   {
-    sel_t dp = get_segreg(cmd.ea, DP);
+    sel_t dp = get_sreg(insn.ea, DP);
     if ( dp == BADSEL )
       return BADSEL;
     rv = ((dp & 0x1FF) << 7) | (ea & 0x7F);
@@ -92,11 +92,12 @@ regnum_t get_mapped_register(ea_t ea)
 }
 
 //----------------------------------------------------------------------
-static void process_imm(op_t &x)
+static void process_imm(const insn_t &insn, const op_t &x, flags_t F)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag,x.n) ) return; // if already defined by user
-  switch ( cmd.itype )
+  set_immd(insn.ea);
+  if ( is_defarg(F, x.n) )
+    return; // if already defined by user
+  switch ( insn.itype )
   {
     case TMS320C54_cmpm:
     case TMS320C54_bitf:
@@ -116,12 +117,12 @@ static void process_imm(op_t &x)
     case TMS320C54_or3:
     case TMS320C54_xor3:
     case TMS320C54_mac2:
-      op_num(cmd.ea, x.n);
+      op_num(insn.ea, x.n);
   }
 }
 
 //----------------------------------------------------------------------
-static void process_operand(op_t &x, int use)
+static void handle_operand(const insn_t &insn, const op_t &x, flags_t F, bool use)
 {
   switch ( x.type )
   {
@@ -134,36 +135,36 @@ static void process_operand(op_t &x, int use)
     case o_near:
     case o_far:
       {
-        if ( cmd.itype != TMS320C54_rptb && cmd.itype != TMS320C54_rptbd )
+        if ( insn.itype != TMS320C54_rptb && insn.itype != TMS320C54_rptbd )
         {
           cref_t ftype = fl_JN;
-          ea_t ea = calc_code_mem(x.addr, x.type == o_near);
-          if ( InstrIsSet(cmd.itype, CF_CALL) )
+          ea_t ea = calc_code_mem(insn, x.addr, x.type == o_near);
+          if ( has_insn_feature(insn.itype, CF_CALL) )
           {
             if ( !func_does_return(ea) )
               flow = false;
             ftype = fl_CN;
           }
 #ifndef TMS320C54_NO_NAME_NO_REF
-          if ( x.dtyp == dt_byte )
-            ua_add_dref(x.offb, ea, dr_R);
+          if ( x.dtype == dt_byte )
+            insn.add_dref(ea, x.offb, dr_R);
           else
-            ua_add_cref(x.offb, ea, ftype);
+            insn.add_cref(ea, x.offb, ftype);
 #endif
         }
 #ifndef TMS320C54_NO_NAME_NO_REF
         else // evaluate RPTB[D] loops as dref
-          ua_add_dref(x.offb, calc_code_mem(x.addr), dr_I);
+          insn.add_dref(calc_code_mem(insn, x.addr), x.offb, dr_I);
 #endif
       }
       break;
 
     case o_imm:
       QASSERT(10113, use);
-      process_imm(x);
+      process_imm(insn, x, F);
 #ifndef TMS320C54_NO_NAME_NO_REF
-      if ( op_adds_xrefs(uFlag, x.n) )
-        ua_add_off_drefs2(x, dr_O, x.Signed ? OOF_SIGNED : 0);
+      if ( op_adds_xrefs(F, x.n) )
+        insn.add_off_drefs(x, dr_O, x.Signed ? OOF_SIGNED : 0);
 #endif
       break;
 
@@ -171,34 +172,32 @@ static void process_operand(op_t &x, int use)
     case o_farmem:
     case o_mmr:
       {
-        ea_t ea = calc_data_mem(x.addr, x.type == o_mem);
+        ea_t ea = calc_data_mem(insn, x.addr, x.type == o_mem);
         if ( ea != BADADDR )
         {
 #ifndef TMS320C54_NO_NAME_NO_REF
-          ua_add_dref(x.offb, ea, use ? dr_R : dr_W);
+          insn.add_dref(ea, x.offb, use ? dr_R : dr_W);
 #endif
-          ua_dodata2(x.offb, ea, x.dtyp);
-          if ( !use )
-            doVar(ea);
+          insn.create_op_data(ea, x);
         }
       }
       break;
 
     case o_local: // local variables
       if ( may_create_stkvars()
-        && (get_func(cmd.ea) != NULL)
-        && ua_stkvar2(x, x.addr, STKVAR_VALID_SIZE) )
+        && (get_func(insn.ea) != NULL)
+        && insn.create_stkvar(x, x.addr, STKVAR_VALID_SIZE) )
       {
-        op_stkvar(cmd.ea, x.n);
+        op_stkvar(insn.ea, x.n);
       }
       break;
 
     case o_displ:
-      doImmd(cmd.ea);
+      set_immd(insn.ea);
       break;
 
     default:
-      warning("interr: emu2 address:%a operand:%d type:%d", cmd.ea, x.n, x.type);
+      warning("interr: emu2 address:%a operand:%d type:%d", insn.ea, x.n, x.type);
   }
 }
 
@@ -225,21 +224,21 @@ static void process_operand(op_t &x, int use)
 // TMS320C54_reted,   // Enable Interrupts and Return From Interrupt       1111 01Z0 1110 1011                      RETE[D]
 // TMS320C54_retfd,   // Enable Interrupts and Fast Return From Interrupt  1111 01Z0 1001 1011                      RETF[D]
 
-bool delayed_stop(void)
+static bool delayed_stop(const insn_t &insn, flags_t F)
 {
-  if ( !isFlow(uFlag) )
+  if ( !is_flow(F) )
     return false;
 
-  if ( cmd.size == 0 || cmd.size > 2 )
+  if ( insn.size == 0 || insn.size > 2 )
     return false;
 
-  int sub = 2 - cmd.size; // backward offset to skip the previous 1-word instruction in the case of 2 consecutive 1-word instructions
+  int sub = 2 - insn.size; // backward offset to skip the previous 1-word instruction in the case of 2 consecutive 1-word instructions
 
   // first, we analyze 1-word instructions
-  ea_t ea = cmd.ea - sub - 1;
-  if ( isCode(get_flags_novalue(ea)) )
+  ea_t ea = insn.ea - sub - 1;
+  if ( is_code(get_flags(ea)) )
   {
-    int code = get_full_byte(ea); // get the instruction word
+    int code = get_wide_byte(ea); // get the instruction word
     switch ( code )
     {
       case 0xF6E2: // TMS320C54_baccd,   // Branch to Location Specified by Accumulator       1111 01ZS 1110 0010                      BACC[D] src
@@ -255,46 +254,49 @@ bool delayed_stop(void)
     }
   }
   // else, we analyze 2-word instructions
-  ea = cmd.ea - sub - 2;
-  if ( isCode(get_flags_novalue(ea)) )
+  ea = insn.ea - sub - 2;
+  if ( is_code(get_flags(ea)) )
   {
-    int code = get_full_byte(ea); // get the first instruction word
-    if ( code == 0xF273             // TMS320C54_bd,      // Branch Unconditionally      1111 00Z0 0111 0011 16-bit constant      B[D] pmad
-      || (code & 0xFF80) == 0xFA80) // TMS320C54_fbd,     // Far Branch Unconditionally  1111 10Z0 1 7bit constant=pmad(22-16) 16-bit constant=pmad(15-0)  FB[D] extpmad
-        return true;
+    int code = get_wide_byte(ea); // get the first instruction word
+    if ( code == 0xF273              // TMS320C54_bd,      // Branch Unconditionally      1111 00Z0 0111 0011 16-bit constant      B[D] pmad
+      || (code & 0xFF80) == 0xFA80 ) // TMS320C54_fbd,     // Far Branch Unconditionally  1111 10Z0 1 7bit constant=pmad(22-16) 16-bit constant=pmad(15-0)  FB[D] extpmad
+    {
+      return true;
+    }
   }
   return false;
 }
 
 //----------------------------------------------------------------------
-bool is_basic_block_end(void)
+bool is_basic_block_end(const insn_t &insn)
 {
-  if ( delayed_stop() )
+  flags_t F = get_flags(insn.ea);
+  if ( delayed_stop(insn, F) )
     return true;
-  return ! isFlow(get_flags_novalue(cmd.ea+cmd.size));
+  return !is_flow(get_flags(insn.ea+insn.size));
 }
 
 //----------------------------------------------------------------------
-static bool add_stkpnt(sval_t delta)
+static bool add_stkpnt(const insn_t &insn, sval_t delta)
 {
-  func_t *pfn = get_func(cmd.ea);
+  func_t *pfn = get_func(insn.ea);
   if ( pfn == NULL )
     return false;
 
-  return add_auto_stkpnt2(pfn, cmd.ea+cmd.size, delta);
+  return add_auto_stkpnt(pfn, insn.ea+insn.size, delta);
 }
 
 //----------------------------------------------------------------------
-static void trace_sp(void)
+static void trace_sp(const insn_t &insn)
 {
   // trace SP changes
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS320C54_fret:
     case TMS320C54_fretd:
     case TMS320C54_frete:
     case TMS320C54_freted:
-      add_stkpnt(2);
+      add_stkpnt(insn, 2);
       break;
     case TMS320C54_ret:
     case TMS320C54_retd:
@@ -302,62 +304,69 @@ static void trace_sp(void)
     case TMS320C54_reted:
     case TMS320C54_retf:
     case TMS320C54_retfd:
-      add_stkpnt(1);
+      add_stkpnt(insn, 1);
       break;
     case TMS320C54_frame:
-      add_stkpnt(cmd.Op1.value);
+      add_stkpnt(insn, insn.Op1.value);
       break;
     case TMS320C54_popd:
     case TMS320C54_popm:
-      add_stkpnt(1);
+      add_stkpnt(insn, 1);
       break;
     case TMS320C54_pshd:
     case TMS320C54_pshm:
-      add_stkpnt(-1);
+      add_stkpnt(insn, -1);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+int idaapi emu(const insn_t &insn)
 {
-  uint32 feature = cmd.get_canon_feature();
+  uint32 feature = insn.get_canon_feature();
   flow = (feature & CF_STOP) == 0;
 
-  if ( feature & CF_USE1 ) process_operand(cmd.Op1, 1);
-  if ( feature & CF_USE2 ) process_operand(cmd.Op2, 1);
-  if ( feature & CF_USE3 ) process_operand(cmd.Op3, 1);
+  flags_t F = get_flags(insn.ea);
+  if ( feature & CF_USE1 ) handle_operand(insn, insn.Op1, F, true);
+  if ( feature & CF_USE2 ) handle_operand(insn, insn.Op2, F, true);
+  if ( feature & CF_USE3 ) handle_operand(insn, insn.Op3, F, true);
 
-  if ( feature & CF_CHG1 ) process_operand(cmd.Op1, 0);
-  if ( feature & CF_CHG2 ) process_operand(cmd.Op2, 0);
-  if ( feature & CF_CHG3 ) process_operand(cmd.Op3, 0);
+  if ( feature & CF_CHG1 ) handle_operand(insn, insn.Op1, F, false);
+  if ( feature & CF_CHG2 ) handle_operand(insn, insn.Op2, F, false);
+  if ( feature & CF_CHG3 ) handle_operand(insn, insn.Op3, F, false);
 
   // check for CPL changes
-  if ( (cmd.itype == TMS320C54_rsbx1 || cmd.itype == TMS320C54_ssbx1)
-    && cmd.Op1.type == o_reg && cmd.Op1.reg == CPL )
+  if ( (insn.itype == TMS320C54_rsbx1 || insn.itype == TMS320C54_ssbx1)
+    && insn.Op1.type == o_reg && insn.Op1.reg == CPL )
   {
-    split_srarea(get_item_end(cmd.ea), CPL, cmd.itype == TMS320C54_rsbx1 ? 0 : 1, SR_auto);
+    int value = insn.itype == TMS320C54_rsbx1 ? 0 : 1;
+    split_sreg_range(get_item_end(insn.ea), CPL, value, SR_auto);
   }
 
   // check for DP changes
-  if (cmd.itype == TMS320C54_ld2 && cmd.Op1.type == o_imm && cmd.Op1.dtyp == dt_byte
-    && cmd.Op2.type == o_reg && cmd.Op2.reg == DP)
-      split_srarea(get_item_end(cmd.ea), DP, cmd.Op1.value & 0x1FF, SR_auto);
+  if ( insn.itype == TMS320C54_ld2
+    && insn.Op1.type == o_imm
+    && insn.Op1.dtype == dt_byte
+    && insn.Op2.type == o_reg
+    && insn.Op2.reg == DP )
+  {
+    split_sreg_range(get_item_end(insn.ea), DP, insn.Op1.value & 0x1FF, SR_auto);
+  }
 
   // determine if the next instruction should be executed
-  if ( segtype(cmd.ea) == SEG_XTRN )
+  if ( segtype(insn.ea) == SEG_XTRN )
     flow = false;
-  if ( flow && delayed_stop() )
+  if ( flow && delayed_stop(insn, F) )
     flow = false;
   if ( flow )
-    ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+    add_cref(insn.ea, insn.ea+insn.size, fl_F);
 
   if ( may_trace_sp() )
   {
     if ( !flow )
-      recalc_spd(cmd.ea);     // recalculate SP register for the next insn
+      recalc_spd(insn.ea);     // recalculate SP register for the next insn
     else
-      trace_sp();
+      trace_sp(insn);
   }
 
   return 1;
@@ -370,31 +379,32 @@ bool idaapi create_func_frame(func_t *pfn)
   {
     if ( pfn->frame == BADNODE )
     {
-      ea_t ea = pfn->startEA;
+      insn_t insn;
       int regsize = 0;
-      while ( ea < pfn->endEA ) // check for register pushs
+      ea_t ea = pfn->start_ea;
+      while ( ea < pfn->end_ea ) // check for register pushs
       {
-        if ( !decode_insn(ea) )
+        if ( decode_insn(&insn, ea) < 1 )
           break;
-        if ( cmd.itype != TMS320C54_pshm )
+        if ( insn.itype != TMS320C54_pshm )
           break;
-        if ( cmd.Op1.type != o_mem && cmd.Op1.type != o_mmr )
+        if ( insn.Op1.type != o_mem && insn.Op1.type != o_mmr )
           break;
-        if ( get_mapped_register(cmd.Op1.addr) == rnone )
+        if ( get_mapped_register(insn.Op1.addr) == rnone )
           break;
         regsize++;
-        ea += cmd.size;
+        ea += insn.size;
       }
       int localsize = 0;
-      while ( ea < pfn->endEA ) // check for frame creation
+      while ( ea < pfn->end_ea ) // check for frame creation
       {
-        if ( cmd.itype == TMS320C54_frame && cmd.Op1.type == o_imm )
+        if ( insn.itype == TMS320C54_frame && insn.Op1.type == o_imm )
         {
-          localsize = -(int)cmd.Op1.value;
+          localsize = -(int)insn.Op1.value;
           break;
         }
-        ea += cmd.size;
-        if ( !decode_insn(ea) )
+        ea += insn.size;
+        if ( decode_insn(&insn, ea) < 1 )
           break;
       }
       add_frame(pfn, localsize+regsize, 0, 0);
@@ -404,7 +414,7 @@ bool idaapi create_func_frame(func_t *pfn)
 }
 
 //----------------------------------------------------------------------
-int idaapi tms_get_frame_retsize(func_t * /*pfn*/)
+int idaapi tms_get_frame_retsize(const func_t * /*pfn*/)
 {
   return 1;     // 1 'byte' for the return address
 }
@@ -412,15 +422,16 @@ int idaapi tms_get_frame_retsize(func_t * /*pfn*/)
 //----------------------------------------------------------------------
 int idaapi is_align_insn(ea_t ea)
 {
-  if ( !decode_insn(ea) )
+  insn_t insn;
+  if ( decode_insn(&insn, ea) < 1 )
     return 0;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS320C54_nop:
       break;
     default:
       return 0;
   }
-  return cmd.size;
+  return insn.size;
 }
 

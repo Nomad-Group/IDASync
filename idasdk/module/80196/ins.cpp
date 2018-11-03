@@ -6,7 +6,8 @@
 
 #include "i196.hpp"
 
-instruc_t Instructions[] = {
+instruc_t Instructions[] =
+{
   { "",       0                       },  // Unknown Operation
 
   { "add",    CF_USE2|CF_USE1|CF_CHG1 },  // Add words (2 operands)
@@ -162,7 +163,7 @@ instruc_t Instructions[] = {
 
   { "xor",    CF_USE2|CF_USE1|CF_CHG1 },  // Logical exclusive-or words
   { "xorb",   CF_USE2|CF_USE1|CF_CHG1 },  // Logical exclusive-or bytes
-  
+
 // 8x196NU, NP instructions
 
   { "ebmovi", CF_USE1|CF_USE2         },  // Extended interruptable block move
@@ -173,7 +174,7 @@ instruc_t Instructions[] = {
   { "eldb",   CF_CHG1|CF_USE2         },  // Extended load byte
   { "est",    CF_USE1|CF_CHG2         },  // Extended store word
   { "estb",   CF_USE1|CF_CHG2         },  // Extended store byte
-  
+
 };
 
 CASSERT(qnumber(Instructions) == I196_last);

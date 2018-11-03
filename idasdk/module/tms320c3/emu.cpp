@@ -8,34 +8,35 @@
  */
 
 #include "tms320c3x.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <frame.hpp>
 
-static int flow;
+static bool flow;
 //----------------------------------------------------------------------
-ea_t calc_code_mem(op_t &x)
+ea_t calc_code_mem(const insn_t &insn, const op_t &x)
 {
-  return toEA(cmd.cs, x.addr);
+  return to_ea(insn.cs, x.addr);
 }
 
 //------------------------------------------------------------------------
-ea_t calc_data_mem(op_t &x)
+ea_t calc_data_mem(const insn_t &insn, const op_t &x)
 {
-    sel_t dpage = get_segreg(cmd.ea, dp);
-    if ( dpage == BADSEL ) return BADSEL;
-    return ((dpage & 0xFF) << 16) | (x.addr);
+  sel_t dpage = get_sreg(insn.ea, dp);
+  if ( dpage == BADSEL )
+    return BADSEL;
+  return ((dpage & 0xFF) << 16) | (x.addr);
 }
 
 //----------------------------------------------------------------------
-static void process_imm(op_t &x)
+static void process_imm(const insn_t &insn, const op_t &x, flags_t F)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag,x.n) ) return; // if already defined by user
-  op_num(cmd.ea, x.n);
+  set_immd(insn.ea);
+  if ( !is_defarg(F, x.n) )
+    op_num(insn.ea, x.n);
 }
 
 //----------------------------------------------------------------------
-static void process_operand(op_t &x, int use)
+static void handle_operand(const insn_t &insn, const op_t &x, flags_t F, bool use)
 {
   switch ( x.type )
   {
@@ -43,40 +44,38 @@ static void process_operand(op_t &x, int use)
       return;
 
     case o_near:
+      if ( insn.itype != TMS320C3X_RPTB )
       {
-        if ( cmd.itype != TMS320C3X_RPTB  )
+        cref_t ftype = fl_JN;
+        ea_t ea = calc_code_mem(insn, x);
+        if ( has_insn_feature(insn.itype, CF_CALL) )
         {
-          cref_t ftype = fl_JN;
-          ea_t ea = calc_code_mem(x);
-          if ( InstrIsSet(cmd.itype, CF_CALL) )
-          {
-            if ( !func_does_return(ea) )
-              flow = false;
-            ftype = fl_CN;
-          }
-          ua_add_cref(x.offb, ea, ftype);
+          if ( !func_does_return(ea) )
+            flow = false;
+          ftype = fl_CN;
         }
-        else // evaluate RPTB loops as dref
-          ua_add_dref(x.offb, calc_code_mem(x), dr_I);
+        insn.add_cref(ea, x.offb, ftype);
+      }
+      else // evaluate RPTB loops as dref
+      {
+        insn.add_dref(calc_code_mem(insn, x), x.offb, dr_I);
       }
       break;
 
     case o_imm:
       QASSERT(10112, use);
-      process_imm(x);
-      if ( op_adds_xrefs(uFlag, x.n) )
-        ua_add_off_drefs2(x, dr_O, 0);
+      process_imm(insn, x, F);
+      if ( op_adds_xrefs(F, x.n) )
+        insn.add_off_drefs(x, dr_O, 0);
       break;
 
     case o_mem:
       {
-        ea_t ea = calc_data_mem(x);
+        ea_t ea = calc_data_mem(insn, x);
         if ( ea != BADADDR )
         {
-          ua_add_dref(x.offb, ea, use ? dr_R : dr_W);
-          ua_dodata2(x.offb, ea, x.dtyp);
-          if ( !use )
-            doVar(ea);
+          insn.add_dref(ea, x.offb, use ? dr_R : dr_W);
+          insn.create_op_data(ea, x);
         }
       }
       break;
@@ -85,18 +84,18 @@ static void process_operand(op_t &x, int use)
       break;
 
     case o_displ:
-      doImmd(cmd.ea);
+      set_immd(insn.ea);
       break;
 
     default:
       if ( x.type == o_void )
       {
-        if ( cmd.itype == TMS320C3X_ABSF )
+        if ( insn.itype == TMS320C3X_ABSF )
           break;
-        if ( cmd.itype == TMS320C3X_ABSI )
+        if ( insn.itype == TMS320C3X_ABSI )
           break;
       }
-      warning("interr: emu2 address:%a operand:%d type:%d", cmd.ea, x.n, x.type);
+      warning("interr: emu2 address:%a operand:%d type:%d", insn.ea, x.n, x.type);
   }
 }
 
@@ -113,152 +112,172 @@ static void process_operand(op_t &x, int use)
 // TMS320C3X_DBcond,            // Decrement and branch conditionally   0110 11xx xx1x xxxx xxxx xxxx xxxx xxxx
 
 
-bool delayed_stop(void)
+static bool delayed_stop(const insn_t &insn, flags_t F)
 {
-  if ( ! isFlow(uFlag) )
+  if ( !is_flow(F) )
     return false;  // Does the previous instruction exist and pass execution flow to the current byte?
 
-  if ( cmd.size == 0 )
+  if ( insn.size == 0 )
     return false;
 
   int sub = 3; // backward offset to skip 3 previous 1-word instruction
 
-  ea_t ea = cmd.ea - sub;
+  ea_t ea = insn.ea - sub;
 
-  if ( isCode(get_flags_novalue(ea)) )          // Does flag denote start of an instruction?
+  if ( is_code(get_flags(ea)) )          // Does flag denote start of an instruction?
   {
-    int code = get_full_byte(ea); // get the instruction word
+    int code = get_wide_byte(ea); // get the instruction word
 
-        if ( (code & 0xff000000) == 0x61000000 )        return true;    // Branch unconditionally delayed                               0110 0001 xxxx xxxx xxxx xxxx xxxx xxxx
-        if ( (code & 0xfdff0000) == 0x68200000) return true;    // Branch conditionally delayed (with U cond )                  0110 10x0 001x xxxx xxxx xxxx xxxx xxxx
-        //if ( (code & 0xfc3f0000) == 0x6c200000)       return true;    // Decrement and branch conditionally (with U cond )    0110 11xx xx1x xxxx xxxx xxxx xxxx xxxx
-        // выброшено, т.к. используется в основном для огранизации циклов
-        // а циклы не покидают пределы процедуры
+    if ( (code & 0xff000000) == 0x61000000 )
+      return true;    // Branch unconditionally delayed                               0110 0001 xxxx xxxx xxxx xxxx xxxx xxxx
+    if ( (code & 0xfdff0000) == 0x68200000 )
+      return true;    // Branch conditionally delayed (with U cond )                  0110 10x0 001x xxxx xxxx xxxx xxxx xxxx
+    //if ( (code & 0xfc3f0000) == 0x6c200000)       return true;    // Decrement and branch conditionally (with U cond )    0110 11xx xx1x xxxx xxxx xxxx xxxx xxxx
+    // выброшено, т.к. используется в основном для огранизации циклов
+    // а циклы не покидают пределы процедуры
   }
 
 
   return false;
 }
 
-ea_t GetDelayedBranchAdr(void)   // if previous instruction is delayed jump return jump adr, else -1
+//----------------------------------------------------------------------
+// if previous instruction is delayed jump return jump adr, else -1
+static ea_t GetDelayedBranchAdr(const insn_t &insn, flags_t F)
 {
   int16 disp;
 
-  if ( ! isFlow(uFlag) )
+  if ( !is_flow(F) )
     return BADADDR; // Does the previous instruction exist and pass execution flow to the current byte?
 
-  if ( cmd.size == 0 )
+  if ( insn.size == 0 )
     return BADADDR;
 
   int sub = 3; // backward offset to skip 3 previous 1-word instruction
 
-  ea_t ea = cmd.ea - sub;
+  ea_t ea = insn.ea - sub;
 
-  if ( isCode(get_flags_novalue(ea)) )    // Does flag denote start of an instruction?
+  if ( is_code(get_flags(ea)) )    // Does flag denote start of an instruction?
   {
-    int code = get_full_byte(ea); // get the instruction word
+    int code = get_wide_byte(ea); // get the instruction word
 
-    if ( (code & 0xff000000) == 0x61000000) // Branch unconditionally (delayed )
-        return code & 0xffffff;
+    if ( (code & 0xff000000) == 0x61000000 ) // Branch unconditionally (delayed )
+      return code & 0xffffff;
 
     if ( (code & 0xffe00000) == 0x6a200000 ) // BranchD conditionally
     {
-        disp = code & 0xffff;
-        return  cmd.ea + disp;
+      disp = code & 0xffff;
+      return insn.ea + disp;
     }
 
     if ( (code & 0xfe200000) == 0x6e200000 ) // DecrementD and branch conditionally
     {
-        disp = code & 0xffff;
-        return  cmd.ea + disp;
+      disp = code & 0xffff;
+      return insn.ea + disp;
     }
   }
-
-
   return BADADDR;
 }
 
-
 //----------------------------------------------------------------------
-bool is_basic_block_end(void)
+bool is_basic_block_end(const insn_t &insn)
 {
-  if ( delayed_stop() ) return true;
-  return ! isFlow(get_flags_novalue(cmd.ea+cmd.size));
+  flags_t F = get_flags(insn.ea);
+  if ( delayed_stop(insn, F) )
+    return true;
+  return !is_flow(get_flags(insn.ea+insn.size));
 }
 
 //----------------------------------------------------------------------
-static bool add_stkpnt(sval_t delta)
+static bool add_stkpnt(const insn_t &insn, sval_t delta)
 {
-  func_t *pfn = get_func(cmd.ea);
+  func_t *pfn = get_func(insn.ea);
   if ( pfn == NULL )
     return false;
 
-  return add_auto_stkpnt2(pfn, cmd.ea+cmd.size, delta);
+  return add_auto_stkpnt(pfn, insn.ea+insn.size, delta);
 }
 
 //----------------------------------------------------------------------
-static void trace_sp(void)
+static void trace_sp(const insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS320C3X_RETIcond:
-      add_stkpnt(-2);
+      add_stkpnt(insn, -2);
       break;
     case TMS320C3X_RETScond:
-      add_stkpnt(-1);
+      add_stkpnt(insn, -1);
       break;
     case TMS320C3X_POP:
     case TMS320C3X_POPF:
-      add_stkpnt(-1);
+      add_stkpnt(insn, -1);
       break;
     case TMS320C3X_PUSH:
     case TMS320C3X_PUSHF:
-      add_stkpnt(1);
+      add_stkpnt(insn, 1);
+      break;
+    case TMS320C3X_SUBI:
+      if ( insn.Op2.is_reg(sp) && insn.Op1.type == o_imm )
+        add_stkpnt(insn, -insn.Op1.value);
+      break;
+    case TMS320C3X_ADDI:
+      if ( insn.Op2.is_reg(sp) && insn.Op1.type == o_imm )
+        add_stkpnt(insn, insn.Op1.value);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+int idaapi emu(const insn_t &insn)
 {
-  uint32 feature = cmd.get_canon_feature();
+  uint32 feature = insn.get_canon_feature();
   flow = (feature & CF_STOP) == 0;
 
-  if ( (cmd.auxpref & DBrFlag) == 0 )   // У отложенных переходов не надо обрабатывать операнды, т.к.
+  flags_t F = get_flags(insn.ea);
+  if ( (insn.auxpref & DBrFlag) == 0 )   // У отложенных переходов не надо обрабатывать операнды, т.к.
                                       // регистры и так не обрабатываются, а адр. перехода будет обработан через 3 команды
   {
-        if ( feature & CF_USE1 ) process_operand(cmd.Op1, 1);
-        if ( feature & CF_USE2 ) process_operand(cmd.Op2, 1);
-        if ( feature & CF_USE3 ) process_operand(cmd.Op3, 1);
+    if ( feature & CF_USE1 ) handle_operand(insn, insn.Op1, F, true);
+    if ( feature & CF_USE2 ) handle_operand(insn, insn.Op2, F, true);
+    if ( feature & CF_USE3 ) handle_operand(insn, insn.Op3, F, true);
 
-        if ( feature & CF_CHG1 ) process_operand(cmd.Op1, 0);
-        if ( feature & CF_CHG2 ) process_operand(cmd.Op2, 0);
-        if ( feature & CF_CHG3 ) process_operand(cmd.Op3, 0);
+    if ( feature & CF_CHG1 ) handle_operand(insn, insn.Op1, F, false);
+    if ( feature & CF_CHG2 ) handle_operand(insn, insn.Op2, F, false);
+    if ( feature & CF_CHG3 ) handle_operand(insn, insn.Op3, F, false);
   }
 
 
-  if ( GetDelayedBranchAdr() != BADADDR )  // добавить ссылку по отложенному переходу
-        ua_add_cref(0, toEA(cmd.cs, GetDelayedBranchAdr()), fl_JN);
+  ea_t dbaddr = GetDelayedBranchAdr(insn, F);
+  if ( dbaddr != BADADDR )  // добавить ссылку по отложенному переходу
+    add_cref(insn.ea, to_ea(insn.cs, dbaddr), fl_JN);
 
-  if ( cmd.itype == TMS320C3X_RETScond )  // добавить ссылку по условному выходу
-        ua_add_cref(0, cmd.ea, fl_JN);
+  if ( insn.itype == TMS320C3X_RETScond )  // добавить ссылку по условному выходу
+    add_cref(insn.ea, insn.ea, fl_JN);
 
   // check for DP changes
-  if ( ((cmd.itype == TMS320C3X_LDIcond) || (cmd.itype == TMS320C3X_LDI)) && (cmd.Op1.type == o_imm)
-    && (cmd.Op2.type == o_reg) && (cmd.Op2.reg == dp))
-      split_srarea(get_item_end(cmd.ea), dp, cmd.Op1.value & 0xFF, SR_auto);
+  if ( (insn.itype == TMS320C3X_LDIcond || insn.itype == TMS320C3X_LDI)
+    && insn.Op1.type == o_imm
+    && insn.Op2.type == o_reg
+    && insn.Op2.reg == dp )
+  {
+    split_sreg_range(get_item_end(insn.ea), dp, insn.Op1.value & 0xFF, SR_auto);
+  }
 
   // determine if the next instruction should be executed
-  if ( segtype(cmd.ea) == SEG_XTRN ) flow = 0;
-  if ( flow && delayed_stop() ) flow = 0;
-  if ( flow ) ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+  if ( segtype(insn.ea) == SEG_XTRN )
+    flow = false;
+  if ( flow && delayed_stop(insn, F) )
+    flow = false;
+  if ( flow )
+    add_cref(insn.ea, insn.ea+insn.size, fl_F);
 
   if ( may_trace_sp() )
   {
     if ( !flow )
-      recalc_spd(cmd.ea);     // recalculate SP register for the next insn
+      recalc_spd(insn.ea);     // recalculate SP register for the next insn
     else
-      trace_sp();
+      trace_sp(insn);
   }
 
   return 1;
@@ -271,30 +290,42 @@ bool idaapi create_func_frame(func_t *pfn)     // create frame of newly created 
   {
     if ( pfn->frame == BADNODE )
     {
-      ea_t ea = pfn->startEA;
+      insn_t insn;
+      ea_t ea = pfn->start_ea;
       ushort regsize = 0;
-      while ( ea < pfn->endEA ) // check for register pushs
+      while ( ea < pfn->end_ea ) // check for register pushs
       {
-        decode_insn(ea);
-        ea += cmd.size;         // считаем кол-во push
-        if ( ((cmd.itype == TMS320C3X_PUSH) || (cmd.itype == TMS320C3X_PUSHF)) && (cmd.Op1.type == o_reg) )
-            regsize++;
-        else    // варианты манипуляции с sp типа:      LDI     SP,AR3  ADDI    #0001,SP игнорируем
-            if  ( ((cmd.Op1.type == o_reg) && (cmd.Op1.reg == sp)) || ((cmd.Op2.type == o_reg) && (cmd.Op2.reg == sp)) )
-                continue;
-            else
-                break;
+        decode_insn(&insn, ea);
+        ea += insn.size;         // считаем кол-во push
+        if ( (insn.itype == TMS320C3X_PUSH || insn.itype == TMS320C3X_PUSHF)
+          && insn.Op1.type == o_reg )
+        {
+          regsize++;
+        }
+        else if ( insn.Op1.type == o_reg && insn.Op1.reg == sp
+               || insn.Op2.type == o_reg && insn.Op2.reg == sp )
+        { // варианты манипуляции с sp типа:
+          //   LDI     SP,AR3  ADDI    #0001,SP игнорируем
+          continue;
+        }
+        else
+        {
+          break;
+        }
       }
 
-      ea = pfn->startEA;
+      ea = pfn->start_ea;
       int localsize = 0;
-      while ( ea < pfn->endEA ) // check for frame creation
+      while ( ea < pfn->end_ea ) // check for frame creation
       {
-        decode_insn(ea);
-        ea += cmd.size; // Попытка определить команду типа      ADDI    #0001,SP
-        if ( (cmd.itype == TMS320C3X_ADDI) && (cmd.Op1.type == o_imm) && (cmd.Op2.type == o_reg) && (cmd.Op2.reg == sp) )
+        decode_insn(&insn, ea);
+        ea += insn.size; // Попытка определить команду типа      ADDI    #0001,SP
+        if ( insn.itype == TMS320C3X_ADDI
+          && insn.Op1.type == o_imm
+          && insn.Op2.type == o_reg
+          && insn.Op2.reg == sp )
         {
-          localsize = (int)cmd.Op1.value;
+          localsize = (int)insn.Op1.value;
           break;
         }
       }
@@ -309,10 +340,11 @@ bool idaapi create_func_frame(func_t *pfn)     // create frame of newly created 
 //      returns: number of bytes in the instruction
 int idaapi is_align_insn(ea_t ea)
 {
+  insn_t insn;
+  if ( decode_insn(&insn, ea) < 1 )
+    return 0;
 
-  if ( !decode_insn(ea) ) return 0;
-
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS320C3X_NOP:
       break;
@@ -320,13 +352,12 @@ int idaapi is_align_insn(ea_t ea)
       return 0;
   }
 
-  return cmd.size;
+  return insn.size;
 }
 
 //#processor_t.can_have_type
 //----------------------------------------------------------------------
-//lint -esym(1764,op)
-bool idaapi can_have_type(op_t &op)
+bool idaapi can_have_type(const op_t &op)
 {
   switch ( op.type )
   {

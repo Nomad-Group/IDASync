@@ -128,6 +128,7 @@ struct trk_cpuinfo_t
   uchar extended2TypeSize;
 };
 
+//-V:trk_process_info_t:730 not all members of a class are initialized inside the constructor
 struct trk_process_info_t
 {
   int32 pid;            // process id
@@ -155,6 +156,7 @@ struct thread_list_entry_t
 };
 typedef qvector<thread_list_entry_t> thread_list_t;
 
+//-V:metrotrk_t:730 not all members of a class are initialized inside the constructor
 struct metrotrk_t
 {
   HANDLE hp;
@@ -204,7 +206,8 @@ public:
   bool ping(void);
   bool connect(void);
   bool disconnect(void);
-  bool support_mask(uchar mask[32], uchar *protocol_level);
+#define SUPPORT_MASK_SZ 32
+  bool support_mask(uchar mask[SUPPORT_MASK_SZ], uchar *protocol_level);
   bool cpu_type(trk_cpuinfo_t *cpuinfo);
   int open_file(const char *name, trk_open_mode_t mode);
   ssize_t write_file(int h, const void *bytes, size_t size);

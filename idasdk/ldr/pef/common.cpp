@@ -64,7 +64,7 @@ static void swap_pef_library(pef_library_t &pil)
   pil.currentVersion      = swap32(pil.currentVersion     );
   pil.importedSymbolCount = swap32(pil.importedSymbolCount);
   pil.firstImportedSymbol = swap32(pil.firstImportedSymbol);
-  pil.reservedB           = swap16(pil.reservedB         );
+  pil.reservedB           = swap16(pil.reservedB          );
 #endif
 }
 
@@ -94,23 +94,42 @@ static void swap_pef_export(pef_export_t &pe)
 }
 
 //----------------------------------------------------------------------
-bool is_pef_file(linput_t *li)
+const char *get_pef_processor(const pef_t &pef)
+{
+  if ( strneq(pef.architecture, PEF_ARCH_PPC, 4) ) // PowerPC
+    return "ppc";
+  if ( strneq(pef.architecture, PEF_ARCH_68K, 4) ) // or 68K
+    return "68000";
+  return NULL;
+}
+
+//----------------------------------------------------------------------
+const char *get_pef_processor(linput_t *li)
 {
   pef_t pef;
   if ( qlread(li, &pef, sizeof(pef_t)) != sizeof(pef_t) )
-    return false;
+    return NULL;
   swap_pef(pef);
-  return strncmp(pef.tag1,PEF_TAG_1,4) == 0     // Joy!
-      && strncmp(pef.tag2,PEF_TAG_2,4) == 0     // peff
-      && pef.formatVersion == PEF_VERSION       // 1
-      && (strncmp(pef.architecture,PEF_ARCH_PPC,4) == 0         // PowerPC
-       || strncmp(pef.architecture,PEF_ARCH_68K,4) == 0);       // or 68K
+  if ( !strneq(pef.tag1, PEF_TAG_1, 4)    // Joy!
+    || !strneq(pef.tag2, PEF_TAG_2, 4)    // peff
+    || pef.formatVersion != PEF_VERSION ) // 1
+  {
+    return NULL;
+  }
+  return get_pef_processor(pef);
+}
+
+//----------------------------------------------------------------------
+bool is_pef_file(linput_t *li)
+{
+  const char *proc = get_pef_processor(li);
+  return proc != NULL;
 }
 
 //----------------------------------------------------------------------
 static char *get_string(
         linput_t *li,
-        int32 snames_table,
+        qoff64_t snames_table,
         int32 off,
         char *buf,
         size_t bufsize)

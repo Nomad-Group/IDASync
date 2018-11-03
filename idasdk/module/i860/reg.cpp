@@ -135,34 +135,71 @@ static const char *const RegNames[] =
 };
 
 //----------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::newprc:
+    case processor_t::ev_newprc:
       {
         int procnum = va_arg(va, int);
+        // bool keep_cfg = va_argi(va, bool);
         pflag = procnum ? _PT_860XP : _PT_860XR;
       }
       break;
 
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i860_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i860_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        i860_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return i860_ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return i860_emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
     default:
       break;
   }
-  va_end(va);
-
-  return(1);
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -175,7 +212,6 @@ static const asm_t i860 =
   0,
   "Generic for Intel 860",
   0,
-  NULL,
   NULL,
   "org",
   NULL,
@@ -199,10 +235,6 @@ static const asm_t i860 =
   ".byte [%s]", // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -252,11 +284,14 @@ static const bytes_t retcodes[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,
-  PLFM_I860,            // id
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_I860,              // id
+                          // flag
   PR_USE32,
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -265,31 +300,8 @@ processor_t LPH =
 
   notify,
 
-  i860_header,
-  i860_footer,
-
-  i860_segstart,
-  std_gen_segm_footer,
-
-  NULL,
-
-  i860_ana,
-  i860_emu,
-
-  i860_out,
-  i860_outop,
-  intel_data,
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  R_vds+1,                      // Number of registers
   RegNames,                     // Regsiter names
-  NULL,                         // get abstract register
-
-  0,                            // Number of register files
-  NULL,                         // Register file names
-  NULL,                         // Register descriptions
-  NULL,                         // Pointer to CPU registers
+  R_vds+1,                      // Number of registers
 
   R_vcs,R_vds,
   0,                            // size of a segment register
@@ -299,5 +311,5 @@ processor_t LPH =
   retcodes,
 
   0,I860_last,
-  Instructions
+  Instructions,                 // instruc
 };

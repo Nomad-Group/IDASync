@@ -13,13 +13,21 @@
 #include "pdp.hpp"
 
 //----------------------------------------------------------------------
-inline void OutReg(int rgnum)
+class out_pdp_t : public outctx_t
 {
-  out_register(ph.regNames[rgnum]);
-}
+  out_pdp_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void OutReg(int rgnum) { out_register(ph.reg_names[rgnum]); }
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+};
+CASSERT(sizeof(out_pdp_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_pdp_t)
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_pdp_t::out_operand(const op_t &x)
 {
   ea_t segadr;
   switch ( x.type )
@@ -43,10 +51,10 @@ bool idaapi outop(op_t &x)
       else
       {
         out_symbol('#');
-        if ( x.dtyp == dt_float || x.dtyp == dt_double )
+        if ( x.dtype == dt_float || x.dtype == dt_double )
         {
           char str[MAXSTR];
-          if ( out_real(&x.value, 2, str, sizeof(str)) )
+          if ( print_fpval(str, sizeof(str), &x.value, 2) )
           {
             char *p = str;
             while ( *p == ' ' )
@@ -62,7 +70,7 @@ bool idaapi outop(op_t &x)
         }
         else
         {
-          OutValue(x, OOF_SIGNED | OOFW_IMM);
+          out_value(x, OOF_SIGNED | OOFW_IMM);
         }
       }
       break;
@@ -75,27 +83,29 @@ bool idaapi outop(op_t &x)
           out_symbol('@');
         if ( x.phrase == 037 )
           out_symbol('#');
-        if ( x.addr16 < ml.asect_top && !isOff(uFlag, x.n) )
+        if ( x.addr16 < ml.asect_top && !is_off(F, x.n) )
         {
-          OutValue(x, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN | OOFW_16);
+          out_value(x, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN | OOFW_16);
           break;
         }
       }
-      segadr = toEA(x.type == o_far ? x.segval : codeSeg(x.addr16,x.n), x.addr16);
+      segadr = x.type == o_far
+             ? to_ea(x.segval, x.addr16)
+             : map_code_ea(insn, x.addr16, x.n);
       if ( !out_name_expr(x, segadr, x.addr16) )
       {
          if ( x.type == o_far || x.addr16 < 0160000 )
-           QueueSet(Q_noName, cmd.ea);
-         OutValue(x, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN | OOFW_16);
+           remember_problem(PR_NONAME, insn.ea);
+         out_value(x, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN | OOFW_16);
       }
       break;
     case o_number:      //EMT/TRAP/MARK/SPL
-      OutValue(x, OOF_NUMBER | OOFS_NOSIGN | OOFW_8);
+      out_value(x, OOF_NUMBER | OOFS_NOSIGN | OOFW_8);
       break;
     case o_displ:           // 6x/7x (!67/!77)
       if ( x.phrase >= 070 )
         out_symbol('@');
-      OutValue(x, OOF_ADDR | OOF_SIGNED | OOFW_16);
+      out_value(x, OOF_ADDR | OOF_SIGNED | OOFW_16);
       out_symbol('(');
       goto endregout;
     case o_phrase:         // 1x/2x/3x/4x/5x (!27/!37)
@@ -107,6 +117,7 @@ bool idaapi outop(op_t &x)
           break;
         case 3:
           out_symbol('@');
+          // fallthrough
         case 2:
           out_symbol('(');
           OutReg(x.phrase & 7);
@@ -115,6 +126,7 @@ bool idaapi outop(op_t &x)
           break;
         case 5:
           out_symbol('@');
+          // fallthrough
         case 4:
           out_symbol('-');
           out_symbol('(');
@@ -125,33 +137,37 @@ endregout:
       }
       break;
     default:
-      warning("out: %" FMT_EA "o: bad optype %d", cmd.ip, x.type);
+      warning("out: %" FMT_EA "o: bad optype %d", insn.ip, x.type);
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_pdp_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  static const char *const postfix[] = { "", "b"};
-  init_output_buffer(buf, sizeof(buf));
+  static const char *const postfix[] = { "", "b" };
+  out_mnem(8, postfix[insn.bytecmd]);
+}
 
-  OutMnem(8, postfix[cmd.bytecmd]);
-  if ( cmd.itype == pdp_compcc )
+//----------------------------------------------------------------------
+void out_pdp_t::out_insn(void)
+{
+  out_mnemonic();
+  if ( insn.itype == pdp_compcc )
   {
     uint i = 0, code, first = 0;
-    static const uint tabcc[8] = {
+    static const uint tabcc[8] =
+    {
       pdp_clc, pdp_clv, pdp_clz, pdp_cln,
       pdp_sec, pdp_sev, pdp_sez, pdp_sen
     };
-    code = cmd.Op1.phrase;
+    code = insn.Op1.phrase;
     out_symbol('<');
     if ( code >= 020 )
     {
       if ( (code ^= 020) == 0 )
-        OutLine(COLSTR("nop!^O20", SCOLOR_INSN));
+        out_line(COLSTR("nop!^O20", SCOLOR_INSN));
       i = 4;
     }
     for ( ; code; i++, code >>= 1 )
@@ -168,211 +184,202 @@ void idaapi out(void)
 
   out_one_operand(0);
 
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
   }
 
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi pdp_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX);
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, seg) could be made const
+void idaapi pdp_segstart(outctx_t &ctx, segment_t *seg)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
-  segment_t *Sarea = getseg(ea);
-
-  if ( Sarea->type == SEG_IMEM)
+  if ( seg->type == SEG_IMEM )
   {
-    MakeLine(COLSTR(".ASECT", SCOLOR_ASMDIR), inf.indent);
+    ctx.flush_buf(COLSTR(".ASECT", SCOLOR_ASMDIR), inf.indent);
   }
   else
   {
-    char sname[MAXNAMELEN];
-    get_segm_name(Sarea, sname, sizeof(sname));
-    char *p = buf + qsnprintf(buf, sizeof(buf),
-                              COLSTR(".PSECT %s", SCOLOR_ASMDIR),
-                              sname);
-    if ( Sarea->ovrname != 0 )
+    qstring sname;
+    get_visible_segm_name(&sname, seg);
+    ctx.out_printf(COLSTR(".PSECT %s", SCOLOR_ASMDIR), sname.c_str());
+    if ( seg->ovrname != 0 )
     {
       char bseg[MAX_NUMBUF];
       char breg[MAX_NUMBUF];
-      btoa(bseg, sizeof(bseg), Sarea->ovrname & 0xFFFF, 10);
-      btoa(breg, sizeof(breg), Sarea->ovrname >> 16, 10);
-      qsnprintf(p, end-p,
+      btoa(bseg, sizeof(bseg), seg->ovrname & 0xFFFF, 10);
+      btoa(breg, sizeof(breg), seg->ovrname >> 16, 10);
+      ctx.out_printf(
                 COLSTR(" %s Overlay Segment %s, Region %s", SCOLOR_AUTOCMT),
                 ash.cmnt, bseg, breg);
     }
-    MakeLine(buf, 0);
+    ctx.flush_outbuf(0);
   }
 
-  if ( inf.s_org )
+  if ( (inf.outflags & OFLG_GEN_ORG) != 0 )
   {
-    size_t org = size_t(ea-get_segm_base(Sarea));
-    if ( org != 0 && org != ml.asect_top && Sarea->comorg()  )
+    size_t org = size_t(ctx.insn_ea-get_segm_base(seg));
+    if ( org != 0 && org != ml.asect_top && seg->comorg() )
     {
-      char *p = tag_on(buf, end, COLOR_ASMDIR);
-      APPEND(p, end, ash.origin);
-      APPEND(p, end, ash.a_equ);
-      if ( Sarea->type != SEG_IMEM )
+      ctx.out_tagon(COLOR_ASMDIR);
+      ctx.out_line(ash.origin);
+      ctx.out_line(ash.a_equ);
+      if ( seg->type != SEG_IMEM )
       {
-        APPEND(p, end, ash.origin);
-        APPCHAR(p, end, '+');
+        ctx.out_line(ash.origin);
+        ctx.out_char('+');
       }
-      p += btoa(p, end-p, org);
-      tag_off(p, end, COLOR_ASMDIR);
-      MakeLine(buf, inf.indent);
+      ctx.out_btoa(org);
+      ctx.out_tagoff(COLOR_ASMDIR);
+      ctx.flush_outbuf(inf.indent);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi pdp_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   if ( ash.end != NULL )
   {
-    MakeNull();
-    char *p = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
       size_t i = strlen(ash.end);
       do
-        APPCHAR(p, end, ' ');
+        ctx.out_char(' ');
       while ( ++i < 8 );
-      APPEND(p, end, name.begin());
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }
 
 //--------------------------------------------------------------------------
-static int out_equ(ea_t ea)
+static bool out_equ(outctx_t &ctx, ea_t ea)
 {
   segment_t *s = getseg(ea);
   char buf[MAXSTR];
   if ( s != NULL )
   {
-    if ( s->type != SEG_IMEM && !isLoaded(ea) )
+    if ( s->type != SEG_IMEM && !is_loaded(ea) )
     {
       char num[MAX_NUMBUF];
       btoa(num, sizeof(num), get_item_size(ea));
       nowarn_qsnprintf(buf, sizeof(buf), ash.a_bss, num);
-      gl_name = 1;
-      MakeLine(buf);
-      return 1;
+      ctx.flush_buf(buf);
+      return true;
     }
   }
-  return 0;
+  return false;
 }
 
 //--------------------------------------------------------------------------
-void idaapi pdp_data(ea_t ea)
+void idaapi pdp_data(outctx_t &ctx, bool analyze_only)
 {
   char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   ushort v[5];
   ea_t endea;
-  register char *p;
   register ushort i, j;
 
-  if ( out_equ(ea) )
+  ea_t ea = ctx.insn_ea;
+  if ( out_equ(ctx, ea) )
     return;
 
   i = 0;
-  if ( !isUnknown(uFlag) )
+  flags_t F = ctx.F;
+  if ( !is_unknown(F) )
   {
-    if ( isWord(uFlag) && getRadix(uFlag,0) == 16 ) i = 2;
-    else if ( isDwrd(uFlag) ) i = 4;
-    else if ( isQwrd(uFlag) ) i = 8;
-    else if ( isTbyt(uFlag) ) i = 10;
+    if ( is_word(F) && get_radix(F,0) == 16 )
+      i = 2;
+    else if ( is_dword(F) )
+      i = 4;
+    else if ( is_qword(F) )
+      i = 8;
+    else if ( is_tbyte(F) )
+      i = 10;
     if ( i == 0 )
     {
-      intel_data(ea);
+      ctx.out_data(analyze_only);
       return;
     }
 
-    gl_name = 1;
+    int radix = get_radix(F, 0);
     //lint -esym(443,endea) 'for clause irregularity'
     for ( endea = get_item_end(ea); ea < endea; ea += i )
     {
-      color_t lntag;
-      p = tag_addstr(buf, end, COLOR_KEYWORD, ".rad50  ");
-      p = tag_on(p, end, lntag = COLOR_CHAR);
-      APPCHAR(p, end, '/');
       memset(v, 0, sizeof(v));
-      if ( !get_many_bytes(ea, v, i) || r50_to_asc(v, p, i/2) != 0  )
+      if ( get_bytes(v, i, ea) != i || r50_to_asc(buf, v, i/2) != 0 )
       {
-        p = tag_addstr(buf, end, COLOR_KEYWORD, ".word   ");
-        p = tag_on(p, end, lntag = COLOR_NUMBER);
+        ctx.out_keyword(".word   ");
         for ( j = 0; j < i/2; j++ )
         {
           if ( i )
-            APPCHAR(p, end, ',');
-          p += btoa(p, end-p, v[j], getRadix(uFlag, 0));
+            ctx.out_symbol(',');
+          btoa(buf, sizeof(buf), v[j], radix);
+          ctx.out_line(buf, COLOR_NUMBER);
         }
       }
       else
       {
-        p = tail(p);
-        APPCHAR(p, end, '/');
+        ctx.out_keyword(".rad50  ");
+        ctx.out_tagon(COLOR_CHAR);
+        ctx.out_char('/');
+        ctx.out_line(buf);
+        ctx.out_char('/');
+        ctx.out_tagoff(COLOR_CHAR);
       }
-      tag_off(p, end, lntag);
-      if ( MakeLine(buf) )
+      if ( ctx.flush_outbuf() )
         return;   // too many lines
     }
     return;
   }
 // unknown
-  gl_name = 1;
-  if ( !isLoaded(ea) )
+  if ( !is_loaded(ea) )
   {
-    MakeLine(COLSTR(".blkb", SCOLOR_KEYWORD));
+    ctx.flush_buf(COLSTR(".blkb", SCOLOR_KEYWORD));
   }
   else
   {
     uchar c = get_byte(ea);
-    uchar c1 = c >= ' ' && ash.XlatAsciiOutput != 0 ? ash.XlatAsciiOutput[c] : c;
 
     char cbuf[MAX_NUMBUF];
     btoa(cbuf, sizeof(cbuf), c);
-    p = buf + qsnprintf(buf, sizeof(buf),
-                        COLSTR(".byte ", SCOLOR_KEYWORD)
-                        COLSTR("%4s ", SCOLOR_DNUM)
-                        COLSTR("%s %c", SCOLOR_AUTOCMT),
-                        cbuf, ash.cmnt, c1 >= ' ' ? c1 : ' ');
+    ctx.out_printf(COLSTR(".byte ", SCOLOR_KEYWORD)
+                   COLSTR("%4s ", SCOLOR_DNUM)
+                   COLSTR("%s %c", SCOLOR_AUTOCMT),
+                   cbuf,
+                   ash.cmnt,
+                   c >= ' ' ? c : ' ');
     if ( !(ea & 1) && (i = get_word(ea)) != 0 )
     {
-      p = tag_on(p, end, COLOR_AUTOCMT);
-      APPCHAR(p, end, ' ');
-      b2a32(i, p, end-p, 2, 0);
-      p = tail(p);
-      APPCHAR(p, end, ' ');
+      ctx.out_tagon(COLOR_AUTOCMT);
+      ctx.out_char(' ');
+      b2a32(buf, sizeof(buf), i, 2, 0);
+      ctx.out_line(buf);
+      ctx.out_char(' ');
       ushort w = i;
-      r50_to_asc(&w, p, 1);
-      p = tail(p);
-      tag_off(p, end, COLOR_AUTOCMT);
+      r50_to_asc(buf, &w, 1);
+      ctx.out_line(buf);
+      ctx.out_tagoff(COLOR_AUTOCMT);
     }
-    MakeLine(buf);
+    ctx.flush_outbuf();
   } // undefined
 }

@@ -29,11 +29,20 @@ extern processor_subtype_t ptype;
 inline bool is_a4() { return ptype == prc_arc; }
 
 extern netnode helper;      // altval(-1): idp flags
-                            // altval(ea): callee address for indirect calls
+#define CALLEE_TAG   'A'    // altval(ea): callee address for indirect calls
 #define DXREF_TAG    'd'    // altval(ea): resolved address for complex calculation (e.g. ADD R1, PC)
 #define DSLOT_TAG    's'    // altval(ea): 1: delay slot of an unconditional jump/branch
                             //             2: delay slot of a conditional jump/branch
                             //             3: delay slot of a jl/bl
+
+inline void set_callee(ea_t ea, ea_t callee) { helper.easet(ea, callee, CALLEE_TAG); }
+inline ea_t get_callee(ea_t ea) { return helper.eaget(ea, CALLEE_TAG); }
+inline void del_callee(ea_t ea) { helper.eadel(ea, CALLEE_TAG); }
+
+inline void set_dxref(ea_t ea, ea_t dxref) { helper.easet(ea, dxref, DXREF_TAG); }
+inline ea_t get_dxref(ea_t ea) { return helper.eaget(ea, DXREF_TAG); }
+inline void del_dxref(ea_t ea) { helper.eadel(ea, DXREF_TAG); }
+
 extern ushort idpflags;
 
 #define ARC_SIMPLIFY    0x01
@@ -124,8 +133,7 @@ inline bool issp(const op_t &x) { return isreg(x, SP); }
 
 #define aux_pcload      0x0200  // converted pc-relative to memory load (used when ARC_INLINECONST is set)
 
-#define cmd_cond() (cmd.itype <= ARC_store_instructions ? cAL : (cmd.auxpref & aux_cmask))
-#define cond(ins)  (ins.itype <= ARC_store_instructions ? cAL : (ins.auxpref & aux_cmask))
+#define cond(ins)  ((ins).itype <= ARC_store_instructions ? cAL : ((ins).auxpref & aux_cmask))
 
 // Operand types:
 
@@ -179,7 +187,7 @@ enum cond_t
 // is 'ea' in a delay slot of a branch/jump?
 inline bool is_dslot(ea_t ea, bool including_calls = true)
 {
-  nodeidx_t v = helper.altval(ea, DSLOT_TAG);
+  nodeidx_t v = helper.altval_ea(ea, DSLOT_TAG);
   if ( including_calls )
     return v != 0;
   else
@@ -187,24 +195,22 @@ inline bool is_dslot(ea_t ea, bool including_calls = true)
 }
 
 //------------------------------------------------------------------------
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi arc_header(outctx_t &ctx);
+void idaapi arc_footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
+void idaapi arc_segstart(outctx_t &ctx, segment_t *seg);
 
-int idaapi ana(void);
-int idaapi emu(void);
-void idaapi out(void);
-bool idaapi outop(op_t & op);
+int idaapi ana(insn_t *out);
+int idaapi emu(const insn_t &insn);
 int idaapi is_align_insn(ea_t ea);
 
-int idaapi is_sp_based(const op_t & x);
+int idaapi is_sp_based(const insn_t &insn, const op_t & x);
 bool idaapi create_func_frame(func_t * pfn);
-int idaapi arc_get_frame_retsize(func_t * pfn);
-bool copy_insn_optype(op_t &x, ea_t ea, void *value = NULL, bool force = false);
-bool is_call_insn(void);
-bool is_return_insn();
-bool is_basic_block_end();
+int idaapi arc_get_frame_retsize(const func_t * pfn);
+bool copy_insn_optype(const insn_t &insn, const op_t &x, ea_t ea, void *value = NULL, bool force = false);
+bool is_arc_call_insn(const insn_t &insn);
+bool is_arc_return_insn(const insn_t &insn);
+bool is_arc_basic_block_end(const insn_t &insn);
 void del_insn_info(ea_t ea);
 
 int get_arc_fastcall_regs(const int **regs);
@@ -213,7 +219,7 @@ bool calc_arc_varglocs(
         func_type_data_t *fti,
         regobjs_t *regargs,
         int nfixed);
-bool calc_arc_retloc(const tinfo_t &tif, cm_t cc, argloc_t *retloc);
+bool calc_arc_retloc(argloc_t *retloc, const tinfo_t &tif, cm_t cc);
 int use_arc_regarg_type(ea_t ea, const funcargvec_t &rargs);
 void use_arc_arg_types(
         ea_t ea,

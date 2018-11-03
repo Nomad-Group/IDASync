@@ -88,7 +88,7 @@ void Edge::setDestNode(Node *node)
 
 void Edge::adjust()
 {
-  if (!source || !dest)
+  if ( !source || !dest )
     return;
 
   QRectF srect = source->boundingRect();
@@ -100,7 +100,8 @@ void Edge::adjust()
 
   prepareGeometryChange();
 
-  if (length > qreal(40.)) {
+  if ( length > qreal(40.) )
+  {
     qreal line_angle = line.angle();
     qreal angle = line_angle > 90. ? fmod(line_angle, 90.0) : line_angle;
     qreal dist = qMax(angle, 45.0) - qMin(angle, 45.0);
@@ -109,34 +110,36 @@ void Edge::adjust()
     sourcePoint = line.p1() + edgeOffset;
     destPoint = line.p2() - edgeOffset;
     qreal new_angle = QLineF(sourcePoint, destPoint).angle();
-    if (qAbs(new_angle - line_angle) > 90.)
+    if ( qAbs(new_angle - line_angle) > 90. )
       sourcePoint = destPoint = line.p1();
-  } else {
+  }
+  else
+  {
     sourcePoint = destPoint = line.p1();
   }
 }
 
 QRectF Edge::boundingRect() const
 {
-  if (!source || !dest)
+  if ( !source || !dest )
     return QRectF();
 
   qreal penWidth = 1;
   qreal extra = (penWidth + arrowSize) / 2.0;
 
-  return QRectF(sourcePoint, QSizeF(destPoint.x() - sourcePoint.x(),
-                                    destPoint.y() - sourcePoint.y()))
-  .normalized()
-  .adjusted(-extra, -extra, extra, extra);
+  QRectF r(sourcePoint, QSizeF(destPoint.x() - sourcePoint.x(),
+                               destPoint.y() - sourcePoint.y()));
+
+  return r.normalized().adjusted(-extra, -extra, extra, extra);
 }
 
 void Edge::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
 {
-  if (!source || !dest)
+  if ( !source || !dest )
     return;
 
   QLineF line(sourcePoint, destPoint);
-  if (qFuzzyCompare(line.length(), qreal(0.)))
+  if ( qFuzzyCompare(line.length(), qreal(0.)) )
     return;
 
   // Draw the line itself
@@ -145,7 +148,7 @@ void Edge::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
 
   // Draw the arrows
   double angle = ::acos(line.dx() / line.length());
-  if (line.dy() >= 0)
+  if ( line.dy() >= 0 )
     angle = TwoPi - angle;
 
   QPointF destArrowP1 = destPoint + QPointF(sin(angle - Pi / 3) * arrowSize,

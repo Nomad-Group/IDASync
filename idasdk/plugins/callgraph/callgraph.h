@@ -31,13 +31,15 @@ struct funcs_walk_options_t
   int32 version;
 #define FWO_VERSION 1 // current version of options block
   int32 flags;
-#define FWO_SHOWSTRING     			 0x0001 // show string references
-#define FWO_SKIPLIB       			 0x0002 // skip library functions
+#define FWO_SHOWSTRING                           0x0001 // show string references
+#define FWO_SKIPLIB                              0x0002 // skip library functions
 #define FWO_CALLEE_RECURSE_UNLIM 0x0004 // unlimited callees recursion
   int32 callees_recurse_limit; // how deep to recurse callees (0 = unlimited)
-	int32 callers_recurse_limit; // how deep to recurse callers (0 = unlimited)
+  int32 callers_recurse_limit; // how deep to recurse callers (0 = unlimited)
   int32 max_nodes;             // maximum number of nodes per level
 };
+
+class graph_info_t;
 
 //--------------------------------------------------------------------------
 // function call graph creator class
@@ -64,8 +66,8 @@ public:
   {
     int id1;
     int id2;
-    edge_t(int i1, int i2): id1(i1), id2(i2) { }
-    edge_t(): id1(0), id2(0) { }
+    edge_t(int i1, int i2): id1(i1), id2(i2) {}
+    edge_t(): id1(0), id2(0) {}
   };
   typedef qlist<edge_t> edges_t;
 
@@ -97,36 +99,36 @@ public:
   funcinfo_t *get_info(int nid);
 
   // function name manipulation
-  ea_t get_addr(int nid);
+  ea_t get_addr(int nid) const;
   const char *get_name(int nid);
 
   int walk_func(eavec_t *hide_nodes, func_t *func, funcs_walk_options_t *o=NULL, int level=1);
-	void add_fathers(func_t *func, ea_t func_start, int id, funcs_walk_options_t *opt, int level);
+  void add_fathers(func_t *func, ea_t func_start, int id, funcs_walk_options_t *opt, int level);
 
-  static bool idaapi navigate(void *ud, ea_t addr);
-  static void idaapi go_back(void *ud);
-  static void idaapi go_forward(void *ud);
+  bool navigate(graph_info_t *gi, ea_t addr) const;
 
-	static bool idaapi menu_options_cb(void *ud);
-	static bool idaapi menu_refresh_cb(void *ud);
-	static bool idaapi menu_home_cb(void *ud);
-	static bool idaapi menu_searchfirst_cb(void *ud);
-	static bool idaapi menu_searchnext_cb(void *ud);
-	static bool idaapi menu_center_cb(void *ud);
-	static bool idaapi menu_back_cb(void *ud);
-  static bool idaapi menu_forward_cb(void *ud);
-	static bool idaapi menu_hidenode_cb(void *ud);
-	static bool idaapi menu_showhidden_cb(void *ud);
-	static bool idaapi menu_showall_cb(void *ud);
-  static bool idaapi menu_select_cb(void *ud);
+  void go_back(graph_info_t *gi) const;
+  void go_forward(graph_info_t *gi) const;
 
-	static int idaapi gr_callback(void *ud, int code, va_list va);
+  bool options(graph_info_t *gi) const;
+  bool refresh(graph_info_t *gi) const;
 
-	void idaapi jump_disasm(void *ud, int code, va_list va) const;
-	static bool idaapi menu_jump_cb(void *ud);
-  static bool idaapi menu_jumpaddr_cb(void *ud);
-  static bool idaapi menu_jumpxref_cb(void *ud);
+  bool jumpxref(graph_info_t *gi) const;
+  bool jumpaddr(graph_info_t *gi) const;
+  bool jump(const graph_info_t *gi) const;
+  bool back(graph_info_t *gi) const;
+  bool forward(graph_info_t *gi) const;
 
+  bool center(graph_info_t *gi) const;
+  bool select(const graph_info_t *gi) const;
+  bool home(const graph_info_t *gi) const;
+  bool searchfirst(graph_info_t *gi);
+  bool searchnext(graph_info_t *gi);
+  bool hidenode(graph_info_t *gi) const;
+  bool showhidden(graph_info_t *gi) const;
+  bool showall(graph_info_t *gi) const;
+
+  static ssize_t idaapi gr_callback(void *ud, int code, va_list va);
   static void idaapi user_refresh(void *ud, int code, va_list va, int current_node);
 private:
   edges_t edges;
@@ -141,7 +143,7 @@ class graph_info_t
 public:
   callgraph_t fg; // associated call graph maker
   graph_viewer_t *gv; // associated graph_view
-  TForm *form; // associated TForm
+  TWidget *widget; // associated widget
   ea_t func_ea; // function ea in question
   qstring title; // the title
 
@@ -162,6 +164,7 @@ private:
 public:
   static graph_info_t *find(const ea_t func_ea);
   static graph_info_t *find(const char *title);
+  static graph_info_t *find(const graph_viewer_t *v);
   static graph_info_t *create(ea_t func_ea);
   static void destroy(graph_info_t *gi);
   static bool get_title(ea_t func_ea, qstring *out);

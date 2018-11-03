@@ -22,7 +22,7 @@ const char e_exe[] = "exe";
 
 static jmp_buf jmpb;
 
-#define R_ss 18         // this comes from module/pc/intel.hpp
+#define R_ss 18         // this comes from intel.hpp
 
 //--------------------------------------------------------------------------
 //
@@ -30,20 +30,23 @@ static jmp_buf jmpb;
 //      and fill 'fileformatname'.
 //      otherwise return 0
 //
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *filename)
 {
   static int order = 0;
-  if ( order >= 4 || n > order )
+  if ( order >= 4 )
     return 0;
 
   uint32 fLen = qlsize(li);
-  char rf[MAXSTR];
-  get_input_file_path(rf, sizeof(rf));
-  const char *file_ext = get_file_ext(rf);
-  if( file_ext == NULL )
+  const char *file_ext = get_file_ext(filename);
+  if ( file_ext == NULL )
     file_ext = "";
 
   exehdr E;
+  *processor = "metapc";
   switch ( order )
   {
     case 0:
@@ -52,6 +55,7 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
         order = 3; // check for com
         break;
       }
+
       CASSERT(sizeof(E) >= 16);
       lread(li, &E, sizeof(E));
       if ( E.exe_ident != EXE_ID && E.exe_ident != EXE_ID2
@@ -74,13 +78,13 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
       if ( E.CalcEXE_Length() < fLen - E.HdrSize*16
         && PrepareOverlayType(li, &E) != ovr_noexe )
       {
-        qstrncpy(fileformatname, fn_ovr, MAX_FILE_FORMAT_NAME);
+        *fileformatname = fn_ovr;
         ++order;
-        return f_EXE;
+        return f_EXE | ACCEPT_CONTINUE;
       }
       // no break
     case 1:
-      qstrncpy(fileformatname, fn_exe, MAX_FILE_FORMAT_NAME);
+      *fileformatname = fn_exe;
       order = 5; // done
       return f_EXE;
 
@@ -96,20 +100,20 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
   {
     if ( strieq(file_ext, "sys") || strieq(file_ext, "drv") )
     {
-      qstrncpy(fileformatname, fn_drv, MAX_FILE_FORMAT_NAME);
-      return f_DRV;
+      *fileformatname = fn_drv;
+      return f_DRV | ACCEPT_CONTINUE;
     }
     order++; // 4
   }
 
-  if ( strieq(file_ext, "com") || strieq(file_ext, e_exe) )
+  if ( strieq(file_ext, "com") )
   { // com files must be readable
     // on wince, file .exe files are unreadable. we do not want them to
     // be detected as com files
     qlseek(li, 0);
     if ( qlread(li, &fLen, 1) == 1 )
     {
-      qstrncpy(fileformatname, "MS-DOS COM-file", MAX_FILE_FORMAT_NAME);
+      *fileformatname = "MS-DOS COM-file";
       return f_COM;
     }
   }
@@ -119,9 +123,13 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
 //-------------------------------------------------------------------------
 NORETURN void errstruct(void)
 {
-  if ( askyn_c(ASKBTN_CANCEL, "HIDECANCEL\n"
-               "Bad file structure or read error. Proceed with the loaded infomration?") <= ASKBTN_NO )
+  if ( ask_yn(ASKBTN_CANCEL,
+              "HIDECANCEL\n"
+              "Bad file structure or read error.\n"
+              "Proceed with the loaded infomration?") <= ASKBTN_NO )
+  {
     loader_failure();
+  }
   longjmp(jmpb, 1);
 #ifdef __CODEGEARC__
   exit(0); // suppress compiler error
@@ -131,11 +139,15 @@ NORETURN void errstruct(void)
 //-------------------------------------------------------------------------
 int CheckCtrlBrk(void)
 {
-  if ( wasBreak() )
+  if ( user_cancelled() )
   {
-    if ( askyn_c(ASKBTN_NO, "HIDECANCEL\nDo you really want to abort loading?") > ASKBTN_NO )
+    if ( ask_yn(ASKBTN_NO,
+                "HIDECANCEL\n"
+                "Do you really want to abort loading?") > ASKBTN_NO )
+    {
       loader_failure();
-    clearBreak();
+    }
+    clr_cancelled();
     return 1;
   }
   return 0;
@@ -146,16 +158,16 @@ void add_segm_by_selector(sel_t base, const char *sclass)
 {
   segment_t *ptr = get_segm_by_sel(base);
 
-  if( ptr == NULL || ptr->sel != base )
+  if ( ptr == NULL || ptr->sel != base )
   {
     ea_t ea = sel2ea(base);
-    if ( ea > inf.omaxEA )
-      inf.omaxEA = ea;
+    if ( ea > inf.omax_ea )
+      inf.omax_ea = ea;
 
     segment_t s;
     s.sel     = base;
-    s.startEA = sel2ea(base);
-    s.endEA   = inf.omaxEA;
+    s.start_ea = sel2ea(base);
+    s.end_ea   = inf.omax_ea;
     s.align   = saRelByte;
     s.comb    = sclass != NULL && strcmp(sclass, "STACK") == 0 ? scStack : scPub;
     add_segm_ex(&s, NULL, sclass, ADDSEG_SPARSE | ADDSEG_NOSREG);
@@ -170,18 +182,14 @@ void add_segm_by_selector(sel_t base, const char *sclass)
 //
 static void doRelocs(int16 delta, bool dosegs, netnode ovr_info)
 {
-  fixup_data_t fd;
 
   if ( ovr_info == BADNODE )
     return;
 
-  fd.type         = FIXUP_SEG16;
-  fd.off          = 0;
-  fd.displacement = 0;
-
-  for ( ea_t xEA = ovr_info.alt1st(); xEA != BADADDR; xEA = ovr_info.altnxt(xEA) )
+  fixup_data_t fd(FIXUP_SEG16);
+  for ( ea_t xEA = ovr_info.altfirst(); xEA != BADADDR; xEA = ovr_info.altnext(xEA) )
   {
-    showAddr(xEA);
+    show_addr(xEA);
 
     uint16 curval = get_word(xEA);
     uint16 base = curval + delta;
@@ -192,7 +200,7 @@ static void doRelocs(int16 delta, bool dosegs, netnode ovr_info)
     }
     put_word(xEA, base);
     fd.sel = base;
-    set_fixup(xEA, &fd);
+    fd.set(xEA);
     if ( dosegs )
       add_segm_by_selector(base, NULL);
     CheckCtrlBrk();
@@ -206,10 +214,10 @@ static void create_msdos_segments(bool com_mode, netnode ovr_info)
   add_segm_by_selector(find_selector(inf.start_cs), CLASS_CODE);
   if ( com_mode ) // COM/DRV
   {
-    set_segm_start(inf.ominEA, inf.ominEA, SEGMOD_KILL);
-    inf.minEA = inf.ominEA;
+    set_segm_start(inf.omin_ea, inf.omin_ea, SEGMOD_KILL);
+    inf.min_ea = inf.omin_ea;
 
-    segment_t *s = getseg(inf.minEA);
+    segment_t *s = getseg(inf.min_ea);
     if ( s )
     {
       s->set_comorg();    //i display ORG directive
@@ -219,25 +227,25 @@ static void create_msdos_segments(bool com_mode, netnode ovr_info)
   if ( inf.start_ss != BADSEL && inf.start_ss != inf.start_cs )
     add_segm_by_selector(inf.start_ss, CLASS_STACK);
   else // specify the sp value for the first segment
-    set_default_segreg_value(get_segm_by_sel(inf.start_cs), R_ss, inf.start_cs);
+    set_default_sreg_value(get_segm_by_sel(inf.start_cs), R_ss, inf.start_cs);
   doRelocs(inf.baseaddr, true, ovr_info);
 
-  ea_t ea = inf.ominEA;
-  for ( int i = 0; ea < inf.omaxEA; )
+  ea_t ea = inf.omin_ea;
+  for ( int i = 0; ea < inf.omax_ea; )
   {
     segment_t *sptr = getnseg(i);
-    if ( sptr == NULL || ea < sptr->startEA )
+    if ( sptr == NULL || ea < sptr->start_ea )
     {
       msg("Dummy segment at 0x%a (next segment at 0x%a)\n",
           ea,
-          sptr == NULL ? BADADDR : sptr->startEA);
+          sptr == NULL ? BADADDR : sptr->start_ea);
       add_segm_by_selector(unsigned(ea>>4), "DUMMY");
     }
     else
     {
-      ea = sptr->endEA;
-      if ( !isEnabled(ea) )
-        ea = nextaddr(ea);
+      ea = sptr->end_ea;
+      if ( !is_mapped(ea) )
+        ea = next_addr(ea);
       ++i;
     }
   }
@@ -253,29 +261,29 @@ bool pos_read(linput_t *li, uint32 pos, void *buf, size_t size)
 //--------------------------------------------------------------------------
 static ea_t FindDseg(void)
 {
-  ea_t dea = toEA(inf.start_cs, inf.startIP);
+  ea_t dea = to_ea(inf.start_cs, inf.start_ip);
 
   if ( get_byte(dea) == 0x9A ) // call far
   {
-    dea = toEA(ask_selector(get_word(dea+3)), get_word(dea+1));
-    inf.strtype = ASCSTR_PASCAL;
+    dea = to_ea(sel2para(get_word(dea+3)), get_word(dea+1));
+    inf.strtype = STRTYPE_PASCAL;
   }
   //
   //      Borland startup
   //
   uchar code = get_byte(dea);
   uchar reg = code & 7;
-  if(   (code & ~7) == 0xB8                             // mov reg, ????
-     && (   (   get_byte(dea+3) == 0x8E
-             && ((code=get_byte(dea+4)) & ~7) == 0xD8   // mov ds, reg
-             && (code & 7) == reg)
-         || (   get_byte(dea+3) == 0x2E                 // mov cs:@DGROUP, reg
-             && get_byte(dea+4) == 0x89
-             && ((code = get_byte(dea+5)) & 0x8F) == 6
-             && ((code>>3) & 7) == reg)))
+  if ( (code & ~7) == 0xB8                             // mov reg, ????
+    && ((get_byte(dea+3) == 0x8E
+      && ((code=get_byte(dea+4)) & ~7) == 0xD8   // mov ds, reg
+      && (code & 7) == reg)
+     || (get_byte(dea+3) == 0x2E                 // mov cs:@DGROUP, reg
+      && get_byte(dea+4) == 0x89
+      && ((code = get_byte(dea+5)) & 0x8F) == 6
+      && ((code>>3) & 7) == reg)) )
   {
     segment_t *s = get_segm_by_sel(get_word(dea + 1));
-    return s == NULL ? BADADDR : s->startEA;
+    return s == NULL ? BADADDR : s->start_ea;
   }
   //
   //      Watcom startup
@@ -287,7 +295,7 @@ static ea_t FindDseg(void)
       && get_byte(dea + 1) == 0xB9 )     // mov cx, ???
     {
       segment_t *s = get_segm_by_sel(get_word(dea + 2));
-      return s == NULL ? BADADDR : s->startEA;
+      return s == NULL ? BADADDR : s->start_ea;
     }
   }
   //
@@ -306,8 +314,8 @@ static ea_t FindDseg(void)
   for ( const char *const *p = copyr; *p != NULL; ++p )
   {
     msg("Looking for '%s'...\n", *p);
-    ea_t dataea = bin_search(inf.minEA,
-                             inf.maxEA,
+    ea_t dataea = bin_search(inf.min_ea,
+                             inf.max_ea,
                              (uchar *)*p,
                              NULL,
                              strlen(*p),
@@ -371,46 +379,51 @@ void idaapi load_file(linput_t *li, ushort neflag, const char *fileformatname)
 
   if ( setjmp(jmpb) == 0 )
   {
-    if ( ph.id != PLFM_386)
-      set_processor_type("80386r", SETPROC_ALL|SETPROC_FATAL );
+    set_processor_type("metapc", SETPROC_LOADER);
 
-    type = strnieq(fileformatname, fn_ovr, MAX_FILE_FORMAT_NAME - 1) ? 3
-         : strnieq(fileformatname, fn_exe, MAX_FILE_FORMAT_NAME - 1) ? 2
-         : strnieq(fileformatname, fn_drv, MAX_FILE_FORMAT_NAME - 1) ? 1
+    type = strieq(fileformatname, fn_ovr) ? 3
+         : strieq(fileformatname, fn_exe) ? 2
+         : strieq(fileformatname, fn_drv) ? 1
          : 0;
 
-    clearBreak();
+    clr_cancelled();
 
+    uval_t start_off;
+    uval_t fcoresize;
     inf.cc.cm &= CM_CC_MASK;
     if ( type < 2 ) // COM/DRV
     {
       inf.cc.cm |= C_PC_SMALL;
       if ( !type ) // f_COM
       {
-        inf.startIP = 0x100;
-        inf.minEA   = toEA(inf.baseaddr, inf.startIP);
+        inf.start_ip = 0x100;
+        inf.min_ea   = to_ea(inf.baseaddr, inf.start_ip);
       }
       else
       {            // f_DRV
-        inf.startIP = BADADDR;
-        inf.minEA   = toEA(inf.baseaddr, 0 /*binoff*/);
+        inf.start_ip = BADADDR;
+        inf.min_ea   = to_ea(inf.baseaddr, 0 /*binoff*/);
                                         //binoff has no sense for COM/DRV
       }
-      inf.start_cs  = inf.baseaddr;
-      inf.corestart = 0;
-      inf.fcoresiz  = qlsize(li);
-      inf.maxEA = inf.minEA + inf.fcoresiz;
+      inf.start_cs = inf.baseaddr;
+      start_off = 0;
+      fcoresize = qlsize(li);
+      inf.max_ea = inf.min_ea + fcoresize;
     }
     else
     { // EXE (/OVR)
       inf.cc.cm |= C_PC_LARGE;
       lread(li, &E, sizeof(E));
-      if ( !E.ReloCnt && askyn_c(ASKBTN_YES, "HIDECANCEL\nPossibly packed file, continue?") <= ASKBTN_NO )
+      if ( !E.ReloCnt
+        && ask_yn(ASKBTN_YES,
+                  "HIDECANCEL\nPossibly packed file, continue?") <= ASKBTN_NO )
+      {
         loader_failure();
+      }
       inf.start_ss = E.ReloSS;
       inf.start_cs = E.ReloCS;
-      inf.startSP = E.ExeSP;
-      inf.startIP = E.ExeIP;
+      inf.start_sp = E.ExeSP;
+      inf.start_ip = E.ExeIP;
       // take into account pointers like FFF0:0100
       // FFF0 should be treated as signed in this case
       if ( inf.start_cs >= 0xFFF0 || inf.start_ss >= 0xFFF0 )
@@ -424,32 +437,32 @@ void idaapi load_file(linput_t *li, ushort neflag, const char *fileformatname)
       }
       inf.start_ss += inf.baseaddr;
       inf.start_cs += inf.baseaddr;
-      inf.minEA = toEA(inf.baseaddr, 0);
-      inf.fcoresiz = E.CalcEXE_Length();
+      inf.min_ea = to_ea(inf.baseaddr, 0);
+      fcoresize = E.CalcEXE_Length();
 
       ovr_info.create(LDR_INFO_NODE);
       ovr_info.set((char *)&E, sizeof(E));
 
       //i Check for file size
       uint32 fsize = qlsize(li) - E.HdrSize*16;
-      if ( inf.fcoresiz > fsize )
-        inf.fcoresiz = fsize;
+      if ( fcoresize > fsize )
+        fcoresize = fsize;
       if ( type == 2
-        && inf.fcoresiz < fsize
-        && askyn_c(ASKBTN_YES,
-                   "HIDECANCEL\n"
-                   "The input file has extra information at the end\n"
-                   "\3(tail %Xh, loaded %ah), continue?",
-                   fsize,
-                   inf.fcoresiz) <= ASKBTN_NO )
+        && fcoresize < fsize
+        && ask_yn(ASKBTN_YES,
+                  "HIDECANCEL\n"
+                  "The input file has extra information at the end\n"
+                  "(tail %Xh, loaded %ah), continue?",
+                  fsize,
+                  fcoresize) <= ASKBTN_NO )
       {
         loader_failure();
       }
-      inf.maxEA = inf.minEA + inf.fcoresiz;
+      inf.max_ea = inf.min_ea + fcoresize;
 
-      ea_t stackEA = toEA(inf.start_ss, inf.startSP);
-      if ( inf.maxEA < stackEA )
-        inf.maxEA = stackEA;
+      ea_t stackEA = to_ea(inf.start_ss, inf.start_sp);
+      if ( inf.max_ea < stackEA )
+        inf.max_ea = stackEA;
       msg("Reading relocation table...\n");
       if ( E.ReloCnt )
       {
@@ -460,22 +473,22 @@ void idaapi load_file(linput_t *li, ushort neflag, const char *fileformatname)
 
           lread(li, buf, sizeof(buf));
 
-          ea_t xEA = toEA((ushort)(inf.baseaddr + buf[1]), buf[0]); // we need ushort() here!
-          if ( xEA >= inf.maxEA )
+          ea_t xEA = to_ea((ushort)(inf.baseaddr + buf[1]), buf[0]); // we need ushort() here!
+          if ( xEA >= inf.max_ea )
             errstruct();
           ovr_info.altset(xEA, 1);
         }
       }
-      inf.corestart = E.HdrSize * 16;
+      start_off = E.HdrSize * 16;
       //i preset variable for overlay loading
       if ( type == 3 )
         ovr_type = PrepareOverlayType(li, &E);
     }
     // next 2 strings for create_msdos_segments & CppOverlays
-    inf.ominEA = inf.minEA;
-    inf.omaxEA = inf.maxEA;
+    inf.omin_ea = inf.min_ea;
+    inf.omax_ea = inf.max_ea;
 
-    file2base(li, uint32(inf.corestart), inf.minEA, inf.minEA + inf.fcoresiz,
+    file2base(li, start_off, inf.min_ea, inf.min_ea + fcoresize,
               FILEREG_PATCHABLE);
 
     if ( ovr_type != ovr_cpp )
@@ -488,11 +501,11 @@ void idaapi load_file(linput_t *li, ushort neflag, const char *fileformatname)
 
     create_filename_cmt();
     add_pgm_cmt("Base Address: %ah Range: %ah-%ah Loaded length: %ah",
-                inf.baseaddr, inf.minEA, inf.maxEA, inf.fcoresiz);
+                inf.baseaddr, inf.min_ea, inf.max_ea, fcoresize);
     if ( type >= 2 )
     { //f_EXE
       linput_t *volatile lio = NULL;
-      add_pgm_cmt("Entry Point : %a:%a", inf.start_cs, inf.startIP);
+      add_pgm_cmt("Entry Point : %a:%a", inf.start_cs, inf.start_ip);
       if ( type == 2 // && E.CalcEXE_Length() < qlsize(li) - E.HdrSize*16
         && (lio = CheckExternOverlays()) != NULL )
       {
@@ -508,6 +521,7 @@ void idaapi load_file(linput_t *li, ushort neflag, const char *fileformatname)
         {
           case ovr_pascal:
             lio = li;
+            // fallthrough
           case ovr_noexe:
             LoadPascalOverlays(lio);
             if ( ovr_type == ovr_noexe )
@@ -532,22 +546,21 @@ void idaapi load_file(linput_t *li, ushort neflag, const char *fileformatname)
   {
     segment_t *s = get_segm_by_sel(find_selector(inf.start_cs));
     if ( s != NULL )
-      set_default_segreg_value(s, ph.regDataSreg, s->sel);
+      set_default_sreg_value(s, ph.reg_data_sreg, s->sel);
   }
-  inf.beginEA = (inf.startIP == BADADDR)
-              ? BADADDR
-              : toEA(ask_selector(inf.start_cs), inf.startIP);
-  if ( inf.startIP != BADADDR )
+  inf.start_ea = (inf.start_ip == BADADDR)
+             ? BADADDR
+             : to_ea(sel2para(inf.start_cs), inf.start_ip);
+  if ( inf.start_ip != BADADDR )
   {
-    split_srarea(inf.beginEA,
-                 ph.regDataSreg,
-                 (type < 2)
-               ? find_selector(inf.start_cs)   //COM/DRV
-               : ((get_str_type_code(inf.strtype) == ASCSTR_PASCAL) //i set in [srareaovl.cpp]FindDseg
-                 ? get_segreg(inf.beginEA, ph.regDataSreg)
-                 : inf.baseaddr - 0x10),
-                 SR_autostart,
-                 true);
+    uval_t val;
+    if ( type < 2 )
+      val = find_selector(inf.start_cs); //COM/DRV
+    else if ( get_str_type_code(inf.strtype) == STRTYPE_PASCAL )
+      val = get_sreg(inf.start_ea, ph.reg_data_sreg); //i set in [srareaovl.cpp]FindDseg
+    else
+      val = inf.baseaddr - 0x10;
+    split_sreg_range(inf.start_ea, ph.reg_data_sreg, val, SR_autostart, true);
   }
 
   if ( inf.filetype == f_COM )
@@ -585,7 +598,7 @@ static int expand_file(FILE *fp, uint32 pos)
 //
 //  generate binary file.
 //
-int idaapi save_file(FILE *fp, const char* /*fileformatname*/)
+int idaapi save_file(FILE *fp, const char * /*fileformatname*/)
 {
   int retcode;
   uint32 codeoff;
@@ -606,7 +619,9 @@ int idaapi save_file(FILE *fp, const char* /*fileformatname*/)
       if ( !expand_file(fp, E.TablOff) )
         return 0;
 
-      for ( uval_t x = ovr_info.alt1st(); x != BADADDR; x = ovr_info.altnxt(x) )
+      for ( uval_t x = ovr_info.altfirst();
+            x != BADADDR;
+            x = ovr_info.altnext(x) )
       {
         ushort buf[2];
 
@@ -626,7 +641,7 @@ int idaapi save_file(FILE *fp, const char* /*fileformatname*/)
   }
 
   doRelocs(-inf.baseaddr, 0, ovr_info);
-  retcode = base2file(fp, codeoff, inf.ominEA, inf.ominEA+inf.fcoresiz);
+  retcode = base2file(fp, codeoff, inf.omin_ea, inf.omax_ea);
   doRelocs(inf.baseaddr, 0, ovr_info);
   return retcode;
 }
@@ -641,7 +656,7 @@ static int idaapi move_segm(ea_t from, ea_t to, asize_t /*size*/, const char * /
   if ( ovr_info == BADNODE )
   {
     // Can't find our private loader node.
-    warning("Couldn't find dos.ldr node.\n");
+    warning("Couldn't find dos.ldr node.");
     return 0;
   }
 
@@ -657,7 +672,7 @@ static int idaapi move_segm(ea_t from, ea_t to, asize_t /*size*/, const char * /
     // relocate the executable.
     if ( (delta % 16) != 0 )
     {
-      warning("DOS images can only be relocated to 16-byte boundaries.\n");
+      warning("DOS images can only be relocated to 16-byte boundaries.");
       return 0;
     }
 
@@ -665,10 +680,9 @@ static int idaapi move_segm(ea_t from, ea_t to, asize_t /*size*/, const char * /
     // to locations that needed fixups when the image was located at its
     // old address.  Change the entries so that they point to the appropriate
     // places in the new image location.
-    uint32 current_base_paragraph = inf.baseaddr;
-    ea_t current_base = current_base_paragraph << 4;
+    ea_t current_base = uint32(inf.baseaddr << 4);
     ea_t new_base = current_base + delta;
-    ovr_info.altshift(current_base, new_base, MAXADDR);
+    ovr_info.altshift(current_base, new_base, inf.privrange.start_ea);
 
     // remember bases for later remapping of segment regs
     std::map<ea_t, ea_t> segmap;
@@ -680,7 +694,7 @@ static int idaapi move_segm(ea_t from, ea_t to, asize_t /*size*/, const char * /
     // IDA has adjusted all segment start and end addresses to cover their
     // new effective address ranges, but we, the loader, must finish the
     // job by rebasing each segment.
-    for  ( int i = 0; i < get_segm_qty(); ++i )
+    for ( int i = 0; i < get_segm_qty(); ++i )
     {
       segment_t *seg = getnseg(i);
       ea_t curbase = get_segm_base(seg); // Returns base in EA
@@ -694,18 +708,18 @@ static int idaapi move_segm(ea_t from, ea_t to, asize_t /*size*/, const char * /
     //rebase segment registers
     for ( int sr = 0; sr < SREG_NUM; ++sr )
     {
-      int sra_num = get_srareas_qty2(ph.regFirstSreg + sr);
+      int sra_num = get_sreg_ranges_qty(ph.reg_first_sreg + sr);
       for ( int i = 0; i < sra_num; ++i )
       {
-        segreg_area_t sra;
-        if ( !getn_srarea2(&sra, sr, i) )
+        sreg_range_t sra;
+        if ( !getn_sreg_range(&sra, sr, i) )
           break;
         sel_t reg = sra.val;
-        if( reg != BADSEL )
+        if ( reg != BADSEL )
         {
           std::map<ea_t, ea_t>::const_iterator p = segmap.find(reg);
           if ( p != segmap.end() )
-            split_srarea(sra.startEA, ph.regFirstSreg + sr, p->second, SR_auto, true);
+            split_sreg_range(sra.start_ea, ph.reg_first_sreg + sr, p->second, SR_auto, true);
         }
       }
     }
@@ -742,6 +756,6 @@ loader_t LDSC =
   save_file,
 
   // take care of a moved segment (fix up relocations, for example)
-  move_segm
+  move_segm,
+  NULL,
 };
-//==========================================================================

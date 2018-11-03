@@ -27,7 +27,7 @@ static int handle_symbol(
         int _info,
         uint32 st_name,
         uval_t st_value,
-        int namsec,
+        slice_type_t slice_type,
         symbol_visitor_t &sv)
 {
   if ( shndx == SHN_UNDEF
@@ -49,7 +49,7 @@ static int handle_symbol(
     st_value -= imagebase;
 
   qstring name;
-  reader.sections.get_name(&name, namsec, st_name);
+  reader.get_name(&name, slice_type, st_name);
   return sv.visit_symbol(st_value, name.c_str());
 }
 
@@ -57,13 +57,13 @@ static int handle_symbol(
 static int load_symbols(
         reader_t &reader,
         const elf_shdr_t &section,
-        int namsec,
+        slice_type_t slice_type,
         symbol_visitor_t &sv)
 {
   int code = 0;
   sym_rel *sym;
   buffered_input_t<sym_rel> symbols_input(reader, section);
-  for ( int i = 0; code == 0 && symbols_input.next(sym); i++ )
+  for ( elf_sym_idx_t i = 0; code == 0 && symbols_input.next(sym); ++i )
   {
     if ( i == 0 ) // skip _UNDEF
       continue;
@@ -73,7 +73,7 @@ static int load_symbols(
                          sym->original.st_info,
                          sym->original.st_name,
                          sym->original.st_value,
-                         namsec,
+                         slice_type,
                          sv);
   }
   return code;
@@ -105,7 +105,7 @@ static int _load_elf_symbols(linput_t *li, symbol_visitor_t &sv)
 
   const elf_ident_t &ident = reader.get_ident();
   uint8 elf_class = ident.elf_class;
-  if ( elf_class != ELFCLASS32 && elf_class != ELFCLASS64  )
+  if ( elf_class != ELFCLASS32 && elf_class != ELFCLASS64 )
     return -1;
 
   uint8 elf_data_ord = ident.bytesex;
@@ -117,11 +117,10 @@ static int _load_elf_symbols(linput_t *li, symbol_visitor_t &sv)
 
   int code = 0;
   elf_ehdr_t &header = reader.get_header();
-  if ( header.e_phnum && !map_pht(reader) )
+  if ( header.has_pht() && !map_pht(reader) )
     return -1;
 
-  if ( header.e_shnum && header.e_shentsize )
-    reader.read_section_headers();
+  reader.read_section_headers();
 
   // Try and acquire dynamic linking tables info.
   dlt = reader.sections.get_dynamic_linking_tables_info();
@@ -132,81 +131,105 @@ static int _load_elf_symbols(linput_t *li, symbol_visitor_t &sv)
   dynamic_info_t di;
   if ( dlt.is_valid() )
   {
-    if ( (sv.velf & VISIT_DYNINFO) != 0 )
+    reader_t::dyninfo_tags_t dyninfo_tags;
+    dyninfo_tags.reserve(10);
+    if ( reader.read_dynamic_info_tags(&dyninfo_tags, dlt)
+      && reader.parse_dynamic_info(&di, dyninfo_tags)
+      && (sv.velf & VISIT_DYNINFO) != 0 )
     {
-      int link = dlt.link;
-      if ( link == 0 )
+      reader.set_di_strtab(reader.dyn_strtab, di.strtab());
+      typedef reader_t::dyninfo_tags_t::const_iterator const_it;
+      for ( const_it dyn = dyninfo_tags.begin();
+            dyn != dyninfo_tags.end();
+            ++dyn )
       {
-        elf_shdr_t *dsh = sections.get_wks(WKS_DYNSYM);
-        if ( dsh != NULL )
-          link = dsh->sh_link;
-      }
-      class ida_local my_handler_t : public dynamic_info_handler_t
-      {
-        symbol_visitor_t &visitor;
-        int link;
-      public:
-        my_handler_t(reader_t &_r, int _l, symbol_visitor_t &_sv)
-          : dynamic_info_handler_t(_r),
-            visitor(_sv),
-            link(_l)
+        qstring name;
+        switch ( dyn->d_tag )
         {
+          case DT_SONAME:
+          case DT_RPATH:
+          case DT_RUNPATH:
+          case DT_NEEDED:
+            reader.get_name(&name, reader.dyn_strtab, uint32(dyn->d_un));
+            break;
         }
-
-        virtual int handle(const elf_dyn_t &dyn)
-        {
-          qstring name;
-          switch ( dyn.d_tag )
-          {
-            case DT_SONAME:
-            case DT_RPATH:
-            case DT_RUNPATH:
-            case DT_NEEDED:
-              reader.sections.get_name(&name, link, dyn.d_un);
-              break;
-          }
-          return visitor.visit_dyninfo(dyn.d_tag, name.c_str(), dyn.d_un);
-        };
+        if ( sv.visit_dyninfo(dyn->d_tag, name.c_str(), dyn->d_un) != 0 )
+          break;
       };
-      my_handler_t handler(reader, link, sv);
-      code = reader.parse_dynamic_info(dlt, di, handler);
-    }
-    else
-    {
-      reader.parse_dynamic_info(dlt, di);
     }
   }
 
-  int interp = sections.get_index(WKS_INTERP);
-  if ( interp != 0
-    && (sv.velf & VISIT_INTERP) != 0 )
+  if ( (sv.velf & VISIT_INTERP) != 0 )
   {
-    qstring name;
-    sections.get_name(&name, interp, 0);
-    code = sv.visit_interp(name.c_str());
-    if ( code != 0 )
-      return code;
+    elf_shdr_t *interp_sh = reader.sections.get_wks(WKS_INTERP);
+    if ( interp_sh != NULL )
+    {
+      qstring name;
+      reader.get_string_at(&name, interp_sh->sh_offset);
+      code = sv.visit_interp(name.c_str());
+      if ( code != 0 )
+        return code;
+    }
   }
 
   if ( (sv.velf & VISIT_SYMBOLS) != 0 )
   {
-    int symtab = sections.get_index(WKS_SYMTAB);
-    int dynsym = sections.get_index(WKS_DYNSYM);
-    int strtab = sections.get_index(WKS_STRTAB);
-    int dynstr = sections.get_index(WKS_DYNSTR);
+    elf_shndx_t symtab = sections.get_index(WKS_SYMTAB);
+    elf_shndx_t dynsym = sections.get_index(WKS_DYNSYM);
+    elf_shdr_t fake_section;
     if ( symtab != 0 || dynsym != 0 )
     {
       // Loading symbols
       if ( symtab != 0 )
-        code = load_symbols(reader, *sections.getn(symtab), strtab, sv);
+        code = load_symbols(reader, *sections.getn(symtab), SLT_SYMTAB, sv);
       if ( code == 0 && dynsym != 0 )
-        code = load_symbols(reader, *sections.getn(dynsym), dynstr, sv);
+        code = load_symbols(reader, *sections.getn(dynsym), SLT_DYNSYM, sv);
     }
-    else if ( di.symtab.size != 0 )
+    else if ( di.fill_section_header(&fake_section, DIT_SYMTAB) )
     {
-      elf_shdr_t fake_section;
-      di.fill_section_header(reader, di.symtab, fake_section);
-      code = load_symbols(reader, fake_section, -1, sv);
+      code = load_symbols(reader, fake_section, SLT_DYNSYM, sv);
+    }
+  }
+
+  notes_t notes(&reader);
+  if ( (sv.velf & VISIT_BUILDID) != 0 && reader.read_notes(&notes) )
+  {
+    qstring id;
+    if ( notes.get_build_id(&id) )
+    {
+      code = sv.visit_buildid(id.c_str());
+      if ( code != 0 )
+        return code;
+    }
+  }
+
+  if ( (sv.velf & VISIT_DBGLINK ) != 0 )
+  {
+    const elf_shdr_t *s = sections.get(SHT_PROGBITS, ".gnu_debuglink");
+    if ( s != NULL )
+    {
+      bytevec_t buf;
+      sections.read_file_contents(&buf, *s);
+      int sz = buf.size();
+      if ( sz > 4 )
+      {
+        uint32 crc = *(uint32 *)(buf.begin() + (sz - 4));
+        if ( reader.get_header().e_ident.bytesex == ELFDATA2MSB )
+          crc = swap32(crc);
+        sz -= 4;
+        qstring debuglink;
+        debuglink.reserve(sz);
+        for ( int i=0; i < sz; ++i )
+        {
+          uchar ch = buf[i];
+          if ( ch == 0 )
+            break;
+          debuglink.append(ch);
+        }
+        code = sv.visit_debuglink(debuglink.c_str(), crc);
+        if ( code != 0 )
+          return code;
+      }
     }
   }
 

@@ -8,9 +8,10 @@ int idaapi init(void)
   return PLUGIN_OK;
 }
 
-void idaapi run(int)
+bool idaapi run(size_t)
 {
   warning("Hello, world!");
+  return true;
 }
 
 plugin_t PLUGIN =

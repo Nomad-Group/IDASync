@@ -11,13 +11,9 @@
 #ifndef __GDLDRAW_HPP
 #define __GDLDRAW_HPP
 
-#include <algorithm>
-#include <vector>
-#include <deque>
 #include <map>
 #include <set>
 
-#include <area.hpp>
 #include <funcs.hpp>
 
 /*! \file gdl.hpp
@@ -51,7 +47,7 @@ decl node_iterator *ida_export node_iterator_goup(node_iterator *); \
 decl void ida_export create_qflow_chart(qflow_chart_t &);           \
 decl bool ida_export append_to_flowchart(qflow_chart_t &, ea_t, ea_t); \
 decl fc_block_type_t ida_export fc_calc_block_type(const qflow_chart_t &, size_t); \
-decl bool ida_export create_multirange_qflow_chart(qflow_chart_t &, const areavec_t &);
+decl bool ida_export create_multirange_qflow_chart(qflow_chart_t &, const rangevec_t &);
 #else
 #define DECLARE_HELPER(decl)
 #endif // SWIG
@@ -60,10 +56,10 @@ DECLARE_HELPER(idaman)
 
 //-------------------------------------------------------------------------
 /// Ordered sequence of integer constants
-class intseq_t : public qvector<int>
+class intseq_t : public intvec_t
 {
 public:
-  int  idaapi index(int value) const
+  int idaapi index(int value) const
   {
     for ( size_t i=0; i < size(); i++ )
       if ( (*this)[i] == value )
@@ -114,7 +110,7 @@ public:
   const char *idaapi dstr(void) const;
 };
 
-typedef std::vector<intmap_t> array_of_intmap_t;
+typedef qvector<intmap_t> array_of_intmap_t;
 
 //-------------------------------------------------------------------------
 /// Set of graph nodes
@@ -133,7 +129,7 @@ public:
   int  idaapi first(void) const { return empty() ? -1 : *begin(); }
 };
 
-typedef std::vector<node_set_t> array_of_node_set_t;
+typedef qvector<node_set_t> array_of_node_set_t;
 
 //-------------------------------------------------------------------------
 /// Node iterator (used to draw graphs)
@@ -162,7 +158,7 @@ class gdl_graph_t
 public:
   DEFINE_MEMORY_ALLOCATION_FUNCS()
   DEFINE_VIRTUAL_DTOR(gdl_graph_t)
-  virtual char *idaapi get_node_label(int /*n*/, char *buf, int /*bufsize*/) const { buf[0] = '\0'; return buf; }
+  virtual char *idaapi get_node_label(char *buf, int /*bufsize*/, int /*n*/) const { buf[0] = '\0'; return buf; }
   virtual void idaapi print_graph_attributes(FILE * /*fp*/) const {}
   virtual bool idaapi print_node(FILE * /*fp*/, int /*n*/) const { return false; }
   virtual bool idaapi print_edge(FILE * /*fp*/, int /*i*/, int /*j*/) const { return false; }
@@ -224,7 +220,8 @@ idaman bool ida_export gen_flow_graph(
         const char *filename,
         const char *title,
         func_t *pfn,
-        ea_t ea1, ea_t ea2,
+        ea_t ea1,
+        ea_t ea2,
         int gflags);
 
 /// \defgroup CHART_1 Flow graph building flags
@@ -303,7 +300,7 @@ idaman bool ida_export gen_complex_call_chart(
 /// This function is called by the GUI at the beginning, so no need to call
 /// it again.
 
-idaman void ida_export setup_graph_subsystem(const char *grapher, bgcolor_t (idaapi *get_graph_color)(int color));
+idaman void ida_export setup_graph_subsystem(const char *_grapher, bgcolor_t (idaapi *get_graph_color)(int color));
 
 
 //--------------------------------------------------------------------------
@@ -312,6 +309,7 @@ idaman void ida_export setup_graph_subsystem(const char *grapher, bgcolor_t (ida
 //      Third party plugins or modules should not use them.
 //
 /// \cond
+//-V:cancellable_graph_t:730 not all members of a class are initialized inside the constructor
 class cancellable_graph_t : public gdl_graph_t
 {
 public:
@@ -324,7 +322,7 @@ public:
 };
 
 //--------------------------------------------------------------------------
-struct qbasic_block_t : public area_t
+struct qbasic_block_t : public range_t
 {
   intseq_t succ; // list of node successors
   intseq_t pred; // list of node predecessors
@@ -346,7 +344,7 @@ public:
   typedef qvector<qbasic_block_t> blocks_t;
   DECLARE_HELPER(friend)
   qstring title;
-  area_t bounds;
+  range_t bounds;
   func_t *pfn;
   int flags;
 #define FC_PRINT     0x0001 // print names (used only by display_flow_chart())
@@ -355,11 +353,11 @@ public:
 #define FC_APPND     0x0008 // multirange flowchart (set by append_to_flowchart)
 #define FC_CHKBREAK  0x0010 // build_qflow_chart() may be aborted by user
   blocks_t blocks;
-  int nproper;          // number of basic blocks belonging to the specified area
+  int nproper;          // number of basic blocks belonging to the specified range
 
-  idaapi qflow_chart_t(void) : flags(0) {}
+  idaapi qflow_chart_t(void) : pfn(NULL), flags(0), nproper(0) {}
   idaapi qflow_chart_t(const char *_title, func_t *_pfn, ea_t _ea1, ea_t _ea2, int _flags)
-    : title(_title), bounds(_ea1, _ea2), pfn(_pfn), flags(_flags)
+    : title(_title), bounds(_ea1, _ea2), pfn(_pfn), flags(_flags), nproper(0)
   {
     refresh();
   }
@@ -368,11 +366,11 @@ public:
   {
     title  = _title;
     pfn    = _pfn;
-    bounds = area_t(_ea1, _ea2);
+    bounds = range_t(_ea1, _ea2);
     flags  = _flags;
     refresh();
   }
-  void idaapi create(const char *_title, const areavec_t &ranges, int _flags)
+  void idaapi create(const char *_title, const rangevec_t &ranges, int _flags)
   {
     title  = _title;
     flags  = _flags;
@@ -390,28 +388,9 @@ public:
   int  idaapi succ(int node, int i) const { return blocks[node].succ[i]; }
   int  idaapi pred(int node, int i) const { return blocks[node].pred[i]; } // note: specify FC_PREDS for preds!
   bool idaapi print_names(void) const { return (flags & FC_PRINT) != 0; }
-  char *idaapi get_node_label(int /*n*/, char* /*buf*/, int /*bufsize*/) const { return NULL; }
+  char *idaapi get_node_label(char * /*buf*/, int /*bufsize*/, int /*n*/) const { return NULL; }
   int  idaapi size(void) const { return int(blocks.size()); }
 };
 /// \endcond
-
-//--------------------------------------------------------------------------
-// The definitions below are obsolete and should not be used
-#ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED bool ida_export display_flow_graph(const char *title,
-                                          func_t *pfn,
-                                          ea_t ea1, ea_t ea2,
-                                          bool print_names);
-idaman DEPRECATED bool ida_export display_simple_call_chart(const char *wait,
-                                                 const char *title,
-                                                 bool ignore_libfuncs);
-idaman DEPRECATED bool ida_export display_complex_call_chart(const char *wait,
-                                                  const char *title,
-                                                  ea_t ea1,
-                                                  ea_t ea2,
-                                                  int flags,
-                                                  int32 recursion_depth=-1);
-
-#endif // NO_OBSOLETE_FUNCS
 
 #endif // __GDLDRAW_HPP

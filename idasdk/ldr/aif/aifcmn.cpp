@@ -4,26 +4,26 @@ static const uint32 magic2[] = { ZERO_CODE2 };
 static const uint32 *const magics[] = { magic1, magic2 };
 
 //--------------------------------------------------------------------------
-static void swap_header(aif_header_t &hd)
+static void swap_header(aif_header_t *hd)
 {
-  uint32 *ptr = (uint32 *)&hd;
-  const int size = sizeof(hd) / sizeof(uint32);
+  uint32 *ptr = (uint32 *)hd;
+  const int size = sizeof(aif_header_t) / sizeof(uint32);
   for ( size_t i=0; i < size; i++, ptr++ )
     *ptr = swap32(*ptr);
 }
 
 //--------------------------------------------------------------------------
 // 0-failed, 1-little endian, 2-big endian
-static int match_zero_code(aif_header_t &hd)
+static int match_zero_code(aif_header_t *hd)
 {
   int mostfirst = 0;
   for ( int i=0; i < qnumber(magics); i++ )
   {
-    if ( memcmp(hd.zero_code, magics[i], sizeof(hd.zero_code)) == 0 )
+    if ( memcmp(hd->zero_code, magics[i], sizeof(hd->zero_code)) == 0 )
       return mostfirst+1;
     swap_header(hd);
     mostfirst = !mostfirst;
-    if ( memcmp(hd.zero_code, magics[i], sizeof(hd.zero_code)) == 0 )
+    if ( memcmp(hd->zero_code, magics[i], sizeof(hd->zero_code)) == 0 )
       return mostfirst+1;
   }
   return 0;
@@ -40,7 +40,7 @@ bool is_aif_file(linput_t *li)
   qlseek(li, 0);
   if ( qlread(li, &hd, sizeof(hd)) != sizeof(hd) )
     return false;
-  return match_zero_code(hd) != 0;
+  return match_zero_code(&hd) != 0;
 }
 
 //--------------------------------------------------------------------------
@@ -70,7 +70,7 @@ static bool swap_symbols(dsym_t *ds, char *str, uchar *end, size_t nsyms)
   int nc = 0;               // number of c strings
   for ( int i=0; i < nsyms; i++,ds++ )
   {
-    if ( mf )
+    if ( is_mf() )
       swap_dsym(ds);
     if ( ds->sym & ASD_16BITSYM )
       continue;

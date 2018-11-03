@@ -3,7 +3,7 @@
 
 #ifndef __AR_H__
 #define __AR_H__
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
+#pragma pack(push, 1)
 
 /* Note that the usual '\n' in magic strings may translate to different
    characters, as allowed by ANSI.  '\012' has a fixed value, and remains
@@ -23,7 +23,8 @@
 
 #define ARMAP_TIME_OFFSET       60
 
-struct ar_hdr {
+struct ar_hdr
+{
   char ar_name[16];             /* name of this member */
   char ar_date[12];             /* file mtime */
   char ar_uid[6];               /* owner uid; printed as decimal */
@@ -37,15 +38,17 @@ struct ar_hdr {
 
 // ig. get all module names from ar
 
-int process_ar( char *libfile,    /* return 0 - ok */
-                int (*_callback)(void *ud,
-                                 int32 offset,
-                                 int method,
-                                 uint32 csize,
-                                 uint32 ucsize,
-                                 uint32 attributes,
-                                 const char *filename),
-                void *ud);
+int process_ar(
+        char *libfile,    /* return 0 - ok */
+        int (*_callback)(
+          void *ud,
+          int32 offset,
+          int method,
+          uint32 csize,
+          uint32 ucsize,
+          uint32 attributes,
+          const char *filename),
+        void *ud);
 
 // The first linker member has the following format. This information appears after the
 // header:
@@ -103,7 +106,7 @@ int process_ar( char *libfile,    /* return 0 - ok */
 // in the previous string.
 //
 
-bool is_ar_file(linput_t *li, int32 offset, bool include_aix);
+bool is_ar_file(linput_t *li, qoff64_t offset, bool include_aix);
 
 #pragma pack(pop)
 #endif /* __AR_H__ */

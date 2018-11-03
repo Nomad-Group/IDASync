@@ -1,0 +1,422 @@
+include ../../allmake.mak
+
+# This makefile may call itself recursively with ASYNC=1
+
+ifneq ($(wildcard ../../parse),)
+  ENABLE_LOWCNDS=1
+endif
+ifneq ($(wildcard ../../ida),)
+  ifndef __CEARM__
+    ENABLE_REMOTEPDB=1
+  endif
+endif
+
+# first build win32 local debugger plugin (if not ASYNC)
+ifdef ASYNC
+  CEFLAGS=-DUSE_ASYNC
+  DONT_BUILD_PLUGIN=1
+else
+  PROC=win32_user
+endif
+
+ifneq ($(or $(__ANDROID__),$(__ANDROID_X86__),$(__CEARM__),$(__ARMLINUX__),$(USE_STATIC_RUNTIME)),)
+  ifdef __CEARM__
+    MODULES=win32_server
+    ifndef ASYNC
+      MAKE_ASYNC=async
+      MODULES+=kdstub wincetst
+    endif
+  else ifdef __ANDROID__
+    ifdef __X64__
+      A64=64
+    endif
+    MODULES=android_server$(A64)
+    ifndef __X64__
+      MODULES+=android_server_nonpie
+    endif
+  else ifdef __ANDROID_X86__
+    ifdef __X64__
+      A64=x64
+    else
+      A64=x86
+    endif
+    MODULES=android_$(A64)_server
+  else ifdef USE_STATIC_RUNTIME
+    O1=win32_debmod
+    O2=winbase_debmod
+    O3=pc_debmod
+    O4=win32_util
+    ifdef __X64__
+      SERVER=win32_server
+    endif
+    ifndef __EA64__
+      SERVER=win32_server
+    endif
+  else
+    MODULES=arm$(SYSNAME)_server
+  endif
+else
+  ifdef ASYNC
+    MODULES=wince_stub
+  else
+    MAKE_ASYNC=async
+    O1=win32_debmod
+    O2=winbase_debmod
+    O3=pc_debmod
+    O4=win32_util
+    ifdef __X64__
+      MODULES=cfg               \
+              win32_stub        \
+              linux_stub        \
+              armlinux_stub     \
+              mac_stub          \
+              wince_stub        \
+
+    endif
+  endif
+endif
+O5=debmod
+ifdef ENABLE_LOWCNDS
+  O6=idcfuncs
+endif
+O7=win32_server_stub
+O8=w32sehch
+ADDITIONAL_GOALS=$(SERVER) $(MODULES) $(MAKE_ASYNC)
+
+ifndef __X64__
+  DONT_BUILD_PLUGIN=1
+endif
+
+include ../../plugins/plugin.mak
+
+ifdef __NT__
+  ifdef __VC__
+	MACHO_INCLUDE_FLAGS=-I../../ldr/mach-o/h -I../../ldr/mach-o/vc_h
+  else
+	MACHO_INCLUDE_FLAGS=-I../../ldr/mach-o/h
+  endif
+endif
+
+# all debug servers should go under the dbgsrv directory
+SERVERBIN=$(R)dbgsrv/
+
+ifdef ASYNC
+  F=$(OBJDIR)_async/
+$(OBJDIR)_async/%$(O): %.cpp
+	$(CXX) $(CFLAGS) -c $(OBJSW)$@ $<
+endif
+
+ifdef USE_STATIC_RUNTIME
+async:
+	@[ -d $(OBJDIR)_async ] || mkdir -p $(OBJDIR)_async
+	@$(MAKE) ASYNC=1
+endif
+
+ifdef ENABLE_LOWCNDS
+  LOWCND_FLAGS=-DENABLE_LOWCNDS
+  LOWCND_LIBS=$(L)idc$(A)
+  LOWCND_OBJS=$(F)idcfuncs$(O) $(L)dbgsrv_funcs$(O)
+endif
+
+ifdef ENABLE_REMOTEPDB
+  REMOTEPDB_FLAGS=-DENABLE_REMOTEPDB
+  ifdef __NT__
+    REMOTEPDB_SYSLIBS=oleaut32.lib ole32.lib
+    REMOTEPDB_OBJS=$(F)tilfuncs$(O)
+  endif
+endif
+__CFLAGS=-DBUILD_DEBUGGER $(MACHO_INCLUDE_FLAGS) $(LOWCND_FLAGS) \
+  $(REMOTEPDB_FLAGS) $(CEFLAGS)
+
+.PHONY: $(ADDITIONAL_GOALS) kdstub async
+
+ifdef __X64__
+  DEFFILE=../../plugins/plugin64.def
+else
+  DEFFILE=../../plugins/plugin.def
+endif
+
+RPC_COMMON=$(F)rpc_hlp$(O) $(F)rpc_engine$(O) $(F)util$(O)
+STUB_COMMON=$(RPC_COMMON) $(F)rpc_client$(O) $(F)rpc_debmod$(O) $(F)debmod$(O)
+SERVER_COMMON=$(F)server$(O) $(RPC_COMMON) $(F)rpc_server$(O) $(DUMB) \
+	      $(F)debmod$(O) $(LOWCND_OBJS)
+#----------------------------------------------------------------------------
+ifdef __X64__
+  WIN32SERVER=$(SERVERBIN)win64_remote$(B)
+  SERVER_TRANS=$(F)tcpip$(O)
+  SERVER_OBJS=$(OBJ2) $(OBJ3) $(OBJ4) $(F)win32_server_impl$(O)
+else ifdef __CEARM__
+  ifdef ASYNC
+    WIN32SERVER=$(SERVERBIN)wince_remote_arm.dll
+    SERVER_TRANS=$(F)async$(O)
+    CREATE_DLL=/LD
+  else
+    WIN32SERVER=$(SERVERBIN)wince_remote_tcp$(B)
+    SERVER_TRANS=$(F)tcpip$(O)
+  endif
+  ARM_RTTI_LIB=ccrtrtti.lib
+  ifdef ASYNC
+    ACCESSCOPROC=wince/xscale/$(OBJDIR)_async/accesscoproc$(O)
+  else
+    ACCESSCOPROC=wince/xscale/$(OBJDIR)/accesscoproc$(O)
+  endif
+  SERVER_OBJS=$(ACCESSCOPROC) $(F)wince_debmod$(O) $(F)winbase_debmod$(O) \
+              $(F)win32_util$(O) $(F)arm_debmod$(O)
+  CCL_LNK_OPT=/implib:$(F)wince_remote_arm.lib
+else
+  WIN32SERVER=$(SERVERBIN)win32_remote$(B)
+  SERVER_TRANS=$(F)tcpip$(O)
+  SERVER_OBJS=$(OBJ2) $(OBJ3) $(OBJ4) $(F)win32_server_impl$(O)
+endif
+
+# do not build mixed servers, where sizeof(ea_t)==8 but sizeof(size_t)==4
+# they do not make any sense
+ifneq ($(__EA64__),$(__X64__))
+  SERVER=
+endif
+
+ifdef SERVER
+  ifeq (,$(wildcard $(VSPATH8)))
+    $(warning Visual Studio 2008 not found in VSPATH8 (see readme.txt and defaults.mk))
+    $(warning debug server $(SERVER) will not be built)
+    SERVER=
+  endif
+  ifeq (,$(wildcard $(MSSDK)))
+    $(warning Microsoft SDK v7.1A not found in MSSDK (see readme.txt and defaults.mk))
+    $(warning debug server $(SERVER) will not be built)
+    SERVER=
+  endif
+endif
+
+ALLLIBS=$(LOWCND_LIBS) $(L)pro$(A)
+
+WIN32_REMOTE_OBJ=$(SERVER_TRANS) $(SERVER_OBJS) $(SERVER_COMMON) \
+	         $(REMOTEPDB_OBJS) $(F)win32_debmod$(O)
+win32_server: $(WIN32SERVER)
+
+$(WIN32SERVER): $(WIN32_REMOTE_OBJ) $(ALLLIBS)
+	$(CCL) $(CREATE_DLL) $(OUTSW)$@ $(WIN32_REMOTE_OBJ) $(ALLLIBS) $(C_LIB) $(ARM_RTTI_LIB) $(REMOTEPDB_SYSLIBS)
+ifndef CCL_LNK_OPT
+	-@$(RM) $(@R).exp
+	-@$(RM) $(@R).lib
+endif
+
+WINVER=$(R)wver$(B)
+WINVER_OBJ=$(F)wver$(O) $(F)win32_util$(O)
+.PHONY: wver
+wver: $(WINVER)
+$(WINVER): $(WINVER_OBJ)
+	$(CCL) $(OUTSW)$@ $(WINVER_OBJ)
+
+#----------------------------------------------------------------------------
+kdstub:
+	@cd wince/xscale; $(MAKE)
+$(ACCESSCOPROC): | kdstub
+hwtest: $(R)wince_hwtest.exe
+$(R)wince_hwtest.exe: $(F)hwtest$(O) $(ACCESSCOPROC) $(DUMB)
+	$(CCL) $(OUTSW)$@ $(F)hwtest$(O) $(ACCESSCOPROC) $(L)pro$(A) $(DUMB) $(C_LIB) $(ARM_RTTI_LIB)
+wincetst: $(R)wincetst.exe
+$(R)wincetst.exe: $(F)wincetst$(O) $(F)winceasm$(O)
+	$(CCL) $(OUTSW)$@ $(F)wincetst$(O) $(F)winceasm$(O) $(L)pro$(A) $(C_LIB) $(ARM_RTTI_LIB)
+$(F)winceasm$(O): winceasm.s | objdir
+	$(_ARMASM) -o $@ $?
+
+tracer: tracer$(B)
+TRACER_OBJS=$(F)tracer$(O) $(F)win32_debmod$(O) $(F)debmod$(O) $(F)pc_debmod$(O) $(DUMB) \
+	    $(LOWCND_OBJS) $(F)win32_server_stub$(O) $(F)winbase_debmod$(O) $(F)win32_util$(O)
+tracer$(B): $(TRACER_OBJS) $(ALLLIBS)
+	$(call link_dumb,$@ $(TRACER_OBJS) $(ALLLIBS))
+
+#----------------------------------------------------------------------------
+WIN32_STUB_OBJ=$(F)win32_rstub$(O) $(F)tcpip$(O) $(F)win32_server_stub$(O) $(STUB_COMMON) $(F)w32sehch$(O)
+WIN32CLIENT=$(BIN_PATH)win32_stub$(PLUGIN)
+win32_stub: $(WIN32CLIENT)
+
+$(WIN32CLIENT): $(WIN32_STUB_OBJ) $(IDALIB) $(DEFFILE)
+	$(LINKER) $(LINKOPTS) /OUT:$@ $(WIN32_STUB_OBJ) $(IDALIB) user32.lib
+	-@$(RM) $(@R).exp
+	-@$(RM) $(@R).lib
+
+#----------------------------------------------------------------------------
+ifdef ASYNC
+  WINCECLIENT=$(BIN_PATH)wince_stub$(PLUGIN)
+  CLIENTTRANSPORT=$(F)async$(O)
+else
+  WINCECLIENT=$(BIN_PATH)wincetcp_stub$(PLUGIN)
+  CLIENTTRANSPORT=$(F)tcpip$(O)
+endif
+WINCE_STUB_OBJ=$(F)wince_rstub$(O) $(CLIENTTRANSPORT) $(STUB_COMMON)
+wince_stub: $(WINCECLIENT)
+
+$(WINCECLIENT): $(WINCE_STUB_OBJ) $(IDALIB) $(DEFFILE)
+	$(LINKER) $(LINKOPTS) /OUT:$@ $(WINCE_STUB_OBJ) $(IDALIB) user32.lib
+	-@$(RM) $(@R).exp
+	-@$(RM) $(@R).lib
+
+#----------------------------------------------------------------------------
+LINUX_STUB_OBJ=$(F)linux_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON)
+LINUXCLIENT=$(BIN_PATH)linux_stub$(PLUGIN)
+linux_stub: $(LINUXCLIENT)
+
+$(LINUXCLIENT): $(LINUX_STUB_OBJ) $(IDALIB) $(DEFFILE)
+	$(LINKER) $(LINKOPTS) /OUT:$@ $(LINUX_STUB_OBJ) $(IDALIB) user32.lib
+	-@$(RM) $(@R).exp
+	-@$(RM) $(@R).lib
+
+#----------------------------------------------------------------------------
+ARM_LINUX_STUB_OBJ=$(F)armlinux_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON)
+ARM_LINUXCLIENT=$(BIN_PATH)armlinux_stub$(PLUGIN)
+armlinux_stub: $(ARM_LINUXCLIENT)
+
+$(ARM_LINUXCLIENT): $(ARM_LINUX_STUB_OBJ) $(IDALIB) $(DEFFILE)
+	$(LINKER) $(LINKOPTS) /OUT:$@ $(ARM_LINUX_STUB_OBJ) $(IDALIB) user32.lib
+	-@$(RM) $(@R).exp
+	-@$(RM) $(@R).lib
+
+#----------------------------------------------------------------------------
+MAC_STUB_OBJ=$(F)mac_rstub$(O) $(F)tcpip$(O) $(F)symmacho$(O) $(STUB_COMMON)
+MACCLIENT=$(BIN_PATH)mac_stub$(PLUGIN)
+mac_stub: $(MACCLIENT)
+
+$(MACCLIENT): $(MAC_STUB_OBJ) $(IDALIB) $(DEFFILE)
+	$(LINKER) $(LINKOPTS) /OUT:$@ $(MAC_STUB_OBJ) $(IDALIB) user32.lib
+	-@$(RM) $(@R).exp
+	-@$(RM) $(@R).lib
+
+#----------------------------------------------------------------------------
+# Android server
+ANDROID_CMN_OBJS=$(SERVER_COMMON) $(F)linux_debmod$(O) $(F)linuxbase_debmod$(O) \
+                 $(F)linux_wait$(O) $(F)symelf$(O) $(F)tcpip$(O)
+ANDROID_OBJS=$(ANDROID_CMN_OBJS) $(F)arm_debmod$(O)
+ANDROID_X86_OBJS=$(ANDROID_CMN_OBJS) $(F)pc_debmod$(O)
+
+ANDROID_COMMON_PARAMS=$(OUTSW)$@ $(PLUGIN_SCRIPT) $(CRTBEGIN) $(ANDROID_OBJS) \
+		      $(F)libthread_db$(O) $(ALLLIBS) $(SYSLIBS) $(CRTEND)
+ANDROID_X86_COMMON_PARAMS=$(OUTSW)$@ $(PLUGIN_SCRIPT) $(CRTBEGIN) $(ANDROID_X86_OBJS) \
+	                  $(F)libthread_db$(O) $(ALLLIBS) $(SYSLIBS) $(CRTEND)
+# position-independent executable
+PIE_SWITCHES=-Wl,-pie
+
+$(F)libthread_db$(O): $(LIBTHREAD_DB_SRC)
+	$(CC) $(CFLAGS) $(CONLY) $(OBJSW)$@ $<
+
+android_server$(A64): $(R)android_server$(A64)$(B)
+$(R)android_server$(A64)$(B): $(ANDROID_OBJS) $(F)libthread_db$(O) $(ALLLIBS)
+	$(CCL) $(PIE_SWITCHES) $(ANDROID_COMMON_PARAMS)
+	$(CCDIR)/$(CCPART)-strip $@
+
+android_server_nonpie: $(R)android_server_nonpie$(B)
+$(R)android_server_nonpie$(B): $(ANDROID_OBJS) $(F)libthread_db$(O) $(ALLLIBS)
+	$(CCL) $(ANDROID_COMMON_PARAMS)
+	$(CCDIR)/$(CCPART)-strip $@
+
+android_$(A64)_server: $(R)android_$(A64)_server$(B)
+$(R)android_$(A64)_server$(B): $(ANDROID_X86_OBJS) $(F)libthread_db$(O) $(ALLLIBS)
+	$(CCL) $(PIE_SWITCHES) $(ANDROID_X86_COMMON_PARAMS)
+	$(CCDIR)/$(CCPART)-strip $@
+
+#----------------------------------------------------------------------------
+arm$(SYSNAME)_server: $(R)arm$(SYSNAME)_server$(B)
+$(R)arm$(SYSNAME)_server$(B): $(ANDROID_OBJS) $(ALLLIBS)
+	$(CCL) $(OUTSW)$@ $(PLUGIN_SCRIPT) $(ANDROID_OBJS) $(ALLLIBS) -lthread_db -lc -lrt -lpthread
+ifdef __UCLINUX__
+	# uCLinux toolchain produces armuclinux_server.gdb (ELF) and armuclinux_server (bFLT)
+	$(MV) $@ $@.bflt
+	$(MV) $@.gdb $@
+endif
+	$(CCDIR)/$(CCPART)-strip $@
+
+.SUFFIXES: .cfg
+
+#----------------------------------------------------------------------------
+cfg: $(C)exceptions.cfg
+
+$(C)%.cfg: %.cfg
+	$(CP) $? $@
+
+$(C)%.xml: %.xml
+	$(CP) $? $@
+
+clean::
+	rm -f $(ARM_LINUXCLIENT) $(LINUXCLIENT) $(WINCECLIENT) $(MACCLIENT) $(WIN32SERVER)
+	rm -f $(WIN32CLIENT)
+	rm -f $(C)exceptions.cfg
+	-@[ -d $(OBJDIR) ] && rmdir $(OBJDIR)
+	-@[ -d obj ] && rmdir obj
+
+# MAKEDEP dependency list ------------------
+$(F)debmod$(O)  : $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp             \
+	          $(I)diskio.hpp $(I)err.h $(I)expr.hpp $(I)fpro.h          \
+	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp  \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)range.hpp      \
+	          $(I)segment.hpp $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp   \
+	          consts.h debmod.cpp debmod.h
+$(F)pc_debmod$(O): $(I)bytes.hpp $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp     \
+	          $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)range.hpp $(I)ua.hpp $(I)xref.hpp consts.h  \
+	          deb_pc.hpp debmod.h pc_debmod.cpp pc_debmod.h
+$(F)w32sehch$(O): $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp             \
+	          $(I)dbg.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp          \
+	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
+	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
+	          $(I)netnode.hpp $(I)pro.h $(I)range.hpp $(I)segment.hpp   \
+	          $(I)ua.hpp $(I)xref.hpp w32sehch.cpp w32sehch.h
+$(F)win32_debmod$(O): $(I)auto.hpp $(I)bitrange.hpp $(I)bytes.hpp               \
+	          $(I)config.hpp $(I)dbg.hpp $(I)diskio.hpp $(I)entry.hpp   \
+	          $(I)err.h $(I)exehdr.h $(I)fixup.hpp $(I)fpro.h           \
+	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp               \
+	          $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp  \
+	          $(I)offset.hpp $(I)pro.h $(I)prodir.h $(I)pronet.h        \
+	          $(I)range.hpp $(I)segment.hpp $(I)segregs.hpp $(I)ua.hpp  \
+	          $(I)xref.hpp ../../ldr/pe/../idaldr.h                     \
+	          ../../ldr/pe/common.cpp ../../ldr/pe/common.h             \
+	          ../../ldr/pe/pe.h arm_debmod.h async.h consts.h           \
+	          dbg_pe_hlp.cpp deb_arm.hpp deb_pc.hpp debmod.h            \
+	          pc_debmod.h rapi/rapi.h rpc_engine.h rpc_hlp.h            \
+	          rpc_server.h tcpip.h win32_debmod.cpp win32_debmod.h      \
+	          win32_debmod_impl.cpp win32_rpc.h win32_undoc.h           \
+	          win32_util.hpp winbase_debmod.h wince.hpp wince_debmod.h  \
+	          wince_debmod_impl.cpp xscale/Breakpoint.h
+$(F)win32_server_stub$(O): $(I)bytes.hpp $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp     \
+	          $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)range.hpp $(I)segment.hpp $(I)ua.hpp        \
+	          $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h consts.h      \
+	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h               \
+	          win32_debmod.h win32_server_stub.cpp win32_util.hpp       \
+	          winbase_debmod.h wince.hpp wince_debmod.h
+$(F)win32_user$(O): $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp             \
+	          $(I)dbg.hpp $(I)err.h $(I)expr.hpp $(I)fpro.h             \
+	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
+	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp               \
+	          $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)range.hpp $(I)segment.hpp $(I)segregs.hpp   \
+	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp                   \
+	          ../../ldr/pe/cor.h ../../ldr/pe/corhdr.h                  \
+	          ../../ldr/pe/mycor.h ../../ldr/pe/pe.h                    \
+	          ../../plugins/debugger/rpc_hlp.h                          \
+	          ../../plugins/debugger/win32_rpc.h                        \
+	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
+	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
+	          ../../plugins/pdb/pdblocal.hpp                            \
+	          ../../plugins/pdb/pdbremote.hpp arm_debmod.h              \
+	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
+	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h               \
+	          pc_local_impl.cpp rpc_hlp.h w32sehch.h win32_debmod.h     \
+	          win32_local_impl.cpp win32_rpc.h win32_user.cpp           \
+	          win32_util.hpp winbase_debmod.h wince.hpp wince_debmod.h
+$(F)win32_util$(O): $(I)bytes.hpp $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp     \
+	          $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)range.hpp $(I)segment.hpp $(I)ua.hpp        \
+	          $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h consts.h      \
+	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h               \
+	          win32_util.cpp win32_util.hpp winbase_debmod.h wince.hpp  \
+	          wince_debmod.h
+$(F)winbase_debmod$(O): $(I)bytes.hpp $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp     \
+	          $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)range.hpp $(I)segment.hpp $(I)ua.hpp        \
+	          $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h consts.h      \
+	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h               \
+	          win32_util.hpp winbase_debmod.cpp winbase_debmod.h        \
+	          wince.hpp wince_debmod.h

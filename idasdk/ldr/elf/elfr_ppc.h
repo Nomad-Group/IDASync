@@ -9,6 +9,13 @@
 #define EF_PPC_RELOCATABLE      0x00010000      /* PowerPC -mrelocatable flag */
 #define EF_PPC_RELOCATABLE_LIB  0x00008000      /* PowerPC -mrelocatable-lib flag */
 
+// PowerPC 64 ABI version
+#define EF_PPC64_ABI_MASK 3     // original function descriptor using ABI
+#define EF_PPC64_UNK_ABI  0     // unspecified or not using any features
+                                // affected by the differences
+#define EF_PPC64_AIX_ABI  1     // original function descriptor using ABI
+#define EF_PPC64_V2_ABI   2     // revised ABI without function descriptors
+
 #define ELFOSABI_CELLOSLV2      0x66            // PS3 lv2 OS
 
 enum elf_ET_PPC
@@ -18,12 +25,17 @@ enum elf_ET_PPC
 
 enum elf_SHT_PPC
 {
-  SHT_PS3PRX_RELA	= 0x700000A4, // Sony PS3 PRX relocations
+  SHT_PS3PRX_RELA = 0x700000A4, // Sony PS3 PRX relocations
 };
 
 enum elf_PHT_PPC
 {
-  PHT_PS3PRX_RELA	= 0x700000A4, // Sony PS3 PRX relocations
+  PHT_PS3PRX_RELA = 0x700000A4, // Sony PS3 PRX relocations
+};
+
+enum elf_DT_PPC
+{
+  DT_PPC_GOT = (DT_LOPROC + 0x0), // address of _GLOBAL_OFFSET_TABLE_
 };
 
 // relocation field - word32 with HIGH BYTE FIRST!!!
@@ -121,6 +133,8 @@ enum elf_RTYPE_ppc
   R_PPC_GOT_DTPREL16_LO   = 92,
   R_PPC_GOT_DTPREL16_HI   = 93,
   R_PPC_GOT_DTPREL16_HA   = 94,
+  R_PPC_TLSGD             = 95,
+  R_PPC_TLSLD             = 96,
 
   R_PPC_EMB_NADDR32       = 101, // word32 (A - S)
   R_PPC_EMB_NADDR16       = 102, // half16* (A - S)
@@ -197,12 +211,14 @@ enum elf_RTYPE_ppc
   R_PPC_VLE_SDAREL_HA16A  = 231, // split16a #ha(X + A)
   R_PPC_VLE_SDAREL_HA16D  = 232, // split16d #ha(X + A)
 
+  R_PPC_REL16DX_HA        = 246,
+
   R_PPC_IRELATIVE         = 248, // GNU extension to support local ifunc.
  /* GNU relocs used in PIC code sequences.  */
-  R_PPC_REL16             = 249, /* half16   (sym+add-.) */
-  R_PPC_REL16_LO          = 250, /* half16   (sym+add-.)@l */
-  R_PPC_REL16_HI          = 251, /* half16   (sym+add-.)@h */
-  R_PPC_REL16_HA          = 252, /* half16   (sym+add-.)@ha */
+  R_PPC_REL16             = 249, // half16*  S + A - P
+  R_PPC_REL16_LO          = 250, // half16   #lo(S + A - P)
+  R_PPC_REL16_HI          = 251, // half16   #hi(S + A - P)
+  R_PPC_REL16_HA          = 252, // half16   #la(S + A - P)
 
   R_PPC_GNU_VTINHERIT     =  253,
   R_PPC_GNU_VTENTRY       =  254,
@@ -322,18 +338,39 @@ enum elf_RTYPE_ppc
   R_PPC64_DTPREL16_HIGHERA  =  104, /* half16  (sym+add)@dtprel@highera */
   R_PPC64_DTPREL16_HIGHEST  =  105, /* half16  (sym+add)@dtprel@highest */
   R_PPC64_DTPREL16_HIGHESTA =  106, /* half16 (sym+add)@dtprel@highesta */
+#if 0
+  // These relocation types appear in David Anderson's libdwarf and
+  // dwarfdump only. The PPC 64-Bit ELF V2 ABI uses these numbers for
+  // different types (see below).
   R_PPC64_TOC32             =  107, /* word32 (.TOC. & 0xffff_ffff)  */
   R_PPC64_DTPMOD32          =  108, /* word32 (@dtpmod & 0xffff_ffff) */
   R_PPC64_TPREL32           =  109, /* word32 (@tprel & 0xffff_ffff) */
   R_PPC64_DTPREL32          =  110, /* word32 (@dtprel & 0xffff_ffff) */
-  /* GNU extension to support local ifunc.  */
-  R_PPC64_JMP_IREL          =  247,
-  R_PPC64_IRELATIVE         =  248,
- /* GNU relocs used in PIC code sequences.  */
-  R_PPC64_REL16             =  249,        /* half16   (sym+add-.) */
-  R_PPC64_REL16_LO          =  250,        /* half16   (sym+add-.)@l */
-  R_PPC64_REL16_HI          =  251,        /* half16   (sym+add-.)@h */
-  R_PPC64_REL16_HA          =  252,        /* half16   (sym+add-.)@ha */
+#else
+  // The PPC 64-Bit ELF V2 ABI uses these numbers for different types
+  R_PPC64_TLSGD             =  107, // used as markers on thread local
+  R_PPC64_TLSLD             =  108, // storage (TLS) code sequences
+  R_PPC64_TOCSAVE           =  109, // this relocation type indicates a
+                                    // position where a TOC save may be
+                                    // inserted in the function to avoid a
+                                    // TOC save as part of the PLT stub code
+  R_PPC64_ADDR16_HIGH       =  110, // half16  #hi(S + A)
+  R_PPC64_ADDR16_HIGHA      =  111, // half16  #ha(S + A)
+  R_PPC64_TPREL16_HIGH      =  112, // half16  #hi(@tprel)
+  R_PPC64_TPREL16_HIGHA     =  113, // half16  #ha(@tprel)
+  R_PPC64_DTPREL16_HIGH     =  114, // half16  #hi(@dtprel)
+  R_PPC64_DTPREL16_HIGHA    =  115, // half16  #ha(@dtprel)
+  R_PPC64_REL24_NOTOC       =  116, // low24*  (S + A - P) >> 2
+  R_PPC64_ADDR64_LOCAL      =  117, // doubleword64 S + A (see 3.5.4)
+#endif
+  R_PPC64_JMP_IREL          =  247, // GNU extension to support local ifunc
+  // The PPC 64-Bit ELF V2 ABI
+  R_PPC64_IRELATIVE         =  248, // It is used to implement the
+                                    // STT_GNU_IFUNC framework
+  R_PPC64_REL16             =  R_PPC_REL16,     // half16*  S + A - P
+  R_PPC64_REL16_LO          =  R_PPC_REL16_LO,  // half16   #lo(S + A - P)
+  R_PPC64_REL16_HI          =  R_PPC_REL16_HI,  // half16*  #hi(S + A - P)
+  R_PPC64_REL16_HA          =  R_PPC_REL16_HA,  // half16*  #la(S + A - P)
 };
 
 // flags for VLE code
@@ -345,7 +382,5 @@ enum elf_RTYPE_ppc
 // can present offset bypass segment
 #define ELF_RPL_PPC_DEFAULT  (ELF_RPL_GL | ELF_RPL_UNL | \
                               ELF_DIS_OFFW | ELF_DIS_GPLT | ELF_BS_DBG)
-
-void set_vle_mode(ea_t ea, bool enable);
 
 #endif

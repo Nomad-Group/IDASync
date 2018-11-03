@@ -22,22 +22,29 @@ changed:
 //  and fill 'fileformatname'.
 //  otherwise return 0
 //
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
   ex_header ex;      // lmf header
   uint32 n_segments; // segment count
 
-  if ( n > 0 )
+  if ( qlread(li, &ex, sizeof(ex)) != sizeof(ex) )
     return 0;
-
-  if ( qlread(li, &ex, sizeof(ex)) != sizeof(ex) ) return 0;
-  if ( 0    != ex.lmf_header.rec_type     ) return 0;
-  if ( 0    != ex.lmf_header.zero1        ) return 0;
+  if ( 0 != ex.lmf_header.rec_type )
+    return 0;
+  if ( 0 != ex.lmf_header.zero1 )
+    return 0;
 //  if ( 0x38 != ex.lmf_header.data_nbytes  ) return 0;
-  if ( 0    != ex.lmf_header.spare        ) return 0;
-  if (386  != ex.lmf_definition.cpu
-   && 286  != ex.lmf_definition.cpu     ) return 0;
-
+  if ( 0 != ex.lmf_header.spare )
+    return 0;
+  if ( 386  != ex.lmf_definition.cpu
+    && 286  != ex.lmf_definition.cpu )
+  {
+    return 0;
+  }
   n_segments = (ex.lmf_header.data_nbytes - sizeof(_lmf_definition))
                / sizeof (uint32);
 
@@ -49,8 +56,9 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
 
   uint64 file_size = qlsize(li);
 
-  for(uint32 at = sizeof(ex.lmf_header) + ex.lmf_header.data_nbytes;
-      lmf_data.segment_index != _LMF_EOF_REC;)
+  for ( uint32 at = sizeof(ex.lmf_header) + ex.lmf_header.data_nbytes;
+        lmf_data.segment_index != _LMF_EOF_REC;
+        )
   {
     qlseek(li, at, 0);
     if ( sizeof(_lmf_data) != qlread( li, &lmf_data, sizeof(_lmf_data) ) )
@@ -69,12 +77,14 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
       case _LMF_FIXUP_80X87_REC:
         break;
       case _LMF_EOF_REC:
-        if ( lmf_data.offset != sizeof(_lmf_eof) ) return 0;
+        if ( lmf_data.offset != sizeof(_lmf_eof) )
+          return 0;
         break;
       case _LMF_RESOURCE_REC:
         break;
       case _LMF_ENDDATA_REC:
-        if ( lmf_data.offset != 6 /*sizeof(???)*/ ) return 0;
+        if ( lmf_data.offset != 6 /*sizeof(???)*/ )
+          return 0;
         break;
       case _LMF_FIXUP_LINEAR_REC:
         break;
@@ -88,9 +98,11 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
     at += sizeof(lmf_data) + lmf_data.offset;
   }
 
-  qsnprintf(fileformatname, MAX_FILE_FORMAT_NAME, "QNX %d-executable",
-           (_PCF_32BIT & ex.lmf_definition.cflags) ? 32 : 16);
-
+  fileformatname->sprnt("QNX %d-executable",
+                        (_PCF_32BIT & ex.lmf_definition.cflags)
+                      ? 32
+                      : 16);
+  *processor = "metapc";
   return f_LOADER;
 }
 
@@ -109,15 +121,15 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   ex_header ex;         // lmf header
   uint32 n_segments;    // segment count
   uint32 nseg;          // watcom 10.6 not working properly without this!
-  int32 filelen = qlsize(li);
+  qoff64_t filelen = qlsize(li);
 
-  if ( ph.id != PLFM_386 )
-    set_processor_type("80386r", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("metapc", SETPROC_LOADER);
 
   qlseek(li, 0);
   lread(li, &ex, sizeof(ex));
 
-  struct {
+  struct
+  {
     uint32 minea,topea;
   } perseg[MAX_SEGMENTS];
 
@@ -152,17 +164,17 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   inf.baseaddr = 0;
   if ( ISFLAT )
   {
-    inf.lflags     |= LFLG_PC_FLAT;
+    inf.lflags |= LFLG_PC_FLAT;
 //    inf.s_prefflag &= ~PREF_SEGADR;
 //    inf.nametype   =  NM_EA4;
   }
 
-  inf.startIP  = ex.lmf_definition.code_offset;
+  inf.start_ip = ex.lmf_definition.code_offset;
   if ( ex.lmf_definition.code_index >= n_segments )
     loader_failure("Corrupted file");
 
   if ( ISFLAT )
-    inf.startIP +=  perseg[ex.lmf_definition.code_index].minea;
+    inf.start_ip +=  perseg[ex.lmf_definition.code_index].minea;
   inf.start_cs = LDT_SELECTOR(ex.lmf_definition.code_index);
 
   _lmf_data lmf_data, lmf_data2;
@@ -207,27 +219,26 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
         break;
 
       case _LMF_FIXUP_SEG_REC:
-        fixup_data_t fd;
-        uint32 n_fixups;
-        _lmf_seg_fixup lmf_seg_fixup;
-        n_fixups = lmf_data.offset / sizeof(_lmf_seg_fixup);
-        while ( n_fixups-- )
         {
-          lread( li, &lmf_seg_fixup, sizeof(_lmf_seg_fixup) );
-          uint32 ea=lmf_seg_fixup.data[0].fixup_offset;
-          if ( lmf_seg_fixup.data[0].fixup_seg_index >= n_segments )
-            loader_failure("Corrupted file");
-          ea += perseg[ lmf_seg_fixup.data[0].fixup_seg_index ].minea; // fix!
-          if ( perseg[ lmf_seg_fixup.data[0].fixup_seg_index ].minea > ea
-            || ea > perseg[ lmf_seg_fixup.data[0].fixup_seg_index ].topea )
+          fixup_data_t fd(FIXUP_SEG16);
+          uint32 n_fixups;
+          _lmf_seg_fixup lmf_seg_fixup;
+          n_fixups = lmf_data.offset / sizeof(_lmf_seg_fixup);
+          while ( n_fixups-- )
           {
-            loader_failure("Corrupted file");
+            lread( li, &lmf_seg_fixup, sizeof(_lmf_seg_fixup) );
+            uint32 ea=lmf_seg_fixup.data[0].fixup_offset;
+            if ( lmf_seg_fixup.data[0].fixup_seg_index >= n_segments )
+              loader_failure("Corrupted file");
+            ea += perseg[ lmf_seg_fixup.data[0].fixup_seg_index ].minea; // fix!
+            if ( perseg[ lmf_seg_fixup.data[0].fixup_seg_index ].minea > ea
+              || ea > perseg[ lmf_seg_fixup.data[0].fixup_seg_index ].topea )
+            {
+              loader_failure("Corrupted file");
+            }
+            fd.sel = get_word(ea); //lmf_seg_fixup.data[0].fixup_seg_index;
+            fd.set(ea);
           }
-          fd.type = FIXUP_SEG16;
-          fd.displacement = 0;
-          fd.off = 0;
-          fd.sel = get_word(ea); //lmf_seg_fixup.data[0].fixup_seg_index;
-          set_fixup(ea, &fd);
         }
         break;
 
@@ -256,7 +267,7 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   uint32 idat = 0;
   for ( nseg = 0; nseg < n_segments; nseg++ )
   {
-    uint32 selector  = LDT_SELECTOR(nseg);
+    uint32 selector = LDT_SELECTOR(nseg);
     char seg_name[8];
     const char *seg_class;
 
@@ -274,11 +285,11 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
     set_selector( selector, ISFLAT ? 0 : perseg[nseg].minea>>4 );
 
     segment_t s;
-    s.sel    = selector;
-    s.startEA= perseg[nseg].minea;
-    s.endEA  = perseg[nseg].topea;
-    s.align  = saRelByte;
-    s.comb   = scPub;
+    s.sel     = selector;
+    s.start_ea = perseg[nseg].minea;
+    s.end_ea   = perseg[nseg].topea;
+    s.align   = saRelByte;
+    s.comb    = scPub;
     s.bitness = (uchar)ph.get_segm_bitness();
     bool sparse = (perseg[nseg].topea - perseg[nseg].minea) > filelen;
     int flags = (sparse ? ADDSEG_SPARSE : 0) | ADDSEG_NOSREG;
@@ -304,17 +315,24 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   char *e = str + sizeof(str);
 
 
-  if ( _PCF_LONG_LIVED&ex.lmf_definition.cflags) APPEND(p, e, " LONG_LIVED" );
-  if ( _PCF_32BIT     &ex.lmf_definition.cflags ) {
-    if ( p != str) APPCHAR(p, e, ',' );
+  if ( _PCF_LONG_LIVED & ex.lmf_definition.cflags )
+    APPEND(p, e, " LONG_LIVED");
+  if ( _PCF_32BIT & ex.lmf_definition.cflags )
+  {
+    if ( p != str )
+      APPCHAR(p, e, ',');
     APPEND(p, e, " 32BIT");
   }
-  if ( ISFLAT ) {
-    if ( p != str) APPCHAR(p, e, ',' );
+  if ( ISFLAT )
+  {
+    if ( p != str )
+      APPCHAR(p, e, ',');
     APPEND(p, e, " FLAT");
   }
-  if ( _PCF_NOSHARE   &ex.lmf_definition.cflags ) {
-    if ( p != str) APPCHAR(p, e, ',' );
+  if ( _PCF_NOSHARE & ex.lmf_definition.cflags )
+  {
+    if ( p != str )
+      APPCHAR(p, e, ',');
     APPEND(p, e, " NOSHARE");
   }
   if ( p == str ) APPEND(p, e, " None");
@@ -349,5 +367,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

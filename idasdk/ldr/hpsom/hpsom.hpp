@@ -25,7 +25,7 @@ struct header
 #define SYSTEM_10       0x20B   // PA-RISC 1.0
 #define SYSTEM_11       0x210   // PA-RISC 1.1
 #define SYSTEM_20       0x214   // PA-RISC 2.0
-  short int    a_magic;                 /* magic number */
+  short int a_magic;            /* magic number */
 #define EXELIB_MAGIC   0x104    // Executable SOM Library
 #define REL_MAGIC      0x106    // Relocatable SOM
 #define EXE_MAGIC      0x107    // Non-sharable, executable SOM
@@ -125,23 +125,23 @@ struct som_exec_auxhdr           /* HP-UX auxiliary header */
 struct user_string_aux_hdr       /* Version string auxiliary header */
 {
   struct aux_id header_id;       /* aux header id */
-  uint  string_length;   /* strlen(user_string) */
-  char          user_string[1];  /* user-defined string */
+  uint string_length;            /* strlen(user_string) */
+  char user_string[1];           /* user-defined string */
   void swap(void);
 };
 
 struct copyright_aux_hdr         /* Copyright string auxiliary header */
 {
-  struct aux_id  header_id;      /* aux header id */
-  uint   string_length;  /* strlen(user_string) */
-  char           copyright[1];   /* user-defined string */
+  struct aux_id header_id;       /* aux header id */
+  uint string_length;            /* strlen(user_string) */
+  char copyright[1];             /* user-defined string */
   void swap(void);
 };
 
 struct shlib_version_aux_hdr
 {
-  struct aux_id  header_id;      /* aux header id */
-  short          version;        /* version number */
+  struct aux_id header_id;       /* aux header id */
+  short version;                 /* version number */
   void swap(void);
 };
 
@@ -187,13 +187,13 @@ struct space_dictionary_record
   unsigned char sort_key;           /* sort key for space */
   unsigned char reserved2;          /* reserved */
 
-  int          space_number;        /* space index */
-  int          subspace_index;      /* index to first subspace */
-  uint         subspace_quantity;   /* # of subspaces in space */
-  int          loader_fix_index;    /* index into loader fixup array */
-  uint         loader_fix_quantity; /* # of loader fixups in space */
-  int          init_pointer_index;  /* index into init pointer array */
-  uint       init_pointer_quantity; /* # of init ptrs */
+  int  space_number;                /* space index */
+  int  subspace_index;              /* index to first subspace */
+  uint subspace_quantity;           /* # of subspaces in space */
+  int  loader_fix_index;            /* index into loader fixup array */
+  uint loader_fix_quantity;         /* # of loader fixups in space */
+  int  init_pointer_index;          /* index into init pointer array */
+  uint init_pointer_quantity;       /* # of init ptrs */
   void swap(void);
 };
 
@@ -206,15 +206,15 @@ struct space_dictionary_record
 
 struct subspace_dictionary_record
 {
-  int           space_index;          /* index into space dictionary */
+  int space_index;                    /* index into space dictionary */
 
-  unsigned char  f1;
+  unsigned char f1;
 #define SUBS_F1_ACCESS  0xFE          /* access and priv levels of subsp */
 #define SUBS_F1_MEMRES  0x01          /* lock in memory during exec */
   int  access_control_bits(void) { return (f1 & SUBS_F1_ACCESS) >> 1; }
   bool memory_resident(void)     { return (f1 & SUBS_F1_MEMRES) != 0; }
 
-  unsigned char  f2;
+  unsigned char f2;
 #define SUBS_F2_DUPCOM  0x80          /* duplicate data symbols allowed */
 #define SUBS_F2_INICOM  0x40          /* initialized common block */
 #define SUBS_F2_ISLOAD  0x20          /* subspace is loadable */
@@ -232,7 +232,7 @@ struct subspace_dictionary_record
 
   unsigned char sort_key;             /* subspace sort key */
 
-  unsigned char  f3;
+  unsigned char f3;
 #define SUBS_F3_REPINI  0x80          /* init values to be replicated to fill subsp len */
 #define SUBS_F3_CONTIN  0x40          /* subspace is a continuation */
 #define SUBS_F3_ISTSPC  0x20          /* subspace contains TLS */
@@ -240,15 +240,15 @@ struct subspace_dictionary_record
   bool continuation(void)     { return (f3 & SUBS_F3_CONTIN) != 0; }
   bool is_tspecific(void)     { return (f3 & SUBS_F3_ISTSPC) != 0; }
 
-  int           file_loc_init_value;  /* file location or init value */
-  uint  initialization_length;  /* length of initialization */
-  uint  subspace_start;       /* starting offset */
-  uint  subspace_length;      /* total subspace length */
+  int  file_loc_init_value;           /* file location or init value */
+  uint initialization_length;         /* length of initialization */
+  uint subspace_start;                /* starting offset */
+  uint subspace_length;               /* total subspace length */
   unsigned short reserved2;           /* reserved */
   unsigned short alignment;           /* alignment required */
   union name_pt name;                 /* index of subspace name */
-  int           fixup_request_index;  /* index to first fixup */
-  uint  fixup_request_quantity;   /* # of fixup requests */
+  int fixup_request_index;            /* index to first fixup */
+  uint fixup_request_quantity;        /* # of fixup requests */
   void swap(void);
 };
 
@@ -353,32 +353,36 @@ struct symbol_dictionary_record
 // performs the requested level of type checking between unsatisfied symbols and
 // local or universal symbols as it resolves symbol references.
 
-union arg_descriptor {
-    struct {
-    uint    reserved: 3;    /* reserved */
-    uint    packing: 1;     /* packing algorithm used */
-    uint    alignment: 4;   /* byte alignment */
-    uint    mode: 4;        /* type of descriptor and its use */
-    uint    structure: 4;   /* structure of symbol */
-    uint    hash: 1;        /* set if arg_type is hashed */
-    int             arg_type: 15;   /* data type */
-    }  arg_desc;
-    uint    word;
+union arg_descriptor
+{
+  struct
+  {
+    uint reserved: 3;    /* reserved */
+    uint packing: 1;     /* packing algorithm used */
+    uint alignment: 4;   /* byte alignment */
+    uint mode: 4;        /* type of descriptor and its use */
+    uint structure: 4;   /* structure of symbol */
+    uint hash: 1;        /* set if arg_type is hashed */
+    int  arg_type: 15;   /* data type */
+  }  arg_desc;
+  uint word;
 };
 
-struct symbol_extension_record {
-    uint    type: 8;                /* always ST_SYM_EXT */
-    uint    max_num_args: 8;        /* max # of parameters */
-    uint    min_num_args: 8;        /* min # of parameters */
-    uint    num_args: 8;            /* actual # of parameters */
-    union arg_descriptor symbol_desc;       /* symbol type desc. */
-    union arg_descriptor argument_desc[3];  /* first 3 parameters */
+struct symbol_extension_record
+{
+  uint type: 8;                /* always ST_SYM_EXT */
+  uint max_num_args: 8;        /* max # of parameters */
+  uint min_num_args: 8;        /* min # of parameters */
+  uint num_args: 8;            /* actual # of parameters */
+  union arg_descriptor symbol_desc;       /* symbol type desc. */
+  union arg_descriptor argument_desc[3];  /* first 3 parameters */
 };
 
-struct argument_desc_array {
-    uint    type: 8;                /* always ST_ARG_EXT */
-    uint    reserved: 24;           /* reserved */
-    union arg_descriptor argument_desc[4];  /* next 4 parameters */
+struct argument_desc_array
+{
+  uint type: 8;                /* always ST_ARG_EXT */
+  uint reserved: 24;           /* reserved */
+  union arg_descriptor argument_desc[4];  /* next 4 parameters */
 };
 
 // The alignment field in arg_descriptor indicates the minimum alignment of the

@@ -16,7 +16,7 @@
 /* ar.h 5.1 - 86/12/09 - 06:03:39 */
 #ifndef _H_AR
 #define _H_AR
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
+#pragma pack(push, 1)
 /*
  * COMPONENT_NAME: CMDAR
  *
@@ -35,7 +35,7 @@
 /*              AIX INDEXED ARCHIVE FORMAT
 *
 *       ARCHIVE File Organization:
-*        _____________________________________________ 
+*        _____________________________________________
 *       |__________FIXED HEADER "fl_hdr"______________|
 *  +--- |                                             |
 *  |    |__________ARCHIVE_FILE_MEMBER_1______________|
@@ -87,7 +87,7 @@ struct fl_hdr               /* archive fixed length header */
         char  fl_lstmoff[20];     /*Offset to last archive member */
         char  fl_freeoff[20];     /*Offset to first mem on free list */
 };
-        
+
 struct aix_ar_hdr                /* archive file member header - printable ascii */
 {
            char ar_size[20];     /* File member size - decimal */
@@ -140,7 +140,7 @@ struct aix_ar_hdr_small             /* archive file member header - printable as
 *               may be up to 255 chars.  The character string containing
 *               the name begins at '_ar_name.ar_name'.  The terminating
 *               string AIAFMAG, is only cosmetic. File member contents begin
-*               at the first even byte boundary past 'header position + 
+*               at the first even byte boundary past 'header position +
 *               sizeof(struct ar_hdr) + ar_namlen',  and continue for
 *               'ar_size' bytes.
 */

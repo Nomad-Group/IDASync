@@ -1,11 +1,23 @@
+
 # ----------------------------------------------------------------------
 # EFI bytecode processor module
 # (c) Hex-Rays
 # Please send fixes or improvements to support@hex-rays.com
 
 import sys
-import idaapi
-from idaapi import *
+from ida_bytes import *
+from ida_ua import *
+from ida_idp import *
+from ida_auto import *
+from ida_nalt import *
+import ida_frame
+from ida_funcs import *
+from ida_lines import *
+from ida_problems import *
+import ida_offset
+from ida_segment import *
+from ida_name import *
+from ida_netnode import *
 
 # extract bitfield occupying bits high..low from val (inclusive, start from 0)
 def BITS(val, low, high):
@@ -36,16 +48,16 @@ def same_op(op1, op2):
            op1.addr  == op2.addr  and \
            op1.flags == op2.flags and \
            op1.specval == op2.specval and \
-           op1.dtyp == op2.dtyp
+           op1.dtype == op2.dtype
 
 # is sp delta fixed by the user?
 def is_fixed_spd(ea):
     return (get_aflags(ea) & AFL_FIXEDSPD) != 0
 
 # ----------------------------------------------------------------------
-class ebc_processor_t(idaapi.processor_t):
+class ebc_processor_t(processor_t):
     # IDP id ( Numbers above 0x8000 are reserved for the third-party modules)
-    id = idaapi.PLFM_EBC
+    id = PLFM_EBC
 
     # Processor features
     flag = PR_SEGS | PR_DEFSEG32 | PR_USE32 | PRN_HEX | PR_RNAMESOK | PR_NO_SEGMOVE
@@ -223,7 +235,7 @@ class ebc_processor_t(idaapi.processor_t):
     FLo_INDIRECT       = 0x0010 # This is an indirect access (not immediate value)
     FLo_SIGNED         = 0x0020 # This is a signed operand
 
-    # cmd.auxpref flags (NB: only 16 bits!)
+    # insn_t.auxpref flags (NB: only 16 bits!)
     FLa_OP1            = 0x0010 # check operand 1
     FLa_32             = 0x0020 # Is 32
     FLa_64             = 0x0040 # Is 64
@@ -248,16 +260,16 @@ class ebc_processor_t(idaapi.processor_t):
 
     # ----------------------------------------------------------------------
     # set comparison kind (eq/lte/gte/ulte/ugte)
-    def set_cmp(self, no):
-        self.cmd.auxpref &= ~self.FLa_CMPMASK
-        self.cmd.auxpref |= [self.FLa_CMPeq, self.FLa_CMPlte,
+    def set_cmp(self, insn, no):
+        insn.auxpref &= ~self.FLa_CMPMASK
+        insn.auxpref |= [self.FLa_CMPeq, self.FLa_CMPlte,
                              self.FLa_CMPgte, self.FLa_CMPulte,
                              self.FLa_CMPugte][no]
 
     # ----------------------------------------------------------------------
     # get comparison kind (eq/lte/gte/ulte/ugte)
-    def get_cmp(self):
-        t = self.cmd.auxpref & self.FLa_CMPMASK
+    def get_cmp(self, insn):
+        t = insn.auxpref & self.FLa_CMPMASK
         if t:
             return { self.FLa_CMPeq: "eq",
                      self.FLa_CMPlte: "lte",
@@ -274,12 +286,12 @@ class ebc_processor_t(idaapi.processor_t):
         elif sz == self.IMMDATA_64: return self.FL_Q
 
     # ----------------------------------------------------------------------
-    def next_data_value(self, sz):
+    def next_data_value(self, insn, sz):
         """Returns a value depending on the data widh number"""
-        if   sz == 0: return ua_next_byte()
-        elif sz == self.IMMDATA_16: return ua_next_word()
-        elif sz == self.IMMDATA_32: return ua_next_long()
-        elif sz == self.IMMDATA_64: return ua_next_qword()
+        if   sz == 0: return insn.get_next_byte()
+        elif sz == self.IMMDATA_16: return insn.get_next_word()
+        elif sz == self.IMMDATA_32: return insn.get_next_dword()
+        elif sz == self.IMMDATA_64: return insn.get_next_qword()
         else: raise Exception, "Invalid width!"
 
     # ----------------------------------------------------------------------
@@ -351,8 +363,8 @@ class ebc_processor_t(idaapi.processor_t):
         w = BITS(index, N-3, N-1)
         t = sz // 8
         A  = w * t # width of the natural units field
-        n  = BITS(index, 0, A-1) if A > 0 else 0 # natural units (n)
-        c  = BITS(index, A, N-4) # constant units (c)
+        n  = BITS(index, 0, A-1) if A >= 1 else 0 # natural units (n)
+        c  = BITS(index, A, N-4) if N-4 >= A else 0 # constant units (c)
         o  = (c + (n * self.PTRSZ)) # offset w/o sign
         so = o * s # signed final offset
         return so
@@ -374,9 +386,9 @@ class ebc_processor_t(idaapi.processor_t):
         op.specval |= self.FLo_SIGNED
 
     # ----------------------------------------------------------------------
-    def decode_index_or_data(self, sz, immed):
+    def decode_index_or_data(self, insn, sz, immed):
         bs = self.get_sz_to_bits(sz)
-        d = self.next_data_value(sz)
+        d = self.next_data_value(insn, sz)
         if not immed:
             d = self.decode_index(d, bs)
         else:
@@ -384,107 +396,107 @@ class ebc_processor_t(idaapi.processor_t):
         return d
 
     # ----------------------------------------------------------------------
-    def fill_op(self, op, reg, direct, has_imm, immsz, dt = None, index_only = False):
+    def fill_op(self, insn, op, reg, direct, has_imm, immsz, dt = None, index_only = False):
         if direct and not has_imm:
             self.op_reg(op, reg)
         else:
-            d = self.decode_index_or_data(immsz, direct and not index_only) if has_imm else None
+            d = self.decode_index_or_data(insn, immsz, direct and not index_only) if has_imm else None
             self.op_disp(op, reg, d, direct)
         if dt:
-            self.cmd.Op1.dtyp = dt
+            insn.Op1.dtype = dt
 
     # ----------------------------------------------------------------------
-    def fill_op1(self, opbyte, has_imm, immsz, dt = None, index_only = False):
+    def fill_op1(self, insn, opbyte, has_imm, immsz, dt = None, index_only = False):
         op1_direct    = (opbyte & 0x08) == 0
         r1            = (opbyte & 0x07)
-        self.fill_op(self.cmd.Op1, r1, op1_direct, has_imm, immsz, dt, index_only)
+        self.fill_op(insn, insn.Op1, r1, op1_direct, has_imm, immsz, dt, index_only)
 
     # ----------------------------------------------------------------------
-    def fill_op2(self, opbyte, has_imm, immsz, dt = None, index_only = False):
+    def fill_op2(self, insn, opbyte, has_imm, immsz, dt = None, index_only = False):
         op2_direct    = (opbyte & 0x80) == 0
         r2            = (opbyte & 0x70) >> 4
-        self.fill_op(self.cmd.Op2, r2, op2_direct, has_imm, immsz, dt, index_only)
+        self.fill_op(insn, insn.Op2, r2, op2_direct, has_imm, immsz, dt, index_only)
 
     # ----------------------------------------------------------------------
     # Instruction decoding
     #
 
     # ----------------------------------------------------------------------
-    def decode_RET(self, opbyte):
+    def decode_RET(self, insn, opbyte):
         # No operands
-        self.cmd.Op1.type  = o_void
+        insn.Op1.type  = o_void
         # Consume the next byte, and it should be zero
-        ua_next_byte()
+        insn.get_next_byte()
         return True
 
     # ----------------------------------------------------------------------
-    def decode_STORESP(self, opbyte):
+    def decode_STORESP(self, insn, opbyte):
         # opbyte (byte0) has nothing meaningful (but the opcode itself)
 
         # get next byte
-        opbyte = ua_next_byte()
+        opbyte = insn.get_next_byte()
 
         vm_reg = (opbyte & 0x70) >> 4
         gp_reg = (opbyte & 0x07)
 
-        self.cmd.Op1.type = self.cmd.Op2.type = o_reg
-        self.cmd.Op1.dtyp = self.cmd.Op2.dtyp = dt_qword
+        insn.Op1.type = insn.Op2.type = o_reg
+        insn.Op1.dtype = insn.Op2.dtype = dt_qword
 
-        self.cmd.Op1.reg  = gp_reg
-        self.cmd.Op2.reg  = self.ireg_FLAGS + vm_reg
+        insn.Op1.reg  = gp_reg
+        insn.Op2.reg  = self.ireg_FLAGS + vm_reg
 
         return True
 
     # ----------------------------------------------------------------------
-    def decode_LOADSP(self, opbyte):
+    def decode_LOADSP(self, insn, opbyte):
         # opbyte (byte0) has nothing meaningful (but the opcode itself)
 
         # get next byte
-        opbyte = ua_next_byte()
+        opbyte = insn.get_next_byte()
 
         gp_reg = (opbyte & 0x70) >> 4
         vm_reg = (opbyte & 0x07)
 
-        self.cmd.Op1.type = self.cmd.Op2.type = o_reg
-        self.cmd.Op1.dtyp = self.cmd.Op2.dtyp = dt_qword
+        insn.Op1.type = insn.Op2.type = o_reg
+        insn.Op1.dtype = insn.Op2.dtype = dt_qword
 
-        self.cmd.Op1.reg  = self.ireg_FLAGS + vm_reg
-        self.cmd.Op2.reg  = gp_reg
+        insn.Op1.reg  = self.ireg_FLAGS + vm_reg
+        insn.Op2.reg  = gp_reg
 
         return True
 
     # ----------------------------------------------------------------------
-    def decode_BREAK(self, opbyte):
+    def decode_BREAK(self, insn, opbyte):
         """
         stx=<BREAK [break code]>
         txt=<The BREAK instruction is used to perform special processing by the VM.>
         """
-        self.cmd.Op1.type  = o_imm
-        self.cmd.Op1.dtyp  = dt_byte
-        self.cmd.Op1.value = ua_next_byte()
+        insn.Op1.type  = o_imm
+        insn.Op1.dtype  = dt_byte
+        insn.Op1.value = insn.get_next_byte()
         return True
 
     # ----------------------------------------------------------------------
-    def cmt_BREAK(self):
+    def cmt_BREAK(self, insn):
         s = "Special processing by VM"
-        if self.cmd.Op1.value == 0:
+        if insn.Op1.value == 0:
             s += ": runaway program break (null/bad opcode)"
-        elif self.cmd.Op1.value == 1:
+        elif insn.Op1.value == 1:
             s += ": get virtual machine version in R7"
-        elif self.cmd.Op1.value == 3:
+        elif insn.Op1.value == 3:
             s += ": debug breakpoint"
-        elif self.cmd.Op1.value == 4:
+        elif insn.Op1.value == 4:
             s += ": system call (ignored)"
-        elif self.cmd.Op1.value == 5:
+        elif insn.Op1.value == 5:
             s += ": create thunk (thunk pointer in R7)"
-        elif self.cmd.Op1.value == 6:
+        elif insn.Op1.value == 6:
             s += ": set compiler version in R7"
         else:
             s += ": unknown break code"
         return s
 
     # ----------------------------------------------------------------------
-    def decode_PUSH(self, opbyte):
+    def decode_PUSH(self, insn, opbyte):
         """
         PUSH[32|64] {@}R1 {Index16|Immed16}
         PUSHn       {@}R1 {Index16|Immed16}
@@ -493,18 +505,18 @@ class ebc_processor_t(idaapi.processor_t):
         is_n          = (opbyte & ~0xC0) in [0x35, 0x36]        # PUSHn, POPn
         if is_n:
           dt = self.native_dt()
-          self.cmd.auxpref = 0
+          insn.auxpref = 0
         else:
           op_32 = (opbyte & 0x40) == 0
           dt = dt_dword if op_32 else dt_qword
-          self.cmd.auxpref = self.FLa_32 if op_32 else self.FLa_64
+          insn.auxpref = self.FLa_32 if op_32 else self.FLa_64
 
-        opbyte = ua_next_byte()
-        self.fill_op1(opbyte, have_data, self.IMMDATA_16, dt)
+        opbyte = insn.get_next_byte()
+        self.fill_op1(insn, opbyte, have_data, self.IMMDATA_16, dt)
         return True
 
     # ----------------------------------------------------------------------
-    def decode_JMP(self, opbyte):
+    def decode_JMP(self, insn, opbyte):
         """
         stx=<JMP32{cs|cc} {@}R1 {Immed32|Index32}>
         stx=<JMP64{cs|cc} Immed64>
@@ -512,7 +524,7 @@ class ebc_processor_t(idaapi.processor_t):
         have_data     = (opbyte & 0x80) != 0
         jmp_32        = (opbyte & 0x40) == 0
 
-        opbyte        = ua_next_byte()
+        opbyte        = insn.get_next_byte()
         conditional   = (opbyte & 0x80) != 0
         cs            = (opbyte & 0x40) != 0
         abs_jmp       = (opbyte & 0x10) == 0
@@ -524,59 +536,59 @@ class ebc_processor_t(idaapi.processor_t):
             if not op1_direct and not have_data:
                 return False
 
-            self.fill_op1(opbyte, have_data, self.IMMDATA_32, dt_dword)
-            if self.cmd.Op1.reg == 0:
+            self.fill_op1(insn, opbyte, have_data, self.IMMDATA_32, dt_dword)
+            if insn.Op1.reg == 0:
                 if op1_direct:
-                    self.cmd.Op1.type = o_near
+                    insn.Op1.type = o_near
                 else:
-                    self.cmd.Op1.type = o_mem
+                    insn.Op1.type = o_mem
         else:
             if not have_data:
                 return False
-            self.cmd.Op1.type  = o_near
-            self.cmd.Op1.dtyp  = dt_qword
-            self.cmd.Op1.addr  = ua_next_qword()
+            insn.Op1.type  = o_near
+            insn.Op1.dtype  = dt_qword
+            insn.Op1.addr  = insn.get_next_qword()
 
         if not abs_jmp:
-            self.cmd.Op1.addr += self.cmd.ea + self.cmd.size
+            insn.Op1.addr += insn.ea + insn.size
 
         fl = self.FLa_32 if jmp_32 else self.FLa_64
         if conditional:
             fl |= self.FLa_CS if cs else self.FLa_NCS
-        self.cmd.auxpref = fl
+        insn.auxpref = fl
 
         return True
 
     # ----------------------------------------------------------------------
-    def cmt_JMP(self):
+    def cmt_JMP(self, insn):
         s = "Jump to address"
-        if self.cmd.auxpref & self.FLa_CS:
+        if insn.auxpref & self.FLa_CS:
             s += " if condition is true"
-        elif self.cmd.auxpref & self.FLa_NCS:
+        elif insn.auxpref & self.FLa_NCS:
             s += " if condition is false"
         else:
             s += " unconditionally"
         return s
 
     # ----------------------------------------------------------------------
-    def decode_JMP8(self, opbyte):
+    def decode_JMP8(self, insn, opbyte):
         """
         stx=<JMP8{cs|cc} Immed8>
         """
         conditional   = (opbyte & 0x80) != 0
         cs            = (opbyte & 0x40) != 0
-        self.cmd.Op1.type  = o_near
-        self.cmd.Op1.dtyp  = dt_byte
-        addr               = ua_next_byte()
-        self.cmd.Op1.addr  = (SIGNEXT(addr, 8) * 2) + self.cmd.size + self.cmd.ea
+        insn.Op1.type = o_near
+        insn.Op1.dtype = dt_byte
+        addr               = insn.get_next_byte()
+        insn.Op1.addr  = (SIGNEXT(addr, 8) * 2) + insn.size + insn.ea
 
         if conditional:
-            self.cmd.auxpref = self.FLa_CS if cs else self.FLa_NCS
+            insn.auxpref = self.FLa_CS if cs else self.FLa_NCS
 
         return True
 
     # ----------------------------------------------------------------------
-    def decode_MOVI(self, opbyte):
+    def decode_MOVI(self, insn, opbyte):
         """
         MOVI[b|w|d|q][w|d|q] {@}R1 {Index16}, Immed16|32|64
         MOVIn[w|d|q]         {@}R1 {Index16}, Index16|32|64
@@ -593,7 +605,7 @@ class ebc_processor_t(idaapi.processor_t):
             return False
 
         # take byte 1
-        opbyte = ua_next_byte()
+        opbyte = insn.get_next_byte()
 
         # Bit 7 is reserved and should be 0
         if opbyte & 0x80 != 0:
@@ -609,26 +621,26 @@ class ebc_processor_t(idaapi.processor_t):
             return False
 
         dt = self.native_dt() if is_MOVIn else self.get_data_dt(move_sz)
-        self.fill_op1(opbyte, have_idx, self.IMMDATA_16, dt)
+        self.fill_op1(insn, opbyte, have_idx, self.IMMDATA_16, dt)
 
-        self.cmd.Op2.type = o_imm
-        self.cmd.Op2.dtyp = self.get_data_dt(imm_sz)
-        v = self.decode_index_or_data(imm_sz, not is_MOVIn)
+        insn.Op2.type = o_imm
+        insn.Op2.dtype = self.get_data_dt(imm_sz)
+        v = self.decode_index_or_data(insn, imm_sz, not is_MOVIn)
         if imm_sz == self.IMMDATA_64:
-            self.cmd.Op2.value = int(SIGNEXT(v & 0xFFFFFFFFL, 32))
-            self.cmd.Op2.addr = int(v >> 32)
+            insn.Op2.value = int(SIGNEXT(v & 0xFFFFFFFFL, 32))
+            insn.Op2.addr = int(v >> 32)
         else:
-            self.cmd.Op2.value = v
+            insn.Op2.value = v
         # save imm size and signal that op1 is defined in first operand
-        self.cmd.auxpref = self.get_data_width_fl(imm_sz)
+        insn.auxpref = self.get_data_width_fl(imm_sz)
         if not is_MOVIn:
-            self.cmd.auxpref |= self.FLa_OP1
-            self.cmd.Op1.specval |= self.get_data_width_fl(move_sz)
+            insn.auxpref |= self.FLa_OP1
+            insn.Op1.specval |= self.get_data_width_fl(move_sz)
 
         return True
 
     # ----------------------------------------------------------------------
-    def decode_MOVREL(self, opbyte):
+    def decode_MOVREL(self, insn, opbyte):
         """
         MOVREL[w|d|q] {@}R1 {Index16}, Immed16|32|64
         """
@@ -640,7 +652,7 @@ class ebc_processor_t(idaapi.processor_t):
             return False
 
         # take byte 1
-        opbyte = ua_next_byte()
+        opbyte = insn.get_next_byte()
 
         # Bits 7 is reserved and should be 0
         # Bits 4 and 5 are supposed to be 0 too, except in real programs they aren't!
@@ -655,19 +667,19 @@ class ebc_processor_t(idaapi.processor_t):
         if have_idx and direct:
             return False
 
-        self.fill_op1(opbyte, have_idx, self.IMMDATA_16, self.get_data_dt(imm_sz))
-        self.cmd.Op1.specval = self.get_data_width_fl(imm_sz)
-        self.cmd.Op2.type   = o_mem
-        self.cmd.Op2.dtyp   = self.get_data_dt(imm_sz)
-        self.cmd.Op2.addr   = self.next_data_value(imm_sz) + self.cmd.size + self.cmd.ea
+        self.fill_op1(insn, opbyte, have_idx, self.IMMDATA_16, self.get_data_dt(imm_sz))
+        insn.Op1.specval = self.get_data_width_fl(imm_sz)
+        insn.Op2.type   = o_mem
+        insn.Op2.dtype   = self.get_data_dt(imm_sz)
+        insn.Op2.addr   = self.next_data_value(insn, imm_sz) + insn.size + insn.ea
 
         # save imm size
-        self.cmd.auxpref   = self.get_data_width_fl(imm_sz)
+        insn.auxpref   = self.get_data_width_fl(imm_sz)
 
         return True
 
     # ----------------------------------------------------------------------
-    def decode_MOV(self, opbyte):
+    def decode_MOV(self, insn, opbyte):
         """
         MOV[b|w|d|q]{w|d} {@}R1 {Index16|32}, {@}R2 {Index16|32}
         MOVn{w|d}         {@}R1 {Index16|32}, {@}R2 {Index16|32}
@@ -694,14 +706,14 @@ class ebc_processor_t(idaapi.processor_t):
 
         dt, idx_sz = m[opcode]
         # get byte1
-        opbyte = ua_next_byte()
-        self.fill_op1(opbyte, have_idx1, idx_sz, dt, True)
-        self.fill_op2(opbyte, have_idx2, idx_sz, dt, True)
+        opbyte = insn.get_next_byte()
+        self.fill_op1(insn, opbyte, have_idx1, idx_sz, dt, True)
+        self.fill_op2(insn, opbyte, have_idx2, idx_sz, dt, True)
 
         return True
 
     # ----------------------------------------------------------------------
-    def decode_CMP(self, opbyte):
+    def decode_CMP(self, insn, opbyte):
         """
         CMP[32|64][eq|lte|gte|ulte|ugte] R1, {@}R2 {Index16|Immed16}
         """
@@ -709,27 +721,27 @@ class ebc_processor_t(idaapi.processor_t):
         cmp_32     = (opbyte & 0x40) == 0
         opcode     = (opbyte & ~0xC0)
 
-        opbyte     = ua_next_byte()
+        opbyte     = insn.get_next_byte()
 
         if opbyte & 0x08: # operand 1 indirect is not supported
             return False
 
         r1         = (opbyte & 0x07)
         dt = dt_dword if cmp_32 else dt_qword
-        self.cmd.Op1.type   = o_reg
-        self.cmd.Op1.reg    = r1
-        self.cmd.Op1.dtyp   = dt
+        insn.Op1.type   = o_reg
+        insn.Op1.reg    = r1
+        insn.Op1.dtype   = dt
 
-        self.fill_op2(opbyte, have_data, self.IMMDATA_16, dt)
+        self.fill_op2(insn, opbyte, have_data, self.IMMDATA_16, dt)
 
-        self.cmd.auxpref = self.FLa_32 if cmp_32 else self.FLa_64
-        self.set_cmp(opcode - 0x05)
+        insn.auxpref = self.FLa_32 if cmp_32 else self.FLa_64
+        self.set_cmp(insn, opcode - 0x05)
         return True
 
     # ----------------------------------------------------------------------
-    def cmt_CMP(self):
+    def cmt_CMP(self, insn):
         s = "Compare if "
-        t = self.cmd.auxpref & self.FLa_CMPMASK
+        t = insn.auxpref & self.FLa_CMPMASK
         s += { self.FLa_CMPeq: "equal",
                  self.FLa_CMPlte: "less than or equal (signed)",
                  self.FLa_CMPgte: "greater than or equal (signed)",
@@ -738,7 +750,7 @@ class ebc_processor_t(idaapi.processor_t):
         return s
 
     # ----------------------------------------------------------------------
-    def decode_CMPI(self, opbyte):
+    def decode_CMPI(self, insn, opbyte):
         """
         CMPI[32|64]{w|d}[eq|lte|gte|ulte|ugte] {@}R1 {Index16}, Immed16|Immed32
         """
@@ -746,20 +758,20 @@ class ebc_processor_t(idaapi.processor_t):
         cmp_32    = (opbyte & 0x40) == 0
         opcode    = (opbyte & ~0xC0)
 
-        opbyte = ua_next_byte()
+        opbyte = insn.get_next_byte()
         have_idx   = (opbyte & 0x10) != 0
         dt = dt_dword if cmp_32 else dt_qword
-        self.fill_op1(opbyte, have_idx, self.IMMDATA_16, dt)
-        self.cmd.Op2.type  = o_imm
-        self.cmd.Op2.value = self.next_data_value(imm_sz)
-        self.cmd.Op2.dtyp  = dt
+        self.fill_op1(insn, opbyte, have_idx, self.IMMDATA_16, dt)
+        insn.Op2.type  = o_imm
+        insn.Op2.value = self.next_data_value(insn, imm_sz)
+        insn.Op2.dtype  = dt
 
-        self.cmd.auxpref = (self.FLa_32 if cmp_32 else self.FLa_64) | self.get_data_width_fl(imm_sz)
-        self.set_cmp(opcode - 0x2D)
+        insn.auxpref = (self.FLa_32 if cmp_32 else self.FLa_64) | self.get_data_width_fl(imm_sz)
+        self.set_cmp(insn, opcode - 0x2D)
         return True
 
     # ----------------------------------------------------------------------
-    def decode_CALL(self, opbyte):
+    def decode_CALL(self, insn, opbyte):
         """
         stx=<CALL32{EX}{a} {@}R1 {Immed32|Index32}>
         stx=<CALL64{EX}{a} Immed64>
@@ -767,7 +779,7 @@ class ebc_processor_t(idaapi.processor_t):
         have_data  = (opbyte & 0x80) != 0
         call_32    = (opbyte & 0x40) == 0
 
-        opbyte     = ua_next_byte()
+        opbyte     = insn.get_next_byte()
 
         # Call to EBC or Native code
         ebc_call   = (opbyte & 0x20) == 0
@@ -778,37 +790,37 @@ class ebc_processor_t(idaapi.processor_t):
         r1         = (opbyte & 0x07)
 
         if call_32:
-            self.fill_op1(opbyte, have_data, self.IMMDATA_32, dt_dword)
-            if have_data and self.cmd.Op1.reg == 0:
-                self.cmd.Op1.type = o_near
+            self.fill_op1(insn, opbyte, have_data, self.IMMDATA_32, dt_dword)
+            if have_data and insn.Op1.reg == 0:
+                insn.Op1.type = o_near
                 if not abs_addr:
-                    self.cmd.Op1.addr += self.cmd.ea + self.cmd.size
+                    insn.Op1.addr += insn.ea + insn.size
         # 64-bit
         else:
-            self.cmd.Op1.type = o_near
-            self.cmd.Op1.dtyp = dt_qword
-            self.cmd.Op1.addr = self.next_data_value(IMMDATA_64) # Get 64-bit value
+            insn.Op1.type = o_near
+            insn.Op1.dtype = dt_qword
+            insn.Op1.addr = self.next_data_value(insn, self.IMMDATA_64) # Get 64-bit value
 
         fl  = self.FLa_EXTERN if not ebc_call else 0
         fl |= self.FLa_32 if call_32 else self.FLa_64
         if abs_addr:
             fl |= self.FLa_ABS
-        self.cmd.auxpref = fl
+        insn.auxpref = fl
 
         return True
 
     # ----------------------------------------------------------------------
-    def cmt_CALL(self):
-        if self.cmd.auxpref & self.FLa_EXTERN:
+    def cmt_CALL(self, insn):
+        if insn.auxpref & self.FLa_EXTERN:
             s = "Call an external subroutine (via thunk)"
         else:
             s = "Call a subroutine"
-        if self.cmd.auxpref & self.FLa_ABS:
+        if insn.auxpref & self.FLa_ABS:
             s += " [absolute addressing]"
         return s
 
     # ----------------------------------------------------------------------
-    def decode_BINOP_FORM1(self, opbyte):
+    def decode_BINOP_FORM1(self, insn, opbyte):
         """
         op[32|64] {@}R1, {@}R2 {Index16|Immed16}
         """
@@ -816,7 +828,7 @@ class ebc_processor_t(idaapi.processor_t):
         op_32      = (opbyte & 0x40) == 0
         opcode     = (opbyte & ~0xC0)
 
-        opbyte     = ua_next_byte()
+        opbyte     = insn.get_next_byte()
 
         op2_direct = (opbyte & 0x80) == 0
         op1_direct = (opbyte & 0x08) == 0
@@ -824,14 +836,14 @@ class ebc_processor_t(idaapi.processor_t):
         r2         = (opbyte & 0x70) >> 4
         dt         = dt_dword if op_32 else dt_qword
 
-        self.fill_op1(opbyte, False, 0, dt)
-        self.fill_op2(opbyte, have_data, self.IMMDATA_16, dt)
-        self.cmd.auxpref = self.FLa_32 if op_32 else self.FLa_64
+        self.fill_op1(insn, opbyte, False, 0, dt)
+        self.fill_op2(insn, opbyte, have_data, self.IMMDATA_16, dt)
+        insn.auxpref = self.FLa_32 if op_32 else self.FLa_64
 
         return True
 
     # ----------------------------------------------------------------------
-    def decode_MOVSN(self, opbyte):
+    def decode_MOVSN(self, insn, opbyte):
         """
         MOVsn{w} {@}R1 {Index16}, {@}R2 {Index16|Immed16}
         MOVsn{d} {@}R1 {Index32}, {@}R2 {Index32|Immed32}
@@ -847,9 +859,9 @@ class ebc_processor_t(idaapi.processor_t):
         else:
             return False
 
-        opbyte = ua_next_byte()
-        self.fill_op1(opbyte, have_idx1, idx_sz, self.native_dt())
-        self.fill_op2(opbyte, have_idx2, idx_sz, self.native_dt())
+        opbyte = insn.get_next_byte()
+        self.fill_op1(insn, opbyte, have_idx1, idx_sz, self.native_dt())
+        self.fill_op2(insn, opbyte, have_idx2, idx_sz, self.native_dt())
 
         return True
 
@@ -857,7 +869,7 @@ class ebc_processor_t(idaapi.processor_t):
     # Processor module callbacks
     #
     # ----------------------------------------------------------------------
-    def get_frame_retsize(self, func_ea):
+    def notify_get_frame_retsize(self, func_ea):
         """
         Get size of function return address in bytes
         for EBC it's 8 bytes of the actual return address
@@ -866,16 +878,16 @@ class ebc_processor_t(idaapi.processor_t):
         return 16
 
     # ----------------------------------------------------------------------
-    def notify_get_autocmt(self):
+    def notify_get_autocmt(self, insn):
         """
-        Get instruction comment. 'cmd' describes the instruction in question
+        Get instruction comment. 'insn' describes the instruction in question
         @return: None or the comment string
         """
-        if 'cmt' in self.instruc[self.cmd.itype]:
-          return self.instruc[self.cmd.itype]['cmt']()
+        if 'cmt' in self.instruc[insn.itype]:
+          return self.instruc[insn.itype]['cmt'](insn)
 
     # ----------------------------------------------------------------------
-    def can_have_type(self, op):
+    def notify_can_have_type(self, op):
         """
         Can the operand have a type as offset, segment, decimal, etc.
         (for example, a register AX can't have a type, meaning that the user can't
@@ -885,7 +897,7 @@ class ebc_processor_t(idaapi.processor_t):
         return op.type in [o_imm, o_displ, o_mem]
 
     # ----------------------------------------------------------------------
-    def is_align_insn(self, ea):
+    def notify_is_align_insn(self, ea):
         """
         Is the instruction created only for alignment purposes?
         Returns: number of bytes in the instruction
@@ -901,24 +913,25 @@ class ebc_processor_t(idaapi.processor_t):
         self.set_ptr_size()
 
     # ----------------------------------------------------------------------
-    def header(self):
+    def notify_out_header(self, ctx):
         """function to produce start of disassembled text"""
-        MakeLine("; natural unit size: %d bits" % (self.PTRSZ*8), 0)
+        ctx.out_line("; natural unit size: %d bits" % (self.PTRSZ*8))
+        ctx.flush_outbuf(0)
 
     # ----------------------------------------------------------------------
-    def notify_may_be_func(self, state):
+    def notify_may_be_func(self, insn, state):
         """
         can a function start here?
-        the instruction is in 'cmd'
+        the instruction is in 'insn'
           arg: state -- autoanalysis phase
             state == 0: creating functions
                   == 1: creating chunks
           returns: probability 0..100
         """
-        if is_reg(self.cmd.Op1, self.ireg_SP) and cmd.Op2.type == o_displ and\
-            cmd.Op2.phrase == self.ireg_SP and (cmd.Op2.specval & self.FLo_INDIRECT) == 0:
+        if is_reg(insn.Op1, self.ireg_SP) and insn.Op2.type == o_displ and\
+            insn.Op2.phrase == self.ireg_SP and (insn.Op2.specval & self.FLo_INDIRECT) == 0:
             # mov SP, SP+delta
-            if SIGNEXT(self.cmd.Op2.addr, self.PTRSZ*8) < 0:
+            if SIGNEXT(insn.Op2.addr, self.PTRSZ*8) < 0:
                 return 100
             else:
                 return 0
@@ -930,145 +943,145 @@ class ebc_processor_t(idaapi.processor_t):
         Check for EBC thunk at addr
         dd fnaddr - (addr+4), 0, 0, 0
         """
-        delta = get_long(addr)
+        delta = get_dword(addr)
         fnaddr = (delta + addr + 4) & 0xFFFFFFFF
-        if isOff(get_flags_novalue(addr), 0):
+        if is_off(get_flags(addr), 0):
             # already an offset
-            if get_offbase(addr, 0) == addr + 4:
+            if ida_offset.get_offbase(addr, 0) == addr + 4:
                 return fnaddr
             else:
                 return None
         # should be followed by three zeroes
-        if delta == 0 or get_long(addr+4) != 0 or\
-           get_long(addr+8) != 0 or get_long(addr+12) != 0:
+        if delta == 0 or get_dword(addr+4) != 0 or\
+           get_dword(addr+8) != 0 or get_dword(addr+12) != 0:
             return None
         if segtype(fnaddr) == SEG_CODE:
             # looks good, create the offset
-            MakeDword(addr)
-            if op_offset(addr, 0, REF_OFF32|REFINFO_NOBASE, BADADDR, addr + 4):
+            create_dword(addr)
+            if ida_offset.op_offset(addr, 0, REF_OFF32|REFINFO_NOBASE, BADADDR, addr + 4):
                 return fnaddr
             else:
                 return None
 
     # ----------------------------------------------------------------------
-    def handle_operand(self, op, isRead):
-        uFlag     = self.get_uFlag()
-        is_offs   = isOff(uFlag, op.n)
+    def handle_operand(self, insn, op, isRead):
+        F = get_flags(insn.ea)
+        is_offs   = is_off(F, op.n)
         dref_flag = dr_R if isRead else dr_W
-        def_arg   = isDefArg(uFlag, op.n)
+        def_arg   = is_defarg(F, op.n)
         optype    = op.type
 
         # create code xrefs
         if optype == o_imm:
             if is_offs:
-                ua_add_off_drefs(op, dr_O)
+                insn.add_off_drefs(op, dr_O, 0)
         # create data xrefs
         elif optype == o_displ:
             # reg + delta
             if is_offs:
-                ua_add_off_drefs(op, dref_flag)
+                insn.add_off_drefs(op, dref_flag, OOF_ADDR)
             elif may_create_stkvars() and not def_arg and op.reg == self.ireg_SP:
                 # ignore prolog/epilog
                 # MOVqw         SP, SP+delta
-                if is_reg(cmd.Op1, self.ireg_SP):
+                if is_reg(insn.Op1, self.ireg_SP):
                     pass
                 else:
-                    pfn = get_func(self.cmd.ea)
+                    pfn = get_func(insn.ea)
                     # [SP+var_x] (indirect)
                     # SP+var_x   (direct)
                     flag = STKVAR_VALID_SIZE if (op.specval & self.FLo_INDIRECT) else 0
-                    if pfn and ua_stkvar2(op, op.addr, flag):
-                        op_stkvar(self.cmd.ea, op.n)
+                    if pfn and insn.create_stkvar(op, op.addr, flag):
+                        op_stkvar(insn.ea, op.n)
         elif optype == o_mem:
-            if self.cmd.itype == self.itype_MOVREL:
+            if insn.itype == self.itype_MOVREL:
                 dref_flag = dr_O
                 self.check_thunk(op.addr)
             else:
-                ua_dodata2(op.offb, op.addr, op.dtyp)
-            ua_add_dref(op.offb, op.addr, dref_flag)
+                insn.create_op_data(op.addr, op)
+            insn.add_dref(op.addr, op.offb, dref_flag)
         elif optype == o_near:
-            itype = self.cmd.itype
+            itype = insn.itype
             if itype == self.itype_CALL:
                 fl = fl_CN
             else:
                 fl = fl_JN
-            ua_add_cref(op.offb, op.addr, fl)
+            insn.add_cref(op.addr, op.offb, fl)
 
     # ----------------------------------------------------------------------
-    def add_stkpnt(self, pfn, v):
+    def add_stkpnt(self, insn, pfn, v):
         if pfn:
-            end = self.cmd.ea + self.cmd.size
+            end = insn.ea + insn.size
             if not is_fixed_spd(end):
-                add_auto_stkpnt2(pfn, end, v)
+                ida_frame.add_auto_stkpnt(pfn, end, v)
 
     # ----------------------------------------------------------------------
-    def trace_sp(self):
+    def trace_sp(self, insn):
         """
         Trace the value of the SP and create an SP change point if the current
         instruction modifies the SP.
         """
-        pfn = get_func(self.cmd.ea)
+        pfn = get_func(insn.ea)
         if not pfn:
             return
-        if is_reg(cmd.Op1, self.ireg_SP) and self.cmd.itype in [self.itype_MOVbw, self.itype_MOVww,
+        if is_reg(insn.Op1, self.ireg_SP) and insn.itype in [self.itype_MOVbw, self.itype_MOVww,
                                               self.itype_MOVdw, self.itype_MOVqw, self.itype_MOVbd,
                                               self.itype_MOVwd, self.itype_MOVdd, self.itype_MOVqd,
                                               self.itype_MOVsnw, self.itype_MOVsnd, self.itype_MOVqq]:
             # MOVqw         SP, SP-0x30
             # MOVqw         SP, SP+0x30
-            if cmd.Op2.type == o_displ and cmd.Op2.phrase == self.ireg_SP and (cmd.Op2.specval & self.FLo_INDIRECT) == 0:
-                spofs = SIGNEXT(self.cmd.Op2.addr, self.PTRSZ*8)
-                self.add_stkpnt(pfn, spofs)
-        elif self.cmd.itype in [self.itype_PUSH, self.itype_PUSHn]:
-            spofs = dt_to_bits(cmd.Op1.dtype) // 8
-            self.add_stkpnt(pfn, -spofs)
-        elif self.cmd.itype in [self.itype_POP, self.itype_POPn]:
-            spofs = dt_to_bits(cmd.Op1.dtype) // 8
-            self.add_stkpnt(pfn, spofs)
+            if insn.Op2.type == o_displ and insn.Op2.phrase == self.ireg_SP and (insn.Op2.specval & self.FLo_INDIRECT) == 0:
+                spofs = SIGNEXT(insn.Op2.addr, self.PTRSZ*8)
+                self.add_stkpnt(insn, pfn, spofs)
+        elif insn.itype in [self.itype_PUSH, self.itype_PUSHn]:
+            spofs = dt_to_bits(insn.Op1.dtype) // 8
+            self.add_stkpnt(insn, pfn, -spofs)
+        elif insn.itype in [self.itype_POP, self.itype_POPn]:
+            spofs = dt_to_bits(insn.Op1.dtype) // 8
+            self.add_stkpnt(insn, pfn, spofs)
 
     # ----------------------------------------------------------------------
-    def emu(self):
+    def notify_emu(self, insn):
         """
         Emulate instruction, create cross-references, plan to analyze
         subsequent instructions, modify flags etc. Upon entrance to this function
-        all information about the instruction is in 'cmd' structure.
+        all information about the instruction is in 'insn' structure.
         If zero is returned, the kernel will delete the instruction.
         """
-        aux = self.get_auxpref()
-        Feature = self.cmd.get_canon_feature()
+        aux = self.get_auxpref(insn)
+        Feature = insn.get_canon_feature()
 
         if Feature & CF_USE1:
-            self.handle_operand(self.cmd.Op1, 1)
+            self.handle_operand(insn, insn.Op1, 1)
         if Feature & CF_CHG1:
-            self.handle_operand(self.cmd.Op1, 0)
+            self.handle_operand(insn, insn.Op1, 0)
         if Feature & CF_USE2:
-            self.handle_operand(self.cmd.Op2, 1)
+            self.handle_operand(insn, insn.Op2, 1)
         if Feature & CF_CHG2:
-            self.handle_operand(self.cmd.Op2, 0)
+            self.handle_operand(insn, insn.Op2, 0)
         if Feature & CF_JUMP:
-            QueueSet(Q_jumps, self.cmd.ea)
+            remember_problem(PR_JUMP, insn.ea)
 
         # is it an unconditional jump?
-        uncond_jmp = self.cmd.itype in [self.itype_JMP8, self.itype_JMP] and (aux & (self.FLa_NCS|self.FLa_CS)) == 0
+        uncond_jmp = insn.itype in [self.itype_JMP8, self.itype_JMP] and (aux & (self.FLa_NCS|self.FLa_CS)) == 0
 
         # add flow
         flow = (Feature & CF_STOP == 0) and not uncond_jmp
         if flow:
-            ua_add_cref(0, self.cmd.ea + self.cmd.size, fl_F)
+            add_cref(insn.ea, insn.ea + insn.size, fl_F)
 
         # trace the stack pointer if:
         #   - it is the second analysis pass
         #   - the stack pointer tracing is allowed
         if may_trace_sp():
             if flow:
-                self.trace_sp()         # trace modification of SP register
+                self.trace_sp(insn) # trace modification of SP register
             else:
-                recalc_spd(self.cmd.ea) # recalculate SP register for the next insn
+                recalc_spd(insn.ea) # recalculate SP register for the next insn
 
         return 1
 
     # ----------------------------------------------------------------------
-    def outop(self, op):
+    def notify_out_operand(self, ctx, op):
         """
         Generate text representation of an instructon operand.
         This function shouldn't change the database, flags or anything else.
@@ -1080,119 +1093,121 @@ class ebc_processor_t(idaapi.processor_t):
         optype = op.type
         fl     = op.specval
         signed = OOF_SIGNED if fl & self.FLo_SIGNED != 0 else 0
-        def_arg = isDefArg(self.get_uFlag(), op.n)
+        def_arg = is_defarg(get_flags(ctx.insn.ea), op.n)
 
         if optype == o_reg:
-            out_register(self.regNames[op.reg])
+            ctx.out_register(self.reg_names[op.reg])
 
         elif optype == o_imm:
             # for immediate loads, use the transfer width (type of first operand)
             if op.n == 1:
-                width = self.dt_to_width(cmd.Op1.dtyp)
+                width = self.dt_to_width(ctx.insn.Op1.dtype)
             else:
                 width = OOFW_32 if self.PTRSZ == 4 else OOFW_64
-            OutValue(op, OOFW_IMM | signed | width)
+            ctx.out_value(op, OOFW_IMM | signed | width)
 
         elif optype in [o_near, o_mem]:
-            r = out_name_expr(op, op.addr, BADADDR)
+            r = ctx.out_name_expr(op, op.addr, BADADDR)
             if not r:
-                out_tagon(COLOR_ERROR)
-                OutLong(op.addr, 16)
-                out_tagoff(COLOR_ERROR)
-                QueueSet(Q_noName, self.cmd.ea)
+                ctx.out_tagon(COLOR_ERROR)
+                ctx.out_btoa(op.addr, 16)
+                ctx.out_tagoff(COLOR_ERROR)
+                remember_problem(PR_NONAME, ctx.insn.ea)
 
         elif optype == o_displ:
             indirect = fl & self.FLo_INDIRECT != 0
             if indirect:
-                out_symbol('[')
+                ctx.out_symbol('[')
 
-            out_register(self.regNames[op.reg])
+            ctx.out_register(self.reg_names[op.reg])
 
             if op.addr != 0 or def_arg:
-                OutValue(op, OOF_ADDR | (OOFW_32 if self.PTRSZ == 4 else OOFW_64) | signed | OOFS_NEEDSIGN)
+                ctx.out_value(op, OOF_ADDR | (OOFW_32 if self.PTRSZ == 4 else OOFW_64) | signed | OOFS_NEEDSIGN)
 
             if indirect:
-                out_symbol(']')
+                ctx.out_symbol(']')
         else:
             return False
 
         return True
 
     # ----------------------------------------------------------------------
-    # Generate text representation of an instruction in 'cmd' structure.
-    # This function shouldn't change the database, flags or anything else.
-    # All these actions should be performed only by u_emu() function.
-    def out(self):
+    # Generate the instruction mnemonics
+    def out_mnem(self, ctx):
         # Init output buffer
-        buf = idaapi.init_output_buffer(1024)
 
         postfix = ""
 
         # First display size of first operand if it exists
-        if self.cmd.auxpref & self.FLa_OP1 != 0:
-            postfix += self.fl_to_str(self.cmd.Op1.specval)
+        if ctx.insn.auxpref & self.FLa_OP1 != 0:
+            postfix += self.fl_to_str(ctx.insn.Op1.specval)
 
         # Display opertion size
-        if self.cmd.auxpref & self.FLa_32:
+        if ctx.insn.auxpref & self.FLa_32:
             postfix += "32"
-        elif self.cmd.auxpref & self.FLa_64:
+        elif ctx.insn.auxpref & self.FLa_64:
             postfix += "64"
 
         # Display if local or extern CALL
-        if self.cmd.auxpref & self.FLa_EXTERN:
+        if ctx.insn.auxpref & self.FLa_EXTERN:
             postfix += "EX"
 
         # Display if absolute call
-        if self.cmd.auxpref & self.FLa_ABS:
+        if ctx.insn.auxpref & self.FLa_ABS:
             postfix += "a"
 
         # Display size of instruction
-        if self.cmd.auxpref & (self.FL_B | self.FL_W | self.FL_D | self.FL_Q) != 0:
-            postfix += self.fl_to_str(self.cmd.auxpref)
+        if ctx.insn.auxpref & (self.FL_B | self.FL_W | self.FL_D | self.FL_Q) != 0:
+            postfix += self.fl_to_str(ctx.insn.auxpref)
 
         # Display JMP condition
-        if self.cmd.auxpref & self.FLa_CS:
+        if ctx.insn.auxpref & self.FLa_CS:
             postfix += "cs"
-        elif self.cmd.auxpref & self.FLa_NCS:
+        elif ctx.insn.auxpref & self.FLa_NCS:
             postfix += "cc"
 
         # Display CMP condition
-        if self.cmd.auxpref & self.FLa_CMPMASK:
-            postfix += self.get_cmp()
+        if ctx.insn.auxpref & self.FLa_CMPMASK:
+            postfix += self.get_cmp(ctx.insn)
 
-        OutMnem(12, postfix)
+        ctx.out_mnem(12, postfix)
+    # ----------------------------------------------------------------------
+    # Generate text representation of an instruction in 'ctx.insn' structure.
+    # This function shouldn't change the database, flags or anything else.
+    # All these actions should be performed only by u_emu() function.
+    def notify_out_insn(self, ctx):
 
-        out_one_operand( 0 )
+        ctx.out_mnemonic()
+
+        ctx.out_one_operand(0)
 
         for i in xrange(1, 3):
-            op = self.cmd[i]
+            op = ctx.insn[i]
 
             if op.type == o_void:
                 break
 
-            out_symbol(',')
-            OutChar(' ')
-            out_one_operand(i)
+            ctx.out_symbol(',')
+            ctx.out_char(' ')
+            ctx.out_one_operand(i)
 
-        if self.cmd.itype == self.itype_MOVREL:
-            fnaddr = self.check_thunk(cmd.Op2.addr)
+        if ctx.insn.itype == self.itype_MOVREL:
+            fnaddr = self.check_thunk(ctx.insn.Op2.addr)
             if fnaddr != None:
-                nm = get_name(BADADDR, fnaddr)
+                nm = get_ea_name(fnaddr, ida_name.GN_VISIBLE)
                 if nm:
-                    out_line("; Thunk to " + nm, COLOR_AUTOCMT)
-        term_output_buffer()
+                    ctx.out_line("; Thunk to " + nm, COLOR_AUTOCMT)
 
-        cvar.gl_comm = 1
-        MakeLine(buf)
+        ctx.set_gen_cmt()
+        ctx.flush_outbuf()
 
     # ----------------------------------------------------------------------
-    def ana(self):
+    def notify_ana(self, insn):
         """
-        Decodes an instruction into the C global variable 'cmd'
+        Decodes an instruction into insn
         """
-
         # take opcode byte
-        b = ua_next_byte()
+        b = insn.get_next_byte()
 
         # the 6bit opcode
         opcode = b & 0x3F
@@ -1201,11 +1216,11 @@ class ebc_processor_t(idaapi.processor_t):
         try:
             ins = self.itable[opcode]
             # set default itype
-            self.cmd.itype = getattr(self, 'itype_' + ins.name)
+            insn.itype = getattr(self, 'itype_' + ins.name)
         except:
             return 0
         # call the decoder
-        return self.cmd.size if ins.d(b) else 0
+        return insn.size if ins.d(insn, b) else 0
 
     # ----------------------------------------------------------------------
     def init_instructions(self):
@@ -1232,56 +1247,56 @@ class ebc_processor_t(idaapi.processor_t):
             0x02: idef(name='JMP8',         d=self.decode_JMP8, cf = CF_USE1 | CF_JUMP, cmt = self.cmt_JMP),
 
             0x03: idef(name='CALL',         d=self.decode_CALL, cf = CF_USE1 | CF_CALL, cmt = self.cmt_CALL),
-            0x04: idef(name='RET',          d=self.decode_RET, cf = CF_STOP,            cmt = lambda: "Return from subroutine" ),
+            0x04: idef(name='RET',          d=self.decode_RET, cf = CF_STOP,            cmt = lambda insn: "Return from subroutine" ),
             0x05: idef(name='CMP',          d=self.decode_CMP, cf = CF_USE1 | CF_USE2,  cmt = self.cmt_CMP),
             0x06: idef(name='CMP',          d=self.decode_CMP, cf = CF_USE1 | CF_USE2,  cmt = self.cmt_CMP),
             0x07: idef(name='CMP',          d=self.decode_CMP, cf = CF_USE1 | CF_USE2,  cmt = self.cmt_CMP),
             0x08: idef(name='CMP',          d=self.decode_CMP, cf = CF_USE1 | CF_USE2,  cmt = self.cmt_CMP),
             0x09: idef(name='CMP',          d=self.decode_CMP, cf = CF_USE1 | CF_USE2,  cmt = self.cmt_CMP),
 
-            0x0A: idef(name='NOT',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 = ~Op2" ),
-            0x0B: idef(name='NEG',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 = -Op2" ),
-            0x0C: idef(name='ADD',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 += Op2" ),
-            0x0D: idef(name='SUB',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 -= Op2" ),
-            0x0E: idef(name='MUL',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 *= Op2 (signed multiply)" ),
-            0x0F: idef(name='MULU',         d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 *= Op2 (unsigned multiply)" ),
-            0x10: idef(name='DIV',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 /= Op2 (signed division)" ),
-            0x11: idef(name='DIVU',         d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 /= Op2 (unsigned division)" ),
-            0x12: idef(name='MOD',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 %= Op2 (signed modulo)" ),
-            0x13: idef(name='MODU',         d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 %= Op2 (unsigned modulo)" ),
-            0x14: idef(name='AND',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 &= Op2" ),
-            0x15: idef(name='OR',           d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 |= Op2" ),
-            0x16: idef(name='XOR',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Op1 ^= Op2" ),
-            0x17: idef(name='SHL',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1 | CF_SHFT, cmt = lambda: "Op1 <<= Op2" ),
-            0x18: idef(name='SHR',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1 | CF_SHFT, cmt = lambda: "Op1 >>= Op2 (unsigned shift)" ),
-            0x19: idef(name='ASHR',         d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1 | CF_SHFT, cmt = lambda: "Op1 >>= Op2 (signed shift)" ),
+            0x0A: idef(name='NOT',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 = ~Op2" ),
+            0x0B: idef(name='NEG',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 = -Op2" ),
+            0x0C: idef(name='ADD',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 += Op2" ),
+            0x0D: idef(name='SUB',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 -= Op2" ),
+            0x0E: idef(name='MUL',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 *= Op2 (signed multiply)" ),
+            0x0F: idef(name='MULU',         d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 *= Op2 (unsigned multiply)" ),
+            0x10: idef(name='DIV',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 /= Op2 (signed division)" ),
+            0x11: idef(name='DIVU',         d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 /= Op2 (unsigned division)" ),
+            0x12: idef(name='MOD',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 %= Op2 (signed modulo)" ),
+            0x13: idef(name='MODU',         d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 %= Op2 (unsigned modulo)" ),
+            0x14: idef(name='AND',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 &= Op2" ),
+            0x15: idef(name='OR',           d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 |= Op2" ),
+            0x16: idef(name='XOR',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Op1 ^= Op2" ),
+            0x17: idef(name='SHL',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1 | CF_SHFT, cmt = lambda insn: "Op1 <<= Op2" ),
+            0x18: idef(name='SHR',          d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1 | CF_SHFT, cmt = lambda insn: "Op1 >>= Op2 (unsigned shift)" ),
+            0x19: idef(name='ASHR',         d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1 | CF_SHFT, cmt = lambda insn: "Op1 >>= Op2 (signed shift)" ),
 
-            0x1A: idef(name='EXTNDB',       d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Sign-extend a byte value" ),
-            0x1B: idef(name='EXTNDW',       d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Sign-extend a word value" ),
-            0x1C: idef(name='EXTNDD',       d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Sign-extend a dword value" ),
+            0x1A: idef(name='EXTNDB',       d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Sign-extend a byte value" ),
+            0x1B: idef(name='EXTNDW',       d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Sign-extend a word value" ),
+            0x1C: idef(name='EXTNDD',       d=self.decode_BINOP_FORM1, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Sign-extend a dword value" ),
 
-            0x1D: idef(name='MOVbw',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move byte"  ),
-            0x1E: idef(name='MOVww',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move word"  ),
-            0x1F: idef(name='MOVdw',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move dword" ),
-            0x20: idef(name='MOVqw',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move qword" ),
-            0x21: idef(name='MOVbd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move byte"  ),
-            0x22: idef(name='MOVwd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move word"  ),
-            0x23: idef(name='MOVdd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move dword" ),
-            0x24: idef(name='MOVqd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move qword" ),
+            0x1D: idef(name='MOVbw',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move byte"  ),
+            0x1E: idef(name='MOVww',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move word"  ),
+            0x1F: idef(name='MOVdw',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move dword" ),
+            0x20: idef(name='MOVqw',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move qword" ),
+            0x21: idef(name='MOVbd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move byte"  ),
+            0x22: idef(name='MOVwd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move word"  ),
+            0x23: idef(name='MOVdd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move dword" ),
+            0x24: idef(name='MOVqd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move qword" ),
 
-            0x25: idef(name='MOVsnw',       d=self.decode_MOVSN, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move signed natural value"),
-            0x26: idef(name='MOVsnd',       d=self.decode_MOVSN, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move signed natural value"),
+            0x25: idef(name='MOVsnw',       d=self.decode_MOVSN, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move signed natural value"),
+            0x26: idef(name='MOVsnd',       d=self.decode_MOVSN, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move signed natural value"),
 
             #  0x27: reserved
 
-            0x28: idef(name='MOVqq',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move qword" ),
+            0x28: idef(name='MOVqq',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move qword" ),
 
-            0x29: idef(name='LOADSP',       d=self.decode_LOADSP, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Load a VM dedicated register from a general-purpose register"),
-            0x2A: idef(name='STORESP',      d=self.decode_STORESP, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Store a VM dedicated register into a general-purpose register"),
+            0x29: idef(name='LOADSP',       d=self.decode_LOADSP, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Load a VM dedicated register from a general-purpose register"),
+            0x2A: idef(name='STORESP',      d=self.decode_STORESP, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Store a VM dedicated register into a general-purpose register"),
 
             # PUSH/POP
-            0x2B: idef(name='PUSH',         d=self.decode_PUSH, cf = CF_USE1, cmt = lambda: "Push value on the stack" ),
-            0x2C: idef(name='POP',          d=self.decode_PUSH, cf = CF_USE1, cmt = lambda: "Pop value from the stack" ),
+            0x2B: idef(name='PUSH',         d=self.decode_PUSH, cf = CF_USE1, cmt = lambda insn: "Push value on the stack" ),
+            0x2C: idef(name='POP',          d=self.decode_PUSH, cf = CF_USE1, cmt = lambda insn: "Pop value from the stack" ),
 
             # CMPI
             0x2D: idef(name='CMPI',         d=self.decode_CMPI, cf = CF_USE1 | CF_USE2, cmt = self.cmt_CMP),
@@ -1290,19 +1305,19 @@ class ebc_processor_t(idaapi.processor_t):
             0x30: idef(name='CMPI',         d=self.decode_CMPI, cf = CF_USE1 | CF_USE2, cmt = self.cmt_CMP),
             0x31: idef(name='CMPI',         d=self.decode_CMPI, cf = CF_USE1 | CF_USE2, cmt = self.cmt_CMP),
 
-            0x32: idef(name='MOVnw',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move unsigned natural value"),
-            0x33: idef(name='MOVnd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move unsigned natural value"),
+            0x32: idef(name='MOVnw',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move unsigned natural value"),
+            0x33: idef(name='MOVnd',        d=self.decode_MOV, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move unsigned natural value"),
 
             #  0x34: reserved
 
             # PUSHn/POPn
-            0x35: idef(name='PUSHn',        d=self.decode_PUSH, cf = CF_USE1, cmt = lambda: "Push natural value on the stack" ),
-            0x36: idef(name='POPn',         d=self.decode_PUSH, cf = CF_USE1, cmt = lambda: "Pop natural value from the stack" ),
+            0x35: idef(name='PUSHn',        d=self.decode_PUSH, cf = CF_USE1, cmt = lambda insn: "Push natural value on the stack" ),
+            0x36: idef(name='POPn',         d=self.decode_PUSH, cf = CF_USE1, cmt = lambda insn: "Pop natural value from the stack" ),
 
-            0x37: idef(name='MOVI',         d=self.decode_MOVI, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move immediate value"),
-            0x38: idef(name='MOVIn',        d=self.decode_MOVI, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Move immediate value"),
+            0x37: idef(name='MOVI',         d=self.decode_MOVI, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move immediate value"),
+            0x38: idef(name='MOVIn',        d=self.decode_MOVI, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Move immediate value"),
 
-            0x39: idef(name='MOVREL',       d=self.decode_MOVREL, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda: "Load IP-relative address")
+            0x39: idef(name='MOVREL',       d=self.decode_MOVREL, cf = CF_USE1 | CF_USE2 | CF_CHG1, cmt = lambda insn: "Load IP-relative address")
             #  0x3A: reserved
             #  0x3B: reserved
             #  0x3C: reserved
@@ -1337,7 +1352,7 @@ class ebc_processor_t(idaapi.processor_t):
         """This function parses the register table and creates corresponding ireg_XXX constants"""
 
         # Registers definition
-        self.regNames = [
+        self.reg_names = [
             # General purpose registers
             "SP", # aka R0
             "R1",
@@ -1362,23 +1377,23 @@ class ebc_processor_t(idaapi.processor_t):
         ]
 
         # Create the ireg_XXXX constants
-        for i in xrange(len(self.regNames)):
-            setattr(self, 'ireg_' + self.regNames[i], i)
+        for i in xrange(len(self.reg_names)):
+            setattr(self, 'ireg_' + self.reg_names[i], i)
 
         # Segment register information (use virtual CS and DS registers if your
         # processor doesn't have segment registers):
-        self.regFirstSreg = self.ireg_CS
-        self.regLastSreg  = self.ireg_DS
+        self.reg_first_sreg = self.ireg_CS
+        self.reg_last_sreg  = self.ireg_DS
 
         # number of CS register
-        self.regCodeSreg = self.ireg_CS
+        self.reg_code_sreg = self.ireg_CS
 
         # number of DS register
-        self.regDataSreg = self.ireg_DS
+        self.reg_data_sreg = self.ireg_DS
 
     # ----------------------------------------------------------------------
     def __init__(self):
-        idaapi.processor_t.__init__(self)
+        processor_t.__init__(self)
         self.PTRSZ = 4 # Assume PTRSZ = 4 by default
         self.init_instructions()
         self.init_registers()

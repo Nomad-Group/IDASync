@@ -5,7 +5,6 @@
 #  __MAC__      build mac os x version
 #  __TARGET_MAC_HOST_LINUX__  - build mac os x version under linux
 #                               __MAC__ must be set, __LINUX__ must be unset
-#  __IPHONE__   build iphone version
 #  __BSD__      build bsd version
 #
 #  __EA64__     build 64-bit version (add 64-bit support, the application itself stays 32-bit)
@@ -36,9 +35,6 @@ not = $(if $(1),,1)
 # define: comma to use in function calls as a literal
 comma=,
 
-ifdef __IPHONE__
-__MAC__=1
-endif
 __UNIX__=1
 
 # our gcc for arm (on armlinux called wd) does not understand some warnings
@@ -50,7 +46,7 @@ ifdef SUPPRESS_WARNINGS
   WARNS=-w
 else
   FORMAT_WARNS=-Wformat=2 -Werror=format-security -Werror=format-nonliteral
-  WARNS=-Wall -Wextra -Wno-sign-compare -Wshadow -Wunused $(FORMAT_WARNS) $(NOARM_WARNS)
+  WARNS=-Wall -Wextra -Wno-sign-compare -Wno-parentheses -Wshadow -Wunused $(FORMAT_WARNS) $(NOARM_WARNS)
 endif
 
 # use -fdiagnostics-show-option to learn warning codes
@@ -71,7 +67,29 @@ else
 endif
 COMPILER_NAME=gcc
 _GCC_VERSION=$(wordlist 1,2,$(subst ., ,$(shell gcc -dumpversion)))
-GCC_VERSION=$(firstword $(_GCC_VERSION)).$(lastword $(_GCC_VERSION))
+GCC_VERSION_MAJOR=$(firstword $(_GCC_VERSION))
+GCC_VERSION=$(GCC_VERSION_MAJOR).$(lastword $(_GCC_VERSION))
+ifeq ("${GCC_VERSION_MAJOR}", "5")
+  __GCC5__=1
+endif
+ifeq ("${GCC_VERSION_MAJOR}", "6")
+  __GCC5__=1
+endif
+ifeq ("${GCC_VERSION_MAJOR}", "7")
+  __GCC5__=1
+  GCC5_WARNS=-Wimplicit-fallthrough=0
+endif
+ifdef __LINUX__
+  ifdef __GCC5__
+    GCC5_WARNS+=-Wno-unused-local-typedefs -fno-diagnostics-show-caret
+    # disable new ABI
+    GCC5_WARNS+=-D_GLIBCXX_USE_CXX11_ABI=0
+    WARNS+=$(GCC5_WARNS)
+  endif
+endif
+ifeq ("${GCC_VERSION}", "4.9")
+  WARNS+=-Wno-unused-local-typedefs -fno-diagnostics-show-caret
+endif
 ifeq ("${GCC_VERSION}", "4.8")
   WARNS+=-Wno-unused-local-typedefs -fno-diagnostics-show-caret
 endif
@@ -92,42 +110,54 @@ endif
 
 ifdef __MAC__
   ifndef MACSDK
-    ifneq ($(wildcard /Developer/SDKs/MacOSX10.6.sdk/*),)
-      MACSDK=/Developer/SDKs/MacOSX10.6.sdk
-      MACSDKVER=1060
+    SDKDIR=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs
+    # MACSDKVER format is MMmm, with MM = major, mm = minor.  It's important
+    # that the number increases with each new version.
+    ifneq ($(wildcard $(SDKDIR)/MacOSX10.12.sdk/*),)
+      MACSDK=$(SDKDIR)/MacOSX10.12.sdk
+      MACSDKVER=1012
+    else ifneq ($(wildcard $(SDKDIR)/MacOSX10.11.sdk/*),)
+      MACSDK=$(SDKDIR)/MacOSX10.11.sdk
+      MACSDKVER=1011
+    else ifneq ($(wildcard $(SDKDIR)/MacOSX10.10.sdk/*),)
+      MACSDK=$(SDKDIR)/MacOSX10.10.sdk
+      MACSDKVER=1010
+    else ifneq ($(wildcard $(SDKDIR)/MacOSX10.9.sdk/*),)
+      MACSDK=$(SDKDIR)/MacOSX10.9.sdk
+      MACSDKVER=1009
+    else ifneq ($(wildcard $(SDKDIR)/MacOSX10.8.sdk/*),)
+      MACSDK=$(SDKDIR)/MacOSX10.8.sdk
+      MACSDKVER=1008
+    else ifneq ($(wildcard $(SDKDIR)/MacOSX10.7.sdk/*),)
+      MACSDK=$(SDKDIR)/MacOSX10.7.sdk
+      MACSDKVER=1007
     else ifneq ($(wildcard /Developer/SDKs/MacOSX10.7.sdk/*),)
       MACSDK=/Developer/SDKs/MacOSX10.7.sdk
-      MACSDKVER=1070
-    else ifneq ($(wildcard /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.7.sdk/*),)
-      MACSDK=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.7.sdk
-      MACSDKVER=1070
-    else ifneq ($(wildcard /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.8.sdk/*),)
-      MACSDK=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.8.sdk
-      MACSDKVER=1080
-    else ifneq ($(wildcard /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk/*),)
-      MACSDK=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk
-      MACSDKVER=1090
+      MACSDKVER=1007
+    else ifneq ($(wildcard /Developer/SDKs/MacOSX10.6.sdk/*),)
+      MACSDK=/Developer/SDKs/MacOSX10.6.sdk
+      MACSDKVER=1006
+    # LM-X cannot be linked with SDK 10.5
+    else ifneq ($(and $(call not $(WITH_LMX)),$(wildcard /Developer/SDKs/MacOSX10.5.sdk/*)),)
+      MACSDK=/Developer/SDKs/MacOSX10.5.sdk
+      MACSDKVER=1005
+    else ifneq ($(wildcard /opt/mac1/SDK/MacOSX10.11.sdk/*),) # cross compilation on linux
+      MACSDK=/opt/mac1/SDK/MacOSX10.11.sdk
+      MACSDKVER=1011
+    else ifneq ($(wildcard /opt/target/SDK/MacOSX10.6.sdk/*),) # cross compilation on linux
+      MACSDK=/opt/target/SDK/MacOSX10.6.sdk
+      MACSDKVER=1006
     else ifneq ($(wildcard /opt/mac/SDKs/MacOSX10.4u.sdk/*),) # cross compilation on linux
       MACSDK=/opt/mac/SDKs/MacOSX10.4u.sdk
-      MACSDKVER=1040
+      MACSDKVER=1004
     else
       $(error Could not find MacOSX SDK)
     endif
   endif
 endif
 
-ifdef __LINUX__
-  QTDIR=/usr/local/Trolltech/Qt-$(QTVER)/
-else
-  QTDIR=/Users/Shared/Qt/$(QTVER)/
-endif
-
 ifdef NDEBUG
-  CCOPT=-O3 -ffunction-sections -fdata-sections -DNDEBUG -fomit-frame-pointer -g -D_FORTIFY_SOURCE=2
-  # defer-pop not supported in clang
-  ifndef __CLANG__
-    CCOPT+=-fdefer-pop
-  endif
+  CCOPT=-O2 -ffunction-sections -fdata-sections -DNDEBUG -fomit-frame-pointer -g -D_FORTIFY_SOURCE=2
   OPTSUF=_opt
   ifdef __MAC__
     ifndef MAC_NO_DEAD_STRIP
@@ -146,31 +176,32 @@ else
   STRIPOPTS=
 endif
 
-BREAKPAD=$(IDA)../third_party/google-breakpad
+ifdef __LINUX__
+BREAKPAD=$(THIRD_PARTY)breakpad/bins-linux
+endif
 
 ifdef __X64__
-  __EA64__=1
-  _SWITCH64=-D__X64__
-  __PIC__=1
-  X64SUFF=x
+  SWITCHX64=-D__X64__
   APPBITS=64
+  __PIC__=1
 else
-  X64SUFF=
   APPBITS=32
+  ifdef __LINUX__
+    __PIC__=1
+  endif
 endif
 
 ifdef __EA64__
   SUFF64=64
   ADRSIZE=64
-  SWITCH64=$(_SWITCH64) -D__EA64__
+  SWITCH64=-D__EA64__
 else
   SUFF64=
   ADRSIZE=32
-  SWITCH64=
 endif
 
 ifdef __LINUX__
-  STDLIBS=-lrt -lpthread
+  STDLIBS=-lrt -lpthread -lc
   SYSNAME=linux
   ifndef OLD_GCC
     VISFLAGS=-fvisibility=hidden -fvisibility-inlines-hidden
@@ -179,7 +210,7 @@ ifdef __LINUX__
   ifndef ALLOW_UNDEFS
     NO_UNDEFS=-Wl,--no-undefined
   endif
-  _OUTDLL=-Wl,--gc-sections $(NO_UNDEFS) $(OUTDLLOPTS)
+  _OUTDLL=-Wl,--gc-sections,--warn-shared-textrel $(NO_UNDEFS) $(OUTDLLOPTS)
   ifdef __ARM__
     BUILD_ONLY_SERVER=1
     TARGET_PROCESSOR_NAME=arm
@@ -194,10 +225,10 @@ ifdef __LINUX__
       ARCH_CFLAGS=-m64
       ASM_ARCH_CFLAGS=--64
       DIRSUFF=.lnx64
-      MODSUFF=.ix
-      PLGSUFF=.px
-      LDRSUFF=.lx
-      DLLSUFF=x.so
+      DLLSUFF=.so
+      MODSUFF=$(DLLSUFF)
+      PLGSUFF=$(DLLSUFF)
+      LDRSUFF=$(DLLSUFF)
     else
       TARGET_PROCESSOR_NAME=x86
       ARCH_CFLAGS=-m32
@@ -223,75 +254,51 @@ ifdef __BSD__
   LDRSUFF=.lbsd
   PLGSUFF=.pbsd
   DLLSUFF=.so
-else
+else # __MAC__
   ifndef MAC_EXPORT_ALL
     SYS=$(PROCFLAG) -D__MAC__ -fvisibility=hidden -fvisibility-inlines-hidden
   else
     SYS=$(PROCFLAG) -D__MAC__
   endif
-  _OUTDLL=-dynamiclib -current_version 1.0 -compatibility_version 1.0 -single_module $(OUTDLLOPTS)
   DLLSUFF=.dylib
-  ifdef __IPHONE__
-    TARGET_PROCESSOR_NAME=arm
-    SYSNAME=iphone
-    DEV=/Developer/Platforms/iPhoneOS.platform/Developer
-    SDK=$(DEV)/SDKs/iPhoneOS2.2.sdk
-    CC = $(DEV)/usr/bin/gcc-4.0
-    CXX = $(DEV)/usr/bin/g++-4.0
-    ASM_ARCH_CFLAGS = -arch arm
-    ARCH_CFLAGS = $(ASM_ARCH_CFLAGS) \
-    -B"$(SDK)" \
-    -I"$(SDK)/usr/include" \
-    -I"$(SDK)/usr/include/c++/4.0.0" \
-    -I"$(SDK)/usr/include/c++/4.0.0/arm-apple-darwin8" \
-    -I"$(SDK)/usr/lib/gcc/arm-apple-darwin9/4.0.1/include" \
-    -D_DARWIN_NO_64_BIT_INODE=1 \
-    -L"$(SDK)/usr/lib" \
-    -mmacosx-version-min=10.3
-    DIRSUFF=.mac_iphone
-    MODSUFF=.imc
-    LDRSUFF=.lmc
-    PLGSUFF=.pmc
-    NO_EXECUTE_TESTS=1
+  SYSNAME=mac
+  ifdef __X64__
+    TARGET_PROCESSOR_NAME=x64
+    DIRSUFF=.mac64
+    DLLSUFF=.dylib
+    MODSUFF=$(DLLSUFF)
+    PLGSUFF=$(DLLSUFF)
+    LDRSUFF=$(DLLSUFF)
+    MFLAG  =-m64
   else
-    SYSNAME=mac
-    ifdef __X64__
-      TARGET_PROCESSOR_NAME=x64
-      DIRSUFF=.mac64
-      MODSUFF=.im
-      PLGSUFF=.pm
-      LDRSUFF=.lm
-      DLLSUFF=x.dylib
-      MFLAG  =-m64
-    else
-      TARGET_PROCESSOR_NAME=x86
-      DIRSUFF=.mac
-      MODSUFF=.imc
-      PLGSUFF=.pmc
-      LDRSUFF=.lmc
-      MFLAG  =-m32
-    endif
-    ifdef __TARGET_MAC_HOST_LINUX__
-      ASM_ARCH_CFLAGS=-I/opt/mac/include/c++/4.0.0 -I/opt/mac/include/c++/4.0.0/i686-apple-darwin10 -I/opt/mac/lib/gcc/i686-apple-darwin8/4.0.1/include
-      FORMAT_WARNS= # turn off because the cross compiler does not understand them
-    else
-      SYSROOT=-mmacosx-version-min=10.5 -isysroot $(MACSDK)
-      ifdef __X64__
-        ASM_ARCH_CFLAGS=-arch x86_64
-      else
-        ASM_ARCH_CFLAGS=-arch i386
-      endif
-    endif
-    ARCH_CFLAGS=$(ASM_ARCH_CFLAGS) $(SYSROOT) $(MFLAG)
+    TARGET_PROCESSOR_NAME=x86
+    DIRSUFF=.mac
+    MODSUFF=.imc
+    PLGSUFF=.pmc
+    LDRSUFF=.lmc
+    MFLAG  =-m32
   endif
+  _OUTDLL=-dynamiclib $(OUTDLLOPTS)
+  ifdef __TARGET_MAC_HOST_LINUX__
+    FORMAT_WARNS= # turn off because the cross compiler does not understand them
+  else
+    _OUTDLL+=-current_version 1.0 -compatibility_version 1.0 -single_module
+    SYSROOT=-mmacosx-version-min=10.5 -isysroot $(MACSDK)
+    ifdef __X64__
+      ASM_ARCH_CFLAGS=-arch x86_64
+    else
+      ASM_ARCH_CFLAGS=-arch i386
+    endif
+  endif
+  ARCH_CFLAGS=$(ASM_ARCH_CFLAGS) $(SYSROOT) $(MFLAG)
   DYLSUF=$(SUFF64)$(DLLSUFF)
 endif
 endif
 OUTDLL=$(SYS) $(_OUTDLL)
 DEVKEY_TO_BIN=1
 
-BINDIR=$(TARGET_PROCESSOR_NAME)_$(SYSNAME)_$(COMPILER_NAME)$(OPTSUF)$(STATSUF)
-SYSDIR=$(TARGET_PROCESSOR_NAME)_$(SYSNAME)_$(COMPILER_NAME)_$(ADRSIZE)
+ADRDIR=$(TARGET_PROCESSOR_NAME)_$(SYSNAME)_$(COMPILER_NAME)_$(ADRSIZE)
+SYSDIR=$(ADRDIR)$(OPTSUF)
 # output directory for target platform
 R=$(IDA)bin/
 # input directory with existing build utilities
@@ -304,33 +311,39 @@ I=$(IDA)include/
 
 HH=.hhp
 HS=.hls
-O=.o$(X64SUFF)$(ADRSIZE)
 A=.a
-B=$(X64SUFF)$(SUFF64)
-BS=$(X64SUFF)$(SUFF64)
-IDP=$(SUFF64)$(MODSUFF)$(SUFF64)
-LDR=$(SUFF64)$(LDRSUFF)$(SUFF64)
-PLUGIN=$(PLGSUFF)$(SUFF64)
+ifdef __X64__
+  O=.o
+  IDP=$(SUFF64)$(MODSUFF)
+  LDR=$(SUFF64)$(LDRSUFF)
+  PLUGIN=$(SUFF64)$(PLGSUFF)
+else
+  O=.o$(ADRSIZE)
+  IDP=$(SUFF64)$(MODSUFF)$(SUFF64)
+  LDR=$(SUFF64)$(LDRSUFF)$(SUFF64)
+  PLUGIN=$(PLGSUFF)$(SUFF64)
+endif
+B=$(SUFF64)
+BS=$(SUFF64)
 CONLY=-c
+LANGC=-xc
 
 ifndef __MAC__
 PTHR_SWITCH=-pthread
 endif
 
-MAKE=$(call qabspath,$(IDA))bin/idamake.pl
-
 # we can not use strict-aliasing because we do have
 # pointers of different type pointing to the same location in many cases.
-CFLAGS=$(CCOPT) $(SYS) $(SWITCH64) -I$(I) -DNO_OBSOLETE_FUNCS $(WARNS) $(_CFLAGS) \
-       $(ARCH_CFLAGS) $(PIC) -pipe -fno-strict-aliasing $(PTHR_SWITCH)
+CFLAGS=$(CCOPT) $(SYS) $(SWITCH64) $(SWITCHX64) -I$(I) -DNO_OBSOLETE_FUNCS $(WARNS) -fwrapv \
+       $(ARCH_CFLAGS) $(PIC) -pipe -fno-strict-aliasing $(PTHR_SWITCH) $(_CFLAGS)
 
 # disable RTTI by default
 ifndef __USE_RTTI__
 NORTTI=-fno-rtti
 endif
 
-LIBDIR=$(IDA)lib/$(SYSDIR)
-OBJDIR=obj/$(SYSDIR)$(OPTSUF)$(STATSUF)
+LIBDIR=$(IDA)lib/$(ADRDIR)
+OBJDIR=obj/$(SYSDIR)
 F=$(OBJDIR)/
 L=$(LIBDIR)/
 
@@ -340,24 +353,11 @@ RM=rm -f
 AS=as
 MKDIR=-@mkdir 2>/dev/null
 
-ifdef __IPHONE__
-  O=.o$(ADRSIZE)_iphone
-  A=.a_iphone
-  R=$(IDA)bin/iphone/
-  RT=$(IDA)bin/iphone/
-  AS=$(DEV)/usr/bin/as -arch arm
-  STDLIBS=-lpthread -liconv
-else
-  AS=as $(ASM_ARCH_CFLAGS)
-  ifdef __MAC__   # plain mac
-    ifndef __TARGET_MAC_HOST_LINUX__
-      ifdef __X64__
-        LIBICONV=-liconv
-      else
-        LIBICONV=$(L)libiconv.2.2.0.dylib
-      endif
-      STDLIBS=-lpthread $(LIBICONV)
-    endif
+AS=as $(ASM_ARCH_CFLAGS)
+ifdef __MAC__   # plain mac
+  ifndef __TARGET_MAC_HOST_LINUX__
+    LIBICONV=-liconv
+    STDLIBS=-lpthread $(LIBICONV)
   endif
 endif
 
@@ -387,13 +387,22 @@ link_dumb=$(CCL) $(OUTSW)$1 $(DUMB) $(L)pro$(A) $(STDLIBS)
 HLIB=$(RS)_ida.hlp
 DUMB=$(L)dumb$(O)
 HELP=$(L)help$(O)
-# NB: DLLSUFF already includes X64SUFF
 IDALIB=$(R)libida$(SUFF64)$(DLLSUFF)
-LINKIDA=-lida$(SUFF64)$(X64SUFF)
-LINKCLP=-lclp$(X64SUFF)
+LINKIDA=-lida$(SUFF64)
+ifdef __X64__
+  LINKCLP=-lclpx
+  CLPLIB=$(R)libclpx$(DLLSUFF)
+else
+  LINKCLP=-lclp
+  CLPLIB=$(R)libclp$(DLLSUFF)
+endif
 
 ifdef __PIC__
-  PIC=-fPIC
+  ifdef __X64__
+    PIC=-fPIC
+  else
+    PIC=-fpic
+  endif
 endif
 
 R32=$(R)
@@ -402,21 +411,19 @@ B32=$(B)
 AR=$(RS)qar.sh rus
 HC=$(R)ihc$(B)
 STM=$(R)stm$(B)
-PYTHON=/usr/bin/python
-NASM=/usr/bin/nasm
-SWIG=/usr/bin/swig
+PYTHON?=/usr/bin/python
+NASM?=nasm
 OUTSW=-o #with space
 OBJSW=-o #with space
 
-CLPLIB=$(R)libclp$(DLLSUFF)
 
 .SUFFIXES: $(HH) $(HS) .c .h .cpp .hpp $(O) .at $(A) .grm .cfg
 .PHONY: all includes Goal goal config cfg objdir $(ADDITIONAL_GOALS)
 
-$(F)%$(O): %.cpp | $(F)
+$(F)%$(O): %.cpp | $(OBJDIR)
 	$(CXX) $(CFLAGS) $(NORTTI) -c $(OBJSW)$@ $<
 
-$(F)%$(O): %.c | $(F)
+$(F)%$(O): %.c | $(OBJDIR)
 ifdef DONT_FORCE_CPP
 	$(CC) $(CFLAGS) -c $(OBJSW)$@ $<
 else

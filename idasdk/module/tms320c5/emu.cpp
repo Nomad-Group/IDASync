@@ -14,45 +14,49 @@
 
 static int flow;
 //------------------------------------------------------------------------
-static void doImmdValue(void) {
-    doImmd(cmd.ea);
-    switch ( cmd.itype ) {
-        case TMS_and:
-        case TMS_bit:
-        case TMS_bitt:
-        case TMS_bsar:
-        case TMS_cmpr:
-        case TMS_in:
-        case TMS_intr:
-        case TMS_apl2:
-        case TMS_opl2:
-        case TMS_xpl2:
-        case TMS_or:
-        case TMS_rpt:
-        case TMS_xc:
-        case TMS_xor:
-        case TMS_rptz:
+static void set_immd_bit(const insn_t &insn)
+{
+  set_immd(insn.ea);
+  switch ( insn.itype )
+  {
+    case TMS_and:
+    case TMS_bit:
+    case TMS_bitt:
+    case TMS_bsar:
+    case TMS_cmpr:
+    case TMS_in:
+    case TMS_intr:
+    case TMS_apl2:
+    case TMS_opl2:
+    case TMS_xpl2:
+    case TMS_or:
+    case TMS_rpt:
+    case TMS_xc:
+    case TMS_xor:
+    case TMS_rptz:
 
-        case TMS2_bit:
-        case TMS2_in:
-        case TMS2_out:
-        case TMS2_andk:
-        case TMS2_ork:
-        case TMS2_xork:
-        case TMS2_rptk:
-          op_num(cmd.ea,0);
-    }
+    case TMS2_bit:
+    case TMS2_in:
+    case TMS2_out:
+    case TMS2_andk:
+    case TMS2_ork:
+    case TMS2_xork:
+    case TMS2_rptk:
+      op_num(insn.ea, 0);
+      break;
+  }
 }
 
 //----------------------------------------------------------------------
-int find_ar(ea_t *res)
+int find_ar(const insn_t &insn, ea_t *res)
 {
-  ea_t ea = cmd.ea;
-  for ( int i=0; i < lookback; i++ )
+  ea_t ea = insn.ea;
+  for ( int i=0; i < get_lookback(); i++ )
   {
     ea = prevInstruction(ea);
-    if ( !isCode(get_flags_novalue(ea)) ) break;
-    ushort code = (ushort)get_full_byte(ea);
+    if ( !is_code(get_flags(ea)) )
+      break;
+    ushort code = (ushort)get_wide_byte(ea);
     if ( isC2() )
     {
       switch ( code >> 11 )
@@ -60,13 +64,13 @@ int find_ar(ea_t *res)
         case 6:                 // LAR
           return 0;
         case 0x18:              // LARK
-          *res = toEA(dataSeg(),(code & 0xFF));
+          *res = map_data_ea(insn, code & 0xFF);
           return 1;
         case 0x1A:              // LRLK
           if ( (code & 0xF8FF) == 0xD000 )
           {
-            ushort b = (ushort)get_full_byte(ea+1);
-            *res = toEA(dataSeg(), b);
+            ushort b = (ushort)get_wide_byte(ea+1);
+            *res = map_data_ea(insn, b);
             return 1;
           }
       }
@@ -77,13 +81,13 @@ int find_ar(ea_t *res)
       case 0:                   // Load AR from addressed data
         return 0;               // LAR found, unknown address
       case 0x16:                // Load AR short immediate
-        *res = toEA(dataSeg(), code & 0xFF);
+        *res = map_data_ea(insn, code & 0xFF);
         return 1;
       case 0x17:                // Load AR long immediate
         if ( (code & ~7) == 0xBF08 )
         {
-          ushort b = (ushort)get_full_byte(ea+1);
-          *res = toEA(dataSeg(),b);
+          ushort b = (ushort)get_wide_byte(ea+1);
+          *res = map_data_ea(insn, b);
           return 1;
         }
     }
@@ -92,73 +96,78 @@ int find_ar(ea_t *res)
 }
 
 //----------------------------------------------------------------------
-static void TouchArg(op_t &x,int isload)
+static void handle_operand(const insn_t &insn, const op_t &x, bool isload)
 {
   ea_t ea;
   switch ( x.type )
   {
   case o_phrase:                // 2 registers or indirect addressing
-    if ( cmd.itype != TMS_mar && cmd.itype != TMS2_mar
-                && find_ar(&ea) ) goto set_dref;
+    if ( insn.itype != TMS_mar && insn.itype != TMS2_mar && find_ar(insn, &ea) )
+      goto SET_DREF;
   case o_reg:
   case o_bit:
   case o_cond:
     break;
   case o_imm:
-    if ( !isload )
-      goto badTouch;
-    doImmdValue();
-    if ( op_adds_xrefs(uFlag, x.n) )
-      ua_add_off_drefs2(x, dr_O, is_mpy() ? OOF_SIGNED : 0);
+    {
+      if ( !isload )
+        goto badTouch;
+      set_immd_bit(insn);
+      flags_t F = get_flags(insn.ea);
+      if ( op_adds_xrefs(F, x.n) )
+        insn.add_off_drefs(x, dr_O, is_mpy(insn) ? OOF_SIGNED : 0);
+    }
     break;
   case o_mem:
-    ea = toEA(dataSeg_op(x.n),x.addr);
-set_dref:
-    ua_dodata2(x.offb, ea, x.dtyp);
-    if ( !isload )
-      doVar(ea);
-    ua_add_dref(x.offb,ea,isload ? dr_R : dr_W);
+    ea = map_data_ea(insn, x);
+SET_DREF:
+    insn.create_op_data(ea, x);
+    insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
     if ( x.type == o_mem )
-      if ( cmd.itype == TMS_dmov  ||
-           cmd.itype == TMS_ltd   ||
-           cmd.itype == TMS_macd  ||
-           cmd.itype == TMS_madd  ||
-           cmd.itype == TMS2_dmov ||
-           cmd.itype == TMS2_macd  ) ua_add_dref(x.offb,ea+1,dr_W);
+    {
+      if ( insn.itype == TMS_dmov
+        || insn.itype == TMS_ltd
+        || insn.itype == TMS_macd
+        || insn.itype == TMS_madd
+        || insn.itype == TMS2_dmov
+        || insn.itype == TMS2_macd )
+      {
+        insn.add_dref(ea+1, x.offb, dr_W);
+      }
+    }
     break;
   case o_near:
     {
-      ea_t segbase = codeSeg(x.addr, x.n);
-      ea = toEA(segbase, x.addr);
-      if ( cmd.itype == TMS_blpd ||
-           cmd.itype == TMS_mac  ||
-           cmd.itype == TMS_macd ||
-           cmd.itype == TMS2_blkp ||
-           cmd.itype == TMS2_mac  ||
-           cmd.itype == TMS2_macd
-         ) goto set_dref;
-      uval_t thisseg = cmd.cs;
-      int iscall = InstrIsSet(cmd.itype,CF_CALL);
-      if ( cmd.itype == TMS_rptb && isTail(get_flags_novalue(ea)) )
+      ea = map_code_ea(insn, x);
+      if ( insn.itype == TMS_blpd
+        || insn.itype == TMS_mac
+        || insn.itype == TMS_macd
+        || insn.itype == TMS2_blkp
+        || insn.itype == TMS2_mac
+        || insn.itype == TMS2_macd )
+      {
+        goto SET_DREF;
+      }
+      ea_t segbase = (ea - x.addr) >> 4;
+      uval_t thisseg = insn.cs;
+      int iscall = has_insn_feature(insn.itype, CF_CALL);
+      if ( insn.itype == TMS_rptb && is_tail(get_flags(ea)) )
       {
         // small hack to display end_loop-1 instead of before_end_loop+1
         ea++;
       }
 
-      ua_add_cref(x.offb,
-                  ea,
-                  iscall ? ((segbase == thisseg) ? fl_CN : fl_CF)
-                         : ((segbase == thisseg) ? fl_JN : fl_JF));
-      if ( iscall )
-      {
-        if ( !func_does_return(ea) )
-          flow = false;
-      }
+      cref_t xtype = iscall
+                   ? (segbase == thisseg ? fl_CN : fl_CF)
+                   : (segbase == thisseg ? fl_JN : fl_JF);
+      insn.add_cref(ea, x.offb, xtype);
+      if ( iscall && !func_does_return(ea) )
+        flow = false;
     }
     break;
   default:
 badTouch:
-    warning("%a: %s,%d: bad optype %d", cmd.ea, cmd.get_canon_mnem(), x.n, x.type);
+    warning("%a: %s,%d: bad optype %d", insn.ea, insn.get_canon_mnem(), x.n, x.type);
     break;
   }
 }
@@ -179,50 +188,56 @@ static int isDelayedStop(ushort code)
 }
 
 //----------------------------------------------------------------------
-static int canFlow(void)
+static bool can_flow(const insn_t &insn)
 {
-  if ( isC2() ) return 1;
-  if ( !isFlow(uFlag) ) return 1;               // no previous instructions
-  ea_t ea = prevInstruction(cmd.ea);
-  if ( cmd.size == 2 )                          // our instruction is long
+  if ( isC2() )
+    return true;
+  flags_t F = get_flags(insn.ea);
+  if ( !is_flow(F) )
+    return true;                                // no previous instructions
+  ea_t ea = prevInstruction(insn.ea);
+  if ( insn.size == 2 )                         // our instruction is long
   {
     ; // nothing to do
   }
   else
   {                                             // our instruction short
-    if ( (cmd.ea-ea) == 2 )                     // prev instruction long
-      return 1;                                 // can flow always
-    flags_t F = get_flags_novalue(ea);
-    if ( !isCode(F) || !isFlow(F) ) return 1;   // no prev instr...
+    if ( (insn.ea-ea) == 2 )                    // prev instruction long
+      return true;                              // can flow always
+    F = get_flags(ea);
+    if ( !is_code(F) || !is_flow(F) )
+      return true; // no prev instr...
     ea = prevInstruction(ea);
   }
-  flags_t F = get_flags_novalue(ea);
-  return !isCode(F) || !isDelayedStop((ushort)get_full_byte(ea));
+  F = get_flags(ea);
+  return !is_code(F) || !isDelayedStop((ushort)get_wide_byte(ea));
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+int idaapi emu(const insn_t &insn)
 {
-  uint32 Feature = cmd.get_canon_feature();
+  uint32 Feature = insn.get_canon_feature();
   flow = ((Feature & CF_STOP) == 0);
 
-  if ( Feature & CF_USE1 ) TouchArg(cmd.Op1,1);
-  if ( Feature & CF_USE2 ) TouchArg(cmd.Op2,1);
-  if ( Feature & CF_JUMP ) QueueSet(Q_jumps,cmd.ea);
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, true);
+  if ( Feature & CF_USE2 ) handle_operand(insn, insn.Op2, true);
+  if ( Feature & CF_JUMP )
+    remember_problem(PR_JUMP, insn.ea);
 
-  if ( Feature & CF_CHG1 ) TouchArg(cmd.Op1,0);
-  if ( Feature & CF_CHG2 ) TouchArg(cmd.Op2,0);
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, false);
+  if ( Feature & CF_CHG2 ) handle_operand(insn, insn.Op2, false);
 
-  if ( flow && canFlow() ) ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+  if ( flow && can_flow(insn) )
+    add_cref(insn.ea, insn.ea+insn.size, fl_F);
 
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS_ldp:                       // change DP register
     case TMS2_ldp:                      // change DP register
     case TMS2_ldpk:                     // change DP register
       {
-        uint v = (cmd.Op1.type == o_imm) ? uint(cmd.Op1.value) : -1u;
-        split_srarea(get_item_end(cmd.ea),rDP,v,SR_auto);
+        uint v = (insn.Op1.type == o_imm) ? uint(insn.Op1.value) : -1u;
+        split_sreg_range(get_item_end(insn.ea), rDP, v, SR_auto);
       }
       break;
   }

@@ -12,8 +12,6 @@
 #include <errno.h>
 #endif
 
-#pragma pack(push, 1)
-
 /*! \file err.h
 
   \brief Thread safe functions that deal with error codes
@@ -28,7 +26,7 @@ idaman THREAD_SAFE AS_PRINTF(1, 0) void ida_export vqperror(const char *format, 
 /// Get error description string.
 /// if _qerrno=-1, get_qerrno() will be used
 
-idaman THREAD_SAFE char *ida_export qstrerror(error_t _qerrno, char *buf, size_t bufsize);
+idaman THREAD_SAFE const char *ida_export qstrerror(error_t _qerrno);
 
 
 /// A convenience function to generate error messages (returns "header: error message")
@@ -106,6 +104,5 @@ idaman THREAD_SAFE const char *ida_export get_error_string(int n);
 
 /// \endcond
 
-#pragma pack(pop)
 #endif
 

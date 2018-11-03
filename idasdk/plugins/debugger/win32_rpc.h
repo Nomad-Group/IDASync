@@ -26,13 +26,13 @@
 //   (unpacked) char *         : input_file
 //   (unpacked) char *         : user symbols path
 // server->client
-//   (packed)   uint64         : session handle
+//   (packed)   uint32         : session handle
 #define WIN32_IOCTL_PDB_OPEN               3
 
 // Close PDB 'session', previously opened with _PDB_OPEN.
 //
 // client->server
-//   (unpacked) uint64         : session handle
+//   (packed) uint32           : session handle
 // server->client
 //   void
 #define WIN32_IOCTL_PDB_CLOSE              4
@@ -42,8 +42,8 @@
 // Synchronous operation.
 //
 // client->server
-//   (unpacked) uint64         : session handle
-//   (packed)   uint64         : symbol ID
+//   (packed) uint32           : session handle
+//   (packed) uint64           : symbol ID
 // server->client
 //       (unpacked) uint32: The integer value 1.
 //       (serialized) data: Packed symbol data (once).
@@ -54,9 +54,9 @@
 // Synchronous operation.
 //
 // client->server
-//   (unpacked) uint64         : session handle
-//   (packed)   uint64         : symbol ID
-//   (packed)   uint32         : children type (a SymTagEnum)
+//   (packed) uint32           : session handle
+//   (packed) uint64           : symbol ID
+//   (packed) uint32           : children type (a SymTagEnum)
 // server->client
 //       (unpacked) uint32: Number of symbols whose data
 //                          has been fetched.
@@ -77,19 +77,118 @@
 //       might change in the future.
 //
 // client->server
-//   (unpacked) uint64         : session handle
+//   (packed) uint32           : session handle
 // server->client
-//   (unpacked) byte[]         : operation result data.
+//   (packed) uint32           : See pdb_op_completion_t
+// Depending on this first byte, the following will be come:
+// pdb_op_not_complete:
+//   nothing
+// pdb_op_complete:
+//   (packed) uint32           : global symbol ID
+//   (packed) uint32           : machine type
+//   (packed) uint32           : DIA version
+//   (unpacked) str            : used file name
+// pdb_op_failure:
+//   (unpacked) str            : error message
+
 #define WIN32_IOCTL_PDB_OPERATION_COMPLETE 7
+
+// Get lines by VA
+//
+// client->server
+//   (packed) uint32           : session handle
+//   (packed) ea_t             : VA
+//   (packed) uint64           : length
+// server->client
+//   (packed) uint32           : the number of line-number objects
+//   (packed) data             : the line-number objects (N times)
+//
+// Each of the line-number objects is transmitted like so:
+//   (packed) ea_t             : VA
+//   (packed) uint32           : length
+//   (packed) uint32           : columnNumber
+//   (packed) uint32           : columnNumberEnd
+//   (packed) uint32           : lineNumber
+//   (packed) uint32           : lineNumberEnd
+//   (packed) uint32           : file_id
+//   (unpacked) byte           : statement
+#define WIN32_IOCTL_PDB_SIP_FETCH_LINES_BY_VA 8
+
+// Get lines by coordinates
+//
+// client->server
+//   (packed) uint32           : session handle
+//   (packed) uint32           : file ID
+//   (packed) uint32           : lnnum
+//   (packed) uint32           : colnum
+// server->client
+//   same as WIN32_IOCTL_PDB_SIP_FETCH_LINES_BY_VA
+#define WIN32_IOCTL_PDB_SIP_FETCH_LINES_BY_COORDS 9
+
+// Get symbols at EA
+//
+// client->server
+//   (packed) uint32           : session handle
+//   (packed) ea_t             : VA
+//   (packed) uint64           : length
+//   (packed) uint32           : children type (a SymTagEnum)
+// server->client
+//       (unpacked) uint32: Number of symbols whose data
+//                          has been fetched.
+//       (serialized) data: Packed symbol data (N times).
+#define WIN32_IOCTL_PDB_SIP_FETCH_SYMBOLS_AT_VA 10
+
+// Get compilands for file
+//
+// client->server
+//   (packed) uint32           : session handle
+//   (packed) uint32           : file ID
+// server->client
+//       (unpacked) uint32: Number of symbols whose data
+//                          has been fetched.
+//       (serialized) data: Packed symbol data (N times).
+#define WIN32_IOCTL_PDB_SIP_FETCH_FILE_COMPILANDS 11
+
+// Get path for file ID
+//
+// client->server
+//   (packed) uint32           : session handle
+//   (packed) uint32           : file ID
+// server->client
+//       (unpacked) str        : the path
+#define WIN32_IOCTL_PDB_SIP_FETCH_FILE_PATH 12
+
+// Get files IDs for files corresponding to symbol
+//
+// client->server
+//   (packed) uint32           : session handle
+//   (packed) uint64           : symbol ID
+// server->client
+//   (packed) uint32           : the number of IDs
+//   (packed) uint32           : file ID (N times).
+#define WIN32_IOCTL_PDB_SIP_FETCH_SYMBOL_FILES 13
+
+// Get files IDs for files whose name matches
+//
+// client->server
+//   (packed) uint32           : session handle
+//   (unpacked) str            : the file name
+// server->client
+//   (packed) uint32           : the number of IDs
+//   (packed) uint32           : file ID (N times).
+#define WIN32_IOCTL_PDB_SIP_FIND_FILES 14
 
 enum ioctl_pdb_code_t
 {
   pdb_ok = 1,
   pdb_error = -2,
+};
 
-  // Fetch-specific
-  pdb_operation_complete   = pdb_ok,
-  pdb_operation_incomplete = -10,
+enum pdb_op_completion_t
+{
+  pdb_op_not_complete = 0,
+  pdb_op_complete = 1,
+  pdb_op_failure = -1,
 };
 
 

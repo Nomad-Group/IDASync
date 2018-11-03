@@ -11,8 +11,6 @@
 #include <idp.hpp>
 
 #include "../idaidp.hpp"
-#define near
-#define far
 #include "ins.hpp"
 
 //-----------------------------------------------
@@ -26,28 +24,27 @@
 #define ENUM8BIT
 #endif
 // список регистров процессора
-enum mn102_registers ENUM8BIT { rNULLReg,
-        rD0, rD1, rD2, rD3,
-        rA0, rA1, rA2, rA3,
-        rMDR,rPSW, rPC,
-        rVcs, rVds};
+enum mn102_registers ENUM8BIT
+{
+  rNULLReg,
+  rD0, rD1, rD2, rD3,
+  rA0, rA1, rA2, rA3,
+  rMDR,rPSW, rPC,
+  rVcs, rVds
+};
 
-#if IDP_INTERFACE_VERSION > 37
-extern char deviceparams[];
-extern char device[];
-#endif
+extern qstring deviceparams;
+extern qstring device;
 
 //------------------------------------------------------------------------
-void    idaapi mn102_header(void);
-void    idaapi mn102_footer(void);
+void    idaapi mn102_header(outctx_t &ctx);
+void    idaapi mn102_footer(outctx_t &ctx);
 
-void    idaapi mn102_segstart(ea_t ea);
+void    idaapi mn102_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi mn102_ana(void);
-int     idaapi mn102_emu(void);
-void    idaapi mn102_out(void);
-bool    idaapi mn102_outop(op_t &op);
+int     idaapi mn102_ana(insn_t *_insn);
+int     idaapi mn102_emu(const insn_t &insn);
 
-void    idaapi mn102_data(ea_t ea);
+void    idaapi mn102_data(outctx_t &ctx, bool analyze_only);
 
 #endif

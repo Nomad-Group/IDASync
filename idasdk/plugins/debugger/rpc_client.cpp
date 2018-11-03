@@ -31,7 +31,7 @@ static uchar *sync_stub(const char *fname, uint32 crc, size_t *psize)
     linput_t *li = open_linput(path, false);
     if ( li != NULL )
     {
-      int32 size = qlsize(li);
+      int64 size = qlsize(li);
       if ( size > 0 )
       {
         bytevec_t buf;
@@ -82,18 +82,9 @@ bytevec_t rpc_client_t::perform_request(const rpc_packet_t *rp)
       {
         int qty = extract_long(&ptr, end);
         ea_t *addrs = OPERATOR_NEW(ea_t, qty);
-        if ( addrs == NULL )
-          goto nomem;
-
         char **names = OPERATOR_NEW(char *, qty);
-        if ( names == NULL )
-        {
-          delete [] addrs;
-          goto nomem;
-        }
-        char name[MAXSTR];
+        qstring name;
         ea_t old = 0;
-        name[0] = '\0';
         for ( int i=0; i < qty; i++ )
         {
           adiff_t o2 = extract_ea64(&ptr, end);
@@ -102,9 +93,12 @@ bytevec_t rpc_client_t::perform_request(const rpc_packet_t *rp)
           old += o2;
           addrs[i] = old;
           int oldlen = extract_long(&ptr, end);
-          QASSERT(1203, oldlen >= 0 && oldlen < sizeof(name));
-          qstrncpy(&name[oldlen], extract_str(&ptr, end), sizeof(name)-oldlen);
-          names[i] = qstrdup(name);
+          QASSERT(1203, oldlen >= 0 && oldlen <= name.length());
+          //keep the prefix
+          name.resize(oldlen);
+          if ( !extract_qstr(&ptr, end, &name) )
+            INTERR(1294);
+          names[i] = qstrdup(name.c_str());
         }
         int result = send_debug_names_to_ida(addrs, names, qty);
         verb(("set_debug_name(qty=%d) => %d\n", qty, result));
@@ -156,7 +150,7 @@ bytevec_t rpc_client_t::perform_request(const rpc_packet_t *rp)
     case RPC_WARNING:
       {
         char *str = extract_str(&ptr, end);
-        if ( rp->code == RPC_MSG)
+        if ( rp->code == RPC_MSG )
           msg("%s", str);
         else if ( rp->code == RPC_ERROR )
           error("%s", str);
@@ -208,8 +202,6 @@ bytevec_t rpc_client_t::perform_request(const rpc_packet_t *rp)
 
     default:
       return prepare_rpc_packet(RPC_UNK);
-nomem:
-      return prepare_rpc_packet(RPC_MEM);
   }
   return req;
 }

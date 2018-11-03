@@ -39,12 +39,8 @@ idaman bool ida_export reg_bin_op(
         size_t datalen,
         const char *subkey,
         int mode = 0);
-idaman bool ida_export reg_str_op(
-        const char *name,
-        bool save,
-        char *utf8,
-        size_t utf8len,
-        const char *subkey);
+idaman bool ida_export reg_str_get(qstring *buf, const char *name, const char *subkey);
+idaman void ida_export reg_str_set(const char *name, const char *subkey, const char *buf);
 idaman int ida_export reg_int_op(
         const char *name,
         bool save,
@@ -63,9 +59,10 @@ enum regval_type_t
 
 
 /// Delete a key from the registry
-
 idaman bool ida_export reg_delete_subkey(const char *name);
 
+/// Delete a subtree from the registry
+idaman bool ida_export reg_delete_tree(const char *name);
 
 /// Delete a value from the registry.
 /// \param name    value name
@@ -108,7 +105,7 @@ idaman bool ida_export reg_data_type(regval_type_t *out, const char *name, const
 /// Retrieve all string values associated with the given key.
 /// Also see reg_update_strlist().
 
-idaman void ida_export reg_read_strlist(const char *subkey, qstrvec_t *list);
+idaman void ida_export reg_read_strlist(qstrvec_t *list, const char *subkey);
 
 
 /// Update list of strings associated with given key.
@@ -203,43 +200,22 @@ inline void reg_write_string(
         const char *utf8,
         const char *subkey = NULL)
 {
-  reg_str_op(name, true, CONST_CAST(char *)(utf8), 0, subkey);
+  reg_str_set(name, subkey, utf8);
 }
 
 
 /// Read a string from the registry.
-/// \param name       value name
 /// \param[out] utf8  output buffer
-/// \param utf8len    length of output buffer
+/// \param name       value name
 /// \param subkey     key name
 /// \return success
 
 inline bool reg_read_string(
+        qstring *utf8,
         const char *name,
-        char *utf8,
-        size_t utf8len,
         const char *subkey = NULL)
 {
-  return reg_str_op(name, false, utf8, utf8len, subkey);
-}
-
-
-/// Read a string from the registry.
-/// \param name       value name
-/// \param utf8len    length of output buffer
-/// \param[out] utf8  output buffer
-/// \param def        default value, copied to 'utf8' if initial reg read fails.
-/// \param subkey     key name
-
-inline void reg_read_string(
-        const char *name,
-        size_t utf8len,
-        char *utf8,
-        const char *def,
-        const char *subkey = NULL)
-{
-  if ( !reg_read_string(name, utf8, utf8len, subkey) )
-      ::qstrncpy(utf8, def, utf8len);
+  return reg_str_get(utf8, name, subkey);
 }
 
 
@@ -342,9 +318,9 @@ inline void reg_update_filestrlist(
 
 #define REG_BOOL_FUNC(func, valname)          \
 REG_VAL_NAME(func, valname);                  \
-inline void regset_ ## func (bool value)      \
+inline void regset_ ## func(bool value)       \
   { reg_write_bool(_RVN_(func), value); }     \
-inline bool regget_ ## func (bool def)        \
+inline bool regget_ ## func(bool def)         \
   { return reg_read_bool(_RVN_(func), def); }
 
 #define REG_INT_FUNC(func, valname)           \
@@ -372,7 +348,7 @@ inline void regget_history(qstrvec_t *list)
 #ifdef DEMO
   qnotused(list);
 #else
-  reg_read_strlist(regkey_history, list);
+  reg_read_strlist(list, regkey_history);
 #endif
 }
 

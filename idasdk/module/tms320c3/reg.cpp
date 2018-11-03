@@ -10,47 +10,47 @@
 #include <math.h>
 #include "tms320c3x.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <ieee.h>
 
 static const char *const register_names[] =
 {
-        // Extended-precision registers
-        "r0",
-        "r1",
-        "r2",
-        "r3",
-        "r4",
-        "r5",
-        "r6",
-        "r7",
-        // Auxiliary registers
-        "ar0",
-        "ar1",
-        "ar2",
-        "ar3",
-        "ar4",
-        "ar5",
-        "ar6",
-        "ar7",
+  // Extended-precision registers
+  "r0",
+  "r1",
+  "r2",
+  "r3",
+  "r4",
+  "r5",
+  "r6",
+  "r7",
+  // Auxiliary registers
+  "ar0",
+  "ar1",
+  "ar2",
+  "ar3",
+  "ar4",
+  "ar5",
+  "ar6",
+  "ar7",
 
-        // Index register n
-        "ir0",
-        "ir1",
+  // Index register n
+  "ir0",
+  "ir1",
 
-        "bk",   // Block-size register
-        "sp",   // System-stack pointer
-        "st",   // Status register
-        "ie",   // CPU/DMA interrupt-enable register
-        "if",   // CPU interrupt flag
-        "iof",  // I/O flag
-        "rs",   // Repeat start-address
-        "re",   // Repeat end-address
-        "rc",   // Repeat counter
+  "bk",   // Block-size register
+  "sp",   // System-stack pointer
+  "st",   // Status register
+  "ie",   // CPU/DMA interrupt-enable register
+  "if",   // CPU interrupt flag
+  "iof",  // I/O flag
+  "rs",   // Repeat start-address
+  "re",   // Repeat end-address
+  "rc",   // Repeat counter
 
-        // segment registers
-        "dp",      // Data-page pointer
-        "cs","ds", // virtual registers for code and data segments
+  // segment registers
+  "dp",      // Data-page pointer
+  "cs","ds", // virtual registers for code and data segments
 
 };
 
@@ -75,7 +75,6 @@ static const asm_t fasm =
   "ASM500",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   NULL,         // org
   ".end",       // end
 
@@ -98,10 +97,6 @@ static const asm_t fasm =
   ".space 32*%s",// uninited arrays
   ".asg",       // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "$",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -133,7 +128,6 @@ static const asm_t gnuasm =
   "GNU assembler",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   NULL,         // org
   ".end",       // end
 
@@ -156,10 +150,6 @@ static const asm_t gnuasm =
   ".zero 2*%s", // uninited arrays
   ".asg",       // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "$",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -190,9 +180,8 @@ static const asm_t gnuasm =
 static const asm_t *const asms[] = { &fasm, &gnuasm, NULL };
 
 //--------------------------------------------------------------------------
-static ioport_t *ports = NULL;
-static size_t numports = 0;
-char device[MAXSTR] = "";
+static ioports_t ports;
+qstring device;
 
 //lint -e528
 static bool entry_processing(ea_t ea, const char *name, const char *cmt)
@@ -210,31 +199,31 @@ static bool select_device(int lrespect_info)
 {
   char cfgfile[QMAXFILE];
   get_cfg_filename(cfgfile, sizeof(cfgfile));
-  if ( !choose_ioport_device(cfgfile, device, sizeof(device), NULL) )
+  if ( !choose_ioport_device(&device, cfgfile) )
   {
-    qstrncpy(device, NONEPROC, sizeof(device));
+    device = NONEPROC;
     return false;
   }
 
   if ( !display_infotype_dialog(IORESP_ALL, &lrespect_info, cfgfile) )
     return false;
 
-  set_device_name(device, lrespect_info);
+  set_device_name(device.c_str(), lrespect_info);
   return true;
 }
 
 //----------------------------------------------------------------------
 static float conv32(int32 A)   // Преобразование 32 bit TMS float -> double
 {
-  int32  mask, f, i, s;
+  int32 mask, f, i, s;
   float mant;
-  int8    e;
+  int8 e;
 
   // Порядок (exponent) signed 8 bit
   e = A >> 24;
 
   //Знак  (sign) boolean 1 bit
-  s =  (A & 0x00800000) >> 23 ;
+  s = (A & 0x00800000) >> 23;
 
   //дробная часть (fractional) unsigned 23 bit
   f =  A & 0x007FFFFF;
@@ -248,33 +237,36 @@ static float conv32(int32 A)   // Преобразование 32 bit TMS float -> double
   mant = 1;       //Мантисса (1<M<2)
   mask = 0x00800000;        // Маска текущего бита (начинаем со знакового разряда потому, что может возниктунь дополнение при Neg мантиссе)
 
-  for (i = 0; i <= 23; i++)
+  for ( i = 0; i <= 23; i++ )
   {       //Получение мантиссы
-    if ( f & mask) mant += (float)pow(double(2), -i );
+    if ( f & mask )
+      mant += (float)pow(double(2), -i);
     mask >>= 1;
   }
 
-  if ( (e == -128) && (f == 0) && (s==0) ) mant = 0;
+  if ( e == -128 && f == 0 && s == 0 )
+    mant = 0;
 
-  return  float(pow(double(-1), s) * mant * pow(double(2), e));
+  return float(pow(double(-1), s) * mant * pow(double(2), e));
 }
 
 //----------------------------------------------------------------------
 static float conv16(int16 A)   // Преобразование 16 bit TMS float -> double
 {
-  int16  mask, f, i, s;
+  int16 mask, f, i, s;
   float mant;
-  int8    e;
+  int8 e;
 
 
   // Порядок (exponent) signed 4 bit
   e = A >> 12;
-  if ( e>7) e = -((e ^ 0x0f) + 1 );
+  if ( e > 7 )
+    e = -((e ^ 0x0f) + 1);
 
-  //Знак  (sign) boolean 1 bit
-  s =  (A & 0x0800) >> 11 ;
+  // Знак  (sign) boolean 1 bit
+  s = (A & 0x0800) >> 11;
 
-  //дробная часть (fractional) unsigned 11 bit
+  // дробная часть (fractional) unsigned 11 bit
   f =  A & 0x07FF;
 
   if ( s )
@@ -286,13 +278,15 @@ static float conv16(int16 A)   // Преобразование 16 bit TMS float -> double
   mant = 1;       //Мантисса (1<M<2)
   mask =       0x0800;    // Маска текущего бита (начинаем со знакового разряда потому, что может возниктунь дополнение при Neg мантиссе)
 
-  for (i = 0; i <= 11; i++)
-  {       //Получение мантиссы
-    if ( f & mask) mant += (float)pow(double(2), -i );
+  for ( i = 0; i <= 11; i++ )
+  { // Получение мантиссы
+    if ( f & mask )
+      mant += (float)pow(double(2), -i);
     mask >>= 1;
   }
 
-  if ( (e == -8) && (f == 0) && (s==0) ) mant = 0;
+  if ( e == -8 && f == 0 && s == 0 )
+    mant = 0;
 
   return float(pow(double(-1), s) * mant * pow(double(2), e));
 }
@@ -305,9 +299,10 @@ int idaapi tms_realcvt(void *m, ushort *e, ushort swt)
   int32 A;
   int16 B;
 
-  union {
-        float pfl;
-        int32 pint;
+  union
+  {
+    float pfl;
+    int32 pint;
   };
 
   switch ( swt )
@@ -337,84 +332,207 @@ int idaapi tms_realcvt(void *m, ushort *e, ushort swt)
 }
 
 //--------------------------------------------------------------------------
-netnode helper;
-ushort idpflags;        // not used?
-
-static int idaapi notify(processor_t::idp_notify msgid, ...)
-{
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
-  switch ( msgid )
-  {
-    case processor_t::init:
-      helper.create("$ tms320c3x");
-      inf.mf = 1; // MSB first
-      inf.wide_high_byte_first = 1;
-      init_analyzer();
-      break;
-
-    case processor_t::term:
-      free_ioports(ports, numports);
-    default:
-      break;
-
-    case processor_t::newfile:   // new file loaded
-      inf.wide_high_byte_first = 0;
-      if ( inf.like_binary() )
-      {
-        segment_t *s0 = get_first_seg();
-        if ( s0 != NULL )
-        {
-          set_segm_name(s0, "CODE");
-          segment_t *s1 = get_next_seg(s0->startEA);
-          for (int i = dp; i <= rVds; i++)
-          {
-            set_default_segreg_value(s0, i, BADSEL);
-            set_default_segreg_value(s1, i, BADSEL);
-          }
-        }
-        select_device(IORESP_ALL);
-      }
-      break;
-
-    case processor_t::oldfile:   // old file loaded
-      inf.wide_high_byte_first = 0;
-      idpflags = (ushort)helper.altval(-1);
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_NONE);
-      }
-      break;
-
-    case processor_t::closebase:
-    case processor_t::savebase:
-      helper.altset(-1, idpflags);
-      break;
-
-    case processor_t::is_basic_block_end:
-      return is_basic_block_end() ? 2 : 0;
-  }
-  va_end(va);
-  return 1;
-}
-
-//--------------------------------------------------------------------------
 static const char *idaapi set_idp_options(const char *keyword, int, const void *)
 {
   if ( keyword != NULL )
     return IDPOPT_BADKEY;
   select_device(IORESP_PORT|IORESP_INT);
   return IDPOPT_OK;
+}
+
+//--------------------------------------------------------------------------
+netnode helper;
+ushort idpflags;        // not used?
+
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
+{
+  switch ( code )
+  {
+    case idb_event::closebase:
+    case idb_event::savebase:
+      helper.altset(-1, idpflags);
+      break;
+  }
+  return 0;
+}
+
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
+      helper.create("$ tms320c3x");
+      inf.set_be(true); // MSB first
+      inf.set_wide_high_byte_first(true);
+      init_analyzer();
+      break;
+
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
+      break;
+
+    case processor_t::ev_newfile:   // new file loaded
+      inf.set_wide_high_byte_first(false);
+      if ( inf.like_binary() )
+      {
+        segment_t *s0 = get_first_seg();
+        if ( s0 != NULL )
+        {
+          set_segm_name(s0, "CODE");
+          segment_t *s1 = get_next_seg(s0->start_ea);
+          for ( int i = dp; i <= rVds; i++ )
+          {
+            set_default_sreg_value(s0, i, BADSEL);
+            set_default_sreg_value(s1, i, BADSEL);
+          }
+        }
+        select_device(IORESP_ALL);
+      }
+      break;
+
+    case processor_t::ev_oldfile:   // old file loaded
+      inf.set_wide_high_byte_first(false);
+      idpflags = (ushort)helper.altval(-1);
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_NONE);
+      break;
+
+    case processor_t::ev_is_basic_block_end:
+      {
+        const insn_t &insn = *va_arg(va, const insn_t *);
+        return is_basic_block_end(insn) ? 1 : 0;
+      }
+
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
+    case processor_t::ev_realcvt:
+      {
+        void *m = va_arg(va, void *);
+        uint16 *e = va_arg(va, uint16 *);
+        uint16 swt = va_argi(va, uint16);
+        int code1 = tms_realcvt(m, e, swt);
+        return code1 == 0 ? 1 : code1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_gen_stkvar_def:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const member_t *mptr = va_arg(va, const member_t *);
+        sval_t v = va_arg(va, sval_t);
+        gen_stkvar_def(*ctx, mptr, v);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
+  }
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -435,11 +553,21 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_TMS320C3,
-  PRN_HEX | PR_SEGS | PR_SGROTHER | PR_ALIGN | PR_USE32 | PR_DEFSEG32,
-  32,                           // 32 bits in a byte for code segments
-  32,                           // 32 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_TMS320C3,          // id
+                          // flag
+    PRN_HEX
+  | PR_SEGS
+  | PR_SGROTHER
+  | PR_ALIGN
+  | PR_USE32
+  | PR_DEFSEG32
+  | PR_DELAYED,
+                          // flag2
+    PR2_REALCVT           // the module has 'realcvt' event implementation
+  | PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  32,                     // 32 bits in a byte for code segments
+  32,                     // 32 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -448,31 +576,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  assumes,              // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  intel_data,           // generate ...                    data
-  NULL,                 // compare operands
-  can_have_type,        // can have type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   dp,                   // first
   rVds,                 // last
@@ -484,28 +589,13 @@ processor_t LPH =
 
   TMS320C3X_null,
   TMS320C3X_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  tms_realcvt,          // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 4,7,15,19 },        // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // Check whether the operand is relative to stack pointer
-  create_func_frame,    // create frame of newly created function
-  NULL,                 // Get size of function return address in bytes
-  gen_stkvar_def,       // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   TMS320C3X_RETSU,      // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

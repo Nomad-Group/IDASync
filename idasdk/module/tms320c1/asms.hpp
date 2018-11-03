@@ -31,7 +31,7 @@
 
 //
 // IDA TMS320C1X processor module.
-//     TMS320C1X assembler types 
+//     TMS320C1X assembler types
 //
 #ifndef _IDP_TMS320C1X_ASMS_HPP
 #define _IDP_TMS320C1X_ASMS_HPP

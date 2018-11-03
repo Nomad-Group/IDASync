@@ -12,21 +12,21 @@
 
 static bool flow;
 //------------------------------------------------------------------------
-static void doImmdValue(int n)
+static void set_immd_bit(const insn_t &insn, int n)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag,n) )
+  set_immd(insn.ea);
+  if ( is_defarg(get_flags(insn.ea), n) )
     return;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case AVR_andi:
     case AVR_ori:
-      op_num(cmd.ea, n);
+      op_num(insn.ea, n);
   }
 }
 
 //----------------------------------------------------------------------
-static void handle_arg(op_t &x, bool isAlt, bool isload)
+static void handle_operand(const insn_t &insn, const op_t &x, bool isAlt, bool isload)
 {
   switch ( x.type )
   {
@@ -36,34 +36,30 @@ static void handle_arg(op_t &x, bool isAlt, bool isload)
     case o_imm:
       if ( !isload )
         goto WRONG_CALL;
-      doImmdValue(x.n);
-      if ( op_adds_xrefs(uFlag, x.n) )
-        ua_add_off_drefs2(x, dr_O, OOF_SIGNED);
+      set_immd_bit(insn, x.n);
+      if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
+        insn.add_off_drefs(x, dr_O, OOF_SIGNED);
       break;
     case o_displ:
-      doImmdValue(x.n);
-      if ( !isAlt && op_adds_xrefs(uFlag, x.n) )
+      set_immd_bit(insn, x.n);
+      if ( !isAlt && op_adds_xrefs(get_flags(insn.ea), x.n) )
       {
-        ea_t ea = ua_add_off_drefs2(x, isload ? dr_R : dr_W, OOF_ADDR);
+        ea_t ea = insn.add_off_drefs(x, isload ? dr_R : dr_W, OOF_ADDR);
         if ( ea != BADADDR )
-        {
-          ua_dodata2(x.offb, ea, x.dtyp);
-          if ( !isload )
-            doVar(ea);
-        }
+          insn.create_op_data(ea, x);
       }
       break;
     case o_near:
       {
         cref_t ftype = fl_JN;
-        ea_t ea = toEA(cmd.cs, x.addr);
-        if ( InstrIsSet(cmd.itype, CF_CALL) )
+        ea_t ea = to_ea(insn.cs, x.addr);
+        if ( has_insn_feature(insn.itype, CF_CALL) )
         {
           if ( !func_does_return(ea) )
             flow = false;
           ftype = fl_CN;
         }
-        ua_add_cref(x.offb, ea, ftype);
+        insn.add_cref(ea, x.offb, ftype);
       }
       break;
     case o_port:
@@ -72,37 +68,37 @@ static void handle_arg(op_t &x, bool isAlt, bool isload)
         ea_t ea = ram + x.addr + 0x20;
         if ( x.type == o_port )
         { // verify that the calculated address corresponds the register name
-          const char *pname = find_port(x.addr);
-          if ( pname == NULL )
+          const ioport_t *port = find_port(x.addr);
+          if ( port == NULL || port->name.empty() )
             break;
-          ea_t rev = get_name_ea(BADADDR, pname);
+          ea_t rev = get_name_ea(BADADDR, port->name.c_str());
           if ( rev != ea )
             break;
         }
-        ua_add_dref(x.offb, ea, isload ? dr_R : dr_W);
+        insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
       }
       break;
     case o_mem:
       {
-        ea_t ea = toEA(dataSeg(), x.addr);
-        ua_add_dref(x.offb, ea, isload ? dr_R : dr_W);
+        ea_t ea = map_data_ea(insn, x);
+        insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
       }
       break;
     default:
 WRONG_CALL:
-      if ( cmd.itype != AVR_lpm && cmd.itype != AVR_elpm )
-        warning("%a: %s,%d: bad optype %d", cmd.ea, cmd.get_canon_mnem(), x.n, x.type);
+      if ( insn.itype != AVR_lpm && insn.itype != AVR_elpm )
+        warning("%a: %s,%d: bad optype %d", insn.ea, insn.get_canon_mnem(), x.n, x.type);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-static bool may_be_skipped(void)
+static bool may_be_skipped(const insn_t &insn)
 {
-  ea_t ea = cmd.ea - 1;
-  if ( isCode(get_flags_novalue(ea)) )
+  ea_t ea = insn.ea - 1;
+  if ( is_code(get_flags(ea)) )
   {
-    int code = get_full_byte(ea);
+    int code = get_wide_byte(ea);
     switch ( code & 0xFC00 )
     {
 // 0001 00rd dddd rrrr     cpse    rd, rr  4  Compare, Skip if Equal
@@ -121,32 +117,33 @@ static bool may_be_skipped(void)
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+
+int idaapi emu(const insn_t &insn)
 {
-  uint32 Feature = cmd.get_canon_feature();
-  bool flag1 = is_forced_operand(cmd.ea, 0);
-  bool flag2 = is_forced_operand(cmd.ea, 1);
-  bool flag3 = is_forced_operand(cmd.ea, 2);
+  uint32 Feature = insn.get_canon_feature();
+  bool flag1 = is_forced_operand(insn.ea, 0);
+  bool flag2 = is_forced_operand(insn.ea, 1);
+  bool flag3 = is_forced_operand(insn.ea, 2);
 
   flow = (Feature & CF_STOP) == 0;
 
-  if ( Feature & CF_USE1 ) handle_arg(cmd.Op1, flag1, true);
-  if ( Feature & CF_USE2 ) handle_arg(cmd.Op2, flag2, true);
-  if ( Feature & CF_USE3 ) handle_arg(cmd.Op3, flag3, true);
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, flag1, true);
+  if ( Feature & CF_USE2 ) handle_operand(insn, insn.Op2, flag2, true);
+  if ( Feature & CF_USE3 ) handle_operand(insn, insn.Op3, flag3, true);
 
-  if ( Feature & CF_CHG1 ) handle_arg(cmd.Op1, flag1, false);
-  if ( Feature & CF_CHG2 ) handle_arg(cmd.Op2, flag2, false);
-  if ( Feature & CF_CHG3 ) handle_arg(cmd.Op3, flag3, false);
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, flag1, false);
+  if ( Feature & CF_CHG2 ) handle_operand(insn, insn.Op2, flag2, false);
+  if ( Feature & CF_CHG3 ) handle_operand(insn, insn.Op3, flag3, false);
 
 //
 //      Determine if the next instruction should be executed
 //
   if ( !flow )
-    flow = may_be_skipped();
-  if ( segtype(cmd.ea) == SEG_XTRN )
+    flow = may_be_skipped(insn);
+  if ( segtype(insn.ea) == SEG_XTRN )
     flow = false;
   if ( flow )
-    ua_add_cref(0,cmd.ea+cmd.size, fl_F);
+    add_cref(insn.ea,insn.ea+insn.size, fl_F);
 
   return 1;
 }
@@ -154,16 +151,17 @@ int idaapi emu(void)
 //----------------------------------------------------------------------
 int idaapi is_align_insn(ea_t ea)
 {
-  decode_insn(ea);
-  switch ( cmd.itype )
+  insn_t insn;
+  decode_insn(&insn, ea);
+  switch ( insn.itype )
   {
     case AVR_mov:
-      if ( cmd.Op1.reg == cmd.Op2.reg )
+      if ( insn.Op1.reg == insn.Op2.reg )
         break;
     default:
       return 0;
     case AVR_nop:
       break;
   }
-  return cmd.size;
+  return insn.size;
 }

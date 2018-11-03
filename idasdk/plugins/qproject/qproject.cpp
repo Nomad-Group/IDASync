@@ -5,6 +5,7 @@
  */
 
 #include <QtGui>
+#include <QtWidgets>
 
 #include <ida.hpp>
 #include <idp.hpp>
@@ -15,16 +16,16 @@
 #include "graphwidget.h"
 
 //--------------------------------------------------------------------------
-static int idaapi ui_callback(void *user_data, int notification_code, va_list va)
+static ssize_t idaapi ui_callback(void *user_data, int notification_code, va_list va)
 {
-  if ( notification_code == ui_tform_visible )
+  if ( notification_code == ui_widget_visible )
   {
-    TForm *form = va_arg(va, TForm *);
-    if ( form == user_data )
+    TWidget *widget = va_arg(va, TWidget *);
+    if ( widget == user_data )
     {
       // widget is created, create controls
 
-      QWidget *w = (QWidget *) form;
+      QWidget *w = (QWidget *) widget;
 
       QHBoxLayout *mainLayout = new QHBoxLayout();
       mainLayout->setMargin(0);
@@ -36,10 +37,10 @@ static int idaapi ui_callback(void *user_data, int notification_code, va_list va
       w->setLayout(mainLayout);
     }
   }
-  if ( notification_code == ui_tform_invisible )
+  if ( notification_code == ui_widget_invisible )
   {
-    TForm *form = va_arg(va, TForm *);
-    if ( form == user_data )
+    TWidget *widget = va_arg(va, TWidget *);
+    if ( widget == user_data )
     {
       // widget is closed, destroy objects (if required)
     }
@@ -61,17 +62,20 @@ void idaapi term(void)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
-  HWND hwnd = NULL;
-  TForm *form = create_tform("Sample Qt Project", &hwnd);
-  if ( hwnd != NULL )
+  TWidget *widget = find_widget("Sample Qt Project");
+  if ( widget == NULL )
   {
-    hook_to_notification_point(HT_UI, ui_callback, form);
-    open_tform(form, FORM_TAB|FORM_MENU|FORM_RESTORE|FORM_QWIDGET);
+    widget = create_empty_widget("Sample Qt Project");
+    hook_to_notification_point(HT_UI, ui_callback, widget);
+    display_widget(widget, WOPN_TAB|WOPN_MENU|WOPN_RESTORE);
   }
   else
-    close_tform(form, FORM_SAVE);
+  {
+    close_widget(widget, WCLS_SAVE);
+  }
+  return true;
 }
 
 //--------------------------------------------------------------------------

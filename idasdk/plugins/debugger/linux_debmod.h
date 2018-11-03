@@ -4,11 +4,7 @@
 #include <signal.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
-#ifdef __ANDROID__
-#  include <linux/user.h>
-#else
-#  include <sys/user.h>
-#endif
+#include <sys/user.h>
 
 #include "linuxbase_debmod.h"
 
@@ -31,6 +27,14 @@ using std::make_pair;
 typedef std::map<ea_t, qstring> ea2name_t;
 typedef std::map<qstring, ea_t> name2ea_t;
 
+#ifndef WCONTINUED
+#define WCONTINUED 8
+#endif
+
+#ifndef __WALL
+#define __WALL 0x40000000
+#endif
+
 //--------------------------------------------------------------------------
 // image information
 struct image_info_t
@@ -41,12 +45,15 @@ struct image_info_t
         asize_t _size,
         const qstring &_fname,
         const qstring &_soname)
-    : base(_base), size(_size), fname(_fname), soname(_soname) { }
+    : base(_base), size(_size), fname(_fname), soname(_soname), dl_crc(0) {}
   ea_t base;
   asize_t size;         // image size, currently 0
   qstring fname;
   qstring soname;
   ea2name_t names;
+  qstring buildid;
+  qstring debuglink;
+  uint32 dl_crc;
 };
 typedef std::map<ea_t, image_info_t> images_t; // key: image base address
 
@@ -183,7 +190,7 @@ class linux_debmod_t: public linuxbase_debmod_t
   name_info_t pending_names;
   name_info_t nptl_names;
 
-  pid_t check_for_signal(int pid, int *status, int timeout_ms);
+  pid_t check_for_signal(int *status, int pid, int timeout_ms);
 
   int find_largest_addrsize(const meminfo_vec_t &miv);
 
@@ -212,6 +219,10 @@ public:
   qstring interp;
 
   qstring exe_path;        // name of the executable file
+
+  ea_t nptl_base;          // base of 'libpthread.so'
+
+  qstring debug_file_directory;   // global debug directories
 
   linux_debmod_t();
   ~linux_debmod_t();
@@ -258,39 +269,38 @@ public:
   void handle_extended_wait(bool *handled, const chk_signal_info_t &csi);
 
   //
-  virtual int idaapi dbg_init(bool _debug_debugger);
+  virtual void idaapi dbg_set_debugging(bool _debug_debugger);
+  virtual int idaapi dbg_init(void);
   virtual void idaapi dbg_term(void);
-  virtual int  idaapi dbg_detach_process(void);
-  virtual int  idaapi dbg_start_process(const char *path,
+  virtual int idaapi dbg_detach_process(void);
+  virtual int idaapi dbg_start_process(const char *path,
     const char *args,
     const char *startdir,
     int flags,
     const char *input_path,
     uint32 input_file_crc32);
   virtual gdecode_t idaapi dbg_get_debug_event(debug_event_t *event, int timeout_ms);
-  virtual int  idaapi dbg_attach_process(pid_t process_id, int event_id);
-  virtual int  idaapi dbg_prepare_to_pause_process(void);
-  virtual int  idaapi dbg_exit_process(void);
-  virtual int  idaapi dbg_continue_after_event(const debug_event_t *event);
+  virtual int idaapi dbg_attach_process(pid_t process_id, int event_id, int flags);
+  virtual int idaapi dbg_prepare_to_pause_process(void);
+  virtual int idaapi dbg_exit_process(void);
+  virtual int idaapi dbg_continue_after_event(const debug_event_t *event);
   virtual void idaapi dbg_stopped_at_debug_event(void);
-  virtual int  idaapi dbg_thread_suspend(thid_t thread_id);
-  virtual int  idaapi dbg_thread_continue(thid_t thread_id);
-  virtual int  idaapi dbg_set_resume_mode(thid_t thread_id, resume_mode_t resmod);
-  virtual int  idaapi dbg_read_registers(thid_t thread_id,
+  virtual int idaapi dbg_thread_suspend(thid_t thread_id);
+  virtual int idaapi dbg_thread_continue(thid_t thread_id);
+  virtual int idaapi dbg_set_resume_mode(thid_t thread_id, resume_mode_t resmod);
+  virtual int idaapi dbg_read_registers(thid_t thread_id,
     int clsmask,
     regval_t *values);
-  virtual int  idaapi dbg_write_register(thid_t thread_id,
+  virtual int idaapi dbg_write_register(thid_t thread_id,
     int reg_idx,
     const regval_t *value);
-  virtual int  idaapi dbg_thread_get_sreg_base(thid_t thread_id,
-    int sreg_value,
-    ea_t *ea);
-  virtual int  idaapi dbg_get_memory_info(meminfo_vec_t &areas);
+  virtual int idaapi dbg_thread_get_sreg_base(ea_t *ea, thid_t thread_id, int sreg_value);
+  virtual int idaapi dbg_get_memory_info(meminfo_vec_t &areas);
   virtual ssize_t idaapi dbg_read_memory(ea_t ea, void *buffer, size_t size);
   virtual ssize_t idaapi dbg_write_memory(ea_t ea, const void *buffer, size_t size);
-  virtual int  idaapi dbg_add_bpt(bpttype_t type, ea_t ea, int len);
-  virtual int  idaapi dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_bytes, int len);
-  virtual int  idaapi handle_ioctl(int fn, const void *buf, size_t size, void **outbuf, ssize_t *outsize);
+  virtual int idaapi dbg_add_bpt(bpttype_t type, ea_t ea, int len);
+  virtual int idaapi dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_bytes, int len);
+  virtual int idaapi handle_ioctl(int fn, const void *buf, size_t size, void **outbuf, ssize_t *outsize);
   virtual bool idaapi write_registers(
     thid_t tid,
     int start,
@@ -313,6 +323,10 @@ public:
   bool fix_instruction_pointer(void);
 #ifdef __ARM__
   virtual int read_bpt_orgbytes(ea_t *p_ea, int *p_len, uchar *buf, int bufsize);
+#endif
+
+#ifdef LDEB
+  void log(thid_t tid, const char *format, ...);
 #endif
 };
 

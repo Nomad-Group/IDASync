@@ -43,66 +43,114 @@
 #endif
 
 //--------------------------------------------------------------------------
-inline bool is_wow64_process_h(HANDLE proc_handle, bool *is_wow64);
-inline bool is_wow64_process(int pid, bool *is_wow64);
+enum wow64_state_t
+{
+  WOW64_NONE = -2, // unknown yet
+  WOW64_BAD = -1,
+  WOW64_NO = 0,
+  WOW64_YES = 1,
+};
 
-inline uchar win_prot_to_ida_perm(DWORD protection);
+wow64_state_t check_wow64_handle(HANDLE handle);
+wow64_state_t check_wow64_pid(int pid);
 
 //--------------------------------------------------------------------------
 class win_version_t
 {
 public:
-  inline win_version_t();
-  inline bool ok();
-  inline bool is_NT();
-  inline bool is_strictly_xp();     // Is strictly XP (32bit)?
-  inline bool is_DW32();
-  inline bool is_2K();              // Is at least Win2K?
-  inline bool is_64bitOS();
-  inline const OSVERSIONINFO &get_info();
+  win_version_t();
+  const OSVERSIONINFO &win_version_t::get_info() const { return OSVersionInfo; }
+  bool ok() { return ver_ok; }
+  bool win_version_t::is_NT()
+  {
+    return ok() && OSVersionInfo.dwPlatformId == VER_PLATFORM_WIN32_NT;
+  }
+  bool win_version_t::is_strictly_xp()  // Is strictly XP (32bit)?
+  {
+    return ok()
+        && is_NT()
+        && OSVersionInfo.dwMajorVersion == 5
+        && OSVersionInfo.dwMinorVersion == 1;
+  }
+  bool win_version_t::is_DW32()
+  {
+    return ok() && OSVersionInfo.dwPlatformId == 3;
+  }
+  bool win_version_t::is_2K()           // Is at least Win2K?
+  {
+    return ok() && OSVersionInfo.dwMajorVersion >= 5;
+  }
+  bool win_version_t::is_64bitOS()
+  {
+#ifdef UNDER_CE
+    return false;
+#elif defined(__X64__)
+    return true;
+#else
+    return is_64bit_os;
+#endif
+  }
+
+  //--------------------------------------------------------------------------
+  // GetProcessDEPPolicy() is broken for Win8, Win8.1, Win10:
+  // always set *lpPermanent == CL register, if not permanently policy.
+  // https://social.msdn.microsoft.com/Forums/windowsdesktop/en-US/05683d76-3c8a-49de-91e3-9d7ab8492f39/getprocessdeppolicy-does-not-set-the-correct-value-to-lppermanent?forum=windowscompatibility
+  bool win_version_t::is_GetProcessDEPPolicy_broken()
+  {
+    return ok()
+        && ((OSVersionInfo.dwMajorVersion == 10 && OSVersionInfo.dwMinorVersion == 0)   // Windows 10
+         || (OSVersionInfo.dwMajorVersion ==  6 && OSVersionInfo.dwMinorVersion == 3)   // Windows 8.1
+         || (OSVersionInfo.dwMajorVersion ==  6 && OSVersionInfo.dwMinorVersion == 2)); // Windows 8
+  }
 
 private:
   OSVERSIONINFO OSVersionInfo;
   bool ver_ok;
+#if !defined(UNDER_CE) && !defined(__X64__)
+  bool is_64bit_os;
+#endif
 };
 
 //--------------------------------------------------------------------------
+//-V:win_tool_help_t:730 Not all members of a class are initialized inside the constructor
 class win_tool_help_t
 {
 public:
-  inline win_tool_help_t();
-  inline ~win_tool_help_t();
-  inline bool ok();
-  inline bool use_debug_break_process();
-  inline bool debug_break_process(HANDLE process_handle);
-  inline bool use_debug_detach_process();
-  inline bool debug_detach_process(pid_t pid);
+  win_tool_help_t();
+  ~win_tool_help_t() { term(); }
+  bool ok() { return th_handle != NULL; }
+  bool use_debug_break_process();
+  bool debug_break_process(HANDLE process_handle);
+  bool use_debug_detach_process();
+  bool debug_detach_process(pid_t pid);
 
 private:
   // function prototypes
-  typedef HANDLE (WINAPI *CreateToolhelp32Snapshot_t)(DWORD dwFlags, DWORD th32ProcessID);
-  typedef BOOL   (WINAPI *Process32First_t)(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
-  typedef BOOL   (WINAPI *Process32Next_t)(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
-  typedef BOOL   (WINAPI *Module32First_t)(HANDLE hSnapshot, LPMODULEENTRY32 lpme);
-  typedef BOOL   (WINAPI *Module32Next_t)(HANDLE hSnapshot, LPMODULEENTRY32 lpme);
-  typedef BOOL   (WINAPI *DebugActiveProcessStop_t)(DWORD dwProcessID);
-  typedef BOOL   (WINAPI *DebugBreakProcess_t)(HANDLE Process);
-  typedef BOOL   (WINAPI *CloseToolhelp32Snapshot_t)(HANDLE hSnapshot);
+  typedef HANDLE WINAPI CreateToolhelp32Snapshot_t(DWORD dwFlags, DWORD th32ProcessID);
+  typedef BOOL   WINAPI Process32First_t(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
+  typedef BOOL   WINAPI Process32Next_t(HANDLE hSnapshot, LPPROCESSENTRY32 lppe);
+  typedef BOOL   WINAPI Module32First_t(HANDLE hSnapshot, LPMODULEENTRY32 lpme);
+  typedef BOOL   WINAPI Module32Next_t(HANDLE hSnapshot, LPMODULEENTRY32 lpme);
+  typedef BOOL   WINAPI DebugActiveProcessStop_t(DWORD dwProcessID);
+  typedef BOOL   WINAPI DebugBreakProcess_t(HANDLE Process);
+  typedef BOOL   WINAPI CloseToolhelp32Snapshot_t(HANDLE hSnapshot);
 
   // functions pointers
-  CreateToolhelp32Snapshot_t _CreateToolhelp32Snapshot;
-  Process32First_t           _Process32First;
-  Process32Next_t            _Process32Next;
-  Module32First_t            _Module32First;
-  Module32Next_t             _Module32Next;
-  CloseToolhelp32Snapshot_t  _CloseToolhelp32Snapshot;
-  DebugActiveProcessStop_t   _DebugActiveProcessStop;
-  DebugBreakProcess_t        _DebugBreakProcess;
+  CreateToolhelp32Snapshot_t *_CreateToolhelp32Snapshot;
+  Process32First_t           *_Process32First;
+  Process32Next_t            *_Process32Next;
+  Module32First_t            *_Module32First;
+  Module32Next_t             *_Module32Next;
+#ifdef UNDER_CE
+  CloseToolhelp32Snapshot_t  *_CloseToolhelp32Snapshot;
+#endif
+  DebugActiveProcessStop_t   *_DebugActiveProcessStop;
+  DebugBreakProcess_t        *_DebugBreakProcess;
 
   HMODULE th_handle;
   bool use_debug_break;
 
-  inline void term();
+  void term();
 
   friend class toolhelp_snapshot_t;
   friend class process_snapshot_t;
@@ -112,150 +160,37 @@ private:
 //--------------------------------------------------------------------------
 class toolhelp_snapshot_t
 {
-  public:
-    inline toolhelp_snapshot_t(win_tool_help_t *tool);
-    inline ~toolhelp_snapshot_t();
-    inline bool ok();
-    inline bool open(uint32 flags, pid_t pid);
-    inline void close();
-    inline uint32 last_err();
-  protected:
-    bool seterr();        // always returns 'false' for convenience
-    win_tool_help_t *t;
-    HANDLE h;
-    uint32 last_error;
+public:
+  inline toolhelp_snapshot_t(win_tool_help_t *tool);
+  inline ~toolhelp_snapshot_t();
+  inline bool ok();
+  inline bool open(uint32 flags, pid_t pid);
+  inline void close();
+  inline uint32 last_err();
+protected:
+  bool seterr();        // always returns 'false' for convenience
+  win_tool_help_t *t;
+  HANDLE h;
+  uint32 last_error;
 };
 
 //--------------------------------------------------------------------------
 class process_snapshot_t: public toolhelp_snapshot_t
 {
-  public:
-    inline process_snapshot_t(win_tool_help_t *tool);
-    inline bool first(uint32 flags, LPPROCESSENTRY32 lppe);
-    inline bool next(LPPROCESSENTRY32 lppe);
+public:
+  inline process_snapshot_t(win_tool_help_t *tool);
+  inline bool first(uint32 flags, LPPROCESSENTRY32 lppe);
+  inline bool next(LPPROCESSENTRY32 lppe);
 };
 
 //--------------------------------------------------------------------------
 class module_snapshot_t: public toolhelp_snapshot_t
 {
-  public:
-    inline module_snapshot_t(win_tool_help_t *tool);
-    inline bool first(uint32 flags, pid_t pid, LPMODULEENTRY32 lpme);
-    inline bool next(LPMODULEENTRY32 lpme);
+public:
+  inline module_snapshot_t(win_tool_help_t *tool);
+  inline bool first(uint32 flags, pid_t pid, LPMODULEENTRY32 lpme);
+  inline bool next(LPMODULEENTRY32 lpme);
 };
-
-//--------------------------------------------------------------------------
-inline win_version_t::win_version_t()
-{
-  OSVersionInfo.dwOSVersionInfoSize = sizeof(OSVersionInfo);
-  ver_ok = GetVersionEx(&OSVersionInfo) != 0;
-}
-
-//--------------------------------------------------------------------------
-inline bool win_version_t::ok()
-{
-  return ver_ok;
-}
-
-//--------------------------------------------------------------------------
-inline bool win_version_t::is_NT()
-{
-  return ok() && OSVersionInfo.dwPlatformId == VER_PLATFORM_WIN32_NT;
-}
-
-//--------------------------------------------------------------------------
-// Is strictly XP?
-inline bool win_version_t::is_strictly_xp()
-{
-  return ok() && is_NT() && OSVersionInfo.dwMajorVersion == 5 && OSVersionInfo.dwMinorVersion == 1;
-}
-
-//--------------------------------------------------------------------------
-inline bool win_version_t::is_DW32()
-{
-  return ok() && OSVersionInfo.dwPlatformId == 3;
-}
-
-//--------------------------------------------------------------------------
-// Is at least Win2K?
-inline bool win_version_t::is_2K()
-{
-  return ok() && OSVersionInfo.dwMajorVersion >= 5;
-}
-
-//--------------------------------------------------------------------------
-inline bool win_version_t::is_64bitOS()
-{
-#ifdef __X64__
-  return true;
-#else
-#ifndef UNDER_CE
-  static char is_64 = -1;
-  if ( is_64 != -1 )
-    return is_64 != 0;
-  if ( OSVersionInfo.dwMajorVersion > 5
-    || OSVersionInfo.dwMajorVersion == 5 && OSVersionInfo.dwMinorVersion >= 1 )
-  {
-    bool is_wow64 = false;
-    return is_wow64_process_h(GetCurrentProcess(), &is_wow64) && is_wow64;
-  }
-#endif
-  return false;
-#endif
-}
-
-//--------------------------------------------------------------------------
-inline const OSVERSIONINFO &win_version_t::get_info()
-{
-  return OSVersionInfo;
-}
-
-//--------------------------------------------------------------------------
-inline win_tool_help_t::win_tool_help_t()
-{
-  use_debug_break = !qgetenv("IDA_NO_DEBUGBREAKPROCESS");
-  HMODULE kern_handle = GetModuleHandle(TEXT(KERNEL_LIB_NAME));
-  *(FARPROC*)&_DebugActiveProcessStop = GetProcAddress(kern_handle, TEXT("DebugActiveProcessStop"));
-  *(FARPROC*)&_DebugBreakProcess      = GetProcAddress(kern_handle, TEXT("DebugBreakProcess"));
-
-  // load the library
-  th_handle = LoadLibrary(TEXT(TOOLHELP_LIB_NAME));
-  if ( th_handle == NULL )
-    return;
-
-  // find the needed functions
-  *(FARPROC*)&_CreateToolhelp32Snapshot = GetProcAddress(th_handle, TEXT("CreateToolhelp32Snapshot"));
-  *(FARPROC*)&_Process32First           = GetProcAddress(th_handle, TEXT("Process32First"));
-  *(FARPROC*)&_Process32Next            = GetProcAddress(th_handle, TEXT("Process32Next"));
-  *(FARPROC*)&_Module32First            = GetProcAddress(th_handle, TEXT("Module32First"));
-  *(FARPROC*)&_Module32Next             = GetProcAddress(th_handle, TEXT("Module32Next"));
-#ifdef UNDER_CE
-  *(FARPROC*)&_CloseToolhelp32Snapshot  = GetProcAddress(th_handle, TEXT("CloseToolhelp32Snapshot"));
-#endif
-
-  bool is_ok = _CreateToolhelp32Snapshot != NULL
-    && _Process32First != NULL
-    && _Process32Next != NULL
-#ifdef UNDER_CE
-    && _CloseToolhelp32Snapshot  != NULL
-#endif
-    && _Module32First != NULL
-    && _Module32Next != NULL;
-  if ( !is_ok )
-    term();
-}
-
-//--------------------------------------------------------------------------
-inline win_tool_help_t::~win_tool_help_t()
-{
-  term();
-}
-
-//--------------------------------------------------------------------------
-inline bool win_tool_help_t::ok()
-{
-  return th_handle != NULL;
-}
 
 //--------------------------------------------------------------------------
 inline bool win_tool_help_t::use_debug_break_process()
@@ -305,7 +240,7 @@ inline bool process_snapshot_t::first(uint32 flags, LPPROCESSENTRY32 lppe)
   if ( ok() && t->_Process32First(h, lppe) )
   {
     // ignore "System Process" (ID==0)
-    return lppe->th32ProcessID==0 ? next(lppe) : true;
+    return lppe->th32ProcessID == 0 ? next(lppe) : true;
   }
   return seterr();
 }
@@ -333,6 +268,8 @@ inline module_snapshot_t::module_snapshot_t(win_tool_help_t *tool)
 //--------------------------------------------------------------------------
 inline bool module_snapshot_t::first(uint32 flags, pid_t pid, LPMODULEENTRY32 lpme)
 {
+  wow64_state_t state = check_wow64_pid(pid);
+  flags |= state == WOW64_YES ? TH32CS_SNAPMODULE32 : 0;
   if ( !open(TH32CS_SNAPMODULE | flags, pid) )
     return false;
   lpme->dwSize = sizeof(MODULEENTRY32);
@@ -401,7 +338,9 @@ inline bool toolhelp_snapshot_t::open(uint32 flags, pid_t pid)
     //       the function until it succeeds.
     if ( last_err() != ERROR_BAD_LENGTH
       || (flags & (TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32)) == 0 )
+    {
       break;
+    }
   }
   return false;
 }
@@ -420,56 +359,25 @@ inline void toolhelp_snapshot_t::close()
 }
 
 //--------------------------------------------------------------------------
-#ifndef UNDER_CE
-inline bool is_wow64_process_h(HANDLE proc_handle, bool *is_wow64)
-{
-  typedef BOOL (WINAPI *LPFN_ISWOW64PROCESS) (HANDLE, PBOOL);
-  static LPFN_ISWOW64PROCESS fnIsWow64Process = NULL;
-  static bool is_wow_defined = false;
-  if ( !is_wow_defined )
-  {
-    *(FARPROC*)&fnIsWow64Process = GetProcAddress(GetModuleHandle(TEXT("kernel32")),"IsWow64Process");
-    is_wow_defined = true;
-  }
-  if ( fnIsWow64Process != NULL )
-  {
-    BOOL bIsWow64 = FALSE;
-    if ( !fnIsWow64Process(proc_handle, &bIsWow64) )
-      return false;
-    *is_wow64 = bIsWow64 != 0;
-    return true;
-  }
-  return false;
-}
-#else
-inline bool is_wow64_process_h(HANDLE, bool *)
-{
-  return false;
-}
-#endif
-
-//--------------------------------------------------------------------------
-inline bool is_wow64_process(int pid, bool *is_wow64)
-{
-  HANDLE h = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
-  if ( h == NULL )
-    return false;
-  return is_wow64_process_h(h, is_wow64);
-}
-
-//--------------------------------------------------------------------------
 // convert Windows protection modes to IDA protection modes
 inline uchar win_prot_to_ida_perm(DWORD protection)
 {
   uchar perm = 0;
 
-  if ( protection & PAGE_READONLY )          perm |= SEGPERM_READ;
-  if ( protection & PAGE_READWRITE )         perm |= SEGPERM_READ | SEGPERM_WRITE;
-  if ( protection & PAGE_WRITECOPY )         perm |= SEGPERM_READ | SEGPERM_WRITE;
-  if ( protection & PAGE_EXECUTE )           perm |=                                SEGPERM_EXEC;
-  if ( protection & PAGE_EXECUTE_READ )      perm |= SEGPERM_READ                 | SEGPERM_EXEC;
-  if ( protection & PAGE_EXECUTE_READWRITE ) perm |= SEGPERM_READ | SEGPERM_WRITE | SEGPERM_EXEC;
-  if ( protection & PAGE_EXECUTE_WRITECOPY ) perm |= SEGPERM_READ | SEGPERM_WRITE | SEGPERM_EXEC;
+  if ( protection & PAGE_READONLY )
+    perm |= SEGPERM_READ;
+  if ( protection & PAGE_READWRITE )
+    perm |= SEGPERM_READ | SEGPERM_WRITE;
+  if ( protection & PAGE_WRITECOPY )
+    perm |= SEGPERM_READ | SEGPERM_WRITE;
+  if ( protection & PAGE_EXECUTE )
+    perm |= SEGPERM_EXEC;
+  if ( protection & PAGE_EXECUTE_READ )
+    perm |= SEGPERM_READ | SEGPERM_EXEC;
+  if ( protection & PAGE_EXECUTE_READWRITE )
+    perm |= SEGPERM_READ | SEGPERM_WRITE | SEGPERM_EXEC;
+  if ( protection & PAGE_EXECUTE_WRITECOPY )
+    perm |= SEGPERM_READ | SEGPERM_WRITE | SEGPERM_EXEC;
 
   return perm;
 }

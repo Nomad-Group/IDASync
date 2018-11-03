@@ -23,11 +23,11 @@ void idaapi term(void)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   ea_t ea = get_screen_ea();
-  if ( askaddr(&ea, "Please enter the disassembly address")
-    && isEnabled(ea) )                              // address belongs to disassembly
+  if ( ask_addr(&ea, "Please enter the disassembly address")
+    && is_mapped(ea) )                              // address belongs to disassembly
   {
     int flags = calc_default_idaplace_flags();
     linearray_t ln(&flags);
@@ -36,16 +36,16 @@ void idaapi run(int /*arg*/)
     pl.lnnum = 0;
     ln.set_place(&pl);
     msg("printing disassembly lines:\n");
-    int n = ln.get_linecnt();           // how many lines for this address?
-    for ( int i=0; i < n; i++ )         // process all of them
+    int n = ln.get_linecnt();                // how many lines for this address?
+    for ( int i=0; i < n; i++ )              // process all of them
     {
-      char *line = ln.down();           // get line
-      char buf[MAXSTR];
-      tag_remove(line, buf, sizeof(buf)); // remove color codes
-      msg("%d: %s\n", i, buf);          // display it on the message window
+      qstring buf;
+      tag_remove(&buf, *ln.down());          // get line and remove color codes
+      msg("%d: %s\n", i, buf.c_str());       // display it on the message window
     }
     msg("total %d lines\n", n);
   }
+  return true;
 }
 
 //--------------------------------------------------------------------------

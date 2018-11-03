@@ -13,18 +13,19 @@ class myplugin_t
 
   init()
   {
-    Message("%s: init() has been called\n", this.wanted_name);
+    msg("%s: init() has been called\n", this.wanted_name);
     return PLUGIN_OK;
   }
 
   run(arg)
   {
-    Warning("%s: run() has been called with %d", this.wanted_name, arg);
+    msg("%s: run() has been called with %d", this.wanted_name, arg);
+    return (arg % 2) == 0;
   }
 
   term()
   {
-    Message("%s: term() has been called\n", this.wanted_name);
+    msg("%s: term() has been called\n", this.wanted_name);
   }
 }
 

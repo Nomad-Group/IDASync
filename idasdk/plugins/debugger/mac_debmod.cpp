@@ -2,72 +2,333 @@
 #include "consts.h"
 #include <sys/utsname.h>
 #include <mach/mach_vm.h>
-#ifndef __arm__
 #include <crt_externs.h>
-#endif
 #include "../../ldr/mach-o/common.h"
 
-#ifdef __arm__
-#define THREAD_STATE_NONE 5
-#elif defined (__i386__) || defined(__x86_64__)
+#if defined (__i386__) || defined(__x86_64__)
 #define THREAD_STATE_NONE 13
 #else
 #error unknown platform
 #endif
 
+#ifdef __EA64__
+#define DEB_SEGM_BITNESS 2
+#define VM_USRSTACK VM_USRSTACK64
+#define COMMPAGE_START 0x7FFFFFE00000ull
+#else
+#define DEB_SEGM_BITNESS 1
+#define VM_USRSTACK VM_USRSTACK32
+#define COMMPAGE_START 0xFFFF0000ul
+#endif
+
 //#define DEBUG_MAC_DEBUGGER
 #define local static  // static is used for static data items
 
-#ifdef __arm__
-#define BPT_CODE_SIZE ARM_BPT_SIZE
-static const uchar dyld_opcode[BPT_CODE_SIZE] = { 0x1E, 0xFF, 0x2F, 0xE1 };
-inline void cleanup_hwbpts(void) {}
-#else
 #define BPT_CODE_SIZE X86_BPT_SIZE
 static const uchar dyld_opcode[BPT_CODE_SIZE] = { 0x55 };
-#endif
 
 mac_debmod_t::stored_signals_t mac_debmod_t::pending_signals;
 
-mac_debmod_t::mac_debmod_t()
+mac_debmod_t::mac_debmod_t() : reader(this)
 {
-#ifdef __arm__
-  // use iphone specific bpt code
-  static const uchar bpt[4] = { 0x70, 0x00, 0x20, 0xE1 };
-  bpt_code = bytevec_t(bpt, 4);
-#endif
   exc_port = MACH_PORT_NULL;
-  struct utsname name;
-  is_leopard = false;
-  if ( uname(&name) == 0 )
-  {
-//    msg("version=%s release=%s\n", name.version, name.release);
-    // release: 9.2.2
-    int major, minor, build;
-    if ( sscanf(name.release, "%d.%d.%d", &major, &minor, &build) == 3 )
-    {
-//      msg("VER=%d.%d.%d\n", major, minor, build);
-      is_leopard = major >= 9;
-    }
-  }
   set_platform("macosx");
-//  msg("is_leopard: %d\n", is_leopard);
+  dyld = BADADDR;
+  dyld_infos = BADADDR;
+  dyld_ranges = BADADDR;
+  is64 = false;
 }
 
 mac_debmod_t::~mac_debmod_t()
 {
 }
 
-local asize_t calc_image_size(const char *fname, ea_t *expected_base);
+local asize_t calc_image_size(const char *fname, bool is64, ea_t *expected_base);
 
 extern boolean_t exc_server(
-                mach_msg_header_t *InHeadP,
-                mach_msg_header_t *OutHeadP);
+        mach_msg_header_t *InHeadP,
+        mach_msg_header_t *OutHeadP);
 
 #define COMPLAIN_IF_FAILED(name)                        \
       if ( err != KERN_SUCCESS )                        \
         msg(name ": %s\n", mach_error_string(err))
 
+//--------------------------------------------------------------------------
+bool mac_debmod_t::get_thread_state(thid_t tid, machine_thread_state_t *state)
+{
+  if ( is64 )
+  {
+    x86_thread_state64_t _state;
+    if ( get_thread_state64(tid, &_state) )
+    {
+      state->__eax    = _state.__rax;
+      state->__ebx    = _state.__rbx;
+      state->__ecx    = _state.__rcx;
+      state->__edx    = _state.__rdx;
+      state->__edi    = _state.__rdi;
+      state->__esi    = _state.__rsi;
+      state->__ebp    = _state.__rbp;
+      state->__esp    = _state.__rsp;
+      state->__eip    = _state.__rip;
+      state->__r8     = _state.__r8;
+      state->__r9     = _state.__r9;
+      state->__r10    = _state.__r10;
+      state->__r11    = _state.__r11;
+      state->__r12    = _state.__r12;
+      state->__r13    = _state.__r13;
+      state->__r14    = _state.__r14;
+      state->__r15    = _state.__r15;
+      state->__eflags = _state.__rflags;
+      state->__cs     = _state.__cs;
+      state->__fs     = _state.__fs;
+      state->__gs     = _state.__gs;
+      return true;
+    }
+  }
+  else
+  {
+    x86_thread_state32_t _state;
+    if ( get_thread_state32(tid, &_state) )
+    {
+      state->__eax    = _state.__eax;
+      state->__ebx    = _state.__ebx;
+      state->__ecx    = _state.__ecx;
+      state->__edx    = _state.__edx;
+      state->__edi    = _state.__edi;
+      state->__esi    = _state.__esi;
+      state->__ebp    = _state.__ebp;
+      state->__esp    = _state.__esp;
+      state->__eip    = _state.__eip;
+      state->__eflags = _state.__eflags;
+      state->__ss     = _state.__ss;
+      state->__cs     = _state.__cs;
+      state->__ds     = _state.__ds;
+      state->__es     = _state.__es;
+      state->__fs     = _state.__fs;
+      state->__gs     = _state.__gs;
+      return true;
+    }
+  }
+  return false;
+}
+
+//--------------------------------------------------------------------------
+bool mac_debmod_t::set_thread_state(thid_t tid, const machine_thread_state_t *state)
+{
+  bool ok = false;
+  if ( is64 )
+  {
+    x86_thread_state64_t _state;
+    _state.__rax    = state->__eax;
+    _state.__rbx    = state->__ebx;
+    _state.__rcx    = state->__ecx;
+    _state.__rdx    = state->__edx;
+    _state.__rdi    = state->__edi;
+    _state.__rsi    = state->__esi;
+    _state.__rbp    = state->__ebp;
+    _state.__rsp    = state->__esp;
+    _state.__rip    = state->__eip;
+    _state.__r8     = state->__r8;
+    _state.__r9     = state->__r9;
+    _state.__r10    = state->__r10;
+    _state.__r11    = state->__r11;
+    _state.__r12    = state->__r12;
+    _state.__r13    = state->__r13;
+    _state.__r14    = state->__r14;
+    _state.__r15    = state->__r15;
+    _state.__rflags = state->__eflags;
+    _state.__cs     = state->__cs;
+    _state.__fs     = state->__fs;
+    _state.__gs     = state->__gs;
+    ok = set_thread_state64(tid, &_state);
+  }
+  else
+  {
+    x86_thread_state32_t _state;
+    _state.__eax    = state->__eax;
+    _state.__ebx    = state->__ebx;
+    _state.__ecx    = state->__ecx;
+    _state.__edx    = state->__edx;
+    _state.__edi    = state->__edi;
+    _state.__esi    = state->__esi;
+    _state.__ebp    = state->__ebp;
+    _state.__esp    = state->__esp;
+    _state.__eip    = state->__eip;
+    _state.__eflags = state->__eflags;
+    _state.__ss     = state->__ss;
+    _state.__cs     = state->__cs;
+    _state.__ds     = state->__ds;
+    _state.__es     = state->__es;
+    _state.__fs     = state->__fs;
+    _state.__gs     = state->__gs;
+    ok = set_thread_state32(tid, &_state);
+  }
+  return ok;
+}
+
+//--------------------------------------------------------------------------
+bool mac_debmod_t::get_float_state(thid_t tid, machine_float_state_t *state)
+{
+#define GET_FLOAT_STATE_COMMON(s1, s2)                                     \
+  do                                                                       \
+  {                                                                        \
+    s1->__fpu_fcw       = *(uint16*)&s2.__fpu_fcw;                         \
+    s1->__fpu_fsw       = *(uint16*)&s2.__fpu_fsw;                         \
+    s1->__fpu_ftw       = s2.__fpu_ftw;                                    \
+    s1->__fpu_fop       = s2.__fpu_fop;                                    \
+    s1->__fpu_ip        = s2.__fpu_ip;                                     \
+    s1->__fpu_cs        = s2.__fpu_cs;                                     \
+    s1->__fpu_dp        = s2.__fpu_dp;                                     \
+    s1->__fpu_ds        = s2.__fpu_ds;                                     \
+    s1->__fpu_mxcsr     = s2.__fpu_mxcsr;                                  \
+    s1->__fpu_mxcsrmask = s2.__fpu_mxcsrmask;                              \
+    /* __fpu_stmm0 thru __fpu_stmm7 */                                     \
+    memcpy(&s1->__fpu_stmm0, &s2.__fpu_stmm0, sizeof(_STRUCT_MMST_REG)*8); \
+    /* __fpu_xmm0 thru __fpu_xmm7 */                                       \
+    memcpy(&s1->__fpu_xmm0, &s2.__fpu_xmm0, sizeof(_STRUCT_XMM_REG)*8);    \
+  }                                                                        \
+  while ( false )
+
+  if ( is64 )
+  {
+    x86_float_state64_t _state;
+    if ( get_float_state64(tid, &_state) )
+    {
+      GET_FLOAT_STATE_COMMON(state, _state);
+      /* __fpu_xmm8 thru __fpu_xmm15 */
+      memcpy(&state->__fpu_xmm8, &_state.__fpu_xmm8, sizeof(_STRUCT_XMM_REG)*8);
+      return true;
+    }
+  }
+  else
+  {
+    x86_float_state32_t _state;
+    if ( get_float_state32(tid, &_state) )
+    {
+      GET_FLOAT_STATE_COMMON(state, _state);
+      return true;
+    }
+  }
+  return false;
+}
+
+//--------------------------------------------------------------------------
+bool mac_debmod_t::set_float_state(thid_t tid, const machine_float_state_t *state)
+{
+#define SET_FLOAT_STATE_COMMON(s1, s2)                                     \
+  do                                                                       \
+  {                                                                        \
+    *(uint16*)&s1.__fpu_fcw = s2->__fpu_fcw;                               \
+    *(uint16*)&s1.__fpu_fsw = s2->__fpu_fsw;                               \
+    s1.__fpu_ftw            = s2->__fpu_ftw;                               \
+    s1.__fpu_fop            = s2->__fpu_fop;                               \
+    s1.__fpu_ip             = s2->__fpu_ip;                                \
+    s1.__fpu_cs             = s2->__fpu_cs;                                \
+    s1.__fpu_dp             = s2->__fpu_dp;                                \
+    s1.__fpu_ds             = s2->__fpu_ds;                                \
+    s1.__fpu_mxcsr          = s2->__fpu_mxcsr;                             \
+    s1.__fpu_mxcsrmask      = s2->__fpu_mxcsrmask;                         \
+    /* __fpu_stmm0 thru __fpu_stmm7 */                                     \
+    memcpy(&s1.__fpu_stmm0, &s2->__fpu_stmm0, sizeof(_STRUCT_MMST_REG)*8); \
+    /* __fpu_xmm0 thru __fpu_xmm7 */                                       \
+    memcpy(&s1.__fpu_xmm0, &s2->__fpu_xmm0, sizeof(_STRUCT_XMM_REG)*8);    \
+  }                                                                        \
+  while ( false )
+
+  bool ok = false;
+  if ( is64 )
+  {
+    x86_float_state64_t _state;
+    SET_FLOAT_STATE_COMMON(_state, state);
+    /* __fpu_xmm8 thru __fpu_xmm15 */
+    memcpy(&_state.__fpu_xmm8, &state->__fpu_xmm8, sizeof(_STRUCT_XMM_REG)*8);
+    ok = set_float_state64(tid, &_state);
+  }
+  else
+  {
+    x86_float_state32_t _state;
+    SET_FLOAT_STATE_COMMON(_state, state);
+    ok = set_float_state32(tid, &_state);
+  }
+  return ok;
+}
+
+//--------------------------------------------------------------------------
+bool mac_debmod_t::get_debug_state(thid_t tid, machine_debug_state_t *state)
+{
+#if __DARWIN_UNIX03
+#define DRNAME(name) __##name
+#else
+#define DRNAME(name) name
+#endif
+
+#define GETDRS(s1, s2)          \
+  do                            \
+  {                             \
+    s1->__dr0 = s2.DRNAME(dr0); \
+    s1->__dr1 = s2.DRNAME(dr1); \
+    s1->__dr2 = s2.DRNAME(dr2); \
+    s1->__dr3 = s2.DRNAME(dr3); \
+    s1->__dr4 = s2.DRNAME(dr4); \
+    s1->__dr5 = s2.DRNAME(dr5); \
+    s1->__dr6 = s2.DRNAME(dr6); \
+    s1->__dr7 = s2.DRNAME(dr7); \
+  }                             \
+  while ( false )
+
+  if ( is64 )
+  {
+    x86_debug_state64_t _state;
+    if ( get_debug_state64(tid, &_state) )
+    {
+      GETDRS(state, _state);
+      return true;
+    }
+  }
+  else
+  {
+    x86_debug_state32_t _state;
+    if ( get_debug_state32(tid, &_state) )
+    {
+      GETDRS(state, _state);
+      return true;
+    }
+  }
+  return false;
+}
+
+//--------------------------------------------------------------------------
+bool mac_debmod_t::set_debug_state(thid_t tid, const machine_debug_state_t *state)
+{
+#define SETDRS(s1, s2)          \
+  do                            \
+  {                             \
+    s1.DRNAME(dr0) = s2->__dr0; \
+    s1.DRNAME(dr1) = s2->__dr1; \
+    s1.DRNAME(dr2) = s2->__dr2; \
+    s1.DRNAME(dr3) = s2->__dr3; \
+    s1.DRNAME(dr4) = s2->__dr4; \
+    s1.DRNAME(dr5) = s2->__dr5; \
+    s1.DRNAME(dr6) = s2->__dr6; \
+    s1.DRNAME(dr7) = s2->__dr7; \
+  }                             \
+  while ( false )
+
+  bool ok = false;
+  if ( is64 )
+  {
+    x86_debug_state64_t _state;
+    SETDRS(_state, state);
+    ok = set_debug_state64(tid, &_state);
+  }
+  else
+  {
+    x86_debug_state32_t _state;
+    SETDRS(_state, state);
+    ok = set_debug_state32(tid, &_state);
+  }
+  return ok;
+}
 
 //--------------------------------------------------------------------------
 local const char *get_ptrace_name(int request)
@@ -123,76 +384,61 @@ ida_thread_info_t *mac_debmod_t::get_thread(thid_t tid)
 //--------------------------------------------------------------------------
 uval_t mac_debmod_t::get_dr(thid_t tid, int idx)
 {
-#if !defined (__i386__) && !defined(__x86_64__)
-  return 0;
-#else
   machine_debug_state_t dr_regs;
-
-#if __DARWIN_UNIX03
-#define dr0 __dr0
-#define dr1 __dr1
-#define dr2 __dr2
-#define dr3 __dr3
-#define dr4 __dr4
-#define dr5 __dr5
-#define dr6 __dr6
-#define dr7 __dr7
-#endif
-
   if ( !get_debug_state(tid, &dr_regs) )
     return 0;
 
   switch ( idx )
   {
     case 0:
-      return dr_regs.dr0;
+      return dr_regs.__dr0;
     case 1:
-      return dr_regs.dr1;
+      return dr_regs.__dr1;
     case 2:
-      return dr_regs.dr2;
+      return dr_regs.__dr2;
     case 3:
-      return dr_regs.dr3;
+      return dr_regs.__dr3;
     case 4:
-      return dr_regs.dr4;
+      return dr_regs.__dr4;
     case 5:
-      return dr_regs.dr5;
+      return dr_regs.__dr5;
     case 6:
-      return dr_regs.dr6;
+      return dr_regs.__dr6;
     case 7:
-      return dr_regs.dr7;
+      return dr_regs.__dr7;
   }
+
   return 0;
-#endif
 }
 
 //--------------------------------------------------------------------------
-static void set_dr(machine_debug_state_t & dr_regs, int idx, uval_t value)
+static void set_dr(machine_debug_state_t &dr_regs, int idx, uval_t value)
 {
   switch ( idx )
   {
     case 0:
-      dr_regs.dr0 = value;
+      dr_regs.__dr0 = value;
       break;
     case 1:
-      dr_regs.dr1 = value;
+      dr_regs.__dr1 = value;
       break;
     case 2:
-      dr_regs.dr2 = value;
+      dr_regs.__dr2 = value;
       break;
     case 3:
-      dr_regs.dr3 = value;
+      dr_regs.__dr3 = value;
       break;
     case 4:
-      dr_regs.dr4 = value;
+      dr_regs.__dr4 = value;
       break;
     case 5:
-      dr_regs.dr5 = value;
+      dr_regs.__dr5 = value;
       break;
     case 6:
-      dr_regs.dr6 = value;
+      dr_regs.__dr6 = value;
       break;
     case 7:
-      dr_regs.dr7 = value;
+      dr_regs.__dr7 = value;
       break;
   }
 }
@@ -200,9 +446,6 @@ static void set_dr(machine_debug_state_t & dr_regs, int idx, uval_t value)
 //--------------------------------------------------------------------------
 bool mac_debmod_t::set_dr(thid_t tid, int idx, uval_t value)
 {
-#if !defined (__i386__) && !defined(__x86_64__)
-  return false;
-#else
   machine_debug_state_t dr_regs;
 
   if ( !get_debug_state(tid, &dr_regs) )
@@ -211,16 +454,6 @@ bool mac_debmod_t::set_dr(thid_t tid, int idx, uval_t value)
   ::set_dr(dr_regs, idx, value);
 
   return set_debug_state(tid, &dr_regs);
-#undef ds
-#undef dr0
-#undef dr1
-#undef dr2
-#undef dr3
-#undef dr4
-#undef dr5
-#undef dr6
-#undef dr7
-#endif
 }
 
 //--------------------------------------------------------------------------
@@ -229,33 +462,15 @@ ea_t mac_debmod_t::get_ip(thid_t tid)
   machine_thread_state_t state;
   if ( !get_thread_state(tid, &state) )
     return BADADDR;
-#ifdef __arm__
-  return state.__pc;
-#else
   return state.__eip;
-#endif
 }
 
 //--------------------------------------------------------------------------
-local kern_return_t qthread_setsinglestep(ida_thread_info_t &ti)
+bool mac_debmod_t::qthread_setsinglestep(ida_thread_info_t &ti)
 {
-#ifdef __arm__
-  QASSERT(30072, !ti.single_step);
-  return KERN_SUCCESS;
-#else
-
   machine_thread_state_t cpu;
-  mach_port_t port = ti.port;
-  mach_msg_type_number_t stateCount = IDA_THREAD_STATE_COUNT;
-  kern_return_t err = thread_get_state(
-                        port,
-                        IDA_THREAD_STATE,
-                        (thread_state_t)&cpu,
-                        &stateCount);
-  QASSERT(30073, stateCount == IDA_THREAD_STATE_COUNT);
-//  COMPLAIN_IF_FAILED("thread_get_state");
-  if ( err != KERN_SUCCESS )
-    return err;
+  if ( !get_thread_state(ti.tid, &cpu) )
+    return false;
 
   ti.asked_step = ti.single_step;
   int bit = ti.single_step ? EFLAGS_TRAP_FLAG : 0;
@@ -267,14 +482,7 @@ local kern_return_t qthread_setsinglestep(ida_thread_info_t &ti)
   else
     cpu.__eflags &= ~EFLAGS_TRAP_FLAG;
 
-  err = thread_set_state(port,
-                         IDA_THREAD_STATE,
-                         (thread_state_t)&cpu,
-                         stateCount);
-  QASSERT(30074, stateCount == IDA_THREAD_STATE_COUNT);
-//  COMPLAIN_IF_FAILED("thread_set_state");
-  return err;
-#endif
+  return set_thread_state(ti.tid, &cpu);
 }
 
 //--------------------------------------------------------------------------
@@ -377,7 +585,6 @@ int mac_debmod_t::handle_bpts(debug_event_t *event, bool asked_step)
   // If we do not handle a hwbpt immediately, dr6 stays set and
   // we discover it later, after resuming. This breaks everything.
   ea_t bpt_ea = event->ea;
-#if defined (__i386__) || defined(__x86_64__)
   uval_t dr6val = get_dr(event->tid, 6);
   for ( int i=0; i < MAX_BPT; i++ )
   {
@@ -396,7 +603,6 @@ int mac_debmod_t::handle_bpts(debug_event_t *event, bool asked_step)
   }
   // x86 returns EIP pointing to the next byte after CC. Take it into account:
   bpt_ea--;
-#endif
   if ( code != 0 )
   {
     if ( asked_step )
@@ -475,7 +681,7 @@ bool mac_debmod_t::handle_signal(
     if ( ei != NULL )
     {
       qsnprintf(event->exc.info, sizeof(event->exc.info), "got %s signal (%s)", ei->name.c_str(), ei->desc.c_str());
-      suspend = ei->break_on();
+      suspend = should_suspend_at_exception(event, ei);
       event->handled = ei->handle();
       if ( code == SIGKILL && run_state >= rs_exiting )
       {
@@ -568,15 +774,8 @@ bool mac_debmod_t::my_resume_thread(ida_thread_info_t &ti)
       {
         // we detach from the process and will handle the rest
         // using mach api
-#if __arm__
-//bool ok = task_resume(task) == KERN_SUCCESS;
-        int pt = run_state >= rs_exiting ? PT_CONTINUE : PT_DETACH;
-        ok = qptrace(pt, pid, caddr_t(1), 0) == 0;
-        in_ptrace = false;
-#else
         int pt = ti.single_step ? PT_STEP : PT_CONTINUE;
         ok = qptrace(pt, pid, caddr_t(1), ti.child_signum) == 0;
-#endif
       }
       else
       {
@@ -627,7 +826,7 @@ int mac_debmod_t::exception_to_signal(const mach_exception_info_t *exinf)
 {
   int code = exinf->exception_data[0];
   int sig = 0;
-  switch( exinf->exception_type )
+  switch ( exinf->exception_type )
   {
     case EXC_BAD_ACCESS:
       if ( code == KERN_INVALID_ADDRESS )
@@ -714,7 +913,7 @@ pid_t mac_debmod_t::qwait(int *status, bool hang)
   else
   {
     int flags = hang ? 0 : WNOHANG;
-    ret = ::qwait(pid, status, flags);
+    ret = ::qwait(status, pid, flags);
     if ( ret != pid && ret != 0 && ret != -1 )
     {
       stored_signal_t &ss = pending_signals.push_back();
@@ -816,16 +1015,10 @@ void mac_debmod_t::handle_dyld_bpt(const debug_event_t *event)
   bool ok = get_thread_state(event->tid, &state);
   QASSERT(30078, ok);
 
-#ifdef __arm__
-  // emulate bx lr. we assume the (lr & 1) == 0
-  QASSERT(30079, (state.__lr & 1) == 0);
-  state.__pc = state.__lr;
-#else
   // emulate push ebp
   state.__esp -= debapp_attrs.addrsize;
   kern_return_t err = write_mem(state.__esp, &state.__ebp, debapp_attrs.addrsize);
   QASSERT(30080, err == KERN_SUCCESS);
-#endif
 
   ok = set_thread_state(event->tid, &state);
   QASSERT(30081, ok);
@@ -977,13 +1170,6 @@ int idaapi mac_debmod_t::dbg_continue_after_event(const debug_event_t *event)
     // here we resume only the threads blocked because of exceptions or signals
     // if the debugger kernel has suspended a thread for another reason, it
     // will stay suspended.
-#ifdef __arm__ // if we suspended all threads, the correct way to unblock them is to
-    if ( run_state == rs_suspended )
-    {
-      run_state = rs_running;
-      resume_all_threads();
-    }
-#endif
     if ( run_state == rs_pausing )
     { // no need to stop anymore, plan to ignore the sigstop
       ti->pending_sigstop = true;
@@ -1020,23 +1206,6 @@ printf("buffer=%x size=%x\n", buffer, size);
   if ( err != KERN_SUCCESS && err != KERN_PROTECTION_FAILURE )
     debdeb("vm_write %d: ea=%a, size=%d => %s\n", task, ea, size, mach_error_string(err));
   return err;
-}
-
-//--------------------------------------------------------------------------
-inline bool is_shared_address(ea_t ea, cpu_type_t cpu)
-{
-  // NB: unsigned(a-b) < l is the same as: a >= b && (a-b) < l
-  switch ( cpu & ~CPU_SUBTYPE_MASK )
-  {
-    case CPU_TYPE_I386:
-      return asize_t(ea - SHARED_REGION_BASE_I386) < SHARED_REGION_SIZE_I386;
-    case CPU_TYPE_X86_64:
-      return asize_t(ea - SHARED_REGION_BASE_X86_64) < SHARED_REGION_SIZE_X86_64;
-    case CPU_TYPE_ARM:
-      return asize_t(ea - SHARED_REGION_BASE_ARM) < SHARED_REGION_SIZE_ARM;
-    default:
-      return false;
-  }
 }
 
 //--------------------------------------------------------------------------
@@ -1081,15 +1250,6 @@ bool mac_debmod_t::xfer_page(ea_t ea, void *buffer, int size, bool write)
     err = KERN_FAILURE;
     if ( write )
     {
-      if ( is_shared_address(r_start, cputype) )
-      {
-#ifndef __arm__
-        if ( is_leopard )
-          return false; // can not modify shared areas under leopard
-#endif
-        bit |= VM_PROT_COPY;
-      }
-//      dmsg("shared: %d b2=%x\n", is_shared_address(r_start), bit);
       err = mach_vm_protect(task, r_start, r_size, 0, bit);
       if ( err != KERN_SUCCESS && (bit & VM_PROT_COPY) == 0 )
       {
@@ -1214,7 +1374,7 @@ ssize_t idaapi mac_debmod_t::dbg_read_memory(ea_t ea, void *buffer, size_t size)
 //--------------------------------------------------------------------------
 void mac_debmod_t::add_dll(ea_t addr, const char *fname)
 {
-  asize_t size = calc_image_size(fname, NULL);
+  asize_t size = calc_image_size(fname, is64, NULL);
 
   debug_event_t ev;
   ev.eid     = LIBRARY_LOAD;
@@ -1254,7 +1414,7 @@ inline bool is_text_segment(const segment_command &sg)
 }
 
 //--------------------------------------------------------------------------
-local asize_t calc_image_size(const char *fname, ea_t *p_base)
+local asize_t calc_image_size(const char *fname, bool is64, ea_t *p_base)
 {
   if ( p_base != NULL )
     *p_base = BADADDR;
@@ -1262,52 +1422,46 @@ local asize_t calc_image_size(const char *fname, ea_t *p_base)
   if ( li == NULL )
     return 0;
 
-  asize_t size = calc_macho_image_size(li, p_base);
+  asize_t size = calc_macho_image_size_pc(li, is64, p_base);
   close_linput(li);
   return size;
 }
 
 //--------------------------------------------------------------------------
-bool mac_debmod_t::import_dll(linput_t *li, ea_t base, name_info_t & /*ni*/)
-{
-  struct ida_local macho_importer_t : public symbol_visitor_t
-  {
-    mac_debmod_t *md;
-    macho_importer_t(mac_debmod_t *_md) : symbol_visitor_t(VISIT_SYMBOLS), md(_md) {}
-    int visit_symbol(ea_t ea, const char *name)
-    {
-      if ( name[0] != '\0' )
-      {
-        md->save_debug_name(ea, name);
-        if ( md->dyld_infos == BADADDR && strcmp(name, "_dyld_all_image_infos") == 0 )
-        {
-//          md->dmsg("%a: address of dyld raw infos\n", ea);
-          md->dyld_infos = ea;
-        }
-      }
-      return 0;
-    }
-  };
-  macho_importer_t mi(this);
-  return parse_macho(base, li, mi, false);
-}
-
-//--------------------------------------------------------------------------
-bool mac_debmod_t::import_dll_to_database(ea_t imagebase, name_info_t &ni)
+void mac_debmod_t::import_dll_to_database(ea_t imagebase)
 {
   images_t::iterator p = dlls.find(imagebase);
   if ( p == dlls.end() )
-    return false;
+    return;
 
-  const char *dllname = p->second.name.c_str();
+  struct ida_local macho_importer_t : public macho_visitor_t
+  {
+    mac_debmod_t *md;
+    macho_importer_t(mac_debmod_t *_md) : macho_visitor_t(MV_SYMBOLS), md(_md) {}
+    void visit_symbol(ea_t ea, const char *name)
+    {
+      md->save_debug_name(ea, name);
 
-  linput_t *li = open_linput(dllname, false);
-  if ( li == NULL )
-    return false;
+#define HANDLE_DYLD_SYMBOL(varname, symname)                  \
+      do                                                      \
+      {                                                       \
+        if ( md->varname == BADADDR && streq(name, symname) ) \
+        {                                                     \
+          md->dmsg("%a: address of " symname "\n", ea);       \
+          md->varname = ea;                                   \
+        }                                                     \
+      }                                                       \
+      while ( false )
 
-  bool ok = import_dll(li, imagebase, ni);
-  close_linput(li);
-  return ok;
+      HANDLE_DYLD_SYMBOL(dyld_infos,  "_dyld_all_image_infos");
+      HANDLE_DYLD_SYMBOL(dyld_ranges, "_dyld_shared_cache_ranges");
+
+#undef HANDLE_DYLD_SYMBOL
+    }
+  };
+
+  macho_importer_t mi(this);
+  parse_macho_image(mi, p->second);
 }
 
 //--------------------------------------------------------------------------
@@ -1315,11 +1469,9 @@ void idaapi mac_debmod_t::dbg_stopped_at_debug_event(void)
 {
   // we will take advantage of this event to import information
   // about the exported functions from the loaded dlls
-  name_info_t &ni = *get_debug_names();
-
-  for (easet_t::iterator p=dlls_to_import.begin(); p != dlls_to_import.end(); )
+  for ( easet_t::iterator p=dlls_to_import.begin(); p != dlls_to_import.end(); )
   {
-    import_dll_to_database(*p, ni);
+    import_dll_to_database(*p);
     dlls_to_import.erase(p++);
   }
 }
@@ -1332,6 +1484,7 @@ void mac_debmod_t::cleanup(void)
   run_state = rs_exited;
   dyld = BADADDR;
   dyld_infos = BADADDR;
+  dyld_ranges = BADADDR;
   dyri.version = 0;  // not inited
   term_exception_ports();
 
@@ -1340,7 +1493,10 @@ void mac_debmod_t::cleanup(void)
   dlls_to_import.clear();
   events.clear();
   attaching = false;
+  is64 = false;
+
   bpts.clear();
+  shared_cache_ranges.clear();
 
   inherited::cleanup();
 }
@@ -1498,17 +1654,112 @@ void mac_debmod_t::term_exception_ports(void)
   }
 }
 
-//--------------------------------------------------------------------------
-local bool is_setgid_procmod(void)
+//-----------------------------------------------------------------------------
+bool mac_debmod_t::verify_user_privilege()
 {
-  gid_t gid = getegid();
-  struct group *gr = getgrgid(gid);
-  if ( gr == NULL )
+  struct group *dev_group = getgrnam("_developer");
+  if ( dev_group == NULL )
     return false;
-  bool ok = strcmp(gr->gr_name, "procmod") == 0;
-  msg("Current group=%s\n", gr->gr_name);
-  endgrent();
-  return ok;
+
+  gid_t grouplist[NGROUPS_MAX];
+  int ngroups = getgroups(NGROUPS_MAX, grouplist);
+  for ( int i = 0; i < ngroups; i++ )
+    if ( grouplist[i] == dev_group->gr_gid )
+      return true;
+
+  return false;
+}
+
+//-----------------------------------------------------------------------------
+bool mac_debmod_t::verify_code_signature()
+{
+  SecCodeRef code = NULL;
+  sec_code_janitor_t code_janitor(code);
+
+  OSStatus status = SecCodeCopySelf(0, &code);
+  if ( status != errSecSuccess )
+    return false;
+
+  status = SecCodeCheckValidity(code, kSecCSDefaultFlags, NULL);
+  return status == errSecSuccess;
+}
+
+//-----------------------------------------------------------------------------
+bool mac_debmod_t::acquire_taskport_right()
+{
+  OSStatus status;
+  AuthorizationRef auth_ref = NULL;
+  auth_ref_janitor_t ref_janitor(auth_ref);
+  AuthorizationFlags auth_flags = kAuthorizationFlagExtendRights
+    | kAuthorizationFlagPreAuthorize
+    | (1 << 5) /* kAuthorizationFlagLeastPrivileged */;
+
+  // create an authorization context
+  status = AuthorizationCreate(
+      NULL,
+      kAuthorizationEmptyEnvironment,
+      auth_flags,
+      &auth_ref);
+
+  if ( status != errAuthorizationSuccess )
+    return false;
+
+  AuthorizationItem taskport_items[] = { { "system.privilege.taskport" } };
+  AuthorizationRights auth_rights = { 1, taskport_items };
+  AuthorizationRights *out_rights = NULL;
+  auth_rights_janitor_t rights_janitor(out_rights);
+
+  // first try to authorize without credentials
+  status = AuthorizationCopyRights(
+      auth_ref,
+      &auth_rights,
+      kAuthorizationEmptyEnvironment,
+      auth_flags,
+      &out_rights);
+
+  if ( status != errAuthorizationSuccess )
+  {
+    qstring user;
+    qstring pass;
+
+    if ( !qgetenv("MAC_DEBMOD_USER", &user)
+      || !qgetenv("MAC_DEBMOD_PASS", &pass) )
+    {
+      return false;
+    }
+
+    AuthorizationItem credentials[] =
+    {
+      { kAuthorizationEnvironmentUsername },
+      { kAuthorizationEnvironmentPassword },
+      { kAuthorizationEnvironmentShared }
+    };
+
+    credentials[0].valueLength = user.length();
+    credentials[0].value = user.begin();
+    credentials[1].valueLength = pass.length();
+    credentials[1].value = pass.begin();
+
+    AuthorizationEnvironment env = { 3, credentials };
+
+    // if we received rights in the previous call to AuthorizationCopyRights,
+    // free it before we re-use the pointer
+    rights_janitor.~janitor_t();
+
+    status = AuthorizationCopyRights(
+        auth_ref,
+        &auth_rights,
+        &env,
+        auth_flags,
+        &out_rights);
+
+    bzero(user.begin(), user.length());
+    bzero(pass.begin(), pass.length());
+
+    return status == errAuthorizationSuccess;
+  }
+
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -1517,19 +1768,21 @@ bool mac_debmod_t::handle_process_start(pid_t _pid)
   debdeb("handle process start %d\n", _pid);
   pid = _pid;
 
+  int status;
+  int k = qwait(&status, true);
+  debdeb("qwait on %d: %x (ret=%d)\n", pid, status, k);
+  QASSERT(30190, k == pid);
+
   cputype = get_process_cpu(pid);
   debapp_attrs.addrsize = get_cpu_bitness(cputype);
+  is64 = debapp_attrs.addrsize == 8;
 #ifndef __X64__
-  if ( debapp_attrs.addrsize != 4 )
+  if ( is64 )
   {
     dwarning("Process with pid %d is an x86_64 process. Please use mac_serverx64 to debug it.", pid);
     return false;
   }
 #endif
-  int status;
-  int k = qwait(&status, true);
-  debdeb("qwait on %d: %x (ret=%d)\n", pid, status, k);
-  QASSERT(30190, k == pid);
 
   if ( !WIFSTOPPED(status) )
   {
@@ -1560,33 +1813,27 @@ bool mac_debmod_t::handle_process_start(pid_t _pid)
   }
 
   /* Get the mach task for the target process */
-  int ntries = 10;
   kern_return_t err = task_for_pid(mach_task_self(), pid, &task);
-  while ( err == KERN_FAILURE ) // no access?
+  if ( err == KERN_FAILURE ) // no access?
   {
-    if ( !is_setgid_procmod() )
+#define OSX_DEBUGGER_HINT "For more info, please see the 'Mac OS X debugger' help entry (shortcut F1)."
+    char **argv = *_NSGetArgv();
+    const char *program = qbasename(argv[0]);
+    if ( strstr(program, "server") == NULL )
+      program = NULL; // runing local mac debugger module
+    if ( program != NULL )
     {
-#ifdef __arm__
-      const char *program = "iphone_server";
-#else
-      //int argc = *_NSGetArgc();
-      char **argv = *_NSGetArgv();
-      const char *program = qbasename(argv[0]);
-      if ( strstr(program, "server") == NULL )
-        program = NULL; // runing local mac debugger module
-#endif
-      if ( program != NULL )
-        dwarning("File '%s' must be run as superuser to debug Mac OS X applications.", program);
-      else
-        dwarning("Please run IDA with elevated permissons for local debugging.\n"
-                 "Another solution is to run mac_server and use localhost as\n"
-                 "the remote computer name");
-      return false;
+      dwarning("Permission denied. Please ensure that '%s' is either codesigned or running as root.\n\n"
+               OSX_DEBUGGER_HINT,
+               program);
     }
-    debdeb("could not determine process %d port: %s\n", pid, mach_error_string(err));
-    if ( --ntries > 0 )
-      continue;
-    usleep(100);
+    else
+    {
+      dwarning("Please run IDA with elevated permissons for local debugging.\n"
+               "Another solution is to run mac_server and use localhost as\n"
+               "the remote computer name.\n\n"
+               OSX_DEBUGGER_HINT);
+    }
     return false;
   }
   QASSERT(30100, err == KERN_SUCCESS);
@@ -1595,6 +1842,8 @@ bool mac_debmod_t::handle_process_start(pid_t _pid)
   thid_t tid = init_main_thread(false);
   debdeb("initially stopped at %a pid=%d tid=%d task=%d\n", get_ip(tid), pid, tid, task);
   run_state = rs_running;
+
+  init_dyld();
 
   create_process_start_event(pid, tid);
 
@@ -1613,24 +1862,7 @@ void mac_debmod_t::create_process_start_event(pid_t _pid, thid_t tid)
   ev.handled = true;
   get_exec_fname(_pid, ev.modinfo.name, sizeof(ev.modinfo.name));
   debdeb("gotexe: %s\n", ev.modinfo.name);
-  ev.modinfo.size = calc_image_size(ev.modinfo.name, &ev.modinfo.base);
-  ev.modinfo.rebase_to = BADADDR;
-
-  // find the real executable base
-  // also call get_memory_info() the first time
-  // this should find dyld and set its bpt
-  meminfo_vec_t miv;
-  if ( get_memory_info(miv, false) > 0 && !is_dll )
-  {
-    for ( int i=0; i < miv.size(); i++ )
-    {
-      if ( miv[i].name == ev.modinfo.name )
-      {
-        ev.modinfo.rebase_to = miv[i].startEA;
-        break;
-      }
-    }
-  }
+  ev.modinfo.size = calc_image_size(ev.modinfo.name, is64, &ev.modinfo.base);
   events.enqueue(ev, IN_FRONT);
 }
 
@@ -1681,7 +1913,7 @@ void mac_debmod_t::create_process_attach_event(pid_t _pid)
 
 //--------------------------------------------------------------------------
 // 1-ok, 0-failed
-int idaapi mac_debmod_t::dbg_attach_process(pid_t _pid, int /*event_id*/)
+int idaapi mac_debmod_t::dbg_attach_process(pid_t _pid, int /*event_id*/, int /*flags*/)
 {
   if ( qptrace(PT_ATTACH, _pid, NULL, NULL) == 0
     && handle_process_start(_pid) )
@@ -1741,23 +1973,8 @@ int idaapi mac_debmod_t::dbg_prepare_to_pause_process(void)
   debdeb("remote_prepare_to_pause_process\n");
   if ( run_state >= rs_exiting )
     return false;
-#ifdef __arm__
-  // since we detached from ptrace, we can not send signals to inferior
-  // simple suspend it and generate a fake event
-  if ( !suspend_all_threads() )
-    return false;
-  run_state = rs_suspended;
-  debug_event_t ev;
-  ev.eid     = NO_EVENT;
-  ev.pid     = pid;
-  ev.tid     = maintid();
-  ev.ea      = BADADDR;
-  ev.handled = true;
-  events.enqueue(ev, IN_BACK);
-#else
   run_state = rs_pausing;
   kill(pid, SIGSTOP);
-#endif
   return true;
 }
 
@@ -1792,9 +2009,6 @@ int idaapi mac_debmod_t::dbg_exit_process(void)
 // Set hardware breakpoints for one thread
 bool mac_debmod_t::set_hwbpts(int hThread)
 {
-#if !defined (__i386__) && !defined(__x86_64__)
-  return false;
-#else
   machine_debug_state_t dr_regs;
 
   if ( !get_debug_state(hThread, &dr_regs) )
@@ -1814,7 +2028,6 @@ bool mac_debmod_t::set_hwbpts(int hThread)
 //         dr7,
 //         ok);
   return set_debug_state(hThread, &dr_regs);
-#endif
 }
 
 //--------------------------------------------------------------------------
@@ -1841,11 +2054,7 @@ int idaapi mac_debmod_t::dbg_add_bpt(bpttype_t type, ea_t ea, int len)
     }
   }
 
-#if defined (__i386__) || defined(__x86_64__)
   return add_hwbpt(type, ea, len);
-#else
-  return false;
-#endif
 }
 
 //--------------------------------------------------------------------------
@@ -1865,25 +2074,16 @@ int idaapi mac_debmod_t::dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_
     }
   }
 
-#if defined (__i386__) || defined(__x86_64__)
   return del_hwbpt(ea, type);
-#else
-  return false;
-#endif
 }
 
 //--------------------------------------------------------------------------
 // 1-ok, 0-failed
-int idaapi mac_debmod_t::dbg_thread_get_sreg_base(thid_t /*tid*/, int /*sreg_value*/, ea_t *pea)
+int idaapi mac_debmod_t::dbg_thread_get_sreg_base(ea_t *pea, thid_t /*tid*/, int /*sreg_value*/)
 {
-#ifdef __arm__
-  qnotused(pea);
-  return false;
-#else
   // assume all segments are based on zero
   *pea = 0;
   return true;
-#endif
 }
 
 //--------------------------------------------------------------------------
@@ -1911,16 +2111,11 @@ int idaapi mac_debmod_t::dbg_set_resume_mode(thid_t tid, resume_mode_t resmod)
   if ( resmod != RESMOD_INTO )
     return false; // not supported
 
-#ifdef __arm__
-  qnotused(tid);
-  return false;
-#else
   ida_thread_info_t *t = get_thread(tid);
   if ( t == NULL )
     return false;
   t->single_step = true;
   return true;
-#endif
 }
 
 //--------------------------------------------------------------------------
@@ -1934,65 +2129,49 @@ int idaapi mac_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t *v
   if ( !get_thread_state(tid, &cpu) )
     return false;
 
-#ifdef __arm__  // fixme - add arm logic
-  if ( (clsmask & ARM_RC_GENERAL) != 0 )
-  {
-    values[ 0].ival = uint32(cpu.__r[ 0]);
-    values[ 1].ival = uint32(cpu.__r[ 1]);
-    values[ 2].ival = uint32(cpu.__r[ 2]);
-    values[ 3].ival = uint32(cpu.__r[ 3]);
-    values[ 4].ival = uint32(cpu.__r[ 4]);
-    values[ 5].ival = uint32(cpu.__r[ 5]);
-    values[ 6].ival = uint32(cpu.__r[ 6]);
-    values[ 7].ival = uint32(cpu.__r[ 7]);
-    values[ 8].ival = uint32(cpu.__r[ 8]);
-    values[ 9].ival = uint32(cpu.__r[ 9]);
-    values[10].ival = uint32(cpu.__r[10]);
-    values[11].ival = uint32(cpu.__r[11]);
-    values[12].ival = uint32(cpu.__r[12]);
-    values[13].ival = uint32(cpu.__sp);
-    values[14].ival = uint32(cpu.__lr);
-    values[15].ival = uint32(cpu.__pc);
-    values[16].ival = uint32(cpu.__cpsr);
-  }
-#else
   if ( (clsmask & X86_RC_GENERAL) != 0 )
   {
-    values[R_EAX   ].ival = uval_t(cpu.__eax);
-    values[R_EBX   ].ival = uval_t(cpu.__ebx);
-    values[R_ECX   ].ival = uval_t(cpu.__ecx);
-    values[R_EDX   ].ival = uval_t(cpu.__edx);
-    values[R_ESI   ].ival = uval_t(cpu.__esi);
-    values[R_EDI   ].ival = uval_t(cpu.__edi);
-    values[R_EBP   ].ival = uval_t(cpu.__ebp);
-    values[R_ESP   ].ival = uval_t(cpu.__esp);
-    values[R_EIP   ].ival = uval_t(cpu.__eip);
+    values[R_EAX].ival    = uval_t(cpu.__eax);
+    values[R_EBX].ival    = uval_t(cpu.__ebx);
+    values[R_ECX].ival    = uval_t(cpu.__ecx);
+    values[R_EDX].ival    = uval_t(cpu.__edx);
+    values[R_ESI].ival    = uval_t(cpu.__esi);
+    values[R_EDI].ival    = uval_t(cpu.__edi);
+    values[R_EBP].ival    = uval_t(cpu.__ebp);
+    values[R_ESP].ival    = uval_t(cpu.__esp);
+    values[R_EIP].ival    = uval_t(cpu.__eip);
     values[R_EFLAGS].ival = uval_t(cpu.__eflags);
-#ifdef __X64__
-    values[R64_R8  ].ival = uval_t(cpu.__r8);
-    values[R64_R9  ].ival = uval_t(cpu.__r9);
-    values[R64_R10 ].ival = uval_t(cpu.__r10);
-    values[R64_R11 ].ival = uval_t(cpu.__r11);
-    values[R64_R12 ].ival = uval_t(cpu.__r12);
-    values[R64_R13 ].ival = uval_t(cpu.__r13);
-    values[R64_R14 ].ival = uval_t(cpu.__r14);
-    values[R64_R15 ].ival = uval_t(cpu.__r15);
+#ifdef __EA64__
+    if ( is64 )
+    {
+      values[R64_R8].ival  = uval_t(cpu.__r8);
+      values[R64_R9].ival  = uval_t(cpu.__r9);
+      values[R64_R10].ival = uval_t(cpu.__r10);
+      values[R64_R11].ival = uval_t(cpu.__r11);
+      values[R64_R12].ival = uval_t(cpu.__r12);
+      values[R64_R13].ival = uval_t(cpu.__r13);
+      values[R64_R14].ival = uval_t(cpu.__r14);
+      values[R64_R15].ival = uval_t(cpu.__r15);
+    }
 #endif
   }
   if ( (clsmask & X86_RC_SEGMENTS) != 0 )
   {
-    values[R_CS    ].ival = uval_t(cpu.__cs);
-    values[R_FS    ].ival = uval_t(cpu.__fs);
-    values[R_GS    ].ival = uval_t(cpu.__gs);
-#ifdef __X64__
-    values[R_DS    ].ival = 0;
-    values[R_ES    ].ival = 0;
-    values[R_SS    ].ival = 0;
-#else
-    values[R_DS    ].ival = uval_t(cpu.__ds);
-    values[R_ES    ].ival = uval_t(cpu.__es);
-    values[R_SS    ].ival = uval_t(cpu.__ss);
-#endif
+    values[R_CS].ival = uval_t(cpu.__cs);
+    values[R_FS].ival = uval_t(cpu.__fs);
+    values[R_GS].ival = uval_t(cpu.__gs);
+    if ( is64 )
+    {
+      values[R_DS].ival = 0;
+      values[R_ES].ival = 0;
+      values[R_SS].ival = 0;
+    }
+    else
+    {
+      values[R_DS].ival = uval_t(cpu.__ds);
+      values[R_ES].ival = uval_t(cpu.__es);
+      values[R_SS].ival = uval_t(cpu.__ss);
+    }
   }
 
   if ( (clsmask & (X86_RC_FPU|X86_RC_XMM|X86_RC_MMX)) != 0 )
@@ -2005,8 +2184,8 @@ int idaapi mac_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t *v
     {
       if ( (clsmask & X86_RC_FPU) != 0 )
       {
-        values[R_CTRL].ival = *(ushort*)&fpu.__fpu_fcw;
-        values[R_STAT].ival = *(ushort*)&fpu.__fpu_fsw;
+        values[R_CTRL].ival = fpu.__fpu_fcw;
+        values[R_STAT].ival = fpu.__fpu_fsw;
         values[R_TAGS].ival = fpu.__fpu_ftw;
       }
       read_fpu_registers(values, clsmask, &fpu.__fpu_stmm0, 16);
@@ -2019,56 +2198,45 @@ int idaapi mac_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t *v
       values[R_MXCSR].ival = fpu.__fpu_mxcsr;
     }
   }
-#endif // __i386__
   return true;
 }
 
 //--------------------------------------------------------------------------
 inline int get_reg_class(int reg_idx)
 {
-#ifdef __arm__
-  return ARM_RC_GENERAL;
-#else
   return get_x86_reg_class(reg_idx);
-#endif
 }
 
 //--------------------------------------------------------------------------
 // 1-ok, 0-failed
-static bool patch_reg_context(
+bool mac_debmod_t::patch_reg_context(
         machine_thread_state_t *cpu,
         machine_float_state_t *fpu,
         int reg_idx,
-        const regval_t *value)
+        const regval_t *value) const
 {
   if ( value == NULL )
     return false;
 
   int regclass = get_reg_class(reg_idx);
-#if defined (__i386__) || defined(__x86_64__)
   if ( (regclass & (X86_RC_GENERAL|X86_RC_SEGMENTS)) != 0 )
   {
     QASSERT(30102, cpu != NULL);
     switch ( reg_idx )
     {
-#ifdef __X64__
-      case R64_R8:   cpu->__r8     = value->ival; break;
-      case R64_R9:   cpu->__r9     = value->ival; break;
-      case R64_R10:  cpu->__r10    = value->ival; break;
-      case R64_R11:  cpu->__r11    = value->ival; break;
-      case R64_R12:  cpu->__r12    = value->ival; break;
-      case R64_R13:  cpu->__r13    = value->ival; break;
-      case R64_R14:  cpu->__r14    = value->ival; break;
-      case R64_R15:  cpu->__r15    = value->ival; break;
-      case R_DS:
-      case R_ES:
-      case R_SS:
-        break;
-#else
-      case R_DS:     cpu->__ds     = value->ival; break;
-      case R_ES:     cpu->__es     = value->ival; break;
-      case R_SS:     cpu->__ss     = value->ival; break;
+#ifdef __EA64__
+      case R64_R8:  if ( is64 ) { cpu->__r8  = value->ival; } break;
+      case R64_R9:  if ( is64 ) { cpu->__r9  = value->ival; } break;
+      case R64_R10: if ( is64 ) { cpu->__r10 = value->ival; } break;
+      case R64_R11: if ( is64 ) { cpu->__r11 = value->ival; } break;
+      case R64_R12: if ( is64 ) { cpu->__r12 = value->ival; } break;
+      case R64_R13: if ( is64 ) { cpu->__r13 = value->ival; } break;
+      case R64_R14: if ( is64 ) { cpu->__r14 = value->ival; } break;
+      case R64_R15: if ( is64 ) { cpu->__r15 = value->ival; } break;
 #endif
+      case R_DS: if ( !is64 ) { cpu->__ds = value->ival; } break;
+      case R_ES: if ( !is64 ) { cpu->__es = value->ival; } break;
+      case R_SS: if ( !is64 ) { cpu->__ss = value->ival; } break;
       case R_CS:     cpu->__cs     = value->ival; break;
       case R_FS:     cpu->__fs     = value->ival; break;
       case R_GS:     cpu->__gs     = value->ival; break;
@@ -2110,9 +2278,9 @@ static bool patch_reg_context(
     {
       switch ( reg_idx )
       {
-        case R_CTRL: *(ushort*)&fpu->__fpu_fcw = value->ival; break;
-        case R_STAT: *(ushort*)&fpu->__fpu_fsw = value->ival; break;
-        case R_TAGS:            fpu->__fpu_ftw = value->ival; break;
+        case R_CTRL: fpu->__fpu_fcw = value->ival; break;
+        case R_STAT: fpu->__fpu_fsw = value->ival; break;
+        case R_TAGS: fpu->__fpu_ftw = value->ival; break;
       }
     }
     else // FPU floating point registers
@@ -2122,29 +2290,6 @@ static bool patch_reg_context(
       memcpy(fptr, value->fval, 10);
     }
   }
-#else // arm
-  switch ( reg_idx )
-  {
-    case  0: cpu->__r[ 0] = value->ival; break;
-    case  1: cpu->__r[ 1] = value->ival; break;
-    case  2: cpu->__r[ 2] = value->ival; break;
-    case  3: cpu->__r[ 3] = value->ival; break;
-    case  4: cpu->__r[ 4] = value->ival; break;
-    case  5: cpu->__r[ 5] = value->ival; break;
-    case  6: cpu->__r[ 6] = value->ival; break;
-    case  7: cpu->__r[ 7] = value->ival; break;
-    case  8: cpu->__r[ 8] = value->ival; break;
-    case  9: cpu->__r[ 9] = value->ival; break;
-    case 10: cpu->__r[10] = value->ival; break;
-    case 11: cpu->__r[11] = value->ival; break;
-    case 12: cpu->__r[12] = value->ival; break;
-    case 13: cpu->__sp    = value->ival; break;
-    case 14: cpu->__lr    = value->ival; break;
-    case 15: cpu->__pc    = value->ival; break;
-    case 16: cpu->__cpsr  = value->ival; break;
-    default: return false;
-  }
-#endif
   return true;
 }
 
@@ -2167,7 +2312,6 @@ int idaapi mac_debmod_t::dbg_write_register(thid_t tid, int reg_idx, const regva
 
     return set_thread_state(tid, &cpu);
   }
-#if defined (__i386__) || defined(__x86_64__)
   else if ( (regclass & (X86_RC_FPU|X86_RC_XMM)) != 0 )
   {
     machine_float_state_t fpu;
@@ -2179,24 +2323,21 @@ int idaapi mac_debmod_t::dbg_write_register(thid_t tid, int reg_idx, const regva
 
     return set_float_state(tid, &fpu);
   }
-#endif
   return false;
 }
 
 //--------------------------------------------------------------------------
 bool idaapi mac_debmod_t::write_registers(
-  thid_t tid,
-  int start,
-  int count,
-  const regval_t *values,
-  const int *indices)
+        thid_t tid,
+        int start,
+        int count,
+        const regval_t *values,
+        const int *indices)
 {
   machine_thread_state_t cpu;
   bool got_regs = false;
-#if defined (__i386__) || defined(__x86_64__)
   machine_float_state_t fpu;
   bool got_i387 = false;
-#endif
 
   for ( int i=0; i < count; i++, values++ )
   {
@@ -2211,7 +2352,6 @@ bool idaapi mac_debmod_t::write_registers(
         got_regs = true;
       }
     }
-#if defined (__i386__) || defined(__x86_64__)
     else if ( (regclass & (X86_RC_FPU|X86_RC_XMM)) != 0 )
     {
       if ( !got_i387 )
@@ -2221,7 +2361,6 @@ bool idaapi mac_debmod_t::write_registers(
         got_i387 = true;
       }
     }
-#endif
     if ( !patch_reg_context(&cpu, &fpu, idx, values) )
       return false;
   }
@@ -2229,29 +2368,10 @@ bool idaapi mac_debmod_t::write_registers(
   if ( got_regs && !set_thread_state(tid, &cpu) )
     return false;
 
-#if defined (__i386__) || defined(__x86_64__)
   if ( got_i387 && !set_float_state(tid, &fpu) )
     return false;
-#endif
 
   return true;
-}
-
-//--------------------------------------------------------------------------
-static mac_debmod_t *md;
-static ssize_t read_mem_helper(ea_t ea, void *buffer, int size)
-{
-  int read_size;
-  return md->read_mem(ea, buffer, size, &read_size) == KERN_SUCCESS ? read_size : 0;
-}
-
-bool mac_debmod_t::is_dyld_header(ea_t base, char *filename, size_t namesize)
-{
-  lock_begin();
-  md = this;
-  bool ok = ::is_dyld_header(base, read_mem_helper, filename, namesize);
-  lock_end();
-  return ok;
 }
 
 //--------------------------------------------------------------------------
@@ -2276,6 +2396,8 @@ void mac_debmod_t::update_dyld(void)
 
   if ( read_dyri() )
   {
+    read_cache_ranges();
+
     QASSERT(30104, dyri.version >= 1);
 
     if ( dyri.num_info > 0 && dyri.info_array != 0 )
@@ -2341,7 +2463,8 @@ bool mac_debmod_t::read_dyri()
   if ( ok && ver != 0 )
   {
     // valid structure fields depending on the version
-    static const size_t read_lengths[] = {
+    static const size_t read_lengths[] =
+    {
       qoffsetof(dyld_raw_infos, libSystemInitialized),     // 1
       qoffsetof(dyld_raw_infos, jitInfo),                  // 2
       qoffsetof(dyld_raw_infos, jitInfo),                  // 3
@@ -2353,17 +2476,19 @@ bool mac_debmod_t::read_dyri()
       qoffsetof(dyld_raw_infos, initialImageCount),        // 9
       qoffsetof(dyld_raw_infos, errorKind),                // 10
       qoffsetof(dyld_raw_infos, sharedCacheSlide),         // 11
-      sizeof(dyld_raw_infos),                              // 12
+      qoffsetof(dyld_raw_infos, sharedCacheUUID),          // 12
+      qoffsetof(dyld_raw_infos, sharedCacheBaseAddress),   // 13
+      qoffsetof(dyld_raw_infos, sharedCacheBaseAddress),   // 14
+      sizeof(dyld_raw_infos),                              // 15
     };
     size_t readsize = (ver - 1) < qnumber(read_lengths) ? read_lengths[ver - 1] : read_lengths[qnumber(read_lengths) - 1];
     ok = read_mem(dyld_infos, &dyri, readsize, NULL) == KERN_SUCCESS;
     memset((char*)&dyri + readsize, 0, sizeof(dyri) - readsize);
-    ea_t expected_dyld = dyri.dyldImageLoadAddress;
-    if ( ok && ver >= 2 && expected_dyld != dyld && dyri.dyldImageLoadAddress != 0 )
+    if ( ok && ver >= 2 && dyld_infos != dyri.dyldAllImageInfosAddress )
     {
       // dyld hasn't relocated the fields yet, do it
-      dmsg("relocating dyld fields from %a to %a\n", expected_dyld, dyld);
-      adiff_t slide = dyld - expected_dyld;
+      adiff_t slide = dyld_infos - dyri.dyldAllImageInfosAddress;
+      dmsg("relocating dyld fields with slide %a\n", slide);
       if ( dyri.info_array != 0 )
         dyri.info_array += slide;
       if ( dyri.dyld_notify != 0 )
@@ -2374,59 +2499,197 @@ bool mac_debmod_t::read_dyri()
 }
 
 //--------------------------------------------------------------------------
-void mac_debmod_t::init_dyld(ea_t addr, const char *fname)
+bool mac_debmod_t::read_cache_ranges()
 {
-  dmsg("%a: located dyld header and file '%s'\n", addr, fname);
-  dyld = addr;
+  shared_cache_ranges.clear();
 
-  add_dll(addr, fname);
-  // immediately process it
-  dbg_stopped_at_debug_event();
-
-  // check if we just found the address of dyld raw information
-  if ( dyri.version == 0 && dyld_infos != BADADDR )
+  if ( dyld_ranges != BADADDR )
   {
-    if ( read_dyri() )
+    dyld_raw_ranges raw;
+    if ( read_mem(dyld_ranges, &raw, sizeof(raw), NULL) != KERN_SUCCESS )
+      return false;
+
+    ea_t count = raw.sharedRegionsCount;
+    for ( ea_t i = 0; i < count; i++ )
     {
-      // set a breakpoint for library loads/unloads
-      ea_t notify_ea = dyri.dyld_notify; // shut up the compiler
-      dmsg("%a: setting bpt for library notifications\n", notify_ea);
-      uchar opcode[BPT_CODE_SIZE];
-      read_mem(notify_ea, opcode, sizeof(opcode), NULL);
-      if ( memcmp(opcode, dyld_opcode, BPT_CODE_SIZE) != 0 )
-        dwarning("Unexpected dyld_opcode in the debugger server (init_dyld): %x", *(uint32*)opcode);
-      dbg_add_bpt(BPT_SOFT, notify_ea, -1);
+      ea_t start = raw.ranges[i].start;
+      ea_t size  = raw.ranges[i].length;
+      dmsg("shared cache mapping: %a..%a\n", start, start+size);
+      shared_cache_ranges.push_back(range_t(start, start+size));
     }
-    else
+  }
+  else if ( dyri.sharedCacheBaseAddress != 0 )
+  {
+    dmsg("dyri: version=%d, sharedCacheBaseAddress=%a, sharedCacheSlide=%a\n",
+         dyri.version,
+         ea_t(dyri.sharedCacheBaseAddress),
+         ea_t(dyri.sharedCacheSlide));
+
+    // _dyld_shared_cache_ranges is no longer present in dyld for OSX 10.13/iOS 11.
+    // fall back to parsing the mappings in the dyld cache header.
+    struct ida_local mapping_visitor_t : public dyld_cache_visitor_t
     {
-      dmsg("%a: error reading dyld infos\n", dyld_infos);
-      // try later?
-      dyri.version = 0;
+      mac_debmod_t *dm;
+      dyld_shared_cache_ranges_t *ranges;
+      ea_t slide;
+
+      mapping_visitor_t(mac_debmod_t *_dm, dyld_shared_cache_ranges_t *_ranges, ea_t _slide)
+        : dyld_cache_visitor_t(DCV_MAPPINGS),
+          dm(_dm),
+          ranges(_ranges),
+          slide(_slide) {}
+
+      virtual void visit_mapping(ea_t _start_ea, ea_t _end_ea)
+      {
+        ea_t start_ea = _start_ea + slide;
+        ea_t end_ea = _end_ea + slide;
+        dm->dmsg("shared cache mapping: %a..%a\n", start_ea, end_ea);
+        ranges->push_back(range_t(start_ea, end_ea));
+      }
+    };
+
+    mapping_visitor_t mapv(this, &shared_cache_ranges, dyri.sharedCacheSlide);
+    parse_dyld_cache_mem(dyri.sharedCacheBaseAddress, reader, mapv);
+  }
+
+  return !shared_cache_ranges.empty();
+}
+
+//--------------------------------------------------------------------------
+int mac_debmod_t::visit_vm_regions(vm_region_visitor_t &rv)
+{
+  mach_vm_size_t size = 0;
+  for ( mach_vm_address_t addr = 0; ; addr += size )
+  {
+    mach_port_t object_name; // unused
+    vm_region_top_info_data_t info;
+    mach_msg_type_number_t count = VM_REGION_TOP_INFO_COUNT;
+    kern_return_t kr = mach_vm_region(task, &addr, &size, VM_REGION_TOP_INFO,
+                        (vm_region_info_t)&info, &count, &object_name);
+
+    debdeb("task=%d addr=%" FMT_64 "x size=%" FMT_64 "x err=%x\n", task, addr, size, kr);
+    if ( kr != KERN_SUCCESS )
+      break;
+
+    mach_vm_address_t subaddr;
+    mach_vm_size_t subsize = 0;
+    mach_vm_address_t end = addr + size;
+    for ( subaddr=addr; subaddr < end; subaddr += subsize )
+    {
+      natural_t depth = 1;
+      vm_region_submap_info_data_64_t sinfo;
+      count = VM_REGION_SUBMAP_INFO_COUNT_64;
+      kr = mach_vm_region_recurse(task, &subaddr, &subsize, &depth,
+                                    (vm_region_info_t)&sinfo, &count);
+      if ( kr != KERN_SUCCESS )
+        break;
+      if ( subaddr >= end )
+        break;
+
+      memory_info_t mi;
+      mi.start_ea = subaddr;
+      mi.end_ea = subaddr + subsize;
+      mi.bitness = DEB_SEGM_BITNESS;
+
+      if ( sinfo.protection & 1 ) mi.perm |= SEGPERM_READ;
+      if ( sinfo.protection & 2 ) mi.perm |= SEGPERM_WRITE;
+      if ( sinfo.protection & 4 ) mi.perm |= SEGPERM_EXEC;
+
+      int code = rv.visit_region(mi);
+      if ( code != 0 )
+        return code;
     }
+  }
+
+  return 0;
+}
+
+//--------------------------------------------------------------------------
+bool mac_debmod_t::parse_macho_file(
+        macho_visitor_t &mv,
+        const image_info_t &ii) const
+{
+  const char *dllname = ii.name.c_str();
+
+  linput_t *li = open_linput(dllname, false);
+  if ( li == NULL )
+    return false;
+
+  bool ok = parse_macho_file_pc(ii.base, li, mv, is64);
+  close_linput(li);
+  return ok;
+}
+
+//--------------------------------------------------------------------------
+void mac_debmod_t::parse_macho_image(macho_visitor_t &mv, const image_info_t &ii)
+{
+  if ( shared_cache_ranges.contains(ii.base) )
+  {
+    // we must avoid parsing libs from dyld_shared_cache on disk, since the libraries
+    // stored on disk may not match the corresponding image in the cache.
+    // (Ex: segment mapping might be different)
+    parse_macho_mem_pc(ii.base, reader, mv, &strings, is64, true);
+  }
+  else if ( !parse_macho_file(mv, ii) )
+  {
+    // if parsing failed on disk, fall back to parsing the image in memory
+    parse_macho_mem_pc(ii.base, reader, mv, NULL, is64, false);
   }
 }
 
 //--------------------------------------------------------------------------
-image_info_t *mac_debmod_t::get_image(ea_t addr, asize_t size)
+void mac_debmod_t::init_dyld()
 {
-  if ( !dlls.empty() )
+  debdeb("searching process memory for dyld...\n");
+  struct dyld_finder_t : public vm_region_visitor_t
   {
-    images_t::iterator p = dlls.lower_bound(addr);
-    if ( p != dlls.end() )
+    mac_debmod_t *dm;
+    char fname[QMAXPATH];
+
+    dyld_finder_t(mac_debmod_t *_dm) : dm(_dm) {}
+
+    virtual int visit_region(memory_info_t &mi)
     {
-      image_info_t &ii = p->second;
-      if ( interval::overlap(ii.base, ii.imagesize, addr, size) )
-        return &ii;
+      if ( is_dyld_header(mi.start_ea, dm->reader, fname, sizeof(fname), dm->is64) )
+      {
+        dm->dmsg("%a: located dyld header and file '%s'\n", mi.start_ea, fname);
+        dm->dyld = mi.start_ea;
+        return 1;
+      }
+      return 0;
     }
-    if ( p != dlls.begin() )
-    {
-      --p;
-      image_info_t &ii = p->second;
-      if ( interval::overlap(ii.base, ii.imagesize, addr, size) )
-        return &ii;
-    }
+  };
+
+  dyld_finder_t df(this);
+  if ( visit_vm_regions(df) != 1 || dyld == BADADDR )
+  {
+    dwarning("failed to find dyld in the target process");
+    return;
   }
-  return NULL;
+
+  add_dll(dyld, df.fname);
+  // immediately process it
+  dbg_stopped_at_debug_event();
+
+  if ( dyld_infos == BADADDR || !read_dyri() )
+  {
+    dwarning("failed to read _dyld_all_image_infos in the target process");
+    return;
+  }
+
+  // set a breakpoint for library loads/unloads
+  ea_t notify_ea = dyri.dyld_notify; // shut up the compiler
+  dmsg("%a: setting bpt for library notifications\n", notify_ea);
+
+  uchar opcode[BPT_CODE_SIZE];
+  read_mem(notify_ea, opcode, sizeof(opcode), NULL);
+  if ( memcmp(opcode, dyld_opcode, BPT_CODE_SIZE) != 0 )
+    dwarning("Unexpected dyld_opcode in the debugger server (init_dyld): %x", *(uint32*)opcode);
+
+  dbg_add_bpt(BPT_SOFT, notify_ea, -1);
+
+  // process any previously loaded dlls
+  update_dyld();
 }
 
 //--------------------------------------------------------------------------
@@ -2447,122 +2710,305 @@ image_info_t *mac_debmod_t::get_image(ea_t addr, asize_t size)
 }*/
 
 //--------------------------------------------------------------------------
-int mac_debmod_t::get_memory_info(meminfo_vec_t &miv, bool suspend)
+ssize_t mem_reader_t::read(ea_t ea, void *buffer, int size)
+{
+  return dm->dbg_read_memory(ea, buffer, size);
+}
+
+//--------------------------------------------------------------------------
+void mac_debmod_t::clean_stack_regions(meminfo_vec_t &miv) const
+{
+  // It seems on some versions of OSX, mach_vm_region() can report a region
+  // of size PAGE_SIZE that lies at the bottom of the user stack. I'm not sure if this
+  // is a bug in the OS, some undocumented range internal to OSX, or maybe even a deliberate attempt
+  // to confuse debuggers/hacking tools. Either way, IDA must ignore this region because if
+  // it doesn't, the stack will be split across two segments which can break stack unwinding.
+  for ( meminfo_vec_t::iterator p = miv.begin(); p != miv.end(); ++p )
+  {
+    // the erroneous region has size PAGE_SIZE
+    if ( p->size() != PAGE_SIZE )
+      continue;
+
+    // check if this region is located somewhere near the default stack base.
+    // from vm_param.h: ASLR can slide the stack down by up to 1 MB.
+    range_t stack_range(VM_USRSTACK-0x100000, VM_USRSTACK);
+    if ( !stack_range.contains(*p) )
+      continue;
+
+    // check if next region is beyond the default stack base.
+    // (i.e. 'p' represents the bottom of the stack).
+    meminfo_vec_t::const_iterator next = p;
+    if ( ++next == miv.end() || next->start_ea < VM_USRSTACK )
+      continue;
+
+    // check if previous region is aligned with the erroneous region
+    meminfo_vec_t::iterator prev = p;
+    if ( prev == miv.begin() || (--prev)->end_ea != p->start_ea )
+      continue;
+
+    // we have found a bogus region at the bottom of the stack.
+    // extend the previous region and remove this erroneous one.
+    prev->end_ea = p->end_ea;
+    miv.erase(p);
+    break;
+  }
+}
+
+//--------------------------------------------------------------------------
+// merge 2 range sets
+// high priority overrides what is defined in low priority
+// FIXME: this function was stolen from ui/memregs.cpp. Since it's part
+// of the ui we can't use it from the mac_server, and I'm not sure if it's
+// worth moving it to the kernel.
+static void merge(
+        meminfo_vec_t &res,
+        const meminfo_vec_t &low,
+        const meminfo_vec_t &high)
+{
+  if ( low.empty() )
+  {
+    res = high;
+    return;
+  }
+
+  if ( high.empty() )
+  {
+    res = low;
+    return;
+  }
+
+  int l = 0;
+  meminfo_vec_t tmp;
+  ea_t end = 0;
+  ea_t lea = low[0].start_ea;
+  for ( int h=0; ; h++ )
+  {
+    ea_t hea = h < high.size() ? high[h].start_ea : BADADDR;
+    if ( hea != end )
+    {
+      while ( l < low.size() && lea < hea )
+      { // add ranges before the high priority range
+        if ( low[l].end_ea > end )
+        {
+          tmp.push_back(low[l]);
+          if ( end >= lea )
+            tmp.back().start_ea = end;
+          end = low[l].end_ea;
+          if ( end > hea )
+          {
+            end = lea = hea;
+            tmp.back().end_ea = end;
+            break;
+          }
+        }
+        l++;
+        if ( l < low.size() )
+          lea = low[l].start_ea;
+      }
+    }
+    if ( h == high.size() )
+      break;
+    tmp.push_back(high[h]);
+    end = high[h].end_ea;
+  }
+  tmp.swap(res);
+}
+
+//--------------------------------------------------------------------------
+int mac_debmod_t::get_memory_info(meminfo_vec_t &out, bool suspend)
 {
   if ( suspend && !suspend_all_threads() )
     return -1;
   if ( exited() )
     return -1;
 
-  mach_vm_size_t size = 0;
-  for ( mach_vm_address_t addr = 0; ; addr += size )
+  meminfo_vec_t sects;
+  // parse section info for each loaded dll
+  for ( images_t::const_iterator i = dlls.begin(); i != dlls.end(); ++i )
   {
-    mach_port_t object_name; // unused
-    vm_region_top_info_data_t info;
-    mach_msg_type_number_t count = VM_REGION_TOP_INFO_COUNT;
-    kern_return_t code = mach_vm_region(task, &addr, &size, VM_REGION_TOP_INFO,
-                        (vm_region_info_t)&info, &count, &object_name);
+    const image_info_t &ii = i->second;
 
-    //debdeb("task=%d addr=%" FMT_64 "x size=%" FMT_64 "x err=%x\n", task, addr, size, code);
-    if ( code != KERN_SUCCESS )
-      break;
-
-    // find dyld in the memory if not found yet
-    char fname[QMAXPATH];
-    if ( dyld == BADADDR && is_dyld_header(addr, fname, sizeof(fname)) )
-      init_dyld(addr, fname);
-
-    mach_vm_address_t subaddr;
-    mach_vm_size_t subsize = 0;
-    mach_vm_address_t end = addr + size;
-    for ( subaddr=addr; subaddr < end; subaddr += subsize )
+    struct ida_local sect_finder_t : public macho_visitor_t
     {
-      natural_t depth = 1;
-      vm_region_submap_info_data_64_t sinfo;
-      count = VM_REGION_SUBMAP_INFO_COUNT_64;
-      code = mach_vm_region_recurse(task, &subaddr, &subsize, &depth,
-                                    (vm_region_info_t)&sinfo, &count);
-      if ( code != KERN_SUCCESS )
-        break;
-      if ( subaddr >= end )
-        break;
+      meminfo_vec_t &sects;
+      const char *dllname;
 
-      memory_info_t &mi = miv.push_back();
-      mi.startEA = subaddr;
-      mi.endEA   = subaddr + subsize;
-#ifdef __X64__
-      if ( subaddr == 0x7FFFFFE00000 )
-        mi.name = "COMMPAGE";
-      mi.bitness = 2; // 64bit
-#else
-      mi.bitness = 1; // 32bit
-#endif
-      // check if we have information about this memory chunk
-      image_info_t *im = get_image(subaddr, subsize);
-      if ( im == NULL )
+      sect_finder_t(meminfo_vec_t &_sects, const char *path)
+        : macho_visitor_t(MV_SECTIONS), sects(_sects), dllname(qbasename(path)) {}
+
+      virtual void visit_section(ea_t start_ea, ea_t end_ea, const qstring &name, bool is_code)
       {
-        // it is not a good idea to hide any addresses because
-        // they will be used by the program and the user will be
-        // left blind, not seeing the executed instructions.
-#if 0
-        if ( is_shared_address(subaddr) )
-        {
-          // hide unloaded shared libraries???
-          continue;
-        }
-#endif
+        memory_info_t &s = sects.push_back();
+        s.name.sprnt("%s:%s", dllname, name.c_str());
+        s.start_ea = start_ea;
+        s.end_ea   = end_ea;
+        s.sclass  = is_code ? "CODE" : "DATA";
+        s.perm    = SEGPERM_READ | (is_code ? SEGPERM_EXEC : 0);
+        s.bitness = DEB_SEGM_BITNESS;
       }
-      else
-      {
-        mi.name = im->name;
-      }
-      mi.perm = 0;
-      if ( sinfo.protection & 1 ) mi.perm |= SEGPERM_READ;
-      if ( sinfo.protection & 2 ) mi.perm |= SEGPERM_WRITE;
-      if ( sinfo.protection & 4 ) mi.perm |= SEGPERM_EXEC;
-//      char buf[40];
-//      dmsg("%" FMT_64 "x..%" FMT_64 "x: share mode %s prot: %x name=%s\n", subaddr, subaddr+subsize, get_share_mode_name(sinfo.share_mode, buf, sizeof(buf)), sinfo.protection, mi.name.c_str());
-    }
+    };
+
+    sect_finder_t sf(sects, ii.name.c_str());
+    parse_macho_image(sf, ii);
   }
 
-#if !defined(__arm__) && !defined(__X64__)
-  // add hidden dsmos data
-  memory_info_t &mi = miv.push_back();
-  mi.startEA = 0xFFFF0000;
-  mi.endEA   = 0xFFFFF000;
-  mi.bitness = 1; // 32bit
-  mi.perm = 0;
-  mi.name = "COMMPAGE";
-#endif
+  std::sort(sects.begin(), sects.end());
 
-  update_dyld();
+  meminfo_vec_t regions;
+  // collect other known vm regions (stack, heap, etc.)
+  struct ida_local vm_region_collector_t : public vm_region_visitor_t
+  {
+    meminfo_vec_t &regions;
+    vm_region_collector_t(meminfo_vec_t &_regions) : regions(_regions) {}
+    virtual int visit_region(memory_info_t &r)
+    {
+      if ( r.start_ea == COMMPAGE_START )
+        r.name = "COMMPAGE";
+      regions.push_back(r);
+      return 0;
+    }
+  };
+
+  vm_region_collector_t rc(regions);
+  visit_vm_regions(rc);
+  std::sort(regions.begin(), regions.end());
+
+  merge(out, regions, sects);
+  // FIXME: eventually this should be removed and replaced with a general solution that
+  // coagulates all user stack vm regions into one. However this would require us to identify exactly
+  // which memory regions represent the user stack - a task that the OS purposefully makes difficult.
+  // I'm not sure how we can do it without guessing. Also see issue IDA-1813.
+  clean_stack_regions(out);
+
   if ( suspend )
     resume_all_threads();
   return 1;
 }
 
 //--------------------------------------------------------------------------
-int idaapi mac_debmod_t::dbg_get_memory_info(meminfo_vec_t &areas)
+int idaapi mac_debmod_t::dbg_get_memory_info(meminfo_vec_t &ranges)
 {
-  int code = get_memory_info(areas, true);
+  int code = get_memory_info(ranges, true);
   if ( code == 1 )
   {
-    if ( same_as_oldmemcfg(areas) )
+    if ( same_as_oldmemcfg(ranges) )
       code = -2;
     else
-      save_oldmemcfg(areas);
+      save_oldmemcfg(ranges);
   }
   return code;
 }
 
 //--------------------------------------------------------------------------
-int idaapi mac_debmod_t::dbg_init(bool _debug_debugger)
+int idaapi mac_debmod_t::dbg_get_scattered_image(scattered_image_t &si, ea_t base)
+{
+  if ( !shared_cache_ranges.contains(base) )
+    return -1;
+
+  struct ida_local segm_visitor_t : public macho_visitor_t
+  {
+    scattered_image_t &si;
+
+    segm_visitor_t(scattered_image_t &_si)
+      : macho_visitor_t(MV_SECTIONS), si(_si) {}
+
+    virtual void visit_section(ea_t start_ea, ea_t end_ea, const qstring &name, bool)
+    {
+      scattered_segm_t &ss = si.push_back();
+      ss.start_ea = start_ea;
+      ss.end_ea = end_ea;
+      ss.name = name;
+    }
+  };
+
+  segm_visitor_t sv(si);
+  return parse_macho_mem_pc(base, reader, sv, NULL, is64, true) ? 1 : -1;
+}
+
+//--------------------------------------------------------------------------
+bool idaapi mac_debmod_t::dbg_get_image_uuid(bytevec_t *uuid, ea_t base)
+{
+  images_t::const_iterator p = dlls.find(base);
+  if ( p == dlls.end() )
+    return false;
+
+  struct ida_local uuid_getter_t : public macho_visitor_t
+  {
+    bytevec_t *uuid;
+    uuid_getter_t(bytevec_t *_uuid) : macho_visitor_t(MV_UUID), uuid(_uuid) {}
+    virtual void visit_uuid(const bytevec_t &_uuid) { *uuid = _uuid; }
+  };
+
+  uuid_getter_t getter(uuid);
+  parse_macho_image(getter, p->second);
+  return true;
+}
+
+//--------------------------------------------------------------------------
+ea_t idaapi mac_debmod_t::dbg_get_segm_start(ea_t base, const qstring &segname)
+{
+  images_t::const_iterator p = dlls.find(base);
+  if ( p == dlls.end() )
+    return BADADDR;
+
+  struct ida_local segm_finder_t : public macho_visitor_t
+  {
+    ea_t *result;
+    const qstring &segname;
+
+    segm_finder_t(ea_t *_result, const qstring &_segname)
+      : macho_visitor_t(MV_SEGMENTS), result(_result), segname(_segname) {}
+
+    virtual void visit_segment(ea_t start_ea, ea_t, const qstring &name, bool)
+    {
+      if ( segname == name )
+        *result = start_ea;
+    }
+  };
+
+  ea_t result = BADADDR;
+  segm_finder_t finder(&result, segname);
+  parse_macho_image(finder, p->second);
+
+  return result;
+}
+
+//--------------------------------------------------------------------------
+void idaapi mac_debmod_t::dbg_set_debugging(bool _debug_debugger)
+{
+  debug_debugger = _debug_debugger;
+}
+
+//--------------------------------------------------------------------------
+int idaapi mac_debmod_t::dbg_init(void)
 {
   // remember if the input is a dll
   cleanup();
   cleanup_hwbpts();
-  debug_debugger = _debug_debugger;
-  return DBG_HAS_PROCGETINFO | DBG_HAS_DETACHPROC;
+
+  int ret = DBG_HAS_PROCGETINFO | DBG_HAS_DETACHPROC;
+
+  // here we ensure that IDA can in fact debug other applications.
+  // if not, we warn the user.
+  if ( getuid() == 0 )
+    return ret;
+
+  if ( !verify_code_signature() )
+  {
+    msg("WARNING: This program must either be codesigned or run as root to debug mac applications.\n");
+  }
+  else if ( !verify_user_privilege() )
+  {
+    msg("WARNING: This program must be launched by a user in the _developer group in order to debug mac applications\n");
+  }
+  else if ( !acquire_taskport_right() )
+  {
+    msg("WARNING: The debugger could not acquire the necessary permissions from the OS to debug mac applications.\n"
+        "You will likely have to specify the proper credentials at process start. To avoid this, you can set\n"
+        "the MAC_DEBMOD_USER and MAC_DEBMOD_PASS environment variables.\n");
+  }
+
+  return ret;
 }
 
 //--------------------------------------------------------------------------
@@ -2574,9 +3020,9 @@ void idaapi mac_debmod_t::dbg_term(void)
 
 //--------------------------------------------------------------------------
 bool idaapi mac_debmod_t::thread_get_fs_base(
-      thid_t /*tid*/,
-      int /*reg_idx*/,
-      ea_t * /*pea*/)
+        thid_t /*tid*/,
+        int /*reg_idx*/,
+        ea_t * /*pea*/)
 {
   return false;
 }
@@ -2618,6 +3064,8 @@ bool idaapi mac_debmod_t::dbg_continue_broken_connection(pid_t _pid)
   if ( restore_broken_breakpoints() )
   {
     thid_t tid = init_main_thread(true);
+
+    init_dyld();
     create_process_start_event(_pid, tid);
     create_process_attach_event(_pid);
 
@@ -2631,6 +3079,7 @@ bool idaapi mac_debmod_t::dbg_continue_broken_connection(pid_t _pid)
 bool init_subsystem()
 {
   mac_debmod_t::reuse_broken_connections = true;
+
   return true;
 }
 

@@ -117,10 +117,10 @@ enum nameNum
   ARC_subsdw,                   // Subtract and saturate dual word
 
   // mac d16
-  ARC_muldw, 
+  ARC_muldw,
   ARC_muludw,
   ARC_mulrdw,
-  ARC_macdw, 
+  ARC_macdw,
   ARC_macudw,
   ARC_macrdw,
   ARC_msubdw,
@@ -137,8 +137,41 @@ enum nameNum
   ARC_mulhlw,
   ARC_mulhflw,
 
-  ARC_last,
+  // Major 6 compact insns
+  ARC_acm,
+  ARC_addqbs,
+  ARC_avgqb,
+  ARC_clamp,
+  ARC_daddh11,
+  ARC_daddh12,
+  ARC_daddh21,
+  ARC_daddh22,
+  ARC_dexcl1,
+  ARC_dexcl2,
+  ARC_dmulh11,
+  ARC_dmulh12,
+  ARC_dmulh21,
+  ARC_dmulh22,
+  ARC_dsubh11,
+  ARC_dsubh12,
+  ARC_dsubh21,
+  ARC_dsubh22,
+  ARC_drsubh11,
+  ARC_drsubh12,
+  ARC_drsubh21,
+  ARC_drsubh22,
+  ARC_fadd,
+  ARC_fmul,
+  ARC_fsub,
+  ARC_fxtr,
+  ARC_iaddr,
+  ARC_mpyqb,
+  ARC_sfxtr,
+  ARC_pkqb,
+  ARC_upkqb,
+  ARC_xpkqb,
 
+  ARC_last,
 };
 
 #endif

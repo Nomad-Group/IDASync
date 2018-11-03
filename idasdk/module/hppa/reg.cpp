@@ -8,6 +8,7 @@
  */
 
 #include "hppa.hpp"
+#include "hppa_cfh.cpp"
 #include <diskio.hpp>
 #include <typeinf.hpp>
 
@@ -25,10 +26,10 @@ static const char *register_names[] =
   // space registers
   "%sr0", "%sr1", "%sr2", "%sr3", "%sr4", "%sr5", "%sr6", "%sr7",
   // control registers
-  "%rctr", "%cr1",  "%cr2",  "%cr3",  "%cr4",  "%cr5",  "%cr6",  "%cr7",
-  "%pidr1","%pidr2","%ccr",  "%sar",  "%pidr3","%pidr4","%iva",  "%eiem",
-  "%itmr", "%pcsq", "pcoq",  "%iir",  "%isr",  "%ior",  "%ipsw", "%eirr",
-  "%tr0",  "%tr1",  "%tr2",  "%tr3",  "%tr4",  "%tr5",  "%tr6",  "%tr7",
+  "%rctr", "%cr1",   "%cr2",  "%cr3",  "%cr4",   "%cr5",  "%cr6",  "%cr7",
+  "%pidr1","%pidr2", "%ccr",  "%sar",  "%pidr3", "%pidr4","%iva",  "%eiem",
+  "%itmr", "%pcsq",  "pcoq",  "%iir",  "%isr",   "%ior",  "%ipsw", "%eirr",
+  "%tr0",  "%tr1",   "%tr2",  "%tr3",  "%tr4",   "%tr5",  "%tr6",  "%tr7",
   // floating-point registers
   "%fpsr", "%fr1",  "%fr2",  "%fr3",  "%fr4",  "%fr5",  "%fr6",  "%fr7",
   "%fr8",  "%fr9",  "%fr10", "%fr11", "%fr12", "%fr13", "%fr14", "%fr15",
@@ -65,7 +66,6 @@ static const asm_t gas =
   "GNU-like hypothetical assembler",
   0,
   NULL,         // header lines
-  NULL,         // bad instructions
   ".org",       // org
   NULL,         // end
 
@@ -88,10 +88,6 @@ static const asm_t gas =
   ".space %s",  // uninited arrays
   "=",          // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   ".",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -119,7 +115,6 @@ static const asm_t gas =
   NULL,         // high16
   "#include \"%s\"",  // a_include_fmt
   NULL,         // vstruc_fmt
-  NULL,         // 3byte
   NULL,         // rva
 };
 
@@ -131,16 +126,14 @@ netnode helper;
 //--------------------------------------------------------------------------
 static void setup_got(void)
 {
-  netnode n("$ got");
-  if ( exist(n) )
-    got = n.altval(0) - 1;
+  got = get_gotea();
   if ( got == BADADDR )
-    get_name_value(BADADDR, "_GLOBAL_OFFSET_TABLE_", &got);
+    get_name_value(&got, BADADDR, "_GLOBAL_OFFSET_TABLE_");
   if ( got == BADADDR )
   {
     segment_t *s = get_segm_by_name(".got");
     if ( s != NULL )
-      got = s->startEA;
+      got = s->start_ea;
   }
   msg("DP is assumed to be %08a\n", got);
 }
@@ -167,181 +160,12 @@ static void handle_new_flags(void)
 }
 
 //--------------------------------------------------------------------------
-static ioport_t *syscalls;
-static size_t nsyscalls;
+static ioports_t syscalls;
 
 const char *get_syscall_name(int syscall)
 {
-  const ioport_t *p = find_ioport(syscalls, nsyscalls, syscall);
-  return p == NULL ? NULL : p->name;
-}
-
-//--------------------------------------------------------------------------
-
-int ptype;
-ea_t got = BADADDR;
-
-ushort idpflags = IDP_SIMPLIFY;
-
-static int idaapi notify(processor_t::idp_notify msgid, ...)
-{
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code != 0 )
-    return code;
-
-  switch ( msgid )
-  {
-    case processor_t::init:
-//      __emit__(0xCC);   // debugger trap
-      helper.create("$ hppa");
-      inf.mf = 1;         // always big endian
-      syscalls = read_ioports(&nsyscalls, "hpux.cfg", NULL, 0, NULL);
-      break;
-
-    case processor_t::term:
-      free_ioports(syscalls, nsyscalls);
-      break;
-
-    case processor_t::newfile:      // new file loaded
-      handle_new_flags();
-      setup_got();
-      break;
-
-    case processor_t::oldfile:      // old file loaded
-      idpflags = ushort(helper.altval(-1));
-      handle_new_flags();
-      setup_got();
-      break;
-
-    case processor_t::newprc:    // new processor type
-      break;
-
-    case processor_t::newasm:    // new assembler type
-      break;
-
-    case processor_t::newseg:    // new segment
-      {
-        segment_t *sptr = va_arg(va, segment_t *);
-        sptr->defsr[ rVds-ph.regFirstSreg] = find_selector(sptr->sel);
-        sptr->defsr[DPSEG-ph.regFirstSreg] = 0;
-      }
-      break;
-
-    case processor_t::is_sane_insn:
-      return is_sane_insn(va_arg(va, int));
-
-    case processor_t::may_be_func:
-                                // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
-                                // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
-      return may_be_func();
-
-    case processor_t::is_basic_block_end:
-      return is_basic_block_end() ? 2 : 0;
-
-// +++ TYPE CALLBACKS (only 32-bit programs for the moment)
-    case processor_t::decorate_name3:
-      {
-        qstring *outbuf  = va_arg(va, qstring *);
-        const char *name = va_arg(va, const char *);
-        bool mangle      = va_argi(va, bool);
-        cm_t cc          = va_argi(va, cm_t);
-        return gen_decorate_name3(outbuf, name, mangle, cc) ? 2 : 0;
-      }
-
-    case processor_t::max_ptr_size:
-      return 4+1;
-
-    case processor_t::based_ptr:
-      {
-        uint ptrt = va_arg(va, uint); qnotused(ptrt);
-        char **ptrname    = va_arg(va, char **);
-        *ptrname = NULL;
-        return 0;                       // returns: size of type
-      }
-
-    case processor_t::get_default_enum_size: // get default enum size
-                                // args:  cm_t cm
-                                // returns: sizeof(enum)
-      {
-//        cm_t cm        =  va_argi(va, cm_t);
-        return inf.cc.size_e;
-      }
-
-    case processor_t::calc_arglocs3:
-      {
-        func_type_data_t *fti = va_arg(va, func_type_data_t *);
-        return calc_hppa_arglocs(fti) ? 2 : -1;
-      }
-
-    case processor_t::use_stkarg_type3:
-        return false;
-
-    case processor_t::use_regarg_type3:
-      {
-        int *used                 = va_arg(va, int *);
-        ea_t ea                   = va_arg(va, ea_t);
-        const funcargvec_t *rargs = va_arg(va, const funcargvec_t *);
-        *used = use_hppa_regarg_type(ea, *rargs);
-        return 2;
-      }
-
-    case processor_t::use_arg_types3:
-      {
-        ea_t ea               = va_arg(va, ea_t);
-        func_type_data_t *fti = va_arg(va, func_type_data_t *);
-        funcargvec_t *rargs   = va_arg(va, funcargvec_t *);
-        use_hppa_arg_types(ea, fti, rargs);
-        return 2;
-      }
-
-    case processor_t::get_fastcall_regs3:
-      {
-        callregs_t *callregs = va_arg(va, callregs_t *);
-        static const int regs[] = { R26, R25, R24, R23, -1 };
-        callregs->set(ARGREGS_INDEPENDENT, regs, NULL);
-        return callregs->nregs + 2;
-      }
-
-    case processor_t::get_thiscall_regs3:
-      {
-        callregs_t *callregs = va_arg(va, callregs_t *);
-        callregs->reset();
-        return 2;
-      }
-
-    case processor_t::calc_cdecl_purged_bytes2:
-                                // calculate number of purged bytes after call
-      {
-        // ea_t ea                     = va_arg(va, ea_t);
-        return 2;
-      }
-
-    case processor_t::get_stkarg_offset2:
-                                // get offset from SP to the first stack argument
-                                // args: none
-                                // returns: the offset+2
-      return -0x34 + 2;
-
-// --- TYPE CALLBACKS
-    case processor_t::loader:
-      break;
-
-    default:
-      return handle_old_type_callbacks(msgid, va);
-  }
-  va_end(va);
-  return 1;
+  const ioport_t *p = find_ioport(syscalls, syscall);
+  return p == NULL ? NULL : p->name.c_str();
 }
 
 //--------------------------------------------------------------------------
@@ -391,7 +215,7 @@ const char *idaapi set_idp_options(const char *keyword,int value_type,const void
 
   if ( keyword == NULL )
   {
-    AskUsingForm_c(form, &idpflags);
+    ask_form(form, &idpflags);
 OK:
     helper.altset(-1, idpflags);
     handle_new_flags();
@@ -420,6 +244,282 @@ OK:
   }
 }
 
+//--------------------------------------------------------------------------
+
+int ptype;
+ea_t got = BADADDR;
+
+ushort idpflags = IDP_SIMPLIFY;
+
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+//      __emit__(0xCC);   // debugger trap
+      helper.create("$ hppa");
+      inf.set_be(true);         // always big endian
+      read_ioports(&syscalls, NULL, "hpux.cfg");
+      init_custom_refs();
+      break;
+
+    case processor_t::ev_term:
+      term_custom_refs();
+      syscalls.clear();
+      break;
+
+    case processor_t::ev_newfile:      // new file loaded
+      handle_new_flags();
+      setup_got();
+      break;
+
+    case processor_t::ev_oldfile:      // old file loaded
+      idpflags = ushort(helper.altval(-1));
+      handle_new_flags();
+      setup_got();
+      break;
+
+    case processor_t::ev_newprc:    // new processor type
+      break;
+
+    case processor_t::ev_newasm:    // new assembler type
+      break;
+
+    case processor_t::ev_creating_segm:    // new segment
+      {
+        segment_t *sptr = va_arg(va, segment_t *);
+        sptr->defsr[ rVds-ph.reg_first_sreg] = find_selector(sptr->sel);
+        sptr->defsr[DPSEG-ph.reg_first_sreg] = 0;
+      }
+      break;
+
+    case processor_t::ev_is_sane_insn:
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        int nocrefs = va_arg(va, int);
+        return is_sane_insn(*insn, nocrefs) == 1 ? 1 : -1;
+      }
+
+    case processor_t::ev_may_be_func:
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        return may_be_func(*insn);
+      }
+
+    case processor_t::ev_is_basic_block_end:
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        return is_basic_block_end(*insn) ? 1 : -1;
+      }
+
+// +++ TYPE CALLBACKS (only 32-bit programs for the moment)
+    case processor_t::ev_decorate_name:
+      {
+        qstring *outbuf  = va_arg(va, qstring *);
+        const char *name = va_arg(va, const char *);
+        bool mangle      = va_argi(va, bool);
+        cm_t cc          = va_argi(va, cm_t);
+        tinfo_t *type    = va_arg(va, tinfo_t *);
+        return gen_decorate_name(outbuf, name, mangle, cc, type) ? 1 : 0;
+      }
+
+    case processor_t::ev_max_ptr_size:
+      return 4;
+
+    case processor_t::ev_get_default_enum_size: // get default enum size
+                                // args:  cm_t cm
+                                // returns: sizeof(enum)
+      {
+//        cm_t cm        =  va_argi(va, cm_t);
+        return inf.cc.size_e;
+      }
+
+    case processor_t::ev_calc_arglocs:
+      {
+        func_type_data_t *fti = va_arg(va, func_type_data_t *);
+        return calc_hppa_arglocs(fti) ? 1 : -1;
+      }
+
+    case processor_t::ev_use_stkarg_type:
+        return 0;
+
+    case processor_t::ev_use_regarg_type:
+      {
+        int *used                 = va_arg(va, int *);
+        ea_t ea                   = va_arg(va, ea_t);
+        const funcargvec_t *rargs = va_arg(va, const funcargvec_t *);
+        *used = use_hppa_regarg_type(ea, *rargs);
+        return 1;
+      }
+
+    case processor_t::ev_use_arg_types:
+      {
+        ea_t ea               = va_arg(va, ea_t);
+        func_type_data_t *fti = va_arg(va, func_type_data_t *);
+        funcargvec_t *rargs   = va_arg(va, funcargvec_t *);
+        use_hppa_arg_types(ea, fti, rargs);
+        return 1;
+      }
+
+    case processor_t::ev_get_cc_regs:
+      {
+        callregs_t *callregs = va_arg(va, callregs_t *);
+        cm_t cc = va_argi(va, cm_t);
+        static const int fastcall_regs[] = { R26, R25, R24, R23, -1 };
+        if ( cc == CM_CC_FASTCALL )
+          callregs->set(ARGREGS_INDEPENDENT, fastcall_regs, NULL);
+        else if ( cc == CM_CC_THISCALL )
+          callregs->reset();
+        else
+          break;
+        return 1;
+      }
+
+    case processor_t::ev_calc_cdecl_purged_bytes:
+                                // calculate number of purged bytes after call
+      {
+        // ea_t ea                     = va_arg(va, ea_t);
+        return 0;
+      }
+
+    case processor_t::ev_get_stkarg_offset:
+                                // get offset from SP to the first stack argument
+                                // args: none
+                                // returns: the offset+2
+      return -0x34;
+
+// --- TYPE CALLBACKS
+
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        hppa_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        hppa_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        hppa_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        hppa_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        hppa_assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_realcvt:
+      {
+        void *m = va_arg(va, void *);
+        uint16 *e = va_arg(va, uint16 *);
+        uint16 swt = va_argi(va, uint16);
+        int code1 = ieee_realcvt(m, e, swt);
+        return code1 == 0 ? 1 : code1;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_get_frame_retsize:
+      {
+        int *frsize = va_arg(va, int *);
+        const func_t *pfn = va_arg(va, const func_t *);
+        *frsize = hppa_get_frame_retsize(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
+  }
+  return code;
+}
+
 //-----------------------------------------------------------------------
 static const char *const shnames[] = { "hppa", NULL };
 static const char *const lnames[] =
@@ -433,20 +533,23 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_HPPA,                    // id
-  PRN_HEX               // hex numbers
-  | PR_ALIGN            // data items should be aligned
-  | PR_DEFSEG32         // 32-bit segments by default
-  | PR_SEGS             // has segment registers
-  | PR_SGROTHER         // segment register mean something unknown to the kernel
-  | PR_STACK_UP         // stack grows up
-  | PR_FULL_HIFXP       // high offsets come with full values
-  | PR_TYPEINFO | PR_TINFO // type system is supported
-  | PR_USE_ARG_TYPES    // use ph.use_arg_types()
-  | PR_DELAYED,         // has delayed jumps and calls
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_HPPA,              // id
+                          // flag
+    PRN_HEX               // hex numbers
+  | PR_ALIGN              // data items should be aligned
+  | PR_DEFSEG32           // 32-bit segments by default
+  | PR_SEGS               // has segment registers
+  | PR_SGROTHER           // segment register mean something unknown to the kernel
+  | PR_STACK_UP           // stack grows up
+  | PR_TYPEINFO           // type system is supported
+  | PR_USE_ARG_TYPES      // use ph.use_arg_types()
+  | PR_DELAYED,           // has delayed jumps and calls
+                          // flag2
+    PR2_REALCVT           // the module has 'realcvt' event implementation
+  | PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -455,31 +558,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  assumes,              // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  intel_data,           // generate ...                    data directive
-  NULL,                 // compare operands
-  NULL,                 // can_have_type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   DPSEG,                // first
   rVds,                 // last
@@ -491,29 +571,13 @@ processor_t LPH =
 
   HPPA_null,
   HPPA_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  ieee_realcvt,         // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 0 },      // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  is_sp_based,          // int (*is_sp_based)(op_t &x);
-  create_func_frame,    // int (*create_func_frame)(func_t *pfn);
-  hppa_get_frame_retsize,// int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,sval_t v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   HPPA_rfi,             // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
-  21,                   // high_fixup_bits
 };

@@ -36,7 +36,7 @@ LINTFLAGS="-e785" $(_LINTFLAGS)
 
 LDR_MODULE=$(R)loaders/$(PROC)$(LDR)
 
-all:	objdir $(LDR_MODULE) $(ADDITIONAL_GOALS)
+all:	objdir $(LDR_MODULE) $(ADDITIONAL_GOALS) $(addprefix $(RI),$(IDCS))
 include ../../objdir.mak
 
 ifdef __UNIX__
@@ -48,7 +48,7 @@ ifdef __UNIX__
   endif
 
 $(LDR_MODULE): ../ldr.script $(OBJS) makefile
-	$(CCL) $(OUTDLL) $(OUTSW)$@ $(OBJS) -L$(R) $(LINKIDA) $(PLUGIN_SCRIPT) $(ADDITIONAL_LIBS) $(STDLIBS)
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(OBJS) -L$(L) $(LINKIDA) $(PLUGIN_SCRIPT) $(ADDITIONAL_LIBS) $(STDLIBS)
 
 else # windows
 
@@ -62,3 +62,11 @@ $(LDR_MODULE): $(DEFFILE) $(OBJS) $(IDALIB) makefile
 	$(LINKER) $(LINKOPTS) /STUB:../stub /INCREMENTAL:NO /OUT:$@ $(OBJS) $(IDALIB) user32.lib
 	@$(RM) $(@:$(LDR)=.exp) $(@:$(LDR)=.lib)
 endif
+
+$(RI)%.idc: %.idc
+	$(CP) $? $@
+
+clean::
+	rm -f $(LDR_MODULE) $(OBJS) $(addprefix $(RI),$(IDCS))
+	-@[ -d $(OBJDIR) ] && rmdir $(OBJDIR)
+	-@[ -d obj ] && rmdir obj

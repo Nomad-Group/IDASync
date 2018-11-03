@@ -11,8 +11,6 @@
 //--------------------------------------------------------------------------
 // Verify the input file format
 //      li - loader_input_t object. it is positioned at the file start
-//      n  - invocation number. if the loader can handle only one format,
-//           it should return failure on n != 0
 // Returns: if the input file is not recognized
 //              return 0
 //          else
@@ -21,11 +19,8 @@
 //                 options:1 or ACCEPT_FIRST. it is ok not to set this attribute.
 //              or return a string designating the format name
 
-static accept_file(li, n)
+static accept_file(li, filename)
 {
-  if ( n )
-    return 0;                   // this loader supports only one format
-
   if ( li.size() > 0x10000 )    // we support max 64K images
     return 0;
 
@@ -60,6 +55,8 @@ static accept_file(li, n)
 // Returns: 1 - means success, 0 - failure
 static load_file(li, neflags, format)
 {
+  set_processor_type("metapc", SETPROC_LOADER);
+
   auto base = 0xF000;
   auto start = base << 4;
   auto size = li.size();
@@ -71,7 +68,7 @@ static load_file(li, neflags, format)
   AddSeg(start, start+size, base, 0, saRelPara, scPub);
 
   // set the entry registers
-  set_start_ip(size-16);
-  set_start_cs(base);
+  set_inf_attr(INF_START_IP, size-16);
+  set_inf_attr(INF_START_CS, base);
   return 1;
 }

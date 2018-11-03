@@ -11,8 +11,6 @@
 #include <pro.h>
 #include <stdio.h>
 
-#pragma pack(push, 1)
-
 /*! \file fpro.h
 
   \brief System independent counterparts of FILE* related functions from Clib
@@ -63,8 +61,8 @@
 idaman THREAD_SAFE FILE *ida_export qfopen(const char *file, const char *mode);
 idaman THREAD_SAFE int   ida_export qfread(FILE *fp, void *buf, size_t n);
 idaman THREAD_SAFE int   ida_export qfwrite(FILE *fp, const void *buf, size_t n);
-idaman THREAD_SAFE int32 ida_export qftell(FILE *fp);
-idaman THREAD_SAFE int   ida_export qfseek(FILE *fp, int32 offset, int whence);
+idaman THREAD_SAFE qoff64_t ida_export qftell(FILE *fp);
+idaman THREAD_SAFE int      ida_export qfseek(FILE *fp, qoff64_t offset, int whence);
 idaman THREAD_SAFE int   ida_export qfclose(FILE *fp);
 idaman THREAD_SAFE int   ida_export qflush(FILE *fp);
 idaman THREAD_SAFE int   ida_export qfputc(int chr, FILE *fp);
@@ -73,12 +71,13 @@ idaman THREAD_SAFE char *ida_export qfgets(char *s, size_t len, FILE *fp);
 idaman THREAD_SAFE int   ida_export qfputs(const char *s, FILE *fp);
 idaman             FILE *ida_export qtmpfile(void);
 idaman THREAD_SAFE int   ida_export qunlink(const char *fname);
+idaman THREAD_SAFE int   ida_export qaccess(const char *fname, int mode);
 idaman THREAD_SAFE char *ida_export qgets(char *line, size_t linesize);
 
 idaman THREAD_SAFE AS_PRINTF(2, 0) int ida_export qvfprintf(FILE *fp, const char *format, va_list va);
 idaman THREAD_SAFE AS_PRINTF(1, 0) int ida_export qvprintf(const char *format, va_list va);
 idaman THREAD_SAFE AS_PRINTF(1, 0) int ida_export qveprintf(const char *format, va_list va);
-idaman THREAD_SAFE AS_SCANF (2, 0) int ida_export qvfscanf(FILE *fp, const char *format, va_list va);
+idaman THREAD_SAFE AS_SCANF(2, 0)  int ida_export qvfscanf(FILE *fp, const char *format, va_list va);
 
 #ifdef __cplusplus
 THREAD_SAFE AS_PRINTF(2, 3) inline int qfprintf(FILE *fp, const char *format, ...)
@@ -120,10 +119,28 @@ THREAD_SAFE AS_SCANF(2, 3) inline int qfscanf(FILE *fp, const char *format, ...)
 //@}
 
 
+/// Read line from file (the newline is removed from the output buffer)
+/// \param buf  output buffer
+/// \param fp   pointer to file
+/// \return -1 or length of line
+
+idaman THREAD_SAFE ssize_t ida_export qgetline(qstring *buf, FILE *fp);
+
 /// Rename a file: 'newname' may exist, and will be deleted
 
 idaman THREAD_SAFE int ida_export qrename(const char *oldfname, const char *newfname);
 
+/// Move a file - more powerful version of qrename
+/// \retval 0    success
+/// \retval -1   system error
+/// \retval else a combination of flags to be given for successful move
+idaman THREAD_SAFE int ida_export qmove(const char *oldfname, const char *newfname, uint32 flags);
+enum
+{
+  QMOVE_CROSS_FS  = 0x01,   // UNIX: allow moving between different filesystem
+  QMOVE_OVERWRITE = 0x02,   // Overwrite existing file
+  QMOVE_OVR_RO    = 0x04,   // Overwrite file even if it is write-protected
+};
 
 /// Copy a file.
 /// \param from       source file name
@@ -138,11 +155,11 @@ idaman THREAD_SAFE int ida_export qrename(const char *oldfname, const char *newf
 /// \retval -4  write failure
 /// \retval -5  interrupted from the callback
 
-idaman THREAD_SAFE int   ida_export qcopyfile(
+idaman THREAD_SAFE int ida_export qcopyfile(
         const char *from,
         const char *to,
         bool overwrite = true,
-        bool (idaapi *cb)(size_t pos, size_t total, void *ud) = NULL,
+        bool (idaapi *cb)(uint64 pos, uint64 total, void *ud)=NULL,
         void *ud = NULL,
         int flags = 0);
 
@@ -193,21 +210,6 @@ DEF_FREADBYTES(fread8bytes, fwrite8bytes, ulonglong, 8)
 #endif
 //@}
 
-/// \name Large file support
-/// The following functions work just like their counterparts,
-/// but support large files (>2Gb).
-//@{
-idaman THREAD_SAFE qoff64_t ida_export qftell64(FILE *fp);
-idaman THREAD_SAFE int      ida_export qfseek64(FILE *fp, qoff64_t offset, int whence);
-idaman THREAD_SAFE int      ida_export qcopyfile64(
-  const char *from,
-  const char *to,
-  bool overwrite = true,
-  bool (idaapi *cb)(uint64 pos, uint64 total, void *ud) = NULL,
-  void *ud = NULL,
-  int flags = 0);
-//@}
-
 #if !defined(feof) || !defined(ferror)
 // If feof() and ferror() are not macros, we can not use them
 // Fortunately, for borland and vc they are macros, so there is no problem
@@ -219,5 +221,4 @@ idaman THREAD_SAFE int      ida_export qcopyfile64(
 
 
 
-#pragma pack(pop)
 #endif

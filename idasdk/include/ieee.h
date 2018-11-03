@@ -11,7 +11,6 @@
 
 #ifndef _IEEE_H_
 #define _IEEE_H_
-#pragma pack(push, 1)
 
 /*! \file ieee.h
 
@@ -47,10 +46,12 @@ typedef uint16 eNE[IEEE_NE];
 typedef uint16 eNI[IEEE_NI];
 
 /// 0.0
-idaman const eNE ida_export_data ieee_ezero;
+extern const eNE ieee_ezero;
+#define EZERO { 0, 0000000,0000000,0000000,0000000,0000000 }
 
 /// 1.0
-idaman const eNE ida_export_data ieee_eone;
+extern const eNE ieee_eone;
+#define EONE { 0, 0000000,0000000,0000000,0100000,0x3fff }
 
 /// 2.0
 extern const eNE ieee_etwo;
@@ -111,11 +112,19 @@ idaman THREAD_SAFE int  ida_export eshift(eNI x, int sc);
 idaman THREAD_SAFE int  ida_export emdnorm(eNI s, int lost, int subflg, int32 exp, int rndbase);
 
 
+/// \defgroup REAL_ERROR_ Floating point/IEEE Conversion codes
+/// Return values for and processor_t::realcvt_t request
+//@{
+#define REAL_ERROR_FORMAT  -1 ///< not supported format for current .idp
+#define REAL_ERROR_RANGE   -2 ///< number too big (small) for store (mem NOT modified)
+#define REAL_ERROR_BADDATA -3 ///< illegal real data for load (IEEE data not filled)
+//@}
+//
 /// \name Prototypes
-/// IDP module function prototypes -- should be implemented in idp
+/// IDP module event prototype -- should be implemented in idp
 //@{
 
-/// Floating point conversion function: implemented by \ph{realcvt()}.
+/// Floating point conversion function: implemented by \ph{realcvt}.
 /// \param m    pointer to data
 /// \param e    internal IEEE format data
 /// \param swt  operation:
@@ -129,10 +138,8 @@ idaman THREAD_SAFE int  ida_export emdnorm(eNI s, int lost, int subflg, int32 ex
 ///               - 013: store double                  8 bytes (e->m)
 ///               - 014: store long double            10 bytes (e->m)
 ///               - 015: store long double            12 bytes (e->m)
-/// \retval  0  ok
-/// \retval -1  not supported format for current .idp
-/// \retval -2  number too big (small) for store (mem NOT modified)
-/// \retval -3  illegal real data for load (IEEE data not filled)
+/// \retval  1  ok
+/// \retval \ref REAL_ERROR_ on error
 
 int idaapi realcvt(void *m, eNE e, uint16 swt);
 
@@ -169,7 +176,7 @@ idaman THREAD_SAFE int ida_export ieee_realcvt(void *m, eNE e, uint16 swt);
 ///                - second byte: FPNUM_LENGTH
 ///                - third byte: FPNUM_DIGITS
 
-idaman THREAD_SAFE void ida_export realtoasc(const eNE x, char *buf, size_t bufsize, uint mode);
+idaman THREAD_SAFE void ida_export realtoasc(char *buf, size_t bufsize, const eNE x, uint mode);
 
 
 /// ascii string to IEEE
@@ -194,17 +201,17 @@ idaman THREAD_SAFE void ida_export eltoe64u(uint64 l, eNE e);
 
 /// IEEE to long (+-0.5 if flg)
 
-idaman THREAD_SAFE int ida_export eetol(const eNE a, sval_t *l, bool roundflg);
+idaman THREAD_SAFE int ida_export eetol(sval_t *l, const eNE a, bool roundflg);
 
 
 /// IEEE to long (+-0.5 if flg)
 
-idaman THREAD_SAFE int ida_export eetol64(const eNE a, int64 *l, bool roundflg);
+idaman THREAD_SAFE int ida_export eetol64(int64 *l, const eNE a, bool roundflg);
 
 
 /// IEEE to ulong (+-0.5 if flg)
 
-idaman THREAD_SAFE int ida_export eetol64u(const eNE a, uint64 *l, bool roundflg);
+idaman THREAD_SAFE int ida_export eetol64u(uint64 *l, const eNE a, bool roundflg);
 
 
 /// b = a*(2**pwr2)
@@ -249,7 +256,7 @@ int  esign(eNE x);
 /// x = -x
 inline void eneg(eNE x)
 {
-  if(x[IEEE_NE-1])
+  if ( x[IEEE_NE-1] != 0 )
     x[IEEE_NE-1] ^= 0x8000;
 }
 #endif
@@ -293,5 +300,4 @@ const uint32
 
 idaman THREAD_SAFE fpvalue_kind_t ida_export get_fpvalue_kind(const eNE a, uint16 max_exp);
 
-#pragma pack(pop)
 #endif

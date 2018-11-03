@@ -9,7 +9,7 @@
         dialog boxes are displayed.
 
         All collected information is validated and then
-        stored in the database in the switch_info_ex_t structure.
+        stored in the database in the switch_info_t structure.
         The last step is to reanalyze the switch idiom.
 
         Please note that this plugin supports the most
@@ -21,7 +21,7 @@
 #include <ida.hpp>
 #include <idp.hpp>
 #include <loader.hpp>
-#include "../../include/intel.hpp"
+#include <intel.hpp>
 
 netnode ignore_micro;
 //---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ static const char main_form[] =
   "<Element ~b~ase value       :N:511:16::>\n"
   "\n"
   "<S~t~art of the switch idiom:N:511:16::>\n"
-  "<~I~nput register of switch :A:511:16::>\n"
+  "<~I~nput register of switch :q:511:16::>\n"
   "<~F~irst(lowest) input value:D:511:16::>(if value table is absent)\n"
   "<~D~efault jump address     :N:511:16::>\n"
   "\n"
@@ -113,7 +113,7 @@ static const char value_form[] =
 static bool check_table(ea_t table, uval_t elsize, uval_t tsize)
 {
   flags_t F;
-  if ( getseg(table) == NULL || isCode((F=get_flags_novalue(table))) || isTail(F) )
+  if ( getseg(table) == NULL || is_code((F=get_flags(table))) || is_tail(F) )
   {
     warning("AUTOHIDE NONE\nIncorrect table address %a", table);
     return false;
@@ -139,7 +139,7 @@ static bool callback()
   // Calculate the default values to display in the form
   ea_t screen_ea = get_screen_ea();
   segment_t *s = getseg(screen_ea);
-  if ( s == NULL || !isCode(get_flags_novalue(screen_ea)) )
+  if ( s == NULL || !is_code(get_flags(screen_ea)) )
   {
     warning("AUTOHIDE NONE\nThe cursor must be on the table jump instruction");
     return false;
@@ -157,13 +157,13 @@ static bool callback()
   uval_t jtsize = 0;
   if ( jumps != BADADDR )
   {
-    decode_insn(screen_ea);
-    jtsize = guess_table_size(jumps);
+    insn_t insn;
+    decode_insn(&insn, screen_ea);
+    jtsize = guess_table_size(insn, jumps);
   }
   uval_t shift = 0;
   uval_t elbase = 0;
-  char input[MAXSTR];
-  input[0] = '\0';
+  qstring input;
   ea_t defea = BADADDR;
   uval_t lowcase = 0;
   ushort jflags = 0;
@@ -175,8 +175,8 @@ static bool callback()
   reg_info_t ri;
   ri.size = 0;
   // If switch information is present in the database, use it for defaults
-  switch_info_ex_t si;
-  if ( get_switch_info_ex(screen_ea, &si, sizeof(si)) > 0 )
+  switch_info_t si;
+  if ( get_switch_info(&si, screen_ea) > 0 )
   {
     jumps = si.jumps;
     jtsize = si.ncases;
@@ -186,10 +186,10 @@ static bool callback()
     shift = si.get_shift();
     defea = (si.flags & SWI_DEFAULT) ? si.defjump : BADADDR;
     if ( si.regnum != -1 )
-      get_reg_name(si.regnum, get_dtyp_size(si.regdtyp), input, sizeof(input));
+      get_reg_name(&input, si.regnum, get_dtype_size(si.regdtype));
     if ( si.flags & SWI_SIGNED )
       jflags |= 2;
-    if ( si.flags2 & SWI2_SUBTRACT )
+    if ( si.flags & SWI_SUBTRACT )
       jflags |= 4;
     if ( si.flags & SWI_SPARSE )
     {
@@ -197,7 +197,7 @@ static bool callback()
       vtable = si.values;
       vtsize = jtsize;
       velsize = si.get_vtable_element_size();
-      if ( si.flags2 & SWI2_INDIRECT )
+      if ( si.flags & SWI_INDIRECT )
       {
         vlowcase = si.get_lowcase();
         vflags |= 1;
@@ -212,8 +212,8 @@ static bool callback()
     }
   }
   // Now display the form and let the user edit the attributes
-  while ( AskUsingForm_c(main_form, &jumps, &jtsize, &jelsize, &shift, &elbase,
-                         &startea, input, &lowcase, &defea, &jflags) )
+  while ( ask_form(main_form, &jumps, &jtsize, &jelsize, &shift, &elbase,
+                  &startea, &input, &lowcase, &defea, &jflags) )
   {
     if ( !check_table(jumps, jelsize, jtsize) )
       continue;
@@ -222,18 +222,18 @@ static bool callback()
       warning("AUTOHIDE NONE\nInvalid shift value (allowed values are 0..3)");
       continue;
     }
-    if ( !isCode(get_flags_novalue(startea)) )
+    if ( !is_code(get_flags(startea)) )
     {
       warning("AUTOHIDE NONE\nInvalid switch idiom start %a (must be an instruction", startea);
       continue;
     }
     ri.reg = -1;
-    if ( input[0] != '\0' && !parse_reg_name(input, &ri) )
+    if ( !input.empty() && !parse_reg_name(&ri, input.c_str()) )
     {
-      warning("AUTOHIDE NONE\nUnknown input register: %s", input);
+      warning("AUTOHIDE NONE\nUnknown input register: %s", input.c_str());
       continue;
     }
-    if ( defea != BADADDR && !isCode(get_flags_novalue(defea)) )
+    if ( defea != BADADDR && !is_code(get_flags(defea)) )
     {
       warning("AUTOHIDE NONE\nInvalid default jump %a (must be an instruction", defea);
       continue;
@@ -241,7 +241,7 @@ static bool callback()
     if ( jflags & 1 ) // value table is present
     {
       bool vok = false;
-      while ( AskUsingForm_c(value_form, &vflags, &vtable, &vtsize, &velsize, &vlowcase) )
+      while ( ask_form(value_form, &vflags, &vtable, &vtsize, &velsize, &vlowcase) )
       {
         if ( (vflags & 1) == 0 )
           vtsize = jtsize;
@@ -255,12 +255,11 @@ static bool callback()
         break;
     }
     // ok, got and validated all params -- fill the structure
-    si.flags = SWI_EXTENDED;
-    si.flags2 = 0;
+    si.flags = 0;
     if ( jflags & 2 )
       si.flags |= SWI_SIGNED;
     if ( jflags & 4 )
-      si.flags2 |= SWI2_SUBTRACT;
+      si.flags |= SWI_SUBTRACT;
     si.jumps = jumps;
     si.ncases = ushort(jtsize);
     si.startea = startea;
@@ -275,7 +274,7 @@ static bool callback()
       si.defjump = defea;
     }
     if ( ri.reg != -1 )
-      si.set_expr(ri.reg, get_dtyp_by_size(ri.size));
+      si.set_expr(ri.reg, get_dtype_by_size(ri.size));
     if ( jflags & 1 ) // value table is present
     {
       si.flags |= SWI_SPARSE;
@@ -283,7 +282,7 @@ static bool callback()
       si.set_vtable_element_size((int)velsize);
       if ( (vflags & 1) != 0 )
       {
-        si.flags2 |= SWI2_INDIRECT;
+        si.flags |= SWI_INDIRECT;
         si.jcases = (int)jtsize;
         si.ncases = (ushort)vtsize;
         si.ind_lowcase = vlowcase;
@@ -296,9 +295,8 @@ static bool callback()
       si.lowcase = lowcase;
     }
     // ready, store it
-    set_switch_info_ex(screen_ea, &si);
-    create_switch_table(screen_ea, &si);
-    setFlbits(screen_ea, FF_JUMP);
+    set_switch_info(screen_ea, si);
+    create_switch_table(screen_ea, si);
     create_insn(screen_ea);
     info("AUTOHIDE REGISTRY\nSwitch information has been stored");
     break;
@@ -315,9 +313,9 @@ struct uiswitch_action_handler_t : public action_handler_t
 
   virtual action_state_t idaapi update(action_update_ctx_t *ctx)
   {
-    return ctx->form_type == BWN_DISASM
-      ? AST_ENABLE_FOR_FORM
-      : AST_DISABLE_FOR_FORM;
+    return ctx->widget_type == BWN_DISASM
+         ? AST_ENABLE_FOR_WIDGET
+         : AST_DISABLE_FOR_WIDGET;
   }
 };
 static uiswitch_action_handler_t uiswitch_action_handler;
@@ -327,16 +325,17 @@ static int idaapi init(void)
 {
   register_and_attach_to_menu(
           "Edit/Other/Create", ACTION_NAME, "Specify switch idiom...",
-          NULL, SETMENU_INS|SETMENU_CTXIDA,
+          NULL, SETMENU_INS,
           &uiswitch_action_handler, &PLUGIN);
-  ignore_micro = netnode("$ ignore micro");
+  init_ignore_micro();
   return PLUGIN_KEEP;
 }
 
 //--------------------------------------------------------------------------
-static void idaapi run(int)
+static bool idaapi run(size_t)
 {
   callback();
+  return true;
 }
 
 //--------------------------------------------------------------------------

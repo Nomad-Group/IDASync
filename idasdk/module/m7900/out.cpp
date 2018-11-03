@@ -14,22 +14,43 @@ static const char *const BitNamesCPU[] = { "IPL", "N", "V", "m", "x", "D", "I", 
 static const char *const BitNamesPUL[] = { "PS", "0", "DT", "DP0", "Y", "X", "B", "A" };
 
 //----------------------------------------------------------------------
-inline void SetDP0Plus(op_t &x)
+class out_m7900_t : public outctx_t
 {
-  OutValue(x, OOFW_IMM | OOFW_16);
-}
+  out_m7900_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void OutReg(int rgnum) { out_register(ph.reg_names[rgnum]); }
+  int OutVarName(const op_t &x);
+  void SetDP0Plus(const op_t &x) { out_value(x, OOFW_IMM | OOFW_16); }
+  void GetNumPUL(uval_t data);
+  void GetNumDPRn(uval_t data);
+  void GetCLPFlags(uval_t data);
+  ea_t OutDPRReg(ea_t Addr, uval_t gDPReg);
+  void OutDPR(uint32 Data);
+  void OutDT(uint32 Data);
+  void OutIMM(uint32 Data);
+  void MOVRB(void);
+  void MOVR(void);
+  void MOV(const op_t &x);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+};
+CASSERT(sizeof(out_m7900_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_m7900_t)
 
 //----------------------------------------------------------------------
-static void GetNumPUL(uval_t data)
+void out_m7900_t::GetNumPUL(uval_t data)
 {
-  int bitOut=0;
-  for ( int i=0; i<8; i++ )
+  int bitOut = 0;
+  for ( int i=0; i < 8; i++ )
   {
-    if( GETBIT(data, i) == 1)
+    if ( GETBIT(data, i) == 1 )
     {
       if ( bitOut != 0 )
         out_symbol(',');
-      out_register( BitNamesPUL[7-i] );
+      out_register(BitNamesPUL[7-i]);
       if ( bitOut == 0 )
         bitOut++;
     }
@@ -37,7 +58,7 @@ static void GetNumPUL(uval_t data)
 }
 
 //----------------------------------------------------------------------
-static void GetNumDPRn(uval_t data)
+void out_m7900_t::GetNumDPRn(uval_t data)
 {
   switch ( data )
   {
@@ -72,30 +93,26 @@ static void GetNumDPRn(uval_t data)
 }
 
 //----------------------------------------------------------------------
-static void GetCLPFlags(uval_t data)
+void out_m7900_t::GetCLPFlags(uval_t data)
 {
-  int bitOut=0;
-  for(int i=0; i<8;i++)
+  int bitOut = 0;
+  for ( int i=0; i < 8; i++ )
   {
-    if( GETBIT(data, i) == 1)
+    if ( GETBIT(data, i) == 1 )
     {
-      if ( bitOut != 0)  out_symbol(',' );
-      out_register( BitNamesCPU[8-i] );
-      if ( bitOut == 0 ) bitOut++;
+      if ( bitOut != 0 )
+        out_symbol(',' );
+      out_register(BitNamesCPU[8-i]);
+      if ( bitOut == 0 )
+        bitOut++;
     }
   }
 }
 
 //----------------------------------------------------------------------
-inline void OutReg(int rgnum)
+int out_m7900_t::OutVarName(const op_t &x)
 {
-  out_register(ph.regNames[rgnum]);
-}
-
-//----------------------------------------------------------------------
-static int OutVarName(op_t &x)
-{
-  return out_name_expr(x, toEA(cmd.cs, x.addr), x.addr);
+  return out_name_expr(x, to_ea(insn.cs, x.addr), x.addr);
 }
 
 //----------------------------------------------------------------------
@@ -113,7 +130,7 @@ static int getNumDPR(uval_t iDPR )
 }
 
 //----------------------------------------------------------------------
-static void OutDPRReg(ea_t &Addr, uval_t gDPReg)
+ea_t out_m7900_t::OutDPRReg(ea_t Addr, uval_t gDPReg)
 {
   if ( gDPReg == 1 )
   {
@@ -128,10 +145,11 @@ static void OutDPRReg(ea_t &Addr, uval_t gDPReg)
   {
     out_keyword("DP0");
   }
+  return Addr;
 }
 
 //----------------------------------------------------------------------
-static sel_t GetValueDP(int DPR )
+static sel_t GetValueDP(const insn_t &insn, int DPR )
 {
   if ( getDPReg == 1 )
   {
@@ -147,62 +165,52 @@ static sel_t GetValueDP(int DPR )
 }
 
 //----------------------------------------------------------------------
-static void OutDPR( uint32 Data )
+void out_m7900_t::OutDPR(uint32 Data)
 {
-  char tmp[20];
-
   ea_t Val = Data;
-  OutDPRReg( Val, getDPReg);
+  Val = OutDPRReg(Val, getDPReg);
   out_symbol(':');
-  qsnprintf(tmp, sizeof(tmp), "%a", Val+GetValueDP( Data&0xC0 ) );
-  out_line(tmp, COLOR_NUMBER);
+  out_printf(COLSTR("%a",SCOLOR_NUMBER), Val+GetValueDP(insn, Data&0xC0));
 }
 
 //----------------------------------------------------------------------
-static void OutDT( uint32 Data )
+void out_m7900_t::OutDT(uint32 Data)
 {
-  char tmp[20];
-
   out_register("DT");
   out_symbol('+');
   out_symbol(':');
-
-  qsnprintf(tmp, sizeof(tmp), "%X", Data );
-  out_line(tmp, COLOR_NUMBER);
+  out_printf(COLSTR("%X",SCOLOR_NUMBER), Data);
 }
 
 //----------------------------------------------------------------------
-static void OutIMM(uint32 Data )
+void out_m7900_t::OutIMM(uint32 Data)
 {
-  char tmp[20];
-
   out_symbol('#');
-  qsnprintf(tmp, sizeof(tmp), "%x", Data);
-  out_line(tmp, COLOR_NUMBER);
+  out_printf(COLSTR("%x",SCOLOR_NUMBER), Data);
 }
 
 //----------------------------------------------------------------------
-static void MOVRB()
+void out_m7900_t::MOVRB(void)
 {
   int i;
   uint32 Val1, Val2;
-  uchar code = get_byte(cmd.ea+1);
+  uchar code = get_byte(insn.ea+1);
   uchar nib  = (code >> 4) & 0xF;
   uchar count = code & 0x0F;
 
   switch ( nib )
   {
     case 0x0:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val1 = get_byte( cmd.ea+2+(i*2) );//imm
-        Val2 = get_byte( cmd.ea+2+(i*2)+1 );//dd
+        Val1 = get_byte(insn.ea+2+(i*2));//imm
+        Val2 = get_byte(insn.ea+2+(i*2)+1);//dd
 
         //DPRxx
-        OutDPR( Val2 );
+        OutDPR(Val2);
         out_symbol(',');
         //imm
-        OutIMM( Val1 );
+        OutIMM(Val1);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -210,16 +218,16 @@ static void MOVRB()
       break;
 
     case 0x1:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val2 = get_word( cmd.ea+2+(i*3) );//mmll
-        Val1 = get_byte( cmd.ea+2+(i*3)+2 );//dd
+        Val2 = get_word(insn.ea+2+(i*3));//mmll
+        Val1 = get_byte(insn.ea+2+(i*3)+2);//dd
 
         //DPRxx
-        OutDPR( Val1 );
+        OutDPR(Val1);
         out_symbol(',');
         //DPR
-        OutDT( Val2 );
+        OutDT(Val2);
         out_symbol(',');
         OutReg(rX);
 
@@ -229,16 +237,16 @@ static void MOVRB()
       break;
 
     case 0x2:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val1 = get_byte( cmd.ea+2+(i*3) );//imm
-        Val2 = get_word( cmd.ea+2+(i*3)+1 );//mmll
+        Val1 = get_byte(insn.ea+2+(i*3));//imm
+        Val2 = get_word(insn.ea+2+(i*3)+1);//mmll
 
         //DPRxx
-        OutDT( Val2 );
+        OutDT(Val2);
         out_symbol(',');
         //IMM
-        OutIMM( Val1 );
+        OutIMM(Val1);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -246,16 +254,16 @@ static void MOVRB()
       break;
 
     case 0x4:
-      for( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val1 = get_byte( cmd.ea+2+(i*2) );//dd1
-        Val2 = get_byte( cmd.ea+2+(i*2)+1 );//dd2
+        Val1 = get_byte(insn.ea+2+(i*2));//dd1
+        Val2 = get_byte(insn.ea+2+(i*2)+1);//dd2
 
         //DPRxx
-        OutDPR( Val2 );
+        OutDPR(Val2);
         out_symbol(',');
         //DPRxx
-        OutDPR( Val1 );
+        OutDPR(Val1);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -263,16 +271,16 @@ static void MOVRB()
       break;
 
     case 0x6:
-      for( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val1 = get_byte( cmd.ea+2+(i*3) );//imm
-        Val2 = get_word( cmd.ea+2+(i*3)+1 );//mmll
+        Val1 = get_byte(insn.ea+2+(i*3));//imm
+        Val2 = get_word(insn.ea+2+(i*3)+1);//mmll
 
         //DPRxx
-        OutDT( Val2 );
+        OutDT(Val2);
         out_symbol(',');
         //DPR
-        OutDPR( Val1 );
+        OutDPR(Val1);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -280,16 +288,16 @@ static void MOVRB()
       break;
 
     case 0x7:
-      for( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-         Val2 = get_byte( cmd.ea+2+(i*3) );//mmll
-         Val1 = get_word( cmd.ea+2+(i*3)+1 );//dd
+         Val2 = get_byte(insn.ea+2+(i*3));//mmll
+         Val1 = get_word(insn.ea+2+(i*3)+1);//dd
 
          //DPRxx
-         OutDT( Val1 );
+         OutDT(Val1);
          out_symbol(',');
          //DPR
-         OutDPR( Val2 );
+         OutDPR(Val2);
          out_symbol(',');
          OutReg(rX);
 
@@ -299,16 +307,16 @@ static void MOVRB()
       break;
 
     case 0x8:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val2 = get_word( cmd.ea+2+(i*3) );//mmll
-        Val1 = get_byte( cmd.ea+2+(i*3)+2 );//dd
+        Val2 = get_word(insn.ea+2+(i*3));//mmll
+        Val1 = get_byte(insn.ea+2+(i*3)+2);//dd
 
         //DPRxx
-        OutDPR( Val1 );
+        OutDPR(Val1);
         out_symbol(',');
         //DT
-        OutDT( Val2 );
+        OutDT(Val2);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -316,16 +324,16 @@ static void MOVRB()
       break;
 
     case 0xA:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val1 = get_word( cmd.ea+2+(i*4) );//imm
-        Val2 = get_word( cmd.ea+2+(i*4)+2 );//mmll
+        Val1 = get_word(insn.ea+2+(i*4));//imm
+        Val2 = get_word(insn.ea+2+(i*4)+2);//mmll
 
         //DPRxx
-        OutDT( Val2 );
+        OutDT(Val2);
         out_symbol(',');
         //DT
-        OutDT( Val1 );
+        OutDT(Val1);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -335,27 +343,27 @@ static void MOVRB()
 }
 
 //----------------------------------------------------------------------
-static void MOVR()
+void out_m7900_t::MOVR(void)
 {
   int i;
   uint32 Val1, Val2;
-  uchar code = get_byte(cmd.ea+1);
+  uchar code = get_byte(insn.ea+1);
   uchar nib  = (code >> 4) & 0xF;
   uchar count = code & 0x0F;
 
   switch ( nib )
   {
     case 0x0:
-      for(i=0; i<count; i++)
+      for ( i=0; i < count; i++ )
       {
-        Val2 = get_word( cmd.ea+2+(i*3) );//mmll
-        Val1 = get_byte( cmd.ea+2+(i*3)+2 );//dd
+        Val2 = get_word(insn.ea+2+(i*3));//mmll
+        Val1 = get_byte(insn.ea+2+(i*3)+2);//dd
 
         //DPRxx
-        OutDPR( Val1 );
+        OutDPR(Val1);
         out_symbol(',');
         //DT
-        OutDT( Val2 );
+        OutDT(Val2);
         out_symbol(',');
         OutReg(rX);
 
@@ -365,24 +373,24 @@ static void MOVR()
       break;
 
     case 0x1:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
         if ( getFlag_M == 0 )
         {
-          Val2 = get_word( cmd.ea+2+(i*3) );//imm
-          Val1 = get_byte( cmd.ea+2+(i*3)+2 );//dd
+          Val2 = get_word(insn.ea+2+(i*3));//imm
+          Val1 = get_byte(insn.ea+2+(i*3)+2);//dd
         }
         else
         {
-          Val2 = get_byte( cmd.ea+2+(i*2) );//imm
-          Val1 = get_byte( cmd.ea+2+(i*2)+1 );//dd
+          Val2 = get_byte(insn.ea+2+(i*2));//imm
+          Val1 = get_byte(insn.ea+2+(i*2)+1);//dd
         }
 
         //DPRxx
-        OutDPR( Val1 );
+        OutDPR(Val1);
         out_symbol(',');
         //imm
-        OutIMM( Val2 );
+        OutIMM(Val2);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -390,24 +398,24 @@ static void MOVR()
       break;
 
     case 0x3:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
          if ( getFlag_M == 0 )
          {
-           Val2 = get_word( cmd.ea+2+(i*4) );//imm
-           Val1 = get_word( cmd.ea+2+(i*4)+2 );//llmm
+           Val2 = get_word(insn.ea+2+(i*4));//imm
+           Val1 = get_word(insn.ea+2+(i*4)+2);//llmm
          }
          else
          {
-           Val2 = get_byte( cmd.ea+2+(i*3) );//imm
-           Val1 = get_word( cmd.ea+2+(i*3)+1 );//llmm
+           Val2 = get_byte(insn.ea+2+(i*3));//imm
+           Val1 = get_word(insn.ea+2+(i*3)+1);//llmm
          }
 
          //DPRxx
-         OutDT( Val1 );
+         OutDT(Val1);
          out_symbol(',');
          //IMM
-         OutIMM( Val2 );
+         OutIMM(Val2);
 
          if ( i != (count-1) )
            out_symbol(',');
@@ -415,16 +423,16 @@ static void MOVR()
       break;
 
     case 0x5:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val2 = get_byte( cmd.ea+2+(i*2) );//dd
-        Val1 = get_byte( cmd.ea+2+(i*2)+1 );//dd
+        Val2 = get_byte(insn.ea+2+(i*2));//dd
+        Val1 = get_byte(insn.ea+2+(i*2)+1);//dd
 
         //DPRxx
-        OutDPR( Val1 );
+        OutDPR(Val1);
         out_symbol(',');
         //DPR
-        OutDPR( Val2 );
+        OutDPR(Val2);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -432,16 +440,16 @@ static void MOVR()
       break;
 
     case 0x6:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val1 = get_byte( cmd.ea+2+(i*3) );//imm
-        Val2 = get_word( cmd.ea+2+(i*3)+1 );//mmll
+        Val1 = get_byte(insn.ea+2+(i*3));//imm
+        Val2 = get_word(insn.ea+2+(i*3)+1);//mmll
 
         //DPRxx
-        OutDT( Val2 );
+        OutDT(Val2);
         out_symbol(',');
         //DPR
-        OutDPR( Val1 );
+        OutDPR(Val1);
         out_symbol(',');
         OutReg(rX);
 
@@ -451,16 +459,16 @@ static void MOVR()
       break;
 
     case 0x7:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val2 = get_byte( cmd.ea+2+(i*3) );//mmll
-        Val1 = get_word( cmd.ea+2+(i*3)+1 );//dd
+        Val2 = get_byte(insn.ea+2+(i*3));//mmll
+        Val1 = get_word(insn.ea+2+(i*3)+1);//dd
 
         //DPRxx
-        OutDT( Val1 );
+        OutDT(Val1);
         out_symbol(',');
         //DPR
-        OutDPR( Val2 );
+        OutDPR(Val2);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -468,16 +476,16 @@ static void MOVR()
       break;
 
     case 0x9:
-      for ( i=0; i<count; i++ )
+      for ( i=0; i < count; i++ )
       {
-        Val2 = get_word( cmd.ea+2+(i*3) );//mmll
-        Val1 = get_byte( cmd.ea+2+(i*3)+2 );//dd
+        Val2 = get_word(insn.ea+2+(i*3));//mmll
+        Val1 = get_byte(insn.ea+2+(i*3)+2);//dd
 
         //DPRxx
-        OutDPR( Val1 );
+        OutDPR(Val1);
         out_symbol(',');
         //DPR
-        OutDT( Val2 );
+        OutDT(Val2);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -485,16 +493,16 @@ static void MOVR()
       break;
 
     case 0xB:
-      for(i=0; i<count; i++)
+      for ( i=0; i < count; i++ )
       {
-        Val2 = get_word( cmd.ea+2+(i*4) );//imm
-        Val1 = get_word( cmd.ea+2+(i*4)+2 );//llmm
+        Val2 = get_word(insn.ea+2+(i*4));//imm
+        Val1 = get_word(insn.ea+2+(i*4)+2);//llmm
 
         //DT
-        OutDT( Val1 );
+        OutDT(Val1);
         out_symbol(',');
         //DT
-        OutDT( Val2 );
+        OutDT(Val2);
 
         if ( i != (count-1) )
           out_symbol(',');
@@ -504,20 +512,20 @@ static void MOVR()
 }
 
 //----------------------------------------------------------------------
-static void MOV(op_t &x)
+void out_m7900_t::MOV(const op_t &x)
 {
   switch ( x.TypeOper )
   {
     case m7900_movrb: MOVRB(); break;
     case m7900_movr:  MOVR();  break;
     default:
-     //msg("out: %a: bad prefix %d\n", cmd.ip, RAZOPER);
+     //msg("out: %a: bad prefix %d\n", insn.ip, RAZOPER);
      break;
   }
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_m7900_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
@@ -529,7 +537,7 @@ bool idaapi outop(op_t &x)
       break;
 
     case o_phrase:
-      OutLine(ph.regNames[x.reg]);
+      out_line(ph.reg_names[x.reg]);
       break;
 
     case o_ab:
@@ -537,11 +545,12 @@ bool idaapi outop(op_t &x)
       {
         case TAB_L_INDIRECTED_ABS:
           out_symbol('L');
+          // fallthrough
 
         case TAB_INDIRECTED_ABS:
           out_symbol('(');
-          if ( !OutVarName(x)  )
-             OutValue(x, OOF_ADDR | OOFS_NOSIGN);
+          if ( !OutVarName(x) )
+             out_value(x, OOF_ADDR | OOFS_NOSIGN);
           out_symbol(')');
           break;
 
@@ -549,7 +558,7 @@ bool idaapi outop(op_t &x)
           out_symbol('(');
 
           if ( !OutVarName(x) )
-             OutValue(x, OOF_ADDR | OOFS_NOSIGN);
+             out_value(x, OOF_ADDR | OOFS_NOSIGN);
 
           out_symbol(',');
           OutReg(rX);
@@ -562,8 +571,8 @@ bool idaapi outop(op_t &x)
           out_register("DT");
           out_symbol(':');
 
-          if ( !OutVarName(x)  )
-             OutValue(x, OOF_ADDR | OOFS_NOSIGN | OOFW_32);
+          if ( !OutVarName(x) )
+             out_value(x, OOF_ADDR | OOFS_NOSIGN | OOFW_32);
           break;
 
         case TAB_ABL_X:
@@ -571,8 +580,8 @@ bool idaapi outop(op_t &x)
           out_register("LG");
           out_symbol(':');
 
-          if ( !OutVarName(x)  )
-             OutValue(x, OOF_ADDR | OOFS_NOSIGN | OOFW_32);
+          if ( !OutVarName(x) )
+             out_value(x, OOF_ADDR | OOFS_NOSIGN | OOFW_32);
           break;
       }
       break;
@@ -582,11 +591,11 @@ bool idaapi outop(op_t &x)
         out_symbol('(');
 
       if ( x.xmode == IMM_32 )
-         OutValue(x, OOFW_IMM | OOFW_32);
+         out_value(x, OOFW_IMM | OOFW_32);
       else if ( x.xmode == IMM_16 )
-         OutValue(x, OOFW_IMM | OOFW_16);
+         out_value(x, OOFW_IMM | OOFW_16);
       else
-         OutValue(x, OOFW_IMM);
+         out_value(x, OOFW_IMM);
 
       if ( x.TypeOper == TSP_INDEX_SP_Y )
       {
@@ -598,22 +607,22 @@ bool idaapi outop(op_t &x)
 
     case o_stk:
       // there are special cases
-      switch ( cmd.itype )
+      switch ( insn.itype )
       {
         case m7900_pei: SetDP0Plus(x); break;
         case m7900_psh:
-        case m7900_pul: GetNumPUL( x.value ); break;
+        case m7900_pul: GetNumPUL(x.value); break;
 
         default:
           out_symbol('#');
-          OutValue(x, OOFW_IMM | OOFS_NOSIGN);
+          out_value(x, OOFW_IMM | OOFS_NOSIGN);
           break;
       }
       break;
 
     case o_imm:
       // there are special cases
-      switch ( cmd.itype )
+      switch ( insn.itype )
       {
         case m7900_sep://Set Processor status
         case m7900_clp://CLear Processor status
@@ -631,12 +640,12 @@ bool idaapi outop(op_t &x)
           break;
         case m7900_bsc:
         case m7900_bss:
-          OutValue(x, OOFW_IMM);
+          out_value(x, OOFW_IMM);
           break;
 
         default:
           out_symbol('#');
-          OutValue(x, OOFW_IMM);
+          out_value(x, OOFW_IMM);
           break;
       }
       break;//case o_imm
@@ -654,36 +663,46 @@ bool idaapi outop(op_t &x)
         case TDIR_DIR_Y:
         case TDIR_DIR_X:
         case TDIR_DIR:
-          OutDPRReg(x.addr, getDPReg );
-          out_symbol(':');
-          if ( !OutVarName(x)  )
-             OutValue(x, OOF_ADDR |OOF_NUMBER| OOFS_NOSIGN);
+          {
+            op_t y = x;
+            y.addr = OutDPRReg(y.addr, getDPReg);
+            out_symbol(':');
+            if ( !OutVarName(y) )
+              out_value(y, OOF_ADDR |OOF_NUMBER| OOFS_NOSIGN);
+          }
           break;
 
         case TDIR_L_INDIRECT_DIR_Y:
         case TDIR_L_INDIRECT_DIR:
           out_symbol('L');
+          // fallthrough
 
         case TDIR_INDIRECT_DIR_Y:
         case TDIR_INDIRECT_DIR:
           out_symbol('(');
-          OutDPRReg(x.addr, getDPReg );
-          out_symbol(':');
-          if ( !OutVarName(x)  )
-            OutValue(x, OOF_ADDR |OOF_NUMBER| OOFS_NOSIGN);
+          {
+            op_t y = x;
+            y.addr = OutDPRReg(y.addr, getDPReg);
+            out_symbol(':');
+            if ( !OutVarName(y) )
+              out_value(y, OOF_ADDR |OOF_NUMBER| OOFS_NOSIGN);
+          }
           out_symbol(')');
          break;
 
         case TDIR_INDIRECT_DIR_X:
           out_symbol('(');
 
-          OutDPRReg(x.addr, getDPReg );
-          out_symbol(':');
-          if ( !OutVarName(x)  )
-            OutValue(x, OOF_ADDR |OOF_NUMBER| OOFS_NOSIGN);
+          {
+            op_t y = x;
+            y.addr = OutDPRReg(y.addr, getDPReg);
+            out_symbol(':');
+            if ( !OutVarName(y) )
+              out_value(y, OOF_ADDR |OOF_NUMBER| OOFS_NOSIGN);
+          }
 
           out_symbol(',');
-          OutReg( rX);
+          OutReg(rX);
           out_symbol(')');
           break;
       }
@@ -691,24 +710,24 @@ bool idaapi outop(op_t &x)
 
     case o_near:
       {
-        ea_t v = toEA(cmd.cs,x.addr);
+        ea_t v = to_ea(insn.cs,x.addr);
         if ( !out_name_expr(x, v, x.addr) )
         {
-          OutValue(x, OOF_ADDR | OOFS_NOSIGN );
-          //QueueSet(Q_noName, cmd.ea);
+          out_value(x, OOF_ADDR | OOFS_NOSIGN );
+          //remember_problem(PR_NONAME, insn.ea);
         }
       }
       break;
 
     default:
-      //warning("out: %a: bad optype %d", cmd.ip, x.type);
+      //warning("out: %a: bad optype %d", insn.ip, x.type);
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-static const char *GetPrefics( int Raz)
+static const char *GetPrefics(int Raz)
 {
   switch ( Raz )
   {
@@ -717,119 +736,111 @@ static const char *GetPrefics( int Raz)
     case INSN_PREF_D: return ".d";
     case INSN_PREF_U: return "";
     default:
-      //msg("out: %a: bad prefix %d\n", cmd.ip, RAZOPER);
+      //msg("out: %a: bad prefix %d\n", insn.ip, RAZOPER);
       break;
   }
   return "";
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_m7900_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
+  out_mnem(8, GetPrefics(RAZOPER));      // output instruction mnemonics
+}
 
-  init_output_buffer(buf, sizeof(buf));       // setup the output pointer
-  OutMnem(8, GetPrefics(RAZOPER));            // output instruction mnemonics
+//----------------------------------------------------------------------
+void out_m7900_t::out_insn(void)
+{
+  out_mnemonic();
 
   out_one_operand(0);                   // output the first operand
 
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');    // operand sep
     if ( (ash.uflag & UAS_NOSPA) == 0 )
-      OutChar(' ');
+      out_char(' ');
     out_one_operand(1);
   }
 
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
     if ( (ash.uflag & UAS_NOSPA) == 0 )
-      OutChar(' ');
+      out_char(' ');
     out_one_operand(2);
   }
 
-  if ( cmd.Op4.type != o_void )
+  if ( insn.Op4.type != o_void )
   {
     out_symbol(',');
     if ( (ash.uflag & UAS_NOSPA) == 0 )
-      OutChar(' ');
+      out_char(' ');
     out_one_operand(3);
   }
 
 
-  if ( cmd.Op5.type != o_void )
+  if ( insn.Op5.type != o_void )
   {
     out_symbol(',');
     if ( (ash.uflag & UAS_NOSPA) == 0 )
-      OutChar(' ');
+      out_char(' ');
     out_one_operand(4);
   }
 
-
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea, uFlag, 2) ) OutImmChar(cmd.Op3);
-  if ( isVoid(cmd.ea, uFlag, 3) ) OutImmChar(cmd.Op4);
-  if ( isVoid(cmd.ea, uFlag, 4) ) OutImmChar(cmd.Op5);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi m7900_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device.c_str());
 }
 
 //--------------------------------------------------------------------------
 // generate segment header
-void idaapi gen_segm_header(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Srange) could be made const
+void idaapi m7900_segstart(outctx_t &ctx, segment_t *Srange)
 {
-  segment_t *Sarea = getseg(ea);
-
-  char sname[MAXNAMELEN];
-  get_segm_name(Sarea, sname, sizeof(sname));
-  char *segname = sname;
+  qstring sname;
+  get_visible_segm_name(&sname, Srange);
 
   if ( ash.uflag & UAS_SEGM )
-    printf_line(inf.indent, COLSTR("SEGMENT %s", SCOLOR_ASMDIR), segname);
+    ctx.gen_printf(inf.indent, COLSTR("SEGMENT %s", SCOLOR_ASMDIR), sname.c_str());
   else
-    printf_line(inf.indent, COLSTR(".SECTION %s", SCOLOR_ASMDIR), segname);
+    ctx.gen_printf(inf.indent, COLSTR(".SECTION %s", SCOLOR_ASMDIR), sname.c_str());
 
-  ea_t orgbase = ea - get_segm_para(Sarea);
+  ea_t orgbase = ctx.insn_ea - get_segm_para(Srange);
   if ( orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi m7900_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   if ( ash.end != NULL )
   {
-    MakeNull();
-    char *p = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
-      register size_t i = strlen(ash.end);
+      size_t i = strlen(ash.end);
       do
-        APPCHAR(p, end, ' ');
+        ctx.out_char(' ');
       while ( ++i < 8 );
-      APPEND(p, end, name.begin());
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }

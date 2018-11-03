@@ -7,7 +7,6 @@
 
 #ifndef _ENTRY_HPP
 #define _ENTRY_HPP
-#pragma pack(push, 1)
 
 /*! \file entry.hpp
 
@@ -26,6 +25,14 @@
 
 idaman size_t ida_export get_entry_qty(void);
 
+/// \defgroup AEF_ entry flags
+/// Passed as 'flags' parameter to add_entry(ea_t, const char *, int)
+//@{
+#define AEF_UTF8         0x0    ///< the name is given in UTF-8 (default)
+#define AEF_IDBENC       0x1    ///< the name is given in the IDB encoding;
+                                ///< non-ASCII bytes will be decoded accordingly
+//@}
+
 
 /// Add an entry point to the list of entry points.
 /// \param ord       ordinal number
@@ -36,9 +43,10 @@ idaman size_t ida_export get_entry_qty(void);
 ///                  comment. If name == NULL, then the old name will be retained.
 /// \param makecode  should the kernel convert bytes at the entry point
 ///                  to instruction(s)
+/// \param flags     See AEF_*
 /// \return success (currently always true)
 
-idaman bool ida_export add_entry(uval_t ord, ea_t ea,const char *name, bool makecode);
+idaman bool ida_export add_entry(uval_t ord, ea_t ea, const char *name, bool makecode, int flags=AEF_UTF8);
 
 
 /// Get ordinal number of an entry point.
@@ -57,12 +65,11 @@ idaman ea_t ida_export get_entry(uval_t ord);
 
 
 /// Get name of the entry point by its ordinal.
-/// \param ord      ordinal number of entry point
 /// \param buf      output buffer, may be NULL
-/// \param bufsize  output buffer size
+/// \param ord      ordinal number of entry point
 /// \return size of entry name or -1
 
-idaman ssize_t ida_export get_entry_name(uval_t ord, char *buf, size_t bufsize);
+idaman ssize_t ida_export get_entry_name(qstring *buf, uval_t ord);
 
 
 /// Rename entry point.
@@ -70,12 +77,29 @@ idaman ssize_t ida_export get_entry_name(uval_t ord, char *buf, size_t bufsize);
 /// \param name     name of entry point. If the specified location already
 ///                 has a name, the old name will be appended to a repeatable
 ///                 comment.
+/// \param flags    See AEF_*
 /// \return success
 
-idaman bool ida_export rename_entry(uval_t ord, const char *name);
+idaman bool ida_export rename_entry(uval_t ord, const char *name, int flags=AEF_UTF8);
+
+
+/// Set forwarder name for ordinal.
+/// \param ord      ordinal number of the entry point
+/// \param name     forwarder name for entry point.
+/// \param flags    See AEF_*
+/// \return success
+
+idaman bool ida_export set_entry_forwarder(uval_t ord, const char *name, int flags=AEF_UTF8);
+
+
+/// Get forwarder name for the entry point by its ordinal.
+/// \param buf      output buffer, may be NULL
+/// \param ord      ordinal number of entry point
+/// \return size of entry forwarder name or -1
+
+idaman ssize_t ida_export get_entry_forwarder(qstring *buf, uval_t ord);
 
 
 
 
-#pragma pack(pop)
 #endif // _ENTRY_HPP

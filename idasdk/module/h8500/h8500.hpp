@@ -12,7 +12,7 @@
 
 #include "../idaidp.hpp"
 #include "ins.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //---------------------------------
 // Operand types:
@@ -57,7 +57,7 @@ const int ph_post   = 2;                // postincrement
 //------------------------------------------------------------------
 enum regnum_t
 {
-  R0,    R1,    R2,    R3,    R4,    R5,    R6, FP=R6, R7, SP=R7,
+  R0, R1, R2, R3, R4, R5, R6, FP=R6, R7, SP=R7,
   SR, CCR, RES1, BR, EP, DP, CP, TP, // RES1 is forbidden
 };
 
@@ -67,34 +67,29 @@ extern ushort idpflags;
 
 #define AFIDP_MIXSIZE   0x0001  // Disassemble mixed size instructions
 
-ea_t calc_mem(op_t &x);         // map virtual to physical ea
+ea_t calc_mem(const insn_t &insn, const op_t &x); // map virtual to physical ea
 const char *find_sym(int address);
 //------------------------------------------------------------------
-int calc_opimm_flags(void);
-int calc_opdispl_flags(void);
+int calc_opimm_flags(const insn_t &insn);
+int calc_opdispl_flags(const insn_t &insn);
 
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi h8500_header(outctx_t &ctx);
+void idaapi h8500_footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assume(ea_t ea);         // function to produce assume directives
+void idaapi h8500_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi h8500_segend(outctx_t &ctx, segment_t *seg);
+void idaapi h8500_assume(outctx_t &ctx);         // function to produce assume directives
 
-void idaapi out(void);
-int  idaapi outspec(ea_t ea,uchar segtype);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi h8500_ana(insn_t *insn);
+int  idaapi h8500_emu(const insn_t &insn);
 
 int  idaapi is_align_insn(ea_t ea);
 bool idaapi create_func_frame(func_t *pfn);
-int  idaapi is_sp_based(const op_t &x);
+int  idaapi is_sp_based(const insn_t &insn, const op_t &x);
 
-int idaapi h8500_get_frame_retsize(func_t *);
+int idaapi h8500_get_frame_retsize(const func_t *);
 int is_jump_func(const func_t *pfn, ea_t *jump_target);
-int is_sane_insn(int nocrefs);
-int may_be_func(void);           // can a function start here?
+int is_sane_insn(const insn_t &insn, int nocrefs);
+int may_be_func(const insn_t &insn); // can a function start here?
 
 #endif // _H8500_HPP

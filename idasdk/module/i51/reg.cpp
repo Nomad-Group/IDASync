@@ -9,7 +9,7 @@
 
 #include "i51.hpp"
 #include <entry.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //--------------------------------------------------------------------------
 processor_subtype_t ptype;
@@ -32,9 +32,8 @@ static const char *const RegNames[] =
 
 //----------------------------------------------------------------------
 netnode helper;
-char device[MAXSTR] = "";
-static size_t numports = 0;
-static ioport_t *ports = NULL;
+qstring device;
+static ioports_t ports;
 static const char cfgname[] = "i51.cfg";
 
 inline void get_cfg_filename(char *buf, size_t bufsize)
@@ -55,8 +54,8 @@ static void i51_apply_io_port(ea_t ea, const char *name, const char *cmt)
     segment_t *s = get_segm_by_name("FSR");
     if ( s != NULL )
     {
-      ea_t map = ea + s->startEA - 0x80;
-      if ( isEnabled(map) )
+      ea_t map = ea + s->start_ea - 0x80;
+      if ( is_mapped(map) )
         ea = map;
     }
   }
@@ -72,60 +71,31 @@ const char *idaapi set_idp_options(const char *keyword,int /*value_type*/,const 
 {
   if ( keyword != NULL )
     return IDPOPT_BADKEY;
-  if ( choose_ioport_device(cfgname, device, sizeof(device), parse_area_line0) )
-    set_device_name(device, IORESP_PORT|IORESP_INT);
+  if ( choose_ioport_device(&device, cfgname, parse_area_line0) )
+    set_device_name(device.c_str(), IORESP_PORT|IORESP_INT);
   return IDPOPT_OK;
 }
 
 //------------------------------------------------------------------
-const ioport_t *find_sym(int address)
-{
-  return find_ioport(ports, numports, address);
-}
-
 const ioport_bit_t *find_bit(ea_t address, int bit)
 {
-  return find_ioport_bit(ports, numports, address, bit);
+  return find_ioport_bit(ports, address, bit);
 }
 
 //----------------------------------------------------------------------
 bool IsPredefined(const char *name)
 {
-  for ( int i=0; i < numports; i++ )
+  for ( int i=0; i < ports.size(); i++ )
   {
-    ioport_t &p = ports[i];
-    if ( strcmp(p.name, name) == 0 )
+    const ioport_t &p = ports[i];
+    if ( p.name == name )
       return true;
-    if ( p.bits != NULL )
-    {
-      for ( int j=0; j < sizeof(ioport_bits_t)/sizeof(ioport_bit_t); j++ )
-      {
-        const ioport_bit_t *b = (*p.bits)+j;
-        if ( b->name != NULL && strcmp(b->name, name) == 0 )
-          return true;
-      }
-    }
+    for ( int j=0; j < p.bits.size(); j++ )
+      if ( p.bits[j].name == name )
+        return true;
   }
   return false;
 }
-
-//----------------------------------------------------------------------
-//static void apply_symbols(void)
-//{
-//  for ( int i=0; i < numports; i++ )
-//  {
-//    ioport_t &p = ports[i];
-//    ea_t ea = sfrmem + p.address;
-//    ea_t oldea = get_name_ea(BADADDR, p.name);
-//    if ( oldea != ea )
-//    {
-//      if ( oldea != BADADDR ) del_global_name(oldea);
-//      do_unknown(ea, DOUNK_EXPAND);
-//      set_name(ea, p.name, SN_NOLIST);
-//    }
-//    if ( p.cmt != NULL ) set_cmt(ea,p.cmt, 1);
-//  }
-//}
 
 //----------------------------------------------------------------------
 struct entry_t
@@ -164,7 +134,7 @@ static ea_t specialSeg(sel_t sel)
       s->type = SEG_IMEM;               // fix it
       s->update();
     }
-    return s->startEA;
+    return s->start_ea;
   }
   return BADADDR;
 }
@@ -173,69 +143,92 @@ static ea_t specialSeg(sel_t sel)
 static ea_t AdditionalSegment(size_t size, size_t offset, const char *name)
 {
   segment_t s;
-  s.startEA = (ptype > prc_51)
-                   ? (inf.maxEA + 0xF) & ~0xF
-                   : freechunk(0, size, 0xF);
-  s.endEA   = s.startEA + size;
-  s.sel     = allocate_selector((s.startEA-offset) >> 4);
+  s.start_ea = (ptype > prc_51)
+                   ? (inf.max_ea + 0xF) & ~0xF
+                   : free_chunk(0, size, 0xF);
+  s.end_ea  = s.start_ea + size;
+  s.sel     = allocate_selector((s.start_ea-offset) >> 4);
   s.type    = SEG_IMEM;                         // internal memory
   add_segm_ex(&s, name, NULL, ADDSEG_NOSREG|ADDSEG_OR_DIE);
-  return s.startEA - offset;
+  return s.start_ea - offset;
 }
 
 //----------------------------------------------------------------------
 static void setup_data_segment_pointers(void)
 {
   sel_t sel;
-  if ( atos("INTMEM",&sel) || atos("RAM", &sel) ) intmem = specialSeg(sel);
-  if ( atos("SFR",&sel)    || atos("FSR", &sel) ) sfrmem = specialSeg(sel) - 0x80;
+  if ( atos(&sel, "INTMEM") || atos(&sel, "RAM") )
+    intmem = specialSeg(sel);
+  if ( atos(&sel, "SFR") || atos(&sel, "FSR") )
+    sfrmem = specialSeg(sel) - 0x80;
+}
+
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
+{
+  switch ( code )
+  {
+    case idb_event::segm_moved: // A segment is moved
+                                // Fix processor dependent address sensitive information
+      {
+        // ea_t from    = va_arg(va, ea_t);
+        // ea_t to      = va_arg(va, ea_t);
+        // asize_t size = va_arg(va, asize_t);
+        // bool changed_netmap = va_argi(va, bool);
+
+        // Add commands to adjust your internal variables here
+        // Most of the time this callback will be empty
+        //
+        // If you keep information in a netnode's altval array, you can use
+        //      node.altshift(from, s->start_ea, s->end_ea - s->start_ea);
+        //
+        // If you have a variables pointing to somewhere in the disassembled program memory,
+        // you can adjust it like this:
+        //
+        //      if ( var >= from && var < from+size )
+        //        var += to - from;
+      }
+      break;
+  }
+  return 0;
 }
 
 //----------------------------------------------------------------------
 // The kernel event notifications
 // Here you may take desired actions upon some kernel events
 
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  static int first_time = 1;
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+  static bool first_time = true;
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ intel 8051");
-      inf.mf = 1;       // Set a big endian mode of the IDA kernel
-    default:
+      inf.set_be(true);       // Set a big endian mode of the IDA kernel
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       {
         segment_t *sptr = get_first_seg();
         if ( sptr != NULL )
         {
-          if ( sptr->startEA-get_segm_base(sptr) == 0 )
+          if ( sptr->start_ea-get_segm_base(sptr) == 0 )
           {
-            inf.beginEA = sptr->startEA;
-            inf.startIP = 0;
+            inf.start_ea = sptr->start_ea;
+            inf.start_ip = 0;
             for ( int i=0; i < qnumber(entries); i++ )
             {
               if ( entries[i].proc > ptype )
                 continue;
-              ea_t ea = inf.beginEA+entries[i].off;
-              if ( isEnabled(ea) && get_byte(ea) != 0xFF )
+              ea_t ea = inf.start_ea+entries[i].off;
+              if ( is_mapped(ea) && get_byte(ea) != 0xFF )
               {
                 add_entry(ea, ea, entries[i].name, 1);
                 set_cmt(ea, entries[i].cmt, 1);
@@ -251,7 +244,7 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
           AdditionalSegment(0x10000-256-128, 256+128, "RAM");
           if ( scode != NULL )
           {
-            ea_t align = (scode->endEA + 0xFFF) & ~0xFFF;
+            ea_t align = (scode->end_ea + 0xFFF) & ~0xFFF;
             if ( getseg(align-7) == scode )     // the code segment size is
             {                                   // multiple of 4K or near it
               uchar b0 = get_byte(align-8);
@@ -281,20 +274,20 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
 //                msg("b0=%x b1=%x\n", b0, b1);
 //              if ( (b0 & 0x80) == 0x80 && (b1 & 0xEA) == 0xEA )
               {                         // the init bits are correct
-                char pname[sizeof(inf.procName)+1];
-                inf.get_proc_name(pname);
+                char pname[sizeof(inf.procname)];
+                qstrncpy(pname, inf.procname, sizeof(pname));
                 char ntype = (b0 & 1) ? 's' : 'b';
                 char *ptr = tail(pname)-1;
                 if ( ntype != *ptr
-                  && askyn_c(1,
-                       "HIDECANCEL\n"
-                       "The input file seems to be for the %s mode of the processor. "
-                       "Do you want to change the current processor type?",
-                       ntype == 's' ? "source" : "binary") > 0 )
+                  && ask_yn(ASKBTN_YES,
+                            "HIDECANCEL\n"
+                            "The input file seems to be for the %s mode of the processor.\n"
+                            "Do you want to change the current processor type?",
+                            ntype == 's' ? "source" : "binary") > 0 )
                 {
                   *ptr = ntype;
-                  first_time = 1;
-                  set_processor_type(pname, SETPROC_COMPAT);
+                  first_time = true;
+                  set_processor_type(pname, SETPROC_USER);
                 }
               }
             }
@@ -308,8 +301,8 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
             set_default_dataseg(s->sel);
         }
 
-        if ( choose_ioport_device(cfgname, device, sizeof(device), parse_area_line0) )
-          set_device_name(device, IORESP_ALL);
+        if ( choose_ioport_device(&device, cfgname, parse_area_line0) )
+          set_device_name(device.c_str(), IORESP_ALL);
 
         if ( get_segm_by_name("RAM") == NULL )
           AdditionalSegment(256, 0, "RAM");
@@ -319,104 +312,138 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
       }
       break;
 
-    case processor_t::oldfile:
+    case processor_t::ev_oldfile:
       setup_data_segment_pointers();
       break;
 
-    case processor_t::newseg:
+    case processor_t::ev_creating_segm:
         // make the default DS point to INTMEM
         // (8051 specific issue)
       {
         segment_t *newseg = va_arg(va, segment_t *);
         segment_t *intseg = getseg(intmem);
         if ( intseg != NULL )
-          newseg->defsr[rVds-ph.regFirstSreg] = intseg->sel;
+          newseg->defsr[rVds-ph.reg_first_sreg] = intseg->sel;
       }
       break;
 
-    case processor_t::newprc:
+    case processor_t::ev_newprc:
       {
         processor_subtype_t prcnum = processor_subtype_t(va_arg(va, int));
+        // bool keep_cfg = va_argi(va, bool);
         if ( !first_time && prcnum != ptype )
         {
           warning("Sorry, it is not possible to change" // (this is 8051 specific)
                   " the processor mode on the fly."
                   " Please reload the input file"
                   " if you want to change the processor.");
-          return 0;
+          code = -1;
+          break;
         }
-        first_time = 0;
+        first_time = false;
         ptype = prcnum;
       }
       break;
 
-    case processor_t::newasm:    // new assembler type
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_NONE);
-      }
+    case processor_t::ev_newasm:    // new assembler type
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_NONE);
       break;
 
-    case processor_t::move_segm:// A segment is moved
-                                // Fix processor dependent address sensitive information
-                                // args: ea_t from - old segment address
-                                //       segment_t - moved segment
-      {
-        // ea_t from    = va_arg(va, ea_t);
-        // segment_t *s = va_arg(va, segment_t *);
-
-        // Add commands to adjust your internal variables here
-        // Most of the time this callback will be empty
-        //
-        // If you keep information in a netnode's altval array, you can use
-        //      node.altshift(from, s->startEA, s->endEA - s->startEA);
-        //
-        // If you have a variables pointing to somewhere in the disassembled program memory,
-        // you can adjust it like this:
-        //
-        //      asize_t size = s->endEA - s->startEA;
-        //      if ( var >= from && var < from+size )
-        //        var += s->startEA - from;
-      }
-      break;
-
-    case processor_t::is_sane_insn:
+    case processor_t::ev_is_sane_insn:
                                 // is the instruction sane for the current file type?
                                 // arg:  int no_crefs
-                                // 1: the instruction has no code refs to it.
-                                //    ida just tries to convert unexplored bytes
-                                //    to an instruction (but there is no other
-                                //    reason to convert them into an instruction)
-                                // 0: the instruction is created because
-                                //    of some coderef, user request or another
-                                //    weighty reason.
+                                // 1:  the instruction has no code refs to it.
+                                //     ida just tries to convert unexplored bytes
+                                //     to an instruction (but there is no other
+                                //     reason to convert them into an instruction)
+                                // -1: the instruction is created because
+                                //     of some coderef, user request or another
+                                //     weighty reason.
                                 // The instruction is in 'cmd'
                                 // returns: 1-ok, <=0-no, the instruction isn't
                                 // likely to appear in the program
       {
-        bool no_crefs = va_arg(va, int) != 0;
-        return is_sane_insn(no_crefs);
+        const insn_t *insn = va_arg(va, insn_t *);
+        int reason = va_arg(va, int);
+        return is_sane_insn(*insn, reason) == 1 ? 1 : -1;
       }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i51_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i51_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        i51_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_data:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        bool analyze_only = va_argi(va, bool);
+        i51_data(*ctx, analyze_only);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
+      break;
   }
-  va_end(va);
-
-  return(1);
+  return code;
 }
-
-//-----------------------------------------------------------------------
-//      Checkarg data. Common for all assemblers. Not good.
-//
-//      What is checkarg?
-//        It is a possibilty to compare the value of a manually entered
-//        operand against its original value.
-//        Checkarg is currently implemented for IBM PC, 8051, and PDP-11
-//        processors. Other processor are unlikely to be supported.
-//      You may just get rid of checkarg and replace the pointers to it
-//      in the 'LPH' structure by NULLs.
-//
-//-----------------------------------------------------------------------
-#include "chkarg.cpp"
 
 //-----------------------------------------------------------------------
 //                   ASMI
@@ -428,7 +455,6 @@ static const asm_t asmi =
   "ASMI",
   0,
   NULL,         // no headers
-  NULL,         // no bad instructions
   ".equ $, ",
   ".end",
 
@@ -451,10 +477,7 @@ static const asm_t asmi =
   ".byte 0xFF;(array %s)", // uninited arrays
   ".equ",       // equ
   NULL,         // seg prefix
-  chkarg_dispatch_i51,
-  NULL, NULL,   // FREE
-  NULL,
-  "$",
+  "$",          // curip
   NULL,         // func_header
   NULL,         // func_footer
   NULL,         // public
@@ -480,12 +503,11 @@ static const asm_t asmi =
 //-----------------------------------------------------------------------
 static const asm_t adasm =
 {
-  AS_COLON | ASH_HEXF0 ,
+  AS_COLON | ASH_HEXF0,
   UAS_PBIT | UAS_SECT,
   "8051 Macro Assembler by 2500 A.D. Software",
   0,
   NULL,         // no headers
-  NULL,         // no bad instructions
   "org",
   "end",
 
@@ -508,10 +530,7 @@ static const asm_t adasm =
   "ds %s",      // uninited arrays
   "reg",        // equ
   NULL,         // seg prefix
-  chkarg_dispatch_i51,
-  NULL, NULL,   // FREE
-  NULL,
-  "$",
+  "$",          // curip
   NULL,         // func_header
   NULL,         // func_footer
   NULL,         // public
@@ -553,7 +572,6 @@ static const asm_t pseudosam =
   "PseudoSam by PseudoCode",
   0,
   ps_headers,
-  NULL,
   ".org",
   ".end",
 
@@ -576,10 +594,7 @@ static const asm_t pseudosam =
   ".rs %s",     // uninited arrays
   ".equ",       // equ
   NULL,         // seg prefix
-  chkarg_dispatch_i51,
-  NULL, NULL,   // FREE
-  NULL,
-  "$",
+  "$",          // curip
   NULL,         // func_header
   NULL,         // func_footer
   NULL,         // public
@@ -615,7 +630,6 @@ static const asm_t cross16 =
   "Cross-16 by Universal Cross-Assemblers",
   0,
   cross16_headers,
-  NULL,
   "org",
   "end",
 
@@ -638,10 +652,7 @@ static const asm_t cross16 =
   "dfs %s",     // uninited arrays
   "equ",        // Equ
   NULL,         // seg prefix
-  chkarg_dispatch_i51,
-  NULL, NULL,   // FREE
-  NULL,
-  "$",
+  "$",          // curip
   NULL,         // func_header
   NULL,         // func_footer
   NULL,         // public
@@ -671,7 +682,6 @@ static const asm_t mcross =
   "8051 Cross-Assembler by MetaLink Corporation",
   0,
   NULL,
-  NULL,
   "org",
   "end",
 
@@ -694,10 +704,7 @@ static const asm_t mcross =
   "ds %s",      // uninited arrays
   "equ",        // Equ
   NULL,         // seg prefix
-  chkarg_dispatch_i51,
-  NULL, NULL,   // FREE
-  NULL,
-  "$",
+  "$",          // curip
   NULL,         // func_header
   NULL,         // func_footer
   NULL,         // public
@@ -733,7 +740,6 @@ static const asm_t tasm =
   "Table Driven Assembler (TASM) by Speech Technology Inc.",
   0,
   tasm_headers,
-  NULL,
   ".org",
   ".end",
 
@@ -756,10 +762,7 @@ static const asm_t tasm =
   ".block %s",  // uninited arrays
   ".equ",
   NULL,         // seg prefix
-  chkarg_dispatch_i51,
-  NULL, NULL,   // FREE
-  NULL,
-  "$",
+  "$",          // curip
   NULL,         // func_header
   NULL,         // func_footer
   NULL,         // public
@@ -831,14 +834,17 @@ static const bytes_t retcodes[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,// version
-  PLFM_8051,            // id
-  PR_RNAMESOK           // can use register names for byte names
-  |PR_SEGTRANS          // segment translation is supported (codeSeg)
-  |PR_BINMEM,           // The module creates RAM/ROM segments for binary files
-                        // (the kernel shouldn't ask the user about their sizes and addresses)
-  8,                    // 8 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_8051,              // id
+                          // flag
+    PR_RNAMESOK           // can use register names for byte names
+  | PR_SEGTRANS           // segment translation is supported (map_code_ea)
+  | PR_BINMEM,            // The module creates RAM/ROM segments for binary files
+                          // (the kernel shouldn't ask the user about their sizes and addresses)
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,              // array of short processor names
                         // the short names are used to specify the processor
@@ -851,31 +857,8 @@ processor_t LPH =
 
   notify,               // the kernel event notification callback
 
-  header,               // generate the disassembly header
-  footer,               // generate the disassembly footer
-
-  segstart,             // generate a segment declaration (start of segment)
-  std_gen_segm_footer,  // generate a segment footer (end of segment)
-
-  NULL,                 // generate 'assume' directives
-
-  ana,                  // analyze an instruction and fill the 'cmd' structure
-  emu,                  // emulate an instruction
-
-  out,                  // generate a text representation of an instruction
-  outop,                // generate a text representation of an operand
-  i51_data,             // generate a text representation of a data item
-  NULL,                 // compare operands
-  NULL,                 // can an operand have a type?
-
-  qnumber(RegNames),    // Number of registers
   RegNames,             // Regsiter names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(RegNames),    // Number of registers
 
   rVcs,rVds,
   0,                    // size of a segment register
@@ -885,29 +868,14 @@ processor_t LPH =
   retcodes,
 
   0,I51_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 0 },      // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // long (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x);
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,sval_t v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   I51_ret,              // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 
 };

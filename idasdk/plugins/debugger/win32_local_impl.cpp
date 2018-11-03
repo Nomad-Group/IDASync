@@ -106,15 +106,12 @@ static error_t idaapi idc_win32_wrmsr(idc_value_t *argv, idc_value_t *res)
 // Installs or uninstalls debugger specific idc functions
 static bool register_idc_funcs(bool reg)
 {
-  static const extfun_t funs[] =
+  static const ext_idcfunc_t idcfuncs[] =
   {
-    { IDC_READ_MSR,    idc_win32_rdmsr,     idc_win32_rdmsr_args     },
-    { IDC_WRITE_MSR,   idc_win32_wrmsr,     idc_win32_wrmsr_args     },
+    { IDC_READ_MSR,  idc_win32_rdmsr, idc_win32_rdmsr_args, NULL, 0, 0 },
+    { IDC_WRITE_MSR, idc_win32_wrmsr, idc_win32_wrmsr_args, NULL, 0, 0 },
   };
-  for ( int i=0; i < qnumber(funs); i++ )
-    if ( !set_idc_func_ex(funs[i].name, reg ? funs[i].fp : NULL, funs[i].args, 0) )
-      return false;
-  return true;
+  return add_idc_funcs(idcfuncs, qnumber(idcfuncs), reg);
 }
 
 //--------------------------------------------------------------------------
@@ -152,7 +149,7 @@ bool read_pe_header(peheader_t *pe)
   return penode.valobj(pe, sizeof(peheader_t)) > 0;
 }
 
-#if defined(RPC_CLIENT) && defined(ENABLE_REMOTEPDB)
+#if defined(RPC_CLIENT) && defined(ENABLE_REMOTEPDB) && !defined(WINCE_DEBUGGER)
 
 //--------------------------------------------------------------------------
 // handler on IDA: Server -> IDA
@@ -169,7 +166,7 @@ static int ioctl_handler(
   {
     case WIN32_IOCTL_READFILE:
       {
-        wasBreak();
+        user_cancelled();
         const uchar *ptr = (const uchar *)buf;
         const uchar *end = ptr + size;
         uint64 offset        = unpack_dq(&ptr, end);
@@ -180,9 +177,7 @@ static int ioctl_handler(
         // read an arbitrary file on the local computer. therefore we completely
         // ignore the file name and use the input file path.
         qnotused(filename);
-        char path[QMAXPATH];
-        get_input_file_path(path, sizeof(path));
-        filename = path;
+        filename = g_dbgmod.pdb_file_path.c_str();
 
         *poutbuf = NULL;
         *poutsize = 0;
@@ -237,8 +232,15 @@ static bool win32_init_plugin(void)
   {
     if ( inf.filetype != f_PE )
       return false; // only PE files
-    if ( ph.id != TARGET_PROCESSOR )
+
+    // allow incorrect target processor if the debugger is only being
+    // used for fetching pdb
+    if ( ph.id != TARGET_PROCESSOR
+      && ph.id != -1
+      && !netnode(PDB_NODE_NAME).altval(PDB_LOADING_WIN32_DBG) )
+    {
       return false;
+    }
 
     // find out the pe header
     peheader_t pe;
@@ -255,7 +257,7 @@ static bool win32_init_plugin(void)
       // debug only gui or console applications
       if ( pe.subsys != PES_WINGUI && pe.subsys != PES_WINCHAR )
       {
-#if defined(RPC_CLIENT) && defined(ENABLE_REMOTEPDB)
+#if defined(RPC_CLIENT) && defined(ENABLE_REMOTEPDB) && !defined(WINCE_DEBUGGER)
         if ( !debugger.is_remote() )
           return false;
         // allow loading to handle remote PDB symbols
@@ -266,7 +268,7 @@ static bool win32_init_plugin(void)
 #endif
     }
   }
-#if defined(RPC_CLIENT) && defined(ENABLE_REMOTEPDB)
+#if defined(RPC_CLIENT) && defined(ENABLE_REMOTEPDB) && !defined(WINCE_DEBUGGER)
   g_dbgmod.set_ioctl_handler(ioctl_handler);
 #endif
   return true;

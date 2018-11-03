@@ -89,7 +89,7 @@ bool til_builder_t::get_symbol_name(pdb_sym_t &sym, qstring &buf)
 //----------------------------------------------------------------------------
 bool til_builder_t::get_symbol_type(tpinfo_t *out, pdb_sym_t &sym, int *p_id)
 {
-  pdb_sym_t pType(*pdb_access);
+  pdb_sym_t pType(pdb_access);
   if ( p_id != NULL )
     *p_id = -1;
   if ( sym.get_type(&pType) != S_OK )
@@ -106,7 +106,7 @@ size_t til_builder_t::get_symbol_type_length(pdb_sym_t &sym) const
   sym.get_symTag(&tag);
   if ( tag == SymTagData )
   {
-    pdb_sym_t pType(*pdb_access);
+    pdb_sym_t pType(pdb_access);
     if ( sym.get_type(&pType) == S_OK )
       pType.get_length(&size);
   }
@@ -147,9 +147,22 @@ cvt_code_t til_builder_t::convert_basetype(
       {
         switch ( size )
         {
-          case 1: bt |= BTMT_BOOL1; break;
-          case 2: bt |= BTMT_BOOL2; break;
-          case 4: bt |= BTMT_BOOL4; break;
+          case 1:
+            bt |= BTMT_BOOL1;
+            break;
+          case 2:
+            if ( inf.is_64bit() )
+              goto MAKE_INT; // 64bit apps do not have BOOL2
+            bt |= BTMT_BOOL2;
+            break;
+          case 4:
+            bt |= BTMT_BOOL4;
+            break;
+          case 8:
+            if ( !inf.is_64bit() )
+              goto MAKE_INT; // 32bit apps do not have BOOL8
+            bt |= BTMT_BOOL8;
+            break;
           default:
             // can't make this bool size; make an int
             goto MAKE_INT;
@@ -158,9 +171,9 @@ cvt_code_t til_builder_t::convert_basetype(
       break;
 MAKE_INT:
     case btInt:
-    case btLong:     bt = get_int_type_bit(size);              break;
+    case btLong:     bt = get_scalar_bt(size);              break;
     case btUInt:
-    case btULong:    bt = get_int_type_bit(size)|BTMT_USIGNED; break;
+    case btULong:    bt = get_scalar_bt(size)|BTMT_USIGNED; break;
     case btFloat:
       if ( size == sizeof_ldbl() )
       {
@@ -168,7 +181,7 @@ MAKE_INT:
       }
       else
       {
-        switch( size )
+        switch ( size )
         {
           case 4:  bt = BTMT_FLOAT;   break;
           default:
@@ -235,7 +248,7 @@ bool til_builder_t::retrieve_arguments(
   fi.clear();
   type_name_collector_t pp(ti, this, fi);
   HRESULT hr = pdb_access->iterate_children(_sym, SymTagNull, pp);
-  if ( SUCCEEDED(hr) && funcSym != NULL )
+  if ( hr == S_OK && funcSym != NULL )
   {
     // get parameter names from the function symbol
     func_type_data_t args;
@@ -257,13 +270,14 @@ bool til_builder_t::retrieve_arguments(
           {
             if ( fi.cc == CM_CC_FASTCALL
               && cur_argloc.regoff() == 0
-              && (cur_argloc.reg1() == R_cx && i==0 || cur_argloc.reg1() == R_dx && i==1) )
+              && (cur_argloc.reg1() == R_cx && i == 0
+               || cur_argloc.reg1() == R_dx && i == 1) )
             {
               // ignore ecx and edx for fastcall
             }
             else if ( fi.cc == CM_CC_THISCALL
                    && cur_argloc.regoff() == 0
-                   && cur_argloc.reg1() == R_cx && i==0 )
+                   && cur_argloc.reg1() == R_cx && i == 0 )
             {
               // ignore ecx for thiscall
             }
@@ -295,7 +309,9 @@ cm_t til_builder_t::convert_cc(DWORD cc0) const
   {
     case CV_CALL_GENERIC    :
     case CV_CALL_NEAR_C     :
-    case CV_CALL_FAR_C      : return CM_CC_CDECL;
+    case CV_CALL_FAR_C      : return inf.is_64bit()
+                                   ? CM_CC_FASTCALL
+                                   : CM_CC_CDECL;
     case CV_CALL_NEAR_PASCAL:
     case CV_CALL_FAR_PASCAL : return CM_CC_PASCAL;
     case CV_CALL_NEAR_FAST  :
@@ -326,26 +342,10 @@ bool til_builder_t::get_variant_string_value(qstring *out, pdb_sym_t &sym) const
   bool ok = false;
   VARIANT value;
   VariantInit(&value);
-  if ( sym.get_value(&value) == S_OK )
+  if ( sym.get_value(&value) == S_OK && value.vt == VT_BSTR )
   {
-    switch ( value.vt )
-    {
-      case VT_BSTR:
-        {
-          VARIANT vbstr;
-          VariantInit(&vbstr);
-          HRESULT hr = VariantChangeType(&vbstr, &value, 0, VT_BSTR);
-          if ( hr == S_OK )
-          {
-            u2cstr((wchar16_t*) vbstr.bstrVal, out);
-            ok = true;
-          }
-          VariantClear(&vbstr);
-        }
-        break;
-      default:
-        break;
-    }
+    utf16_utf8(out, (wchar16_t*) value.bstrVal);
+    ok = true;
   }
   VariantClear(&value);
   return ok;
@@ -359,14 +359,22 @@ uint32 til_builder_t::get_variant_long_value(pdb_sym_t &sym) const
   VariantInit(&value);
   if ( sym.get_value(&value) == S_OK )
   {
-    VARIANT vlong;
-    VariantInit(&vlong);
-    HRESULT hr = VariantChangeType(&vlong, &value, 0, VT_UI4);
-    if ( hr != S_OK )
-      hr = VariantChangeType(&vlong, &value, 0, VT_I4);
-    if ( hr == S_OK )
-      v = vlong.ulVal;
-    VariantClear(&vlong);
+    switch ( value.vt )
+    {
+      case VT_I1:   v = value.cVal; break;
+      case VT_I2:   v = value.iVal; break;
+      case VT_I4:   v = value.lVal; break;
+      case VT_I8:   v = value.llVal; break;
+      case VT_INT:  v = value.intVal; break;
+      case VT_UI1:  v = value.bVal; break;
+      case VT_UI2:  v = value.uiVal; break;
+      case VT_UI4:  v = value.ulVal; break;
+      case VT_UI8:  v = value.ullVal; break;
+      case VT_UINT: v = value.uintVal; break;
+      default:
+        ask_for_feedback("pdb: unsupported VARIANT type %d", value.vt);
+        break;
+    }
   }
   VariantClear(&value);
   return v;
@@ -377,7 +385,7 @@ uint32 til_builder_t::get_variant_long_value(pdb_sym_t &sym) const
 bool til_builder_t::is_member_func(tinfo_t *class_type, pdb_sym_t &typeSym, pdb_sym_t *funcSym)
 {
   // make sure we retrieve class type first
-  pdb_sym_t pParent(*pdb_access);
+  pdb_sym_t pParent(pdb_access);
   if ( typeSym.get_classParent(&pParent) != S_OK || pParent.data == NULL )
     return false;
 
@@ -452,8 +460,8 @@ int til_builder_t::get_symbol_funcarg_info(
     DWORD dwReg;
     LONG lOffset;
     if ( sym.get_registerId(&dwReg) == S_OK
-         && sym.get_offset(&lOffset) == S_OK
-         && is_frame_reg(dwReg) )
+      && sym.get_offset(&lOffset) == S_OK
+      && is_frame_reg(dwReg) )
     {
       uint32 align;
       out->argloc._set_stkoff(stack_off);
@@ -542,8 +550,8 @@ cvt_code_t til_builder_t::verify_union(
         udt_member_t &lastmem = sm.back();
         uint64 smend = lastmem.end();
         if ( lastmem.is_bitfield() == q->is_bitfield()
-           && smend <= q->begin()
-           && (best == NULL || bestend < smend) )
+          && smend <= q->begin()
+          && (best == NULL || bestend < smend) )
         {
           best = &sm;
           bestend = smend;
@@ -558,7 +566,7 @@ cvt_code_t til_builder_t::verify_union(
       bitfield_type_data_t bi;
       q->type.get_bitfield_details(&bi);
       size_t size = bi.nbytes * 8;
-      QASSERT(30385, size==8 || size==16 || size==32 || size==64);
+      QASSERT(30385, size == 8 || size == 16 || size == 32 || size == 64);
       qend = align_down(q->offset, size) + size;
     }
     else
@@ -832,6 +840,9 @@ cvt_code_t til_builder_t::convert_udt(
   }
   udt.total_size = size;
   std::stable_sort(udt.begin(), udt.end());
+  BOOL cppobj;
+  if ( _sym.get_constructor(&cppobj) == S_OK && cppobj > 0 )
+    udt.taudt_bits |= TAUDT_CPPOBJ;
   return create_udt(out, &udt, udtKind);
 }
 
@@ -941,7 +952,7 @@ cvt_code_t til_builder_t::create_udt(tinfo_t *out, udt_type_data_t *udt, int udt
 // if so, a pointer to return value will be passed as a hidden parameter
 bool til_builder_t::is_complex_return(pdb_sym_t &sym) const
 {
-  pdb_sym_t pType(*pdb_access);
+  pdb_sym_t pType(pdb_access);
   bool complex = false;
   if ( sym.get_type(&pType) == S_OK )
   {
@@ -1057,7 +1068,7 @@ cvt_code_t til_builder_t::really_convert_type(
           }
           else
           { // revert to int
-            type_t inttype = get_int_type_bit(size);
+            type_t inttype = get_scalar_bt(size);
             if ( inttype == BT_UNK )
             {
               code = cvt_failed;
@@ -1110,19 +1121,24 @@ FAILED_ARRAY:
         if ( get_cc(fi.cc) != CM_CC_VOIDARG )
         {
           retrieve_arguments(sym, fi, parent);
-          // last arg unknown/invalid argument => convert to ellipsis
-          if ( !fi.empty() && fi.back().type.empty() )
+          // if arg has unknown/invalid argument => convert to ellipsis
+          for ( func_type_data_t::iterator i = fi.begin(); i != fi.end(); i++ )
           {
-            // If the CC is cdecl, the last argument represents
-            // the ellipsis.
-            // Otherwise, it's likely to be a C-type function
-            // with unknown number of arguments, such as 'foo()'
-            // (as opposed to 'foo(void)'), and which might not have a cdecl
-            // calling convention. E.g., pc_win32_appcall.pe's 'FARPROC':
-            // "int (FAR WINAPI * FARPROC) ()", which is a stdcall.
-            fi.pop_back();
-            if ( get_cc(fi.cc) == CM_CC_CDECL )
-              fi.cc = CM_CC_ELLIPSIS;
+            if ( i->type.empty() )
+            {
+              // If the CC is cdecl, empty arguments represent an ellipsis.
+              // Otherwise, it's likely to be a C-type function
+              // with unknown number of arguments, such as 'foo()'
+              // (as opposed to 'foo(void)'), and which might not have a cdecl
+              // calling convention. E.g., pc_win32_appcall.pe's 'FARPROC':
+              // "int (FAR WINAPI * FARPROC) ()", which is a stdcall.
+              cm_t cc = get_cc(fi.cc);
+              if ( cc == CM_CC_CDECL || inf.is_64bit() && cc == CM_CC_FASTCALL )
+                fi.cc = CM_CC_ELLIPSIS;
+              // remove the ellipsis and any trailing arguments
+              fi.erase(i, fi.end());
+              break;
+            }
           }
           // is there an implicit "result" pointer passed?
           if ( is_complex_return(sym) )
@@ -1504,13 +1520,13 @@ cvt_code_t til_builder_t::create_udt_ref(tinfo_t *out, udt_type_data_t *udt, int
   qtype type, fields;
   tif.serialize(&type, &fields);
 
-  char name[MAXNAMELEN];
-  build_anon_type_name(name, sizeof(name), type.begin(), fields.begin());
-  uint32 id = get_type_ordinal(ti, name);
+  qstring name;
+  build_anon_type_name(&name, type.begin(), fields.begin());
+  uint32 id = get_type_ordinal(ti, name.c_str());
   if ( id == 0 )
   {
     id = alloc_type_ordinal(ti);
-    if ( !set_numbered_type(ti, id, NTF_NOBASE, name, type.begin(), fields.begin()) )
+    if ( set_numbered_type(ti, id, NTF_NOBASE|NTF_FIXNAME, name.c_str(), type.begin(), fields.begin()) != TERR_OK )
       return cvt_failed;
     type_created(BADADDR, id, NULL, tif);
   }
@@ -1573,6 +1589,8 @@ bool til_builder_t::retrieve_type(
     // this is a temporary name, it will be replaced by $hex..
     if ( is_unnamed )
       ns.sprnt("unnamed-%d", unnamed_idx++);
+    else
+      validate_name(&ns, VNT_TYPE);
 
     // some types can be defined multiple times. check if the name is already defined
     bool defined_correctly = false;
@@ -1613,7 +1631,7 @@ RETT2:
       {
         // the following may fail because of c++ overloaded functions
         // do not check the error code - we can not help it
-        set_named_type(ti, ns.c_str(), NTF_SYMM, type.begin(), fields.begin());
+        tpi2.type.set_symbol_type(ti, ns.c_str(), NTF_SYMM);
         type_created(BADADDR, 0, ns.c_str(), tpi2.type);
         goto RETT2;
       }
@@ -1621,8 +1639,7 @@ RETT2:
       bool reuse_anon_type = false;
       if ( is_unnamed ) // this type will be referenced, so create a name for it
       {
-        ns.resize(MAXNAMELEN-1);
-        build_anon_type_name(ns.begin(), ns.size(), type.begin(), fields.begin());
+        build_anon_type_name(&ns, type.begin(), fields.begin());
         id = get_type_ordinal(ti, ns.c_str());
         if ( id != 0 ) // this type already exists, just reuse it
         {
@@ -1633,13 +1650,13 @@ RETT2:
       if ( !reuse_anon_type )
       {
         id = end_creation(ns);
-        int ntf_flags = NTF_NOBASE;
+        int ntf_flags = NTF_NOBASE|NTF_FIXNAME;
         if ( defined_wrongly )
           ntf_flags |= NTF_REPLACE;
-        if ( !set_numbered_type(ti, id, ntf_flags,
-                                ns.empty() ? NULL : ns.c_str(),
-                                type.begin(),
-                                fields.begin()) )
+        if ( set_numbered_type(ti, id, ntf_flags,
+                               ns.empty() ? NULL : ns.c_str(),
+                               type.begin(),
+                               fields.begin()) != TERR_OK )
         {
           return 0;
         }
@@ -1737,7 +1754,7 @@ struct toplevel_children_visitor_t : public pdb_access_t::children_visitor_t
 {
   virtual HRESULT visit_child(pdb_sym_t &sym)
   {
-    wasBreak();
+    user_cancelled();
     return do_visit_child(sym);
   }
 
@@ -1778,6 +1795,13 @@ HRESULT til_builder_t::handle_publics(pdb_sym_t &global_sym)
   return pdb_access->iterate_children(global_sym, SymTagPublicSymbol, cp);
 }
 
+//-------------------------------------------------------------------------
+HRESULT til_builder_t::handle_globals(pdb_sym_t &global_sym)
+{
+  symbol_handler_t cp(this);
+  return pdb_access->iterate_children(global_sym, SymTagData, cp);
+}
+
 
 //----------------------------------------------------------------------
 HRESULT til_builder_t::handle_types(pdb_sym_t &global_sym)
@@ -1797,11 +1821,11 @@ HRESULT til_builder_t::handle_types(pdb_sym_t &global_sym)
   };
   type_importer_t timp(this);
   HRESULT hr = pdb_access->iterate_children(global_sym, SymTagEnum, timp);
-  if ( SUCCEEDED(hr) )
+  if ( hr == S_OK )
     hr = pdb_access->iterate_children(global_sym, SymTagUDT, timp);
-  if ( SUCCEEDED(hr) )
+  if ( hr == S_OK )
     hr = pdb_access->iterate_children(global_sym, SymTagTypedef, timp);
-  msg("PDB: loaded %d type%s\n", timp.counter, timp.counter!=1 ? "s" : "");
+  msg("PDB: loaded %d type%s\n", timp.counter, timp.counter != 1 ? "s" : "");
   return hr;
 }
 
@@ -1823,13 +1847,27 @@ HRESULT til_builder_t::after_iterating(pdb_sym_t &)
 HRESULT til_builder_t::build(pdb_sym_t &global_sym)
 {
   HRESULT hr = before_iterating(global_sym);
-  if ( SUCCEEDED(hr) )
+  if ( hr == S_OK )
     hr = handle_types(global_sym);
-  if ( SUCCEEDED(hr) )
-    hr = handle_symbols(global_sym);
-  if ( SUCCEEDED(hr) )
-    hr = handle_publics(global_sym);
-  if ( SUCCEEDED(hr) )
+  if ( (pdb_access->pdbargs.flags & PDBFLG_ONLY_TYPES) == 0 )
+  {
+    if ( hr == S_OK )
+      hr = handle_symbols(global_sym);
+    if ( hr == S_OK )
+      hr = handle_globals(global_sym);
+    // handle_globals() will set the type and undecorated name for globals,
+    // and handle_publics() will set the decorated name for public symbols.
+    // We want both the type (from handle_globals()) and the decorated symbol
+    // name (from handle_publics()), since that gives the user more information
+    // about the variable and enables FLIRT to match rulefuncs based on the
+    // symbol name.
+    // For example, @__security_check_cookie@4 is used as a rulefunc by FLIRT,
+    // and that won't match with the undecorated name __security_check_cookie.
+    // Therefore, handle_publics() must be called *after* handle_globals().
+    if ( hr == S_OK )
+      hr = handle_publics(global_sym);
+  }
+  if ( hr == S_OK )
     hr = after_iterating(global_sym);
   return hr;
 }

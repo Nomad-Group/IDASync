@@ -4,12 +4,12 @@
 
 #ifdef ENABLE_LOWCNDS
 inline bool has_armv5(void) { return true; }
-#include "../../module/arm/opinfo.cpp"
+static arm_debmod_t *ssmod; // pointer to the current debugger module
 #endif
 
-#include "deb_arm.hpp"
+#include "../../module/arm/opinfo.cpp"
 
-static arm_debmod_t *ssmod;     // pointer to the current debugger module
+#include "deb_arm.hpp"
 
 //--------------------------------------------------------------------------
 arm_debmod_t::arm_debmod_t()
@@ -144,9 +144,9 @@ void arm_debmod_t::cleanup_hwbpts()
 
 //--------------------------------------------------------------------------
 int arm_debmod_t::finalize_appcall_stack(
-    call_context_t &ctx,
-    regval_map_t &regs,
-    bytevec_t &/*stk*/)
+        call_context_t &ctx,
+        regval_map_t &regs,
+        bytevec_t &/*stk*/)
 {
   regs[R_LR].ival = ctx.ctrl_ea;
   // return addrsize as the adjustment factor to add to sp
@@ -162,6 +162,7 @@ int arm_debmod_t::get_regidx(const char *regname, int *clsmask)
 //                                           register_info_t arm_registers[]
   static const char *const regnames[] =
   {
+#ifndef __EA64__
     "R0",
     "R1",
     "R2",
@@ -179,6 +180,87 @@ int arm_debmod_t::get_regidx(const char *regname, int *clsmask)
     "LR",
     "PC",
     "PSR",
+    /* Floating point registers ********************************/
+    // "VFP0",
+    // "VFP1",
+    // "VFP2",
+    // "VFP3",
+    // "VFP4",
+    // "VFP5",
+    // "VFP6",
+    // "VFP7",
+    // "SCR",
+    // "EXC",
+    /* VFP registers *******************************************/
+    "D0",
+    "D1",
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D11",
+    "D12",
+    "D13",
+    "D14",
+    "D15",
+    "D16",
+    "D17",
+    "D18",
+    "D19",
+    "D20",
+    "D21",
+    "D22",
+    "D23",
+    "D24",
+    "D25",
+    "D26",
+    "D27",
+    "D28",
+    "D29",
+    "D30",
+    "D31",
+    "FPSCR",
+#else
+    "X0",
+    "X1",
+    "X2",
+    "X3",
+    "X4",
+    "X5",
+    "X6",
+    "X7",
+    "X8",
+    "X9",
+    "X10",
+    "X11",
+    "X12",
+    "X13",
+    "X14",
+    "X15",
+    "X16",
+    "X17",
+    "X18",
+    "X19",
+    "X20",
+    "X21",
+    "X22",
+    "X23",
+    "X24",
+    "X25",
+    "X26",
+    "X27",
+    "X28",
+    "X29",
+    "X30",
+    "SP",
+    "PC",
+    "PSR",
+#endif
   };
 
   for ( int i=0; i < qnumber(regnames); i++ )
@@ -186,8 +268,19 @@ int arm_debmod_t::get_regidx(const char *regname, int *clsmask)
     if ( stricmp(regname, regnames[i]) == 0 )
     {
       if ( clsmask != NULL )
+#ifdef __HAVE_ARM_VFP__
+      {
+        if ( i < R_D0 )
+          *clsmask = ARM_RC_GENERAL;
+        else
+          *clsmask = ARM_RC_VFP;
+      }
+#else
+      {
         *clsmask = ARM_RC_GENERAL;
-      return R_R0 + i;
+      }
+#endif
+      return i + R_R0;
     }
   }
   return -1;
@@ -261,13 +354,13 @@ int arm_debmod_t::dbg_perform_single_step(debug_event_t *dev, const insn_t &insn
     arm_get_word,
     arm_get_long,
     arm_get_dtyp_size,
-    NULL,               // InstrIsSet not needed
+    NULL,               // has_insn_feature not needed
   };
 
   // calculate the address of the next executed instruction
   lock_begin();
   ssmod = this;
-  ea_t next = calc_next_exec_insn(insn, values.begin(), oh);
+  ea_t next = calc_next_exec_insn(insn, values.begin(), oh, false); // TODO pass is_mprofile parameter
   ssmod = NULL;
   lock_end();
 
@@ -321,4 +414,3 @@ int arm_debmod_t::read_bpt_orgbytes(ea_t *p_ea, int *p_len, uchar *buf, int bufs
   }
   return inherited::read_bpt_orgbytes(p_ea, p_len, buf, bufsize);
 }
-

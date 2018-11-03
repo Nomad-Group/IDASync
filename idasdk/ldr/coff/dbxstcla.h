@@ -11,7 +11,7 @@
 #define C_RSYM          0x83    // Register variable.
 #define C_RPSYM         0x84    // Argument to function or procedure stored in the register.
 #define C_STSYM         0x85    // Statically allocated symbol.
-#define C_TCSYM         0x86    
+#define C_TCSYM         0x86
 #define C_BCOMM         0x87    // Beginning of common block.
 #define C_ECOML         0x88    // Local member of common block.
 #define C_ECOMM         0x89    // End of common block.
@@ -21,7 +21,8 @@
 #define C_BSTAT         0x8f    // Beginning of static block.
 #define C_ESTAT         0x90    // End of static block.
 
-#define TP_ARRAY {\
+#define TP_ARRAY \
+        {\
         "int:t-1=r-1;-2147483648;2147483647",\
         "char:t-2=@s8;r-2;0;255",\
         "short:t-3=@s16;r-3;-32768;32767",\
@@ -85,6 +86,6 @@
 #define TP_INTEGER4     (-29)
 #define TP_WCHAR        (-30)
 
-#define TP_NTYPES       30      
+#define TP_NTYPES       30
 
 #endif /* _H_DBXSTCLASS */

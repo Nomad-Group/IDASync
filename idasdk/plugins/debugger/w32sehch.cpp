@@ -8,31 +8,146 @@
 
 static int req_id = -1;
 
-//---------------------------------------------------------------------------
-struct x86seh_ctx_t
+//-------------------------------------------------------------------------
+// non-modal exception handler chooser
+struct x86seh_chooser_t : public chooser_t
 {
-  qvector<uint32> handlers;
-  qstring title;
+protected:
   thid_t tid;
+  qvector<uint32> list; //lint !e958 padding is required to align members
+  qstring title_;
 
-  bool get_sehlist();
-  x86seh_ctx_t(thid_t _tid, const char *_title): title(_title),tid(_tid) {}
-  void refresh();
+  static const int widths_[];
+  static const char *const header_[];
+  enum { ICON = 144 };
+
+public:
+  // this object must be allocated using `new`
+  x86seh_chooser_t(thid_t tid);
+  virtual ~x86seh_chooser_t()
+  {
+    unhook_from_notification_point(
+            HT_DBG,
+            dbg_handler, const_cast<char *>(title));
+  }
+  //lint -e{1511} member hides non-virtual member
+  ssize_t choose(uint32 addr = uint32(-1))
+  {
+    return ::choose(this, &addr);
+  }
+
+  virtual const void *get_obj_id(size_t *len) const
+  {
+    *len = sizeof(tid);
+    return &tid;
+  }
+
+  virtual size_t idaapi get_count() const { return list.size(); }
+  virtual void idaapi get_row(
+          qstrvec_t *cols,
+          int *icon_,
+          chooser_item_attrs_t *attrs,
+          size_t n) const;
+  virtual cbret_t idaapi enter(size_t n);
+
+  // calculate the location of the item,
+  // `item_data` is a pointer to a 32-bit address
+  virtual ssize_t idaapi get_item_index(const void *item_data) const;
+  virtual bool idaapi init();
+  virtual cbret_t idaapi refresh(ssize_t n);
+
+protected:
+  static ssize_t idaapi dbg_handler(void *ud, int notif_code, va_list va);
 };
 
-//---------------------------------------------------------------------------
-bool x86seh_ctx_t::get_sehlist()
+//-------------------------------------------------------------------------
+const int x86seh_chooser_t::widths_[] =
 {
+  CHCOL_HEX | 10, // Address
+  30,             // Name
+};
+const char *const x86seh_chooser_t::header_[] =
+{
+  "Address",  // 0
+  "Name",     // 1
+};
+
+//-------------------------------------------------------------------------
+inline x86seh_chooser_t::x86seh_chooser_t(thid_t tid_)
+  : chooser_t(CH_NOBTNS | CH_FORCE_DEFAULT | CH_CAN_REFRESH,
+              qnumber(widths_), widths_, header_),
+    tid(tid_),
+    list()
+{
+  title_.sprnt("[%04X] - Structured exception handlers list", tid);
+  title = title_.c_str();
+  CASSERT(qnumber(widths_) == qnumber(header_));
+  icon = ICON;
+
+  hook_to_notification_point(
+          HT_DBG,
+          dbg_handler, const_cast<char *>(title));
+}
+
+//-------------------------------------------------------------------------
+void idaapi x86seh_chooser_t::get_row(
+        qstrvec_t *cols_,
+        int *,
+        chooser_item_attrs_t *,
+        size_t n) const
+{
+  // assert: n < list.size()
+  uint32 addr = list[n];
+
+  qstrvec_t &cols = *cols_;
+  cols[0].sprnt("%08X", addr);
+  get_nice_colored_name(&cols[1], addr, GNCN_NOCOLOR | GNCN_NOLABEL);
+  CASSERT(qnumber(header_) == 2);
+}
+
+//-------------------------------------------------------------------------
+chooser_t::cbret_t idaapi x86seh_chooser_t::enter(size_t n)
+{
+  // assert: n < list.size()
+  ea_t ea = ea_t(list[n]);
+  if ( !is_code(get_flags(ea)) )
+    create_insn(ea);
+  jumpto(ea);
+  return cbret_t(); // nothing changed
+}
+
+//------------------------------------------------------------------------
+ssize_t idaapi x86seh_chooser_t::get_item_index(const void *item_data) const
+{
+  if ( list.empty() )
+    return NO_SELECTION;
+
+  // `item_data` is a pointer to a 32-bit address
+  uint32 item_addr = *(const uint32 *)item_data;
+  if ( item_addr == uint32(-1) )
+    return 0; // first item by default
+
+  // find `item_script` in the list
+  const uint32 *p = list.find(item_addr);
+  if ( p != list.end() )
+    return p - list.begin();
+  return 0; // first item by default
+}
+
+//--------------------------------------------------------------------------
+bool idaapi x86seh_chooser_t::init()
+{
+  // rebuild the handlers list
   uint64 fs_sel;
   ea_t fs_base;
   uint32 excr_ea;
-  handlers.clear();
+  list.clear();
   if ( !get_reg_val("fs", &fs_sel)
-    || internal_get_sreg_base(tid, int(fs_sel), &fs_base) <= 0
+    || internal_get_sreg_base(&fs_base, tid, int(fs_sel)) <= 0
     || read_dbg_memory(fs_base, &excr_ea, sizeof(excr_ea)) != sizeof(excr_ea) )
   {
     warning("Failed to build the SEH list for thread %08X", tid);
-    return false;
+    return false; // do not show the empty chooser
   }
 
   struct EXC_REG_RECORD
@@ -53,95 +168,40 @@ bool x86seh_ctx_t::get_sehlist()
       break;
     }
 
-    handlers.push_back(rec.p_handler);
+    list.push_back(rec.p_handler);
     excr_ea = rec.p_prev;
   }
   return true;
 }
 
-//---------------------------------------------------------------------------
-void x86seh_ctx_t::refresh()
+//------------------------------------------------------------------------
+chooser_t::cbret_t idaapi x86seh_chooser_t::refresh(ssize_t n)
 {
-  get_sehlist();
-  refresh_chooser(title.c_str());
+  uint32 item_addr = uint32(-1);
+  if ( n >= 0 && n < list.size() )
+    item_addr = list[n];  // remember the currently selected handler
+
+  init();
+
+  if ( n < 0 )
+    return NO_SELECTION;
+  ssize_t idx = get_item_index(&item_addr);
+  // no need to adjust `idx` as get_item_index() returns first item by
+  // default
+  return idx;
 }
 
-//---------------------------------------------------------------------------
-static int idaapi dbg_callback(void *obj, int code, va_list)
+//-------------------------------------------------------------------------
+ssize_t idaapi x86seh_chooser_t::dbg_handler(void *ud, int code, va_list)
 {
   if ( code == dbg_suspend_process )
   {
-    x86seh_ctx_t *ctx = (x86seh_ctx_t *)obj;
-    ctx->refresh();
+    const char *ttl = static_cast<const char *>(ud);
+    refresh_chooser(ttl);
   }
   return 0;
 }
 
-//---------------------------------------------------------------------------
-static const char *const x86seh_chooser_cols[] =
-{
-  "Address",
-  "Name"
-};
-
-static const int widths[] =
-{
-  10 | CHCOL_HEX,
-  30
-};
-CASSERT(qnumber(widths) == qnumber(x86seh_chooser_cols));
-
-//---------------------------------------------------------------------------
-static uint32 idaapi ch_sizer(void *obj)
-{
-  x86seh_ctx_t *ctx = (x86seh_ctx_t *)obj;
-  return ctx->handlers.size();
-}
-
-//---------------------------------------------------------------------------
-static void idaapi ch_getl(void *obj, uint32 n, char *const *arrptr)
-{
-  x86seh_ctx_t *ctx = (x86seh_ctx_t *)obj;
-  if ( n == 0 )
-  {
-    qstrncpy(arrptr[0], x86seh_chooser_cols[0], MAXSTR);
-    qstrncpy(arrptr[1], x86seh_chooser_cols[1], MAXSTR);
-    return;
-  }
-  uint32 addr = ctx->handlers[n-1];
-  qsnprintf(arrptr[0], MAXSTR, "%08X", addr);
-  get_nice_colored_name(addr, arrptr[1], MAXSTR, GNCN_NOCOLOR | GNCN_NOLABEL);
-}
-
-//---------------------------------------------------------------------------
-static uint32 idaapi ch_update(void *obj, uint32 n)
-{
-  x86seh_ctx_t *ctx = (x86seh_ctx_t *)obj;
-  ctx->get_sehlist();
-  return n;
-}
-
-//---------------------------------------------------------------------------
-static void idaapi ch_enter(void *obj, uint32 n)
-{
-  x86seh_ctx_t *ctx = (x86seh_ctx_t *)obj;
-  if ( --n < ctx->handlers.size() )
-  {
-    ea_t ea = ctx->handlers[n];
-    if ( !isCode(get_flags_novalue(ea)) )
-      create_insn(ea);
-
-    jumpto(ea);
-  }
-}
-
-//---------------------------------------------------------------------------
-static void idaapi ch_destroy(void *obj)
-{
-  x86seh_ctx_t *ctx = (x86seh_ctx_t *)obj;
-  unhook_from_notification_point(HT_DBG, dbg_callback, ctx);
-  delete ctx;
-}
 
 //-------------------------------------------------------------------------
 struct show_window_ah_t : public action_handler_t
@@ -149,47 +209,9 @@ struct show_window_ah_t : public action_handler_t
   virtual int idaapi activate(action_activation_ctx_t *)
   {
     thid_t tid = get_current_thread();
-
-    // Find and refresh existing window
-    char title[MAXSTR];
-    qsnprintf(title, sizeof(title), "[%04X] - Structured exception handlers list", tid);
-    TForm *form = find_tform(title); //lint !e64
-    if ( form != NULL )
-    {
-      switchto_tform(form, true); //lint !e64
-      return 1;
-    }
-
-    x86seh_ctx_t *ch = new x86seh_ctx_t(tid, title);
-    if ( !ch->get_sehlist() )
-    {
-      delete ch;
-      return 0;
-    }
-
-    int code = choose2(CH_NOBTNS,
-                       -1, -1, -1, -1,
-                       ch,
-                       qnumber(x86seh_chooser_cols),
-                       widths,
-                       ch_sizer,
-                       ch_getl,
-                       title,
-                       144, // icon
-                       1,
-                       NULL,
-                       NULL,
-                       ch_update,
-                       NULL,
-                       ch_enter,
-                       ch_destroy,
-                       NULL,
-                       NULL);
-    if ( code != -1 )
-      hook_to_notification_point(HT_DBG, dbg_callback, ch);
-
-    //lint -esym(429,ch) custodial pointer has not been freed or returned
-    return 1;
+    x86seh_chooser_t *ch = new x86seh_chooser_t(tid);
+    //lint -e{429} Custodial pointer 'ch' has not been freed or returned
+    return ch->choose() == 0;
   }
 
   virtual action_state_t idaapi update(action_update_ctx_t *)

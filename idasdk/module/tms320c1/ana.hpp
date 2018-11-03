@@ -35,7 +35,7 @@
 #ifndef _IDP_TMS320C1X_ANA_H
 #define _IDP_TMS320C1X_ANA_H
 
-int idaapi ana(void);
+int idaapi ana(insn_t *insn);
 
 #endif  // _IDP_TMS320C1X_ANA_H
 

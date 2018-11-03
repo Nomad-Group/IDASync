@@ -8,7 +8,6 @@
 #ifndef _LOADER_HPP
 #define _LOADER_HPP
 #include <ida.hpp>
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
 
 /*! \file loader.hpp
 
@@ -40,9 +39,6 @@
 class linput_t;         // loader input source. see diskio.hpp for the functions
 struct extlang_t;       // check expr.hpp
 
-/// Max number of chars to describe a file format
-#define MAX_FILE_FORMAT_NAME    64
-
 /// Loader description block - must be exported from the loader module
 struct loader_t
 {
@@ -51,38 +47,58 @@ struct loader_t
 /// \defgroup LDRF_ Loader flags
 /// Used by loader_t::flags
 //@{
-#define LDRF_RELOAD  0x0001     ///< loader recognizes #NEF_RELOAD flag
+#define LDRF_RELOAD   0x0001 ///< loader recognizes #NEF_RELOAD flag
+#define LDRF_REQ_PROC 0x0002 ///< Requires a processor to be set.
+                             ///< if this bit is not set, load_file() must
+                             ///< call set_processor_type(..., SETPROC_LOADER)
 //@}
 
   /// Check input file format.
-  /// This function will be called many times till it returns !=0.
-  /// \param li input file
+  /// This function will be called one or more times depending on the result value.
   /// \param[out] fileformat name of file format
-  /// \param n  initially == 0 for each loader, incremented after each call
+  /// \param[out] processor  desired processor (optional)
+  /// \param li              input file
+  /// \param filename        name of the input file,
+  ///                        if it is an archive member name then the actual file doesn't exist
   /// \return
   /// 1 if file format is recognized, and fills 'fileformatname', otherwise returns 0.
   /// This function may return a unique file format number instead of 1.
   /// To get this unique number, please contact the author.
+  /// If the return value is ORed with #ACCEPT_ARCHIVE, then
+  /// it is an archive loader. Its process_archive() will be called
+  /// instead of load_file().
+  /// If the return value is ORed with #ACCEPT_CONTINUE, then
+  /// this function will be called another time.
   /// If the return value is ORed with #ACCEPT_FIRST, then this format
-  /// should be placed first in the "load file" dialog box
-  int (idaapi* accept_file)(linput_t *li,
-                            char fileformatname[MAX_FILE_FORMAT_NAME],
-                            int n);
+  /// should be placed first in the "load file" dialog box.
+  /// In the sorting order of file formats the archive formats have priority.
+  int (idaapi *accept_file)(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *filename);
 
+/// Specify that a file format is served by archive loader
+/// See loader_t::accept_file
+#define ACCEPT_ARCHIVE 0x2000
+/// Specify that the function must be called another time
+/// See loader_t::accept_file
+#define ACCEPT_CONTINUE 0x4000
 /// Specify that a file format should be place first in "load file" dialog box.
 /// See loader_t::accept_file
 #define ACCEPT_FIRST    0x8000
 
   /// Load file into the database.
-  /// \param fp              pointer to file positioned at the start of the file
+  /// \param li              input file
+  /// \param neflags         \ref NEF_
   /// \param fileformatname  name of type of the file
   ///                        (it was returned by #accept_file)
-  /// \param neflags         \ref NEF_
   ///
   /// If this function fails, loader_failure() should be called
-  void (idaapi* load_file)(linput_t *li,
-                           ushort neflags,
-                           const char *fileformatname);
+  void (idaapi *load_file)(
+        linput_t *li,
+        ushort neflags,
+        const char *fileformatname);
 /// \defgroup NEF_ Load file flags
 /// Passed as 'neflags' parameter to loader_t::load_file
 //@{
@@ -92,9 +108,6 @@ struct loader_t
 #define NEF_MAN         0x0008            ///< Manual load
 #define NEF_FILL        0x0010            ///< Fill segment gaps
 #define NEF_IMPS        0x0020            ///< Create import segment
-#ifndef NO_OBSOLETE_FUNCS
-#define NEF_TIGHT       0x0040            ///< Don't align segments (OMF)
-#endif
 #define NEF_FIRST       0x0080            ///< This is the first file loaded
                                           ///< into the database.
 #define NEF_CODE        0x0100            ///< for load_binary_file():
@@ -122,7 +135,7 @@ struct loader_t
   ///                 - 1: ok, can create file of this type
   ///
   /// If fp != NULL, then this function should create the output file
-  int (idaapi* save_file)(FILE *fp, const char *fileformatname);
+  int (idaapi *save_file)(FILE *fp, const char *fileformatname);
 
   /// Take care of a moved segment (fix up relocations, for example).
   /// This function may be absent.
@@ -134,14 +147,35 @@ struct loader_t
   /// \param  fileformatname  the file format
   /// \retval 1  ok
   /// \retval 0  failure
-  int (idaapi* move_segm)(ea_t from,
-                          ea_t to,
-                          asize_t size,
-                          const char *fileformatname);
+  int (idaapi *move_segm)(
+          ea_t from,
+          ea_t to,
+          asize_t size,
+          const char *fileformatname);
 
-  // This used to be "init_loader_options", but because no-one
-  // calls that function, it is now marked as deprecated.
-  void *_UNUSED1_was_init_loader_options;
+  /// Display list of archive members and let the user select one.
+  /// Extract the selected archive member into a temporary file.
+  /// \param[out]     temp_file      name of the file with the extracted archive member.
+  /// \param          li             input file
+  /// \param[in,out]  module_name    in: name of archive
+  ///                                out: name of the extracted archive member
+  /// \param[in,out]  neflags        \ref NEF_
+  /// \param          fileformatname name of type of the file
+  ///                                (it was returned by #accept_file)
+  /// \param          defmember      extract the specified member,
+  ///                                for example "subdir/member.exe",
+  ///                                may be NULL
+  /// \param          errbuf         error message if 0 is returned,
+  ///                                may be NULL
+  /// \return -1-cancelled by the user, 1-ok, 0-error, see errbuf for details
+  int (idaapi *process_archive)(
+          qstring *temp_file,
+          linput_t *li,
+          qstring *module_name,
+          ushort *neflags,
+          const char *fileformatname,
+          const char *defmember,
+          qstring *errbuf);
 };
 
 
@@ -167,57 +201,68 @@ AS_PRINTF(1, 2) NORETURN inline void loader_failure(const char *format=NULL, ...
 #endif
 }
 
+//-------------------------------------------------------------------------
+#ifdef __X64__
+#  if defined(__NT__)
+#    define LOADER_EXT "dll"
+#    define PLUGIN_EXT "dll"
+#    define IDP_EXT "dll"
+#  elif defined(__LINUX__)
+#    define LOADER_EXT "so"
+#    define PLUGIN_EXT "so"
+#    define IDP_EXT "so"
+#  elif defined(__MAC__)
+#    define LOADER_EXT "dylib"
+#    define PLUGIN_EXT "dylib"
+#    define IDP_EXT "dylib"
+#  elif defined(__BSD__)
+#    define LOADER_EXT "so"
+#    define PLUGIN_EXT "so"
+#    define IDP_EXT "so"
+#  else
+#    error Unknown loader ext
+#  endif
+#endif
+
 //----------------------------------------------------------------------
 /// \def{LOADER_EXT, Loader module filename extension}
-#ifdef __NT__
-#ifdef __EA64__
-#ifdef __X64__
-#define LOADER_EXT "x64"
-#else
-#define LOADER_EXT "l64"
-#endif
-#else
-#define LOADER_EXT "ldw"
-#endif
-#endif
-
-#ifdef __LINUX__
-#ifdef __EA64__
-#ifdef __X64__
-#define LOADER_EXT "lx64"
-#else
-#define LOADER_EXT "llx64"
-#endif
-#else
-#define LOADER_EXT "llx"
-#endif
-#endif
-
-#ifdef __MAC__
-#ifdef __EA64__
-#ifdef __X64__
-#define LOADER_EXT "lm64"
-#else
-#define LOADER_EXT "lmc64"
-#endif
-#else
-#define LOADER_EXT "lmc"
-#endif
-#endif
-
-#ifdef __BSD__
-#ifdef __EA64__
-#define LOADER_EXT "lbsd64"
-#else
-#define LOADER_EXT "lbsd"
-#endif
+// NOTE: X64 definitions are bundled together above
+#ifndef __X64__
+#  ifdef __NT__
+#    ifdef __EA64__
+#      define LOADER_EXT "l64"
+#    else
+#      define LOADER_EXT "ldw"
+#    endif
+#  endif
+#  ifdef __LINUX__
+#    ifdef __EA64__
+#      define LOADER_EXT "llx64"
+#    else
+#      define LOADER_EXT "llx"
+#    endif
+#  endif
+#  ifdef __MAC__
+#    ifdef __EA64__
+#      define LOADER_EXT "lmc64"
+#    else
+#      define LOADER_EXT "lmc"
+#    endif
+#  endif
+#  ifdef __BSD__
+#    ifdef __EA64__
+#      define LOADER_EXT "lbsd64"
+#    else
+#      define LOADER_EXT "lbsd"
+#    endif
+#  endif
 #endif
 
 /// \def{LOADER_DLL, Pattern to find loader files}
 #ifdef __EA64__
-#define LOADER_DLL "*64." LOADER_EXT
+#  define LOADER_DLL "*64." LOADER_EXT
 #else
-#define LOADER_DLL "*." LOADER_EXT
+#  define LOADER_DLL "*." LOADER_EXT
 #endif
 
 //----------------------------------------------------------------------
@@ -227,15 +272,27 @@ AS_PRINTF(1, 2) NORETURN inline void loader_failure(const char *format=NULL, ...
 struct load_info_t
 {
   load_info_t *next;
-  char dllname[QMAXPATH];
-  char ftypename[MAX_FILE_FORMAT_NAME];
+  qstring dllname;
+  qstring ftypename;
+  qstring processor;    ///< desired processor name
   filetype_t ftype;
-  int pri;              ///< 1-place first, 0-normal priority
+  uint32 loader_flags;  ///< copy of loader_t::flags
+  uint32 lflags;        ///< \ref LIF_
+  int pri;              ///< 2-archldr, 1-place first, 0-normal priority
+
+/// \defgroup LIF_ loader info flags
+/// Used by load_info_t::lflags
+//@{
+#define LIF_ARCHLDR   0x0001    ///< archive loader
+//@}
+
+  bool is_archldr(void) { return (lflags & LIF_ARCHLDR) != 0; }
 };
+DECLARE_TYPE_AS_MOVABLE(load_info_t);
 
 /// Build list of potential loaders
 
-idaman load_info_t *ida_export build_loaders_list(linput_t *li);
+idaman load_info_t *ida_export build_loaders_list(linput_t *li, const char *filename);
 
 
 /// Free the list of loaders
@@ -262,15 +319,9 @@ idaman char *ida_export get_loader_name_from_dll(char *dllname);
 idaman ssize_t ida_export get_loader_name(char *buf, size_t bufsize);
 
 
-/// Initialize user configurable options from the given loader
-/// based on the input file.
-
-idaman bool ida_export init_loader_options(linput_t *li, const load_info_t *loader);
-
-
 /// Load a binary file into the database.
 /// This function usually is called from ui.
-/// \param filename   the name of input file as is
+/// \param filename  the name of input file as is
 ///                    (if the input file is from library, then
 ///                     this is the name from the library)
 /// \param li        loader input source
@@ -289,13 +340,13 @@ idaman bool ida_export init_loader_options(linput_t *li, const load_info_t *load
 /// \retval false  failed (couldn't open the file)
 
 idaman bool ida_export load_binary_file(
-                             const char *filename,
-                             linput_t *li,
-                             ushort _neflags,
-                             int32 fileoff,
-                             ea_t basepara,
-                             ea_t binoff,
-                             uint32 nbytes);
+        const char *filename,
+        linput_t *li,
+        ushort _neflags,
+        qoff64_t fileoff,
+        ea_t basepara,
+        ea_t binoff,
+        uint64 nbytes);
 
 
 /// Load a non-binary file into the database.
@@ -313,12 +364,27 @@ idaman bool ida_export load_binary_file(
 /// \return success
 
 idaman bool ida_export load_nonbinary_file(
-                                const char *filename,
-                                linput_t *li,
-                                const char *sysdlldir,
-                                ushort _neflags,
-                                load_info_t *loader);
+        const char *filename,
+        linput_t *li,
+        const char *sysdlldir,
+        ushort _neflags,
+        load_info_t *loader);
 
+
+/// Calls loader_t::process_archive()
+/// For parameters and return value description
+/// look at loader_t::process_archive().
+/// Additional parameter:
+/// \param  loader  pointer to ::load_info_t structure.
+
+idaman int ida_export process_archive(
+        qstring *temp_file,
+        linput_t *li,
+        qstring *module_name,
+        ushort *neflags,
+        const char *defmember,
+        const load_info_t *loader,
+        qstring *errbuf=NULL);
 
 //--------------------------------------------------------------------------
 /// Output file types
@@ -337,10 +403,11 @@ enum ofile_type_t
 //@{
 typedef int idaapi html_header_cb_t(FILE *fp);
 typedef int idaapi html_footer_cb_t(FILE *fp);
-typedef int idaapi html_line_cb_t(FILE *fp,
-                                  const char *line,
-                                  bgcolor_t prefix_color,
-                                  bgcolor_t bg_color);
+typedef int idaapi html_line_cb_t(
+        FILE *fp,
+        const qstring &line,
+        bgcolor_t prefix_color,
+        bgcolor_t bg_color);
 #define gen_outline_t html_line_cb_t
 //@}
 
@@ -390,11 +457,12 @@ idaman int ida_export gen_file(ofile_type_t otype, FILE *fp, ea_t ea1, ea_t ea2,
 /// \retval 1  ok
 /// \retval 0  read error, a warning is displayed
 
-idaman int ida_export file2base(linput_t *li,
-                                int32 pos,
-                                ea_t ea1,
-                                ea_t ea2,
-                                int patchable);
+idaman int ida_export file2base(
+        linput_t *li,
+        qoff64_t pos,
+        ea_t ea1,
+        ea_t ea2,
+        int patchable);
 
 #define FILEREG_PATCHABLE       1       ///< means that the input file may be
                                         ///< patched (i.e. no compression,
@@ -411,7 +479,7 @@ idaman int ida_export file2base(linput_t *li,
 ///                 if == -1, then no file position correspond to the data.
 /// \return 1 always
 
-idaman int ida_export mem2base(const void *memptr,ea_t ea1,ea_t ea2,int32 fpos);
+idaman int ida_export mem2base(const void *memptr, ea_t ea1, ea_t ea2, qoff64_t fpos);
 
 
 /// Unload database to a binary file.
@@ -421,7 +489,7 @@ idaman int ida_export mem2base(const void *memptr,ea_t ea1,ea_t ea2,int32 fpos);
 /// \param ea1,ea2  range of source linear addresses
 /// \return 1-ok(always), write error leads to immediate exit
 
-idaman int ida_export base2file(FILE *fp,int32 pos,ea_t ea1,ea_t ea2);
+idaman int ida_export base2file(FILE *fp, qoff64_t pos, ea_t ea1, ea_t ea2);
 
 
 /// Extract a module for an archive file.
@@ -433,20 +501,20 @@ idaman int ida_export base2file(FILE *fp,int32 pos,ea_t ea1,ea_t ea2);
 /// \param[in,out] filename    in: input file.
 ///                            out: name of the selected module.
 /// \param bufsize             size of the buffer with 'filename'
-/// \param is_remote           is the input file remote?
 /// \param[out] temp_file_ptr  will point to the name of the file that
 ///                            contains the extracted module
+/// \param is_remote           is the input file remote?
 /// \retval true   ok
 /// \retval false  something bad happened (error message has been displayed to the user)
 
 idaman bool ida_export extract_module_from_archive(
         char *filename,
         size_t bufsize,
-        bool is_remote,
-        char **temp_file_ptr);
+        char **temp_file_ptr,
+        bool is_remote);
 
 
-/// Add long comment at \inf{minEA}.
+/// Add long comment at \inf{min_ea}.
 ///   - Input file:     ....
 ///   - File format:    ....
 ///
@@ -494,7 +562,7 @@ struct impinfo_t
 /// \retval 0  dllname doesn't match, import_module() should continue
 /// \retval 1  ok
 
-typedef int (idaapi*importer_t)(linput_t *li,impinfo_t *ii);
+typedef int idaapi importer_t(linput_t *li, impinfo_t *ii);
 
 
 /// Find and import a DLL module.
@@ -512,11 +580,12 @@ typedef int (idaapi*importer_t)(linput_t *li,impinfo_t *ii);
 /// \param ostype    type of operating system (subdir name).
 ///                  NULL means the IDS directory itself (not recommended)
 
-idaman void ida_export import_module(const char *module,
-                   const char *windir,
-                   uval_t modnode,
-                   importer_t importer,
-                   const char *ostype);
+idaman void ida_export import_module(
+        const char *module,
+        const char *windir,
+        uval_t modnode,
+        importer_t *importer,
+        const char *ostype);
 
 
 /// Load and apply IDS file.
@@ -567,7 +636,7 @@ public:
                                 ///< the kernel sets it automatically.
 //@}
 
-  int (idaapi* init)(void);     ///< Initialize plugin - returns \ref PLUGIN_INIT
+  int (idaapi *init)(void);     ///< Initialize plugin - returns \ref PLUGIN_INIT
 /// \defgroup PLUGIN_INIT Plugin initialization codes
 /// Return values for plugin_t::init()
 //@{
@@ -577,101 +646,26 @@ public:
 #define PLUGIN_KEEP  2  ///< Plugin agrees to work with the current database and wants to stay in the memory
 //@}
 
-  void (idaapi* term)(void);    ///< Terminate plugin. This function will be called
-                                ///< when the plugin is unloaded. May be NULL.
-  void (idaapi* run)(int arg);  ///< Invoke plugin
-  const char *comment;          ///< Long comment about the plugin.
-                                ///< it could appear in the status line
-                                ///< or as a hint
-  const char *help;             ///< Multiline help about the plugin
-  const char *wanted_name;      ///< The preferred short name of the plugin
-  const char *wanted_hotkey;    ///< The preferred hotkey to run the plugin
+  void (idaapi *term)(void);      ///< Terminate plugin. This function will be called
+                                  ///< when the plugin is unloaded. May be NULL.
+  bool (idaapi *run)(size_t arg); ///< Invoke plugin
+  const char *comment;            ///< Long comment about the plugin.
+                                  ///< it could appear in the status line
+                                  ///< or as a hint
+  const char *help;               ///< Multiline help about the plugin
+  const char *wanted_name;        ///< The preferred short name of the plugin
+  const char *wanted_hotkey;      ///< The preferred hotkey to run the plugin
 };
 
-#ifdef __IDP__
-idaman ida_module_data plugin_t PLUGIN; // (declaration for plugins)
+#ifdef __X64__
+  CASSERT(sizeof(plugin_t) == 64);
+#else
+  CASSERT(sizeof(plugin_t) == 36);
 #endif
 
-//--------------------------------------------------------------------------
-/// Callback provided to hook_to_notification_point().
-/// A plugin can hook to a notification point and receive notifications
-/// of all major events in IDA. The callback function will be called
-/// for each event.
-/// \param user_data          data supplied in call to hook_to_notification_point()
-/// \param notification_code  processor_t::idp_notify or ::ui_notification_t, depending on
-///                           the hook type
-/// \param va                 additional parameters supplied with the notification.
-///                           see the event descriptions for information
-/// \retval 0    ok, the event should be processed further
-/// \retval !=0  the event is blocked and should be discarded.
-///              in the case of processor modules, the returned value is used
-///              as the return value of processor_t::notify()
-
-typedef int idaapi hook_cb_t(void *user_data, int notification_code, va_list va);
-
-/// Types of events that be hooked to with hook_to_notification_point()
-enum hook_type_t
-{
-  HT_IDP,         ///< Hook to the processor module.
-                  ///< The callback will receive all processor_t::idp_notify events.
-  HT_UI,          ///< Hook to the user interface.
-                  ///< The callback will receive all ::ui_notification_t events.
-  HT_DBG,         ///< Hook to the debugger.
-                  ///< The callback will receive all ::dbg_notification_t events.
-  HT_IDB,         ///< Hook to the database events.
-                  ///< These events are separated from the ::HT_IDP group
-                  ///< to speed things up (there are too many plugins and
-                  ///< modules hooking to the ::HT_IDP). Some essential events
-                  ///< are still generated in th ::HT_IDP group:
-                  ///< make_code, make_data, undefine, rename, add_func, del_func.
-                  ///< This list is not exhaustive.
-                  ///< A common trait of all events in this group: the kernel
-                  ///< does not expect any reaction to the event and does not
-                  ///< check the return code. For event names, see ::idb_event.
-  HT_DEV,         ///< Internal debugger events.
-                  ///< Not stable and undocumented for the moment
-  HT_VIEW,        ///< Custom/IDA views notifications.
-                  ///< Refer to ::view_notification_t
-                  ///< for notification codes
-  HT_OUTPUT,      ///< Output window notifications.
-                  ///< Refer to ::msg_notification_t
-                  ///< (::view_notification_t)
-  HT_LAST
-};
-
-
-/// Register a callback for a class of events in IDA
-
-idaman bool ida_export hook_to_notification_point(hook_type_t hook_type,
-                                hook_cb_t *cb,
-                                void *user_data);
-
-
-/// Unregister a callback (also see hook_to_notification_point()).
-/// A plugin should unhook before being unloaded
-/// (preferably in its termination function).
-/// If different callbacks have the same callback function pointer
-/// and user_data is not NULL, only the callback whose associated
-/// user defined data matches will be removed.
-/// \return number of unhooked functions.
-
-idaman int ida_export unhook_from_notification_point(hook_type_t hook_type,
-                                    hook_cb_t *cb,
-                                    void *user_data = NULL);
-
-
-/// A well behaved processor module should call this function
-/// in its processor_t::notify() function. If this function returns 0, then
-/// the processor module should process the notification itself.
-/// Otherwise the code should be returned to the caller, like this:
-/// \code
-///   int code = invoke_callbacks(HT_IDP, what, va);
-///   if ( code ) return code;
-///   ...
-/// \endcode
-
-idaman int ida_export invoke_callbacks(hook_type_t hook_type, int notification_code, va_list va);
-
+#if defined(__IDP__) && !defined(PLUGIN_SUBMODULE)
+idaman ida_module_data plugin_t PLUGIN; // (declaration for plugins)
+#endif
 
 /// Get plugin options from the command line.
 /// If the user has specified the options in the -Oplugin_name:options
@@ -684,49 +678,49 @@ idaman const char *ida_export get_plugin_options(const char *plugin);
 
 //--------------------------------------------------------------------------
 /// \def{PLUGIN_EXT, PLUGIN module file name extensions}
-#ifdef __NT__
-#ifdef __EA64__
-#ifdef __X64__
-#define PLUGIN_EXT  "x64"
-#else
-#define PLUGIN_EXT  "p64"
-#endif
-#else
-#define PLUGIN_EXT  "plw"
-#endif
-#endif
-#ifdef __LINUX__
-#ifdef __EA64__
-#ifdef __X64__
-#define PLUGIN_EXT  "px64"
-#else
-#define PLUGIN_EXT  "plx64"
-#endif
-#else
-#define PLUGIN_EXT  "plx"
-#endif
-#endif
-#ifdef __MAC__
-#ifdef __EA64__
-#ifdef __X64__
-#define PLUGIN_EXT  "pm64"
-#else
-#define PLUGIN_EXT  "pmc64"
-#endif
-#else
-#define PLUGIN_EXT  "pmc"
-#endif
-#endif
-#ifdef __BSD__
-#ifdef __EA64__
-#define PLUGIN_EXT  "pbsd64"
-#else
-#define PLUGIN_EXT  "pbsd"
-#endif
+// NOTE: X64 definitions are bundled together above
+#ifndef __X64__
+#  ifdef __NT__
+#    ifdef __EA64__
+#      define PLUGIN_EXT  "p64"
+#    else
+#      define PLUGIN_EXT  "plw"
+#    endif
+#  endif
+#  ifdef __LINUX__
+#    ifdef __EA64__
+#      define PLUGIN_EXT  "plx64"
+#    else
+#      define PLUGIN_EXT  "plx"
+#    endif
+#  endif
+#  ifdef __MAC__
+#    ifdef __EA64__
+#      define PLUGIN_EXT  "pmc64"
+#    else
+#      define PLUGIN_EXT  "pmc"
+#    endif
+#  endif
+#  ifdef __BSD__
+#    ifdef __EA64__
+#      define PLUGIN_EXT  "pbsd64"
+#    else
+#      define PLUGIN_EXT  "pbsd"
+#    endif
+#  endif
 #endif
 
-/// Pattern to find plugin files
-#define PLUGIN_DLL "*." PLUGIN_EXT
+  /// Pattern to find plugin files
+#ifdef __X64__
+#  ifdef __EA64__
+#    define PLUGIN_DLL "*64." PLUGIN_EXT
+#  else
+#    define PLUGIN_DLL "*." PLUGIN_EXT
+#  endif
+#else
+#  define PLUGIN_DLL "*." PLUGIN_EXT
+#endif
+
 
 // LOW LEVEL DLL LOADING FUNCTIONS
 // Only the kernel should use these functions!
@@ -748,7 +742,14 @@ struct idadll_t
   bool is_loaded(void) const { return dllinfo[0] != NULL; }
 };
 
-int load_dll(const char *file, idadll_t *dllmem);
+#define MODULE_ENTRY_LOADER "_LDSC"
+#define MODULE_ENTRY_PLUGIN "_PLUGIN"
+#define MODULE_ENTRY_IDP "_LPH"
+
+int _load_core_module(
+        idadll_t *dllmem,
+        const char *file,
+        const char *entry);
                                 // dllmem - allocated segments
                                 //          dos: segment 1 (data) isn't allocated
                                 // Returns 0 - ok, else:
@@ -761,8 +762,14 @@ int load_dll(const char *file, idadll_t *dllmem);
 #define RE_BADATP       7       /* Bad relocation atype */
 #define RE_BADMAP       8       /* DLLDATA offset is invalid */
 
-void                   load_dll_or_die(const char *file, idadll_t *dllmem);
-idaman bool ida_export load_dll_or_say(const char *file, idadll_t *dllmem);
+void load_core_module_or_die(
+        idadll_t *dllmem,
+        const char *file,
+        const char *entry);
+idaman bool ida_export load_core_module(
+        idadll_t *dllmem,
+        const char *file,
+        const char *entry);
 
 idaman void ida_export free_dll(idadll_t *dllmem);
 /// \endcond
@@ -787,7 +794,7 @@ struct idp_desc_t
   idp_names_t names;    ///< processor names
   bool      is_script;  ///< the processor module is a script
   bool      checked;    ///< internal, for cache management
-  idp_desc_t(): is_script(false), checked(false) {}
+  idp_desc_t(): mtime(time_t(-1)), is_script(false), checked(false) {}
 };
 DECLARE_TYPE_AS_MOVABLE(idp_desc_t);
 typedef qvector<idp_desc_t> idp_descs_t; ///< vector of processor module descriptions
@@ -798,80 +805,45 @@ typedef qvector<idp_desc_t> idp_descs_t; ///< vector of processor module descrip
 idaman const idp_descs_t *ida_export get_idp_descs(void);
 
 
-/// Enumerate IDA plugins.
-/// Returns when func() returns nonzero.
-/// \param answer       buffer to contain the file name for which func()!=0
-///                     (answer may be == NULL)
-/// \param answer_size  size of 'answer'
-/// \param func         callback function called for each file
-///                       - file: full file name (with path)
-///                       - ud: user data
-///
-///                     if 'func' returns non-zero value, the enumeration
-///                     is stopped and full path of the current file
-///                     is returned to the caller.
-/// \param ud           user data. this pointer will be passed to
-///                     the callback function
-/// \param el           If the plugin is a scripted plugin, then 'el' will point to the
-///                     associated extlang. This parameter may be NULL
-/// \return zero or the code returned by func()
-
-idaman int ida_export enum_plugins(
-        int (idaapi *func)(const char *file, void *ud),
-        void *ud,
-        char *answer,
-        size_t answer_size,
-        const extlang_t **el = NULL);
-
-
 //--------------------------------------------------------------------------
 /// \def{IDP_EXT, IDP module file name extension}
-#ifdef __NT__
-#ifdef __EA64__
-#ifdef __X64__
-#define IDP_EXT  "x64"
-#else
-#define IDP_EXT  "w64"
-#endif
-#else
-#define IDP_EXT  "w32"
-#endif
-#endif
-#ifdef __LINUX__
-#ifdef __EA64__
-#ifdef __X64__
-#define IDP_EXT  "ix64"
-#else
-#define IDP_EXT  "ilx64"
-#endif
-#else
-#define IDP_EXT  "ilx"
-#endif
-#endif
-#ifdef __MAC__
-#ifdef __EA64__
-#ifdef __X64__
-#define IDP_EXT  "im64"
-#else
-#define IDP_EXT  "imc64"
-#endif
-#else
-#define IDP_EXT  "imc"
-#endif
-#endif
-#ifdef __BSD__
-#ifdef __EA64__
-#define IDP_EXT  "ibsd64"
-#else
-#define IDP_EXT  "ibsd"
-#endif
+// NOTE: X64 definitions are bundled together above
+#ifndef __X64__
+#  ifdef __NT__
+#    ifdef __EA64__
+#      define IDP_EXT  "w64"
+#    else
+#      define IDP_EXT  "w32"
+#    endif
+#  endif
+#  ifdef __LINUX__
+#    ifdef __EA64__
+#      define IDP_EXT  "ilx64"
+#    else
+#      define IDP_EXT  "ilx"
+#    endif
+#  endif
+#  ifdef __MAC__
+#    ifdef __EA64__
+#      define IDP_EXT  "imc64"
+#    else
+#      define IDP_EXT  "imc"
+#    endif
+#  endif
+#  ifdef __BSD__
+#    ifdef __EA64__
+#      define IDP_EXT  "ibsd64"
+#    else
+#      define IDP_EXT  "ibsd"
+#    endif
+#  endif
 #endif
 
 /// \def{IDP_DLL, Pattern to find idp files}
 #ifdef __EA64__
-#define IDP_DLL "*64." IDP_EXT
+#  define IDP_DLL "*64." IDP_EXT
 #else
-#define IDP_DLL "*." IDP_EXT
+#  define IDP_DLL "*." IDP_EXT
 #endif
 
 
@@ -886,7 +858,7 @@ struct plugin_info_t
                         ///< it will appear in the menu
   ushort org_hotkey;    ///< original hotkey to run the plugin
   ushort hotkey;        ///< current hotkey to run the plugin
-  int arg;              ///< argument used to call the plugin
+  size_t arg;           ///< argument used to call the plugin
   plugin_t *entry;      ///< pointer to the plugin if it is already loaded
   idadll_t dllmem;
   int flags;            ///< a copy of plugin_t::flags
@@ -900,24 +872,30 @@ struct plugin_info_t
 idaman plugin_info_t *ida_export get_plugins(void);
 
 
-/// Load a user-defined plugin.
+/// Find a user-defined plugin and optionally load it.
 /// \param name  short plugin name without path and extension,
 ///              or absolute path to the file name
+/// \param load_if_needed if the plugin is not present in the memory, try to load it
 /// \return pointer to plugin description block
 
-idaman plugin_t *ida_export load_plugin(const char *name);
+idaman plugin_t *ida_export find_plugin(const char *name, bool load_if_needed=false);
+
+inline plugin_t *load_plugin(const char *name)
+{
+  return find_plugin(name, true);
+}
 
 
 /// Run a loaded plugin with the specified argument.
 /// \param ptr  pointer to plugin description block
 /// \param arg  argument to run with
 
-idaman bool ida_export run_plugin(const plugin_t *ptr, int arg);
+idaman bool ida_export run_plugin(const plugin_t *ptr, size_t arg);
 
 
 /// Load & run a plugin
 
-inline bool idaapi load_and_run_plugin(const char *name, int arg)
+inline bool idaapi load_and_run_plugin(const char *name, size_t arg)
 {
   return run_plugin(load_plugin(name), arg);
 }
@@ -961,8 +939,8 @@ idaman void ida_export term_plugins(int flag);
 void init_fileregions(void);
 void term_fileregions(void);
 inline void save_fileregions(void) {}
-void add_fileregion(ea_t ea1,ea_t ea2,int32 fpos);
-void move_fileregions(ea_t from, ea_t to, asize_t size);
+void add_fileregion(ea_t ea1,ea_t ea2,qoff64_t fpos);
+void move_fileregions(ea_t from, ea_t to, asize_t size, bool changed_netmap);
 void del_fileregions(ea_t ea1, ea_t ea2);
 //@}
 
@@ -970,13 +948,13 @@ void del_fileregions(ea_t ea1, ea_t ea2);
 /// If the specified ea can't be mapped into the input file offset,
 /// return -1.
 
-idaman int32 ida_export get_fileregion_offset(ea_t ea);
+idaman qoff64_t ida_export get_fileregion_offset(ea_t ea);
 
 
 /// Get linear address which corresponds to the specified input file offset.
 /// If can't be found, return #BADADDR
 
-idaman ea_t ida_export get_fileregion_ea(int32 offset);
+idaman ea_t ida_export get_fileregion_ea(qoff64_t offset);
 
 
 //------------------------------------------------------------------------
@@ -1023,7 +1001,7 @@ private:
 
   int compare(const snapshot_t &r) const
   {
-    return id > r.id ? 1 : id < r.id ? -1 : 0;
+    return ::compare(id, r.id);
   }
 
 public:
@@ -1103,7 +1081,7 @@ idaman bool ida_export update_snapshot_attributes(
 idaman int ida_export visit_snapshot_tree(
         snapshot_t *root,
         int (idaapi *callback)(snapshot_t *ss, void *ud),
-        void *ud);
+        void *ud=NULL);
 
 
 /// Flush buffers to the disk
@@ -1126,7 +1104,7 @@ idaman bool ida_export is_trusted_idb(void);
 ///       will be inherited from the current database.
 /// \return success
 
-idaman bool ida_export save_database_ex(
+idaman bool ida_export save_database(
         const char *outfile,
         uint32 flags,
         const snapshot_t *root = NULL,
@@ -1141,114 +1119,53 @@ idaman bool ida_export save_database_ex(
 #define DBFL_TEMP       0x08            ///< temporary database
 //@}
 
-//
-//      KERNEL ONLY functions & data
-//
+/// Get the current database flag
+/// \param dbfl     flag \ref DBFL_
+/// \returns the state of the flag (set or cleared)
+
+idaman bool ida_export is_database_flag(uint32 dbfl);
+
+/// Set or clear database flag
+/// \param dbfl     flag \ref DBFL_
+/// \param cnd      set if true or clear flag otherwise
+
+idaman void ida_export set_database_flag(uint32 dbfl, bool cnd=true);
+inline void clr_database_flag(uint32 dbfl) { set_database_flag(dbfl, false); }
+
+/// Is a temporary database?
+inline bool is_temp_database(void) { return is_database_flag(DBFL_TEMP); }
+
+
+//------------------------------------------------------------------------
+/// \defgroup PATH_TYPE_ Types of the file pathes
+//@{
+enum path_type_t
+{
+  PATH_TYPE_CMD,  ///< full path to the file specified in the command line
+  PATH_TYPE_IDB,  ///< full path of IDB file
+  PATH_TYPE_ID0,  ///< full path of ID0 file
+};
+//@}
+
+/// Get the file path
+/// \param pt       file path type \ref PATH_TYPE_
+/// \returns file path, never returns NULL
+idaman const char *ida_export get_path(path_type_t pt);
+
+/// Set the file path
+/// \param pt       file path type \ref PATH_TYPE_
+/// \param path     new file path,
+///                 use NULL or empty string to clear the file path
+idaman void ida_export set_path(path_type_t pt, const char *path);
+
+
+/// Check the file extension
+/// \returns true if it is the reserved extension
+idaman bool ida_export is_database_ext(const char *ext);
+
+
+
 /// \cond
-idaman ida_export_data char command_line_file[QMAXPATH];  // full path to the file specified in the command line
-idaman ida_export_data char database_idb[QMAXPATH];       // full path of IDB file
-idaman ida_export_data char database_id0[QMAXPATH];       // full path of ID0 file
-idaman bool ida_export is_database_ext(const char *ext);  // check the file extension
+//--------------------------------------------------------------------------
 
-extern uint32 ida_database_memory;       // Database buffer size in bytes.
-extern char ida_workdir[];              // Work directory for database files.
-
-idaman uint32 ida_export_data database_flags; // for close_database() - see 'Database flags'
-
-inline bool is_temp_database(void) { return (database_flags & DBFL_TEMP) != 0; }
-
-extern bool pe_create_idata;
-extern bool pe_load_resources;
-extern bool pe_create_flat_group;
-extern bool initializing;
-extern int highest_processor_level;
-extern qstrvec_t cpp_namespaces;
-extern int max_trusted_idb_count;
-
-// database check codes
-typedef int dbcheck_t;
-const dbcheck_t
-  DBCHK_NONE = 0,               // database doesn't exist
-  DBCHK_OK   = 1,               // database exists
-  DBCHK_BAD  = 2,               // database exists but we can't use it
-  DBCHK_NEW  = 3;               // database exists but we the user asked to destroy it
-
-dbcheck_t check_database(const char *file);
-
-//------------------------------------------------------------------------
-// Generate an IDC file (unload the database in text form)
-//      fp        - the output file handle
-//      onlytypes - if true then generate idc about enums, structs and
-//                  other type definitions used in the program
-// returns: 1-ok, 0-failed
-
-int local_gen_idc_file(FILE *fp, ea_t ea1, ea_t ea2, bool onlytypes);
-
-
-//------------------------------------------------------------------------
-// Output to a file all lines controlled by place 'pl'
-// These functions are for the kernel only.
-
-class place_t;
-int32 print_all_places(FILE *fp, const place_t *pl, html_line_cb_t *line_cb = NULL);
-
-extern html_line_cb_t save_text_line;
-int32 idaapi print_all_structs(FILE *fp, html_line_cb_t *line_cb = NULL);
-int32 idaapi print_all_enums(FILE *fp, html_line_cb_t *line_cb = NULL);
-
-void idaapi no_disk_space_handler(bool again, int64 size);
-int open_database(
-        bool isnew,
-        const char *file,
-        uint64 input_size,
-        bool is_temp_database);       // returns 'waspacked'
-bool get_workbase_fname(char *buf, size_t bufsize, const char *ext);
-void close_database(void);                      // see database_flags
-bool compress_btree(const char *btree_file);    // (internal) compress .ID0
-bool get_input_file_from_archive(
-        char *filename,
-        size_t namesize,
-        bool is_remote,
-        char **temp_file_ptr);
-bool loader_move_segm(
-        ea_t from,
-        ea_t to,
-        asize_t size,
-        bool keep);
-int generate_ida_copyright(FILE *fp, const char *cmt, html_line_cb_t *line_cb);
-void clear_plugin_options(void);
-bool is_in_loader(void);
-bool is_embedded_dbfile_ext(const char *ext);
-void get_ids_filename(
-        char *buf,
-        size_t bufsize,
-        const char *idsname,
-        const char *ostype,
-        bool *use_ordinals,
-        char **autotils,
-        int maxtils);
-bool add_plugin_option(const char *plugin_options); // format: plugin_name:options
-size_t get_plugins_path(char *buf, size_t bufsize);
-
-// Kernel only, plugins should not use this
-#if !defined(__IDP__) || defined(__UI__)
-// since uninitialized enums are forbidden in C++, define dev_code_t as int
-typedef int dev_code_t;
-idaman int ida_export gen_dev_event(dev_code_t code, ...);
-#endif
-/// \endcond
-
-#ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED bool ida_export save_database(const char *outfile, bool delete_unpacked);
-idaman DEPRECATED char *ida_export get_idp_desc(const char *file, char *buf, size_t bufsize);
-idaman DEPRECATED int ida_export enum_processor_modules(
-        int (idaapi *func)(const char *file, void *ud),
-        void *ud,
-        char *answer,
-        size_t answer_size,
-        const extlang_t **el = NULL);
-idaman int ida_export load_loader_module(linput_t *li, const char *lname, const char *fname, bool is_remote);
-#endif
-
-#pragma pack(pop)
 #endif

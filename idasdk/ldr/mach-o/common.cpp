@@ -1,6 +1,6 @@
 #include "../idaldr.h"
 #include "common.h"
-#include <area.hpp>
+#include <range.hpp>
 #include <kernwin.hpp>
 
 #include "../ar/ar.hpp"
@@ -26,28 +26,28 @@ bool isSectdiff(const struct mach_header_64 *mh, int type)
   return (mh->cputype == CPU_TYPE_MC680x0 && (type == GENERIC_RELOC_SECTDIFF || type == GENERIC_RELOC_LOCAL_SECTDIFF))
       || (mh->cputype == CPU_TYPE_I386 && (type == GENERIC_RELOC_SECTDIFF || type == GENERIC_RELOC_LOCAL_SECTDIFF))
       || (mh->cputype == CPU_TYPE_ARM
-         && (type == ARM_RELOC_SECTDIFF
-          || type == ARM_RELOC_LOCAL_SECTDIFF
-          || type == ARM_RELOC_HALF_SECTDIFF))
+       && (type == ARM_RELOC_SECTDIFF
+        || type == ARM_RELOC_LOCAL_SECTDIFF
+        || type == ARM_RELOC_HALF_SECTDIFF))
       || (mh->cputype == CPU_TYPE_MC88000 && type == M88K_RELOC_SECTDIFF)
       || ((mh->cputype == CPU_TYPE_POWERPC
         || mh->cputype == CPU_TYPE_POWERPC64
         || mh->cputype == CPU_TYPE_VEO)
-          && (type == PPC_RELOC_SECTDIFF
-           || type == PPC_RELOC_LOCAL_SECTDIFF
-           || type == PPC_RELOC_HI16_SECTDIFF
-           || type == PPC_RELOC_LO16_SECTDIFF
-           || type == PPC_RELOC_LO14_SECTDIFF
-           || type == PPC_RELOC_HA16_SECTDIFF))
+       && (type == PPC_RELOC_SECTDIFF
+        || type == PPC_RELOC_LOCAL_SECTDIFF
+        || type == PPC_RELOC_HI16_SECTDIFF
+        || type == PPC_RELOC_LO16_SECTDIFF
+        || type == PPC_RELOC_LO14_SECTDIFF
+        || type == PPC_RELOC_HA16_SECTDIFF))
       || (mh->cputype == CPU_TYPE_I860 && type == I860_RELOC_SECTDIFF)
       || (mh->cputype == CPU_TYPE_HPPA
-          && (type == HPPA_RELOC_SECTDIFF
-           || type == HPPA_RELOC_HI21_SECTDIFF
-           || type == HPPA_RELOC_LO14_SECTDIFF))
+       && (type == HPPA_RELOC_SECTDIFF
+        || type == HPPA_RELOC_HI21_SECTDIFF
+        || type == HPPA_RELOC_LO14_SECTDIFF))
       || (mh->cputype == CPU_TYPE_SPARC
-          && (type == SPARC_RELOC_SECTDIFF
-           || type == SPARC_RELOC_HI22_SECTDIFF
-           || type == SPARC_RELOC_LO10_SECTDIFF));
+       && (type == SPARC_RELOC_SECTDIFF
+        || type == SPARC_RELOC_HI22_SECTDIFF
+        || type == SPARC_RELOC_LO10_SECTDIFF));
 }
 
 //--------------------------------------------------------------------------
@@ -810,7 +810,7 @@ local void swap_i386_thread_state(i386_thread_state_t *cpu)
 }
 
 //--------------------------------------------------------------------------
-local void swap_x86_thread_state64( x86_thread_state64_t *cpu)
+local void swap_x86_thread_state64(x86_thread_state64_t *cpu)
 {
   cpu->__rax = swap64(cpu->__rax);
   cpu->__rbx = swap64(cpu->__rbx);
@@ -879,7 +879,7 @@ local void swap_x86_float_state64(x86_float_state64_t *fpu)
         unsigned short
         busy    :1,
         c3      :1,
-        tos      :3,
+        tos     :3,
         c2      :1,
         c1      :1,
         c0      :1,
@@ -1049,7 +1049,7 @@ void swap_i386_float_state(i386_float_state_t *fpu)
         unsigned short
         busy    :1,
         c3      :1,
-        tos      :3,
+        tos     :3,
         c2      :1,
         c1      :1,
         c0      :1,
@@ -1469,6 +1469,16 @@ local void swap_encryption_info_command(struct encryption_info_command *ec)
 }
 
 //--------------------------------------------------------------------------
+local void swap_encryption_info_command_64(struct encryption_info_command_64 *ec)
+{
+  ec->cmd = swap32(ec->cmd);
+  ec->cmdsize = swap32(ec->cmdsize);
+  ec->cryptoff = swap32(ec->cryptoff);
+  ec->cryptsize = swap32(ec->cryptsize);
+  ec->cryptid = swap32(ec->cryptid);
+  ec->pad = swap32(ec->pad);
+}
+//--------------------------------------------------------------------------
 local void swap_dyld_info_command(struct dyld_info_command *ed)
 {
   ed->cmd = swap32(ed->cmd);
@@ -1684,6 +1694,7 @@ local void swap_relocation_info(struct relocation_info *relocs, uint32 nrelocs)
       uint32 word;
     } u;
   } sr;
+  CASSERT(sizeof(swapped_relocation_info) == sizeof(relocation_info));
 
   struct swapped_scattered_relocation_info
   {
@@ -1696,7 +1707,7 @@ local void swap_relocation_info(struct relocation_info *relocs, uint32 nrelocs)
     scattered = (bool)((swap32(relocs[i].r_address) & R_SCATTERED) != 0);
     if ( scattered == FALSE )
     {
-      memcpy(&sr, relocs + i, sizeof(struct relocation_info));
+      memcpy(&sr, relocs + i, sizeof(struct swapped_relocation_info));
       sr.r_address = swap32(sr.r_address);
       sr.u.word = swap32(sr.u.word);
       relocs[i].r_address = sr.r_address;
@@ -1836,7 +1847,7 @@ static const char *convert_cpu(cpu_type_t cputype, cpu_subtype_t cpusubtype, int
       break;
   }
   if ( p_target != NULL )
-    *p_target = macho_arch_to_ida_arch(cputype, cpusubtype);
+    *p_target = macho_arch_to_ida_arch(cputype, cpusubtype, NULL);
   return name;
 }
 
@@ -1868,7 +1879,8 @@ static size_t get_cpu_name(cpu_type_t cputype, cpu_subtype_t subtype, char *buf,
       if ( subtype == CPU_SUBTYPE_I386_ALL ) // same as CPU_SUBTYPE_386
         subname = "";
       break;
-    case CPU_TYPE_ARM:     name = "ARM";
+    case CPU_TYPE_ARM:
+      name = "ARM";
       switch ( subtype )
       {
         case CPU_SUBTYPE_ARM_A500_ARCH:
@@ -1953,7 +1965,7 @@ static size_t get_cpu_name(cpu_type_t cputype, cpu_subtype_t subtype, char *buf,
 // ---------------------------------------------------------------------------
 bool macho_file_t::seek_to_subfile(uint n, size_t filesize)
 {
-  int32 fsize = filesize == 0 ? qlsize(li) : filesize;
+  int64 fsize = filesize == 0 ? qlsize(li) : filesize;
   if ( fsize <= 0 )
     return false;
 
@@ -1982,7 +1994,7 @@ bool macho_file_t::seek_to_subfile(uint n, size_t filesize)
     return false;
   }
 
-  int32 pos = mach_offset + start_offset;
+  qoff64_t pos = mach_offset + start_offset;
   return qlseek(li, pos) == pos;
 }
 
@@ -1999,7 +2011,7 @@ bool macho_file_t::set_subfile(uint n, size_t filesize, bool silent)
   mach_toc.clear();
   mach_reftable.clear();
   parsed_section_info = false;
-  base_addr = BADADDR;
+  base_addr = BADADDR64;
 
   size_t mh_len;
   subfile_type_t type = get_subfile_type(n, filesize);
@@ -2097,7 +2109,7 @@ macho_file_t::subfile_type_t macho_file_t::get_subfile_type(uint n, size_t files
   }
   else if ( strncmp(ARMAG, (const char *)&magic, sizeof(magic)) == 0 )
   {
-    off_t fpos = qltell(li);
+    qoff64_t fpos = qltell(li);
     if ( is_ar_file(li, fpos, false) )
       type = SUBFILE_AR;
     qlseek(li, fpos, SEEK_SET);
@@ -2116,6 +2128,8 @@ const mach_header_64 &macho_file_t::get_mach_header()
 //--------------------------------------------------------------------------
 bool macho_file_t::parse_load_commands(bool silent)
 {
+  static bool complained = false;
+
   struct load_command l;
   const char *begin = (const char*)&mach_header_data[0];
   size_t delta = m64 ? sizeof(mach_header_64) : sizeof(mach_header);
@@ -2124,16 +2138,15 @@ bool macho_file_t::parse_load_commands(bool silent)
   const char *commands_end = begin + mach_header_data.size();
   begin = (const char*)lc;
   load_commands.clear();
-  for ( uint32 i = 0 ; i < mh.ncmds && begin < commands_end; i++ )
+  for ( uint32 i = 0; i < mh.ncmds && begin < commands_end; i++ )
   {
     if ( begin >= commands_end )
     {
       if ( !silent )
       {
-        static bool displayed = false;
-        if ( !displayed )
-          warning("Inconsistent mh.ncmds %u", mh.ncmds);
-        displayed = true;
+        if ( !complained )
+          warning("Inconsistent mh.ncmds %u, ignored extra commands", mh.ncmds);
+        complained = true;
       }
       break;
     }
@@ -2162,21 +2175,24 @@ bool macho_file_t::parse_load_commands(bool silent)
     begin = end;
     lc = (struct load_command *)begin;
   }
-  if ( !silent && commands_end != begin )
+  if ( !silent && !complained && commands_end != begin )
+  {
     warning("Inconsistent mh.sizeofcmds");
+    complained = true;
+  }
 
   parsed_section_info = false;
   return !load_commands.empty();
 }
 
 //--------------------------------------------------------------------------
-#define HANDLE_SIMPLE_COMMAND(name)                        \
-  {                                                        \
-    name##_command cmd##name;                              \
-    safecopy(begin, end, &cmd##name);                      \
-    if ( mf )                                              \
-      swap_##name##_command(&cmd##name);                   \
-    result = v.visit_##name (&cmd##name , cmd_begin, end); \
+#define HANDLE_SIMPLE_COMMAND(name)                       \
+  {                                                       \
+    name##_command cmd##name;                             \
+    safecopy(begin, end, &cmd##name);                     \
+    if ( mf )                                             \
+      swap_##name##_command(&cmd##name);                  \
+    result = v.visit_##name (&cmd##name, cmd_begin, end); \
   }
 
 //--------------------------------------------------------------------------
@@ -2196,10 +2212,10 @@ int handle_lc_segment(const char *begin, const char *end, macho_lc_visitor_t &v,
     {
       if ( begin >= end )
       {
-        static bool displayed = false;
-        if ( !displayed )
-          warning("Inconsistent number of sections in a segment %u", sg.nsects);
-        displayed = true;
+        static bool complained = false;
+        if ( !complained )
+          warning("Inconsistent number of sections %u in a segment", sg.nsects);
+        complained = true;
         break;
       }
       cmd_begin = begin;
@@ -2232,13 +2248,8 @@ bool macho_file_t::visit_load_commands(macho_lc_visitor_t &v)
     begin = (const char*)lc;
     const char *cmd_begin = begin;
     end = begin + l.cmdsize;
-    if ( end > commands_end )
-      end = commands_end;
-    if ( begin >= end )
-    {
-      warning("Inconsistency in load commands");
-      break;
-    }
+    if ( end > commands_end || begin >= end )
+      loader_failure("Inconsistency in load commands");
     result = v.visit_any_load_command(&l, cmd_begin, end);
     if ( result == 2 )
     {
@@ -2344,12 +2355,22 @@ bool macho_file_t::visit_load_commands(macho_lc_visitor_t &v)
       case LC_ENCRYPTION_INFO:
         HANDLE_SIMPLE_COMMAND(encryption_info);
         break;
+      case LC_ENCRYPTION_INFO_64:
+        {
+          encryption_info_command_64 ec;
+          safecopy(begin, end, &ec);
+          if ( mf )
+            swap_encryption_info_command_64(&ec);
+          result = v.visit_encryption_info_64(&ec, cmd_begin, end);
+        }
+        break;
       case LC_DYLD_INFO:
       case LC_DYLD_INFO_ONLY:
         HANDLE_SIMPLE_COMMAND(dyld_info);
         break;
       case LC_VERSION_MIN_MACOSX:
       case LC_VERSION_MIN_IPHONEOS:
+      case LC_VERSION_MIN_WATCHOS:
         HANDLE_SIMPLE_COMMAND(version_min);
         break;
       case LC_MAIN:
@@ -2366,32 +2387,27 @@ bool macho_file_t::visit_load_commands(macho_lc_visitor_t &v)
   return result != 0;
 }
 
-// from mach_loader.c
-/*
-* The first APPLE_UNPROTECTED_HEADER_SIZE bytes (from offset 0 of
-* this part of a Universal binary) are not protected...
-* The rest needs to be "transformed".
-*/
-
-#define	APPLE_UNPROTECTED_HEADER_SIZE	(3 * PAGE_SIZE)
-
-#define is_protected(sg) ((sg->flags & SG_PROTECTED_VERSION_1) != 0 \
-                        && sg->vmsize > 0 \
-                        && (sg->fileoff > APPLE_UNPROTECTED_HEADER_SIZE \
-                         || sg->fileoff + sg->filesize > APPLE_UNPROTECTED_HEADER_SIZE))
+#define IS_PROTECTED(sg) ((sg.flags & SG_PROTECTED_VERSION_1) != 0 \
+                        && sg.vmsize > 0 \
+                        && (sg.fileoff > APPLE_UNPROTECTED_HEADER_SIZE \
+                         || sg.fileoff + sg.filesize > APPLE_UNPROTECTED_HEADER_SIZE))
 
 //--------------------------------------------------------------------------
-bool macho_file_t::is_encrypted()
+inline bool is_protected(const segment_command &sg) { return IS_PROTECTED(sg); }
+inline bool is_protected(const segment_command_64 &sg) { return IS_PROTECTED(sg); }
+
+//--------------------------------------------------------------------------
+int macho_file_t::is_encrypted()
 {
   struct myvisitor: macho_lc_visitor_t
   {
-    bool is_encrypted;
-    myvisitor(): is_encrypted(false) {}
+    int is_encrypted;
+    myvisitor(): is_encrypted(0) {}
     virtual int visit_segment(const struct segment_command *sg, const char *, const char *)
     {
-      if ( is_protected(sg) )
+      if ( is_protected(*sg) )
       {
-        is_encrypted = true;
+        is_encrypted = 1;
         return 1;
       }
       return 0;
@@ -2399,9 +2415,9 @@ bool macho_file_t::is_encrypted()
 
     virtual int visit_segment(const struct segment_command_64 *sg, const char *, const char *)
     {
-      if ( is_protected(sg) )
+      if ( is_protected(*sg) )
       {
-        is_encrypted = true;
+        is_encrypted = 1;
         return 1;
       }
       return 0;
@@ -2411,7 +2427,16 @@ bool macho_file_t::is_encrypted()
     {
       if ( ec->cryptsize != 0 && ec->cryptid != 0 )
       {
-        is_encrypted = true;
+        is_encrypted = 2;
+        return 1;
+      }
+      return 0;
+    }
+    virtual int visit_encryption_info_64(const struct encryption_info_command_64 *ec, const char *, const char *)
+    {
+      if ( ec->cryptsize != 0 && ec->cryptid != 0 )
+      {
+        is_encrypted = 2;
         return 1;
       }
       return 0;
@@ -2425,6 +2450,7 @@ bool macho_file_t::is_encrypted()
 }
 
 //--------------------------------------------------------------------------
+// check for LC_MAIN and/or LC_THREAD/LC_UNIXTHREAD commands
 static void _get_thread_info(macho_file_t *mfile, const char **thr_begin, const char **thr_end, uint64_t *entryoff)
 {
   struct ida_local myvisitor: macho_lc_visitor_t
@@ -2478,16 +2504,16 @@ void macho_file_t::get_thread_state(const char *&begin, const char *&end)
 }
 
 //--------------------------------------------------------------------------
-ea_t macho_file_t::get_entry_address()
+uint64 macho_file_t::get_entry_address()
 {
   const char *begin, *end;
   uint64_t entryoff;
   _get_thread_info(this, &begin, &end, &entryoff);
   if ( entryoff != 0 )
   {
-    if ( base_addr == BADADDR )
+    if ( base_addr == BADADDR64 )
       parse_section_info();
-    return base_addr == BADADDR ? entryoff : base_addr + entryoff;
+    return base_addr == BADADDR64 ? entryoff : base_addr + entryoff;
   }
 
   // no LC_MAIN, go the long way
@@ -2518,7 +2544,7 @@ ea_t macho_file_t::get_entry_address()
       break;
     default:
       // unhandled
-      return BADADDR;
+      return BADADDR64;
   }
   // 8: skip flavor and count
   begin += 8 + offset;
@@ -2526,7 +2552,7 @@ ea_t macho_file_t::get_entry_address()
   {
     uint64 val;
     if ( !safecopy(begin, end, &val) )
-      return BADADDR;
+      return BADADDR64;
     if ( mf )
       val = swap64(val);
     return val;
@@ -2535,7 +2561,7 @@ ea_t macho_file_t::get_entry_address()
   {
     uint32 val;
     if ( !safecopy(begin, end, &val) )
-      return BADADDR;
+      return BADADDR64;
     if ( mf )
       val = swap32(val);
     return val;
@@ -2597,7 +2623,7 @@ void macho_file_t::parse_section_info()
     {
       if ( --nsecs_to_check <= 0 ) // We have already visited all the sections of last good segment
         return true;
-      const struct segment_command_64& curseg = segcmds.back();
+      const struct segment_command_64 &curseg = segcmds.back();
       if ( curseg.vmsize == 0 )
         return true;
       ea_t start = s->addr;
@@ -2641,11 +2667,24 @@ void macho_file_t::parse_section_info()
     seg2section.clear();
     myvisitor v(mach_sections, mach_segcmds, seg2section, m64);
     visit_load_commands(v);
+    if ( !mach_segcmds.empty() )
+    {
+      segment_command_64 &sg = mach_segcmds[0];
+      if ( streq(sg.segname, "__TEXT") && sg.fileoff != 0 )
+      {
+        // IDA assumes that the text segment is always at offset 0 - even for subfiles of FAT binaries and dyldcache files.
+        // As of OSX10.13/iOS11, dyldcaches always use absolute offsets into the cache file, regardless of the segment.
+        // In this case we must force the text segment to have offset 0 for the loader to work properly.
+        // Also see the comment in dyld_single_macho_linput_t::read().
+        // This is a band-aid. It must be fixed properly after the 7.0 release.
+        sg.fileoff = 0;
+      }
+    }
     parsed_section_info = true;
     for ( size_t i = 0; i < mach_segcmds.size(); i++ )
     {
       const segment_command_64 &sg64 = mach_segcmds[i];
-      if ( base_addr == BADADDR && sg64.fileoff == 0 && sg64.filesize != 0 )
+      if ( base_addr == BADADDR64 && sg64.fileoff == 0 && sg64.filesize != 0 )
       {
         base_addr = sg64.vmaddr;
         break;
@@ -2734,7 +2773,7 @@ bool macho_file_t::get_section(const char *segname, const char *sectname, sectio
       {
         QASSERT(20027, i < mach_sections.size());
         const section_64 &sect = mach_sections[i];
-        if ( strncmp(sect.sectname, sectname, sizeof(sect.sectname)) == 0  )
+        if ( strncmp(sect.sectname, sectname, sizeof(sect.sectname)) == 0 )
         {
           if ( psect != NULL )
             *psect = sect;
@@ -2748,13 +2787,13 @@ bool macho_file_t::get_section(const char *segname, const char *sectname, sectio
 
 //--------------------------------------------------------------------------
 // get section's data by segment name and section name
-bool macho_file_t::get_section(const char *segname, const char *sectname, bytevec_t &data, bool in_mem)
+bool macho_file_t::get_section(const char *segname, const char *sectname, bytevec_t *data)
 {
   section_64 secthdr;
   if ( !get_section(segname, sectname, &secthdr) )
     return false;
   uint64 offset;
-  if ( !in_mem && mh.filetype == MH_OBJECT )
+  if ( !is_mem_image() && mh.filetype == MH_OBJECT )
   {
     // we should use section's file offsets
     offset = secthdr.offset;
@@ -2765,30 +2804,27 @@ bool macho_file_t::get_section(const char *segname, const char *sectname, byteve
     segment_command_64 seghdr;
     if ( !get_segment(segname, &seghdr) )
       return false;
-    if ( in_mem )
+    if ( is_mem_image() )
       offset = secthdr.addr - base_addr;
     else
       offset = seghdr.fileoff + (secthdr.addr - seghdr.vmaddr);
   }
   qlseek(li, start_offset + mach_offset + offset);
-  data.resize(secthdr.size);
-  qlread(li, data.begin(), secthdr.size);
+  data->resize(secthdr.size);
+  qlread(li, data->begin(), secthdr.size);
   return true;
 }
 
 //--------------------------------------------------------------------------
-const dyliblist_t &macho_file_t::get_dylib_list()
+const dyliblist_t macho_file_t::get_dylib_list(int kind)
 {
-  /*
-   * Create an array of section structures in the host byte sex so it
-   * can be processed and indexed into directly.
-   */
 
   struct myvisitor: macho_lc_visitor_t
   {
     dyliblist_t &dylibs;
+    int kind;
 
-    myvisitor(dyliblist_t &_dylibs): dylibs(_dylibs) {}
+    myvisitor(dyliblist_t &_dylibs, int _kind): dylibs(_dylibs), kind(_kind) {}
 
     virtual int visit_dylib(const struct dylib_command *d, const char *begin, const char *end)
     {
@@ -2798,8 +2834,12 @@ const dyliblist_t &macho_file_t::get_dylib_list()
         case LC_LOAD_WEAK_DYLIB:
         case LC_REEXPORT_DYLIB:
         case LC_LAZY_LOAD_DYLIB:
+        case LC_LOAD_UPWARD_DYLIB:
           {
-            //sanity check
+            // check if it's the kind of dylib we're looking for
+            if ( kind != 0 && kind != d->cmd )
+              return 0; // nope, continue
+            // sanity check
             size_t off = d->dylib.name.offset;
             const char *namestart = begin + off;
             if ( off < sizeof(*d) || namestart < begin || namestart >= end )
@@ -2818,10 +2858,16 @@ const dyliblist_t &macho_file_t::get_dylib_list()
     }
   };
 
-  if ( mach_dylibs.empty() )
+  if ( mach_dylibs.empty() || kind != 0 )
   {
-    myvisitor v(mach_dylibs);
+    myvisitor v(mach_dylibs, kind);
     visit_load_commands(v);
+    if ( kind != 0 )
+    {
+      dyliblist_t copy = mach_dylibs;
+      mach_dylibs.clear();
+      return copy;
+    }
   }
   return mach_dylibs;
 }
@@ -2961,30 +3007,30 @@ inline bool is_linkedit_segment(const segment_command_64 &sg)
 
 //--------------------------------------------------------------------------
 // load chunk of data from the linkedit section
-bool macho_file_t::load_linkedit_data(uint32 offset, size_t *size, void *buffer, bool in_mem)
+bool macho_file_t::load_linkedit_data(
+        uint32 offset,
+        size_t *size,
+        void *buffer)
 {
   if ( *size == 0 )
     return true;
 
   sval_t linkedit_shift = 0;
-  if ( in_mem )
+  if ( is_mem_image() )
   {
     // calculate shift between linkedit's segment file offset and memory address
     // so that we will seek to the correct address in memory
     for ( size_t i = 0; i < mach_segcmds.size(); i++ )
     {
       const segment_command_64 &sg64 = mach_segcmds[i];
-      if ( base_addr == BADADDR && sg64.fileoff == 0 && sg64.filesize != 0 )
+      if ( base_addr == BADADDR64 && sg64.fileoff == 0 && sg64.filesize != 0 )
         base_addr = sg64.vmaddr;
       else if ( is_linkedit_segment(sg64) && linkedit_shift == 0 )
         linkedit_shift = sval_t(sg64.vmaddr - base_addr - sg64.fileoff);
     }
   }
   if ( offset >= mach_size )
-  {
-    // outside file
-    return false;
-  }
+    return false; // outside file
   if ( offset + *size > mach_size )
     *size = mach_size - offset;
   if ( *size == 0 )
@@ -2995,91 +3041,155 @@ bool macho_file_t::load_linkedit_data(uint32 offset, size_t *size, void *buffer,
 }
 
 //--------------------------------------------------------------------------
-void macho_file_t::get_symbol_table_info(nlistvec_t &symbols, qstring &strings, bool in_mem)
+bool macho_file_t::get_uuid(uint8 uuid[16])
+{
+  struct ida_local uuid_getter_t : public macho_lc_visitor_t
+  {
+    uint8 *buf;
+    bool retrieved;
+    uuid_getter_t(uint8 *_buf) : buf(_buf), retrieved(false) {}
+    virtual int visit_uuid(const struct uuid_command *cmnd,
+                           const char *,
+                           const char *)
+    {
+      memmove(buf, cmnd->uuid, 16);
+      retrieved = true;
+      return 0;
+    }
+  };
+  uuid_getter_t uuid_getter(uuid);
+  visit_load_commands(uuid_getter);
+  return uuid_getter.retrieved;
+}
+
+//--------------------------------------------------------------------------
+bool macho_file_t::match_uuid(const bytevec_t &bytes)
+{
+  if ( bytes.size() != 16 )
+    return false;
+
+  uint8 uuid[16];
+
+  return get_uuid(uuid) && memcmp(uuid, bytes.begin(), sizeof(uuid)) == 0;
+}
+
+//--------------------------------------------------------------------------
+bool macho_file_t::get_symtab_command(struct symtab_command *st)
 {
   struct myvisitor: macho_lc_visitor_t
   {
-    struct symtab_command &st;
+    struct symtab_command *st;
 
-    myvisitor(struct symtab_command &st_): st(st_) {}
+    myvisitor(struct symtab_command *st_): st(st_) {}
 
     virtual int visit_symtab(const struct symtab_command *s, const char *, const char *)
     {
-      st = *s;
+      *st = *s;
       return 1;
     }
   };
 
-  struct symtab_command st = { 0 };
-  symbols.clear();
-  strings.clear();
-
   myvisitor v(st);
-  if ( visit_load_commands(v) )
+  return visit_load_commands(v);
+}
+
+//--------------------------------------------------------------------------
+void macho_file_t::get_symbol_table(
+        const struct symtab_command &st,
+        nlistvec_t *symbols)
+{
+  if ( st.symoff >= mach_size )
   {
-    if ( st.symoff >= mach_size )
+    msg("WARNING: symbol table offset is past end of file\n");
+  }
+  else
+  {
+    size_t size = st.nsyms * (m64 ? sizeof(struct nlist_64) : sizeof(struct nlist));
+    size_t nsymbols;
+    size_t stend = st.symoff + size;
+    if ( stend < st.symoff || stend > mach_size )
     {
-      msg("WARNING: symbol table offset is past end of file\n");
+      msg("WARNING: symbol table extends past end of file\n");
+      size = mach_size - st.symoff;
+      nsymbols = size / (m64 ? sizeof(struct nlist_64) : sizeof(struct nlist));
     }
     else
     {
-      size_t size = st.nsyms * (m64 ? sizeof(struct nlist_64) : sizeof(struct nlist));
-      size_t nsymbols;
-      size_t stend = st.symoff + size;
-      if ( stend < st.symoff || stend > mach_size )
+      nsymbols = st.nsyms;
+    }
+
+    if ( nsymbols != 0 )
+    {
+      symbols->resize(nsymbols);
+      struct nlist_64 *symbeg = symbols->begin();
+      if ( m64 )
       {
-        msg("WARNING: symbol table extends past end of file\n");
-        size = mach_size - st.symoff;
-        nsymbols = size / (m64 ? sizeof(struct nlist_64) : sizeof(struct nlist));
+        size = sizeof(struct nlist_64) * nsymbols;
+        load_linkedit_data(st.symoff, &size, symbeg);
+        if ( mf )
+          swap_nlist_64(symbeg, symbeg, nsymbols);
       }
       else
       {
-        nsymbols = st.nsyms;
-      }
-
-      if ( nsymbols != 0 )
-      {
-        symbols.resize(nsymbols);
-        if ( m64 )
-        {
-          size = sizeof(struct nlist_64) * nsymbols;
-          load_linkedit_data(st.symoff, &size, &symbols[0], in_mem);
-          if ( mf )
-            swap_nlist_64(&symbols[0], &symbols[0], nsymbols);
-        }
-        else
-        {
-          qvector<struct nlist> syms32;
-          syms32.resize(nsymbols);
-          size = sizeof(struct nlist) * nsymbols;
-          load_linkedit_data(st.symoff, &size, &syms32[0], in_mem);
-          nlist_to64(&syms32[0], &symbols[0], nsymbols, mf);
-        }
+        qvector<struct nlist> syms32;
+        syms32.resize(nsymbols);
+        size = sizeof(struct nlist) * nsymbols;
+        load_linkedit_data(st.symoff, &size, &syms32[0]);
+        nlist_to64(&syms32[0], symbeg, nsymbols, mf);
       }
     }
+  }
+}
 
-    if ( st.stroff >= mach_size )
+//--------------------------------------------------------------------------
+void macho_file_t::get_string_table(
+        const struct symtab_command &st,
+        qstring *strings)
+{
+  if ( st.stroff >= mach_size )
+  {
+    msg("WARNING: string table offset is past end of file\n");
+  }
+  else
+  {
+    size_t strings_size;
+    size_t stend = st.stroff + st.strsize;
+    if ( stend < st.stroff || stend > mach_size )
     {
-      msg("WARNING: string table offset is past end of file\n");
+      msg("WARNING: string table extends past end of file\n");
+      strings_size = mach_size - st.stroff;
     }
     else
     {
-      size_t strings_size;
-      size_t stend = st.stroff + st.strsize;
-      if ( stend < st.stroff || stend > mach_size )
-      {
-        msg("WARNING: string table extends past end of file\n");
-        strings_size = mach_size - st.stroff;
-      }
-      else
-      {
-        strings_size = st.strsize;
-      }
-
-      strings.resize(strings_size);
-      if ( strings_size != 0 )
-        load_linkedit_data(st.stroff, &strings_size, &strings[0]);
+      strings_size = st.strsize;
     }
+
+    string_table_waitbox_t wb(*this);
+
+    for ( size_t off = 0; off < strings_size && !wb.cancelled(); )
+    {
+      size_t chunksize = qmin(32*1024, strings_size - off);
+      strings->resize(strings->size()+chunksize);
+
+      size_t newsize = chunksize;
+      load_linkedit_data(st.stroff+off, &newsize, &strings->at(off));
+
+      off += chunksize;
+    }
+  }
+}
+
+//--------------------------------------------------------------------------
+void macho_file_t::get_symbol_table_info(nlistvec_t *symbols, qstring *strings)
+{
+  symbols->clear();
+  strings->clear();
+
+  struct symtab_command st = { 0 };
+  if ( get_symtab_command(&st) )
+  {
+    get_symbol_table(st, symbols);
+    get_string_table(st, strings);
   }
 }
 
@@ -3095,7 +3205,10 @@ bool macho_file_t::get_dyst(struct dysymtab_command *dyst)
       dyst->cmd = 0;
     }
 
-    virtual int visit_dysymtab(const struct dysymtab_command *s, const char *, const char *)
+    virtual int visit_dysymtab(
+        const struct dysymtab_command *s,
+        const char *,
+        const char *)
     {
       *dyst = *s;
       return 1;
@@ -3108,17 +3221,16 @@ bool macho_file_t::get_dyst(struct dysymtab_command *dyst)
 
 //--------------------------------------------------------------------------
 /*
- * get_indirect_symbol_table_info() returns a pointer and the size of the
- * indirect symbol table.  This routine handles the problems related to the
- * file being truncated and only returns valid pointers and sizes that can be
- * used.  This routine will return pointers that are misaligned and it is up to
+ * get_indirect_symbol_table_info() returns indirect symbols. It handles the
+ * problems related to the file being truncated and only returns valid info.
+ * This routine may return misaligned pointers and it is up to
  * the caller to deal with alignment issues.
  */
-void macho_file_t::get_indirect_symbol_table_info(qvector<uint32> &indirect_symbols)
+void macho_file_t::get_indirect_symbol_table_info(qvector<uint32> *indirect_symbols)
 {
   struct dysymtab_command dyst;
 
-  indirect_symbols.clear();
+  indirect_symbols->clear();
 
   if ( !get_dyst(&dyst) )
     return;
@@ -3138,11 +3250,11 @@ void macho_file_t::get_indirect_symbol_table_info(qvector<uint32> &indirect_symb
       nindirect_symbols = size / sizeof(uint32);
       size = nindirect_symbols * sizeof(uint32);
     }
-    indirect_symbols.resize(nindirect_symbols);
+    indirect_symbols->resize(nindirect_symbols);
     qlseek(li, start_offset + mach_offset + dyst.indirectsymoff);
-    qlread(li, indirect_symbols.begin(), size);
+    qlread(li, indirect_symbols->begin(), size);
     if ( mf )
-      swap_indirect_symbols(indirect_symbols.begin(), nindirect_symbols);
+      swap_indirect_symbols(indirect_symbols->begin(), nindirect_symbols);
   }
 }
 
@@ -3151,21 +3263,21 @@ void macho_file_t::get_indirect_symbol_table_info(qvector<uint32> &indirect_symb
 bool macho_file_t::load_relocs(
         uint32 reloff,
         uint32 nreloc,
-        relocvec_t &relocs,
+        relocvec_t *relocs,
         const char *desc)
 {
   validate_array_count(NULL, &nreloc, sizeof(relocation_info), desc, reloff, mach_size);
-  relocs.qclear();
-  relocs.resize(nreloc);
+  relocs->qclear();
+  relocs->resize(nreloc);
   size_t size = nreloc * sizeof(relocation_info);
   qlseek(li, start_offset + mach_offset + reloff);
-  if ( qlread(li, relocs.begin(), size) != size )
+  if ( qlread(li, relocs->begin(), size) != size )
   {
-    relocs.qclear();
+    relocs->qclear();
     return false;
   }
   if ( mf )
-    swap_relocation_info(relocs.begin(), nreloc);
+    swap_relocation_info(relocs->begin(), nreloc);
   return true;
 }
 
@@ -3176,7 +3288,7 @@ void macho_file_t::visit_relocs(macho_reloc_visitor_t &v)
     return;
 
   struct dysymtab_command dyst;
-  ea_t baseea = 0;
+  uint64 baseea = 0;
 /*
   (from Mach-O spec)
  r_address
@@ -3187,10 +3299,14 @@ void macho_file_t::visit_relocs(macho_reloc_visitor_t &v)
 */
 
   // we check for first writable segment if MH_SPLIT_SEGS is set
-  // it seems this approach is also used on x64 for executables
+  // or on x64 (see ImageLoaderMachOClassic::getRelocBase() in dyld sources)
+  // NB: in MH_KEXT_BUNDLE (processed by kernel kxld) r_address is still based on the first segment/0!
+
   bool need_writable = false;
-  if ( (mh.flags & MH_SPLIT_SEGS) != 0
-    || (mh.cputype == CPU_TYPE_X86_64 && (mh.filetype == MH_EXECUTE || mh.filetype == MH_DYLINKER)) )
+  bool is_dyld_file = mh.filetype == MH_EXECUTE
+                   || mh.filetype == MH_DYLINKER
+                   || mh.filetype == MH_BUNDLE;
+  if ( (mh.flags & MH_SPLIT_SEGS) != 0 || is_dyld_file && mh.cputype == CPU_TYPE_X86_64 )
   {
     need_writable = true;
   }
@@ -3199,7 +3315,7 @@ void macho_file_t::visit_relocs(macho_reloc_visitor_t &v)
     if ( !need_writable
       || (mach_segcmds[i].initprot & (VM_PROT_WRITE|VM_PROT_READ)) == (VM_PROT_WRITE|VM_PROT_READ) )
     {
-      baseea = (ea_t)mach_segcmds[i].vmaddr;
+      baseea = mach_segcmds[i].vmaddr;
       break;
     }
   }
@@ -3209,20 +3325,20 @@ void macho_file_t::visit_relocs(macho_reloc_visitor_t &v)
   {
     // External relocation information
     uint32 nrelocs = dyst.nextrel;
-    if ( nrelocs > 0 && load_relocs(dyst.extreloff, nrelocs, relocs, "Number of dynamic external relocs") )
+    if ( nrelocs > 0 && load_relocs(dyst.extreloff, nrelocs, &relocs, "Number of dynamic external relocs") )
     {
       v.visit_relocs(baseea, relocs, macho_reloc_visitor_t::mach_reloc_external);
     }
     // Local relocation information
     nrelocs = dyst.nlocrel;
-    if ( nrelocs > 0 && load_relocs(dyst.locreloff, nrelocs, relocs, "Number of dynamic local relocs") )
+    if ( nrelocs > 0 && load_relocs(dyst.locreloff, nrelocs, &relocs, "Number of dynamic local relocs") )
     {
       v.visit_relocs(baseea, relocs, macho_reloc_visitor_t::mach_reloc_local);
     }
   }
 
   // Section relocation information
-  for ( size_t i = 0 ; i < mach_sections.size(); i++ )
+  for ( size_t i = 0; i < mach_sections.size(); i++ )
   {
     if ( mach_sections[i].nreloc == 0 )
       continue;
@@ -3230,28 +3346,41 @@ void macho_file_t::visit_relocs(macho_reloc_visitor_t &v)
     char name[80];
     qsnprintf(name, sizeof(name), "Number of relocs for section (%.16s,%.16s)", mach_sections[i].segname, mach_sections[i].sectname);
     uint32 nrelocs = mach_sections[i].nreloc;
-    if ( nrelocs > 0 && load_relocs(mach_sections[i].reloff, nrelocs, relocs, name) )
+    if ( nrelocs > 0 && load_relocs(mach_sections[i].reloff, nrelocs, &relocs, name) )
     {
-      v.visit_relocs((ea_t)mach_sections[i].addr, relocs, i);
+      v.visit_relocs(mach_sections[i].addr, relocs, i);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-uint64_t macho_file_t::segStartAddress(int segIndex)
+bool macho_file_t::getSegInfo(uint64_t *segStartAddr, uint64_t *segSize, int segIndex)
 {
   segment_command_64 seg;
   if ( !get_segment(segIndex, &seg) )
-    return -1;
-  return seg.vmaddr;
+    return false;
+  *segStartAddr = seg.vmaddr;
+  *segSize = seg.vmsize;
+  return true;
 }
 
 //--------------------------------------------------------------------------
 static bool display_wrong_uleb(const uchar *p)
 {
+#ifdef EFD_COMPILE
+
+  printf(
+    "wrong uleb128/sleb128 encoding: %02X %02X %02X %02X %02X\n",
+    p[0], p[1], p[2], p[3], p[4]);
+
+#else
+
   deb(IDA_DEBUG_LDR,
-      "wrong uleb128/sleb128 encoding: %02X %02X %02X %02X %02X\n",
-      p[0], p[1], p[2], p[3], p[4]);
+    "wrong uleb128/sleb128 encoding: %02X %02X %02X %02X %02X\n",
+    p[0], p[1], p[2], p[3], p[4]);
+
+#endif
+
   return false;
 }
 
@@ -3268,7 +3397,8 @@ bool macho_file_t::visit_rebase_opcodes(const bytevec_t &data, dyld_info_visitor
   int segIndex;
   uint64_t segOffset = 0;
   uchar type = REBASE_TYPE_POINTER;
-  uint64_t segStartAddr = BADADDR;
+  uint64_t segStartAddr = BADADDR64;
+  uint64_t segSize = BADADDR64;
 
   while ( !done && p < end )
   {
@@ -3289,7 +3419,9 @@ WRONG_ULEB:
           return display_wrong_uleb(p);
         segIndex = imm;
         segOffset = ulebv;
-        segStartAddr = segStartAddress(segIndex);
+        segStartAddr = BADADDR64;
+        segSize = BADADDR64;
+        getSegInfo(&segStartAddr, &segSize, segIndex);
         break;
       case REBASE_OPCODE_ADD_ADDR_ULEB:
         {
@@ -3303,18 +3435,39 @@ WRONG_ULEB:
         segOffset += imm * ptrsize;
         break;
       case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
+        if ( imm > segSize )
+        {
+          deb(IDA_DEBUG_LDR, "bad immediate value %02X in rebase info!\n", imm);
+          return false;
+        }
+        if ( segStartAddr == BADADDR64 )
+        {
+WRONG_REBASE:
+          msg("Wrong rebase info, file possibly corrupted!\n");
+          return false;
+        }
         for ( int i = 0; i < imm; i++ )
         {
-          v.visit_rebase(uint64_t(segStartAddr + segOffset), type);
+          uint64 addr = segStartAddr + segOffset;
+          if ( !is_loaded_addr(addr) )
+            goto WRONG_REBASE;
+          v.visit_rebase(addr, type);
           segOffset += ptrsize;
         }
         break;
       case REBASE_OPCODE_DO_REBASE_ULEB_TIMES:
         if ( !unpack_uleb128(&ulebv, &p, end) )
           goto WRONG_ULEB;
+        if ( ulebv > segSize )
+          goto WRONG_ULEB;
+        if ( segStartAddr == BADADDR64 )
+          goto WRONG_REBASE;
         for ( size_t i = 0; i < ulebv; i++ )
         {
-          v.visit_rebase(uint64_t(segStartAddr + segOffset), type);
+          uint64 addr = segStartAddr + segOffset;
+          if ( !is_loaded_addr(addr) )
+            goto WRONG_REBASE;
+          v.visit_rebase(addr, type);
           segOffset += ptrsize;
         }
         break;
@@ -3329,9 +3482,16 @@ WRONG_ULEB:
           goto WRONG_ULEB;
         if ( !unpack_uleb128(&ulebv2, &p, end) )
           goto WRONG_ULEB;
+        if ( ulebv > segSize || ulebv2 > segSize )
+          goto WRONG_ULEB;
+        if ( segStartAddr == BADADDR64 )
+          goto WRONG_REBASE;
         for ( size_t i = 0; i < ulebv; i++ )
         {
-          v.visit_rebase(uint64_t(segStartAddr + segOffset), type);
+          uint64 addr = segStartAddr + segOffset;
+          if ( !is_loaded_addr(addr) )
+            goto WRONG_REBASE;
+          v.visit_rebase(addr, type);
           segOffset += ptrsize + ulebv2;
         }
         break;
@@ -3344,24 +3504,29 @@ WRONG_ULEB:
 }
 
 //--------------------------------------------------------------------------
-bool macho_file_t::visit_bind_opcodes(dyld_info_visitor_t::bind_kind_t bind_kind, const bytevec_t &data, dyld_info_visitor_t &v)
+bool macho_file_t::visit_bind_opcodes(
+        dyld_info_visitor_t::bind_kind_t bind_kind,
+        const bytevec_t &data,
+        dyld_info_visitor_t &v)
 {
   const uchar *begin = &data[0];
   const uchar *end = begin + data.size();
   const uchar *p = begin;
-  bool done = false;
-  uint64_t skip, count;
+  uint64 skip;
+  uint64 count;
   const int ptrsize = is64() ? 8 : 4;
 
   int segIndex;
-  uint64_t segOffset = 0;
-  uchar type = BIND_TYPE_POINTER;
+  char type = BIND_TYPE_POINTER;
   uchar flags = 0;
-  uint64_t libOrdinal = BIND_SPECIAL_DYLIB_SELF;
+  uint64 libOrdinal = BIND_SPECIAL_DYLIB_SELF;
   int64_t addend = 0;
   const char *symbolName = NULL;
-  uint64_t segStartAddr = BADADDR;
+  uint64_t segStartAddr = BADADDR64;
+  uint64_t segOffset = 0;
+  uint64_t segSize = BADADDR64;
 
+  bool done = false;
   while ( !done && p < end )
   {
     uchar opcode = *p & BIND_OPCODE_MASK;
@@ -3411,7 +3576,9 @@ WRONG_ULEB:
         segIndex = imm;
         if ( !unpack_uleb128(&segOffset, &p, end) )
           goto WRONG_ULEB;
-        segStartAddr = segStartAddress(segIndex);
+        segStartAddr = BADADDR64;
+        segSize = BADADDR64;
+        getSegInfo(&segStartAddr, &segSize, segIndex);
         break;
       case BIND_OPCODE_ADD_ADDR_ULEB:
         if ( !unpack_uleb128(&skip, &p, end) )
@@ -3419,33 +3586,57 @@ WRONG_ULEB:
         segOffset += skip;
         break;
       case BIND_OPCODE_DO_BIND:
-        v.visit_bind(bind_kind, uint64_t(segStartAddr + segOffset), type, flags, libOrdinal, addend, symbolName);
-        segOffset += ptrsize;
+        {
+          uint64 addr = segStartAddr + segOffset;
+          v.visit_bind(bind_kind, addr, type, flags, libOrdinal, addend, symbolName);
+          segOffset += ptrsize;
+        }
         break;
       case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
-        if ( !unpack_uleb128(&skip, &p, end) )
-          goto WRONG_ULEB;
-        v.visit_bind(bind_kind, uint64_t(segStartAddr + segOffset), type, flags, libOrdinal, addend, symbolName);
-        segOffset += skip + ptrsize;
+        {
+          uint64 addr = segStartAddr + segOffset;
+          if ( !unpack_uleb128(&skip, &p, end) )
+            goto WRONG_ULEB;
+          v.visit_bind(bind_kind, addr, type, flags, libOrdinal, addend, symbolName);
+          segOffset += skip + ptrsize;
+        }
         break;
       case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-        skip = imm*ptrsize + ptrsize;
-        v.visit_bind(bind_kind, uint64_t(segStartAddr + segOffset), type, flags, libOrdinal, addend, symbolName);
-        segOffset += skip;
+        {
+          uint64 addr = segStartAddr + segOffset;
+          skip = imm*ptrsize + ptrsize;
+          v.visit_bind(bind_kind, addr, type, flags, libOrdinal, addend, symbolName);
+          segOffset += skip;
+        }
         break;
       case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
         if ( !unpack_uleb128(&count, &p, end) )
           goto WRONG_ULEB;
         if ( !unpack_uleb128(&skip, &p, end) )
           goto WRONG_ULEB;
-        for ( int i = 0; i < count; i++ )
+        if ( count > segSize || skip > segSize )
+          goto WRONG_ULEB;
         {
-          v.visit_bind(bind_kind, uint64_t(segStartAddr + segOffset), type, flags, libOrdinal, addend, symbolName);
-          segOffset += skip + ptrsize;
+          int i = 0;
+          if ( symbolName != NULL && segStartAddr != BADADDR64 )
+          {
+            for ( ; i < count; i++ )
+            {
+              uint64 addr = segStartAddr + segOffset;
+              if ( !is_loaded_addr(addr) )
+              {
+                msg("Warning: reference to wrong address %" FMT_64 "x\n", addr);
+                break; // exported function must have initialized bytes
+              }
+              v.visit_bind(bind_kind, addr, type, flags, libOrdinal, addend, symbolName);
+              segOffset += skip + ptrsize;
+            }
+          }
+          segOffset += (count - i) * (skip + ptrsize);
         }
         break;
       default:
-        printf(": bad opcode!\n");
+        msg("Warning: bad rebase opcode found (0x%02X), file possibly corrupted!\n", opcode);
         return false;
     }
   }
@@ -3479,9 +3670,10 @@ bool macho_file_t::processExportNode(
     uint64_t address;
     if ( !unpack_uleb128(&flags, &p, end) || !unpack_uleb128(&address, &p, end) )
       return display_wrong_uleb(p);
-    if ( base_addr != BADADDR )
+    if ( base_addr != BADADDR64 )
       address += base_addr;
-    v.visit_export(address, uint32(flags), symname);
+    if ( v.visit_export(address, uint32(flags), symname) != 0 )
+      return true;
   }
   const uchar childrenCount = unpack_db(&children, end);
   const uchar *s = children;
@@ -3489,7 +3681,9 @@ bool macho_file_t::processExportNode(
   {
     int edgeStrLen = 0;
     int maxlen = symnamelen - symnameoff;
-    for ( uchar c = unpack_db(&s, end); c != '\0' && edgeStrLen < maxlen; ++edgeStrLen, c = unpack_db(&s, end) )
+    for ( uchar c = unpack_db(&s, end);
+          c != '\0' && edgeStrLen < maxlen;
+          ++edgeStrLen, c = unpack_db(&s, end) )
     {
       symname[symnameoff+edgeStrLen] = c;
     }
@@ -3502,11 +3696,14 @@ bool macho_file_t::processExportNode(
     if ( !unpack_uleb128(&ulebv, &s, end) )
       return display_wrong_uleb(s);
     uint32_t childNodeOffset = (uint32_t)ulebv;
-    if ( childNodeOffset == 0 || childNodeOffset != ulebv
+    if ( childNodeOffset == 0
+      || childNodeOffset != ulebv
       || !processExportNode(start, start+childNodeOffset, end,
                             symname, symnameoff+edgeStrLen, symnamelen,
                             v, level+1) )
+    {
       return false;
+    }
   }
   return true;
 }
@@ -3600,6 +3797,12 @@ void macho_file_t::visit_dyld_info(dyld_info_visitor_t &v)
 }
 
 //--------------------------------------------------------------------------
+void function_starts_visitor_t::handle_error()
+{
+  msg("Error loading function starts info\n");
+}
+
+//--------------------------------------------------------------------------
 void macho_file_t::visit_function_starts(function_starts_visitor_t &v)
 {
   struct myvisitor: macho_lc_visitor_t
@@ -3629,20 +3832,21 @@ void macho_file_t::visit_function_starts(function_starts_visitor_t &v)
     bytevec_t data;
     data.resize(fs.datasize);
     size_t newsize = fs.datasize;
-    if ( !load_linkedit_data(fs.dataoff, &newsize, &data[0]) || newsize == 0 )
+    if ( !load_linkedit_data(fs.dataoff, &newsize, data.begin()) || newsize == 0 )
     {
-      msg("Error loading function starts info\n");
+      v.handle_error();
       return;
     }
-    uint64_t address = base_addr != BADADDR ? base_addr : 0;
-    const uchar *p = &data[0];
-    const uchar *end = p + data.size();
+    uint64_t address = base_addr != BADADDR64 ? base_addr : 0;
+    const uchar *p = data.begin();
+    const uchar *end = p + newsize;
     while ( p < end )
     {
       uint64_t delta;
       if ( !unpack_uleb128(&delta, &p, end) )
       {
         display_wrong_uleb(p);
+        v.handle_error();
         return;
       }
       address += delta;
@@ -3686,7 +3890,7 @@ void macho_file_t::visit_shared_regions(shared_region_visitor_t &v)
       msg("Error loading segment split info\n");
       return;
     }
-    uint64_t base = base_addr != BADADDR ? base_addr : 0;
+    uint64_t base = base_addr != BADADDR64 ? base_addr : 0;
     const uchar *p = &data[0];
     const uchar *end = p + data.size();
     while ( p < end )
@@ -3754,44 +3958,787 @@ bool macho_file_t::get_id_dylib(qstring *id)
 };*/
 
 //--------------------------------------------------------------------------
-bool dyld_cache_t::parse_header()
+bool dyld_cache_t::parse_header(uint32 flags)
 {
   qlseek(li, 0);
   if ( qlread(li, &header, sizeof(header)) != sizeof(header) )
     return false;
-  if ( strncmp(header.magic, "dyld_v1", strlen("dyld_v1")) )
+  if ( !strneq(header.magic, "dyld_v", strlen("dyld_v")) )
     return false;
+  if ( strneq(header.magic, "dyld_v0", strlen("dyld_v0")) )
+    return false;
+
+  const char *p = header.magic;
+  // deduce endianness and bitness from the arch name
+  p = tail(p);
+  mf = streq(p - 3, "ppc");
+  m64 = streq(p - 2, "64") || streq(p - 3, "64h"); // x86_64(h) or arm64
   if ( header.mappingOffset <= offsetof(dyld_cache_header, slideInfoOffset) )
   {
     // old format, without slide info
     header.slideInfoOffset = header.slideInfoSize = 0;
   }
-  if ( qlseek(li, header.mappingOffset) != header.mappingOffset )
-    return false;
-  mappings.resize(header.mappingCount);
-  if ( qlread(li, mappings.begin(), sizeof(dyld_cache_mapping_info) * header.mappingCount) != sizeof(dyld_cache_mapping_info) * header.mappingCount )
-    return false;
-  if ( qlseek(li, header.imagesOffset) != header.imagesOffset )
-    return false;
-  image_infos.resize(header.imagesCount);
-  if ( qlread(li, image_infos.begin(), sizeof(dyld_cache_image_info) * header.imagesCount) != sizeof(dyld_cache_image_info) * header.imagesCount )
-    return false;
-  for ( size_t i = 0; i < header.imagesCount; i++ )
+  if ( header.mappingOffset <= offsetof(dyld_cache_header, islandsCount) )
   {
-    size_t name_off = image_infos[i].pathFileOffset;
-    char namebuf[MAXSTR];
-    if ( qlgetz(li, name_off, namebuf, sizeof(namebuf)) == NULL )
-      return false;
-    image_names.push_back(namebuf);
+    // no island info
+    header.islandsOffset = header.islandsCount = 0;
   }
+
+  if ( (flags & PHF_MAPPINGS) != 0 )
+  {
+    if ( qlseek(li, header.mappingOffset) != header.mappingOffset )
+      return false;
+    mappings.resize(header.mappingCount);
+    validate_array_count_or_die(li, header.mappingCount, sizeof(dyld_cache_mapping_info), "count of cache mapping infos");
+    if ( qlread(li, mappings.begin(), sizeof(dyld_cache_mapping_info) * header.mappingCount) != sizeof(dyld_cache_mapping_info) * header.mappingCount )
+      return false;
+  }
+
+  if ( (flags & PHF_IMAGES) != 0 )
+  {
+    if ( qlseek(li, header.imagesOffset) != header.imagesOffset )
+      return false;
+    image_infos.resize(header.imagesCount);
+    validate_array_count_or_die(li, header.imagesCount, sizeof(dyld_cache_image_info), "count of images in the cache file");
+    if ( qlread(li, image_infos.begin(), sizeof(dyld_cache_image_info) * header.imagesCount) != sizeof(dyld_cache_image_info) * header.imagesCount )
+      return false;
+    for ( size_t i = 0; i < header.imagesCount; i++ )
+    {
+      size_t name_off = image_infos[i].pathFileOffset;
+      char namebuf[MAXSTR];
+      if ( qlgetz(li, name_off, namebuf, sizeof(namebuf)) == NULL )
+        return false;
+      image_names.push_back(namebuf);
+    }
+  }
+
+  if ( (flags & PHF_SYMBOLS) != 0 )
+  {
+    parse_local_symbols();
+  }
+
+  if ( (flags & PHF_ISLANDS) != 0 && header.islandsCount != 0 && header.islandsOffset != 0 )
+  {
+    if ( qlseek(li, header.islandsOffset) != header.islandsOffset )
+      return false;
+    validate_array_count(li, &header.islandsCount, sizeof(uint64), "branch islands entries count");
+    island_addrs.resize(header.islandsCount);
+    if ( qlread(li, island_addrs.begin(), sizeof(uint64) * header.islandsCount) != sizeof(uint64) * header.islandsCount )
+      return false;
+  }
+
+  if ( (flags & PHF_SLIDE) != 0 && header.slideInfoOffset != 0 && header.slideInfoSize != 0 )
+  {
+    if ( qlseek(li, header.slideInfoOffset) != header.slideInfoOffset )
+       return false;
+    if ( qlread(li, &slide_version, sizeof(slide_version)) != sizeof(slide_version) )
+      return false;
+    if ( qlseek(li, header.slideInfoOffset) != header.slideInfoOffset )
+      return false;
+
+    if ( slide_version == 1 )
+    {
+      dyld_cache_slide_info si;
+      if ( qlread(li, &si, sizeof(si)) != sizeof(si) )
+        return false;
+
+      slide_toc.resize(si.toc_count);
+      if ( qlseek(li, header.slideInfoOffset + si.toc_offset) != header.slideInfoOffset + si.toc_offset )
+        return false;
+      validate_array_count_or_die(li, si.toc_count, sizeof(uint16), "Slide info TOC entries count");
+      if ( qlread(li, slide_toc.begin(), sizeof(uint16) * si.toc_count) != sizeof(uint16) * si.toc_count )
+        return false;
+
+      slide_entries_size = si.entries_size;
+      slide_entries.resize(si.entries_count*si.entries_size);
+      if ( qlseek(li, header.slideInfoOffset + si.entries_offset) != header.slideInfoOffset + si.entries_offset )
+        return false;
+      if ( qlread(li, slide_entries.begin(), slide_entries.size()) != slide_entries.size() )
+        return false;
+    }
+    else if ( slide_version == 2 )
+    {
+      dyld_cache_slide_info2 si;
+      if ( qlread(li, &si, sizeof(si)) != sizeof(si) )
+        return false;
+      if ( si.page_size == 0 )
+        return false;
+
+      slide_page_size = si.page_size;
+      slide_delta_mask = si.delta_mask;
+      slide_value_add = si.value_add;
+
+      slide_page_starts.resize(si.page_starts_count);
+      if ( qlseek(li, header.slideInfoOffset + si.page_starts_offset) != header.slideInfoOffset + si.page_starts_offset )
+        return false;
+      validate_array_count_or_die(li, si.page_starts_count, sizeof(uint16), "Slide info page starts count");
+      if ( qlread(li, slide_page_starts.begin(), sizeof(uint16) * si.page_starts_count) != sizeof(uint16) * si.page_starts_count )
+        return false;
+
+      slide_page_extras.resize(si.page_extras_count);
+      if ( qlseek(li, header.slideInfoOffset + si.page_extras_offset) != header.slideInfoOffset + si.page_extras_offset )
+        return false;
+      validate_array_count_or_die(li, si.page_extras_count, sizeof(uint16), "Slide info page extras count");
+      if ( qlread(li, slide_page_extras.begin(), sizeof(uint16) * si.page_extras_count) != sizeof(uint16) * si.page_extras_count )
+        return false;
+    }
+  }
+
   return true;
 }
 
 //--------------------------------------------------------------------------
-const char *dyld_cache_t::get_arch()
+const char *dyld_cache_t::get_arch() const
 {
   const char *p = strchr(header.magic, ' ');
   if ( p != NULL )
-    while ( *p == ' ' ) p++;
+    while ( *p == ' ' )
+      p++;
   return p;
+}
+
+//--------------------------------------------------------------------------
+static int tzcnt(uint64 x)
+{
+  int b = 0;
+  for ( ; x != 0 && (x & 1) == 0; x >>= 1 )
+    b++;
+  return b;
+}
+
+//--------------------------------------------------------------------------
+bool dyld_cache_t::parse_slid_chain(dyld_cache_slide_visitor_t *v, uint64 start) const
+{
+  QASSERT(20104, slide_version == 2);
+
+  uint64 off = 0;
+  uint64 delta = 1;
+  bool ok = true;
+
+  while ( ok && delta != 0 && off < slide_page_size )
+  {
+    uint64 addr = start + off;
+    uint64 raw_value = v->get_pointer_value(addr);
+    if ( raw_value == BADADDR64 )
+      break;
+
+    ok = v->visit_pointer(addr, ~slide_delta_mask, slide_value_add) == 0;
+
+    delta = (raw_value & slide_delta_mask) >> (tzcnt(slide_delta_mask)-2);
+    off += delta;
+  }
+
+  return ok;
+}
+
+//--------------------------------------------------------------------------
+bool dyld_cache_t::visit_slid_pointers(dyld_cache_slide_visitor_t *v)
+{
+  QASSERT(20068, mappings.size() > 1);
+
+  bool ok = true;
+  uint64 dataStartAddress = mappings[1].address;
+  if ( slide_version == 1 )
+  {
+    size_t pagesize = slide_entries_size*8*4;
+    for ( size_t i = 0, size = slide_toc.size(); ok && i < size; i++ )
+    {
+      size_t off = slide_toc[i] * slide_entries_size;
+      if ( off >= slide_entries.size() )
+        loader_failure("Corrupted DYLD slide info");
+      const uchar *entry = &slide_entries[off];
+      for ( size_t j = 0; ok && j < slide_entries_size; j++ )
+      {
+        uint64 page = dataStartAddress+i*pagesize;
+        uchar  b = entry[j];
+        if ( b != 0 )
+        {
+          for ( int k = 0; ok && k < 8; k++ )
+          {
+            if ( ((1u<<k) & entry[j]) != 0 )
+              ok = v->visit_pointer(page+j*8*4+k*4, ~slide_delta_mask, slide_value_add) == 0;
+          }
+        }
+      }
+    }
+  }
+  else if ( slide_version == 2 )
+  {
+    for ( size_t i = 0; ok && i < slide_page_starts.size(); i++ )
+    {
+      uint64 page = dataStartAddress + (i * slide_page_size);
+
+      uint16 start = slide_page_starts[i];
+      if ( start == DYLD_CACHE_SLIDE_PAGE_ATTR_NO_REBASE )
+      {
+        deb(IDA_DEBUG_LDR, "page %llx has no pointers for sliding\n", page);
+        continue;
+      }
+      else if ( (start & DYLD_CACHE_SLIDE_PAGE_ATTR_EXTRA) == 0 )
+      {
+        uint64 chain = page + (start * 4);
+        deb(IDA_DEBUG_LDR, "page %llx: single slide chain at %llx\n", page, chain);
+        ok = parse_slid_chain(v, chain);
+      }
+      else
+      {
+        for ( size_t j = start & 0x3FFF, size = slide_page_extras.size(); ok && j < size; j++ )
+        {
+          uint16 extra = slide_page_extras[j];
+          if ( (extra & DYLD_CACHE_SLIDE_PAGE_ATTR_END) != 0 )
+            break;
+
+          uint64 chain = page + (extra * 4);
+          deb(IDA_DEBUG_LDR, "page %llx: extra slide chain at %llx\n", page, chain);
+          ok = parse_slid_chain(v, chain);
+        }
+      }
+    }
+  }
+  else
+  {
+    ok = false;
+  }
+
+  return ok;
+}
+
+//--------------------------------------------------------------------------
+void dyld_cache_t::parse_local_symbols()
+{
+  if ( header.localSymbolsOffset == 0 || header.localSymbolsSize == 0 )
+    return;
+
+  if ( qlseek(li, header.localSymbolsOffset) != header.localSymbolsOffset )
+    return;
+
+  dyld_cache_local_symbols_info si;
+  if ( qlread(li, &si, sizeof(si)) != sizeof(si) )
+    return;
+
+  nlistvec_t symbols;
+  qstring strings;
+
+  uint64_t symoff = header.localSymbolsOffset + si.nlistOffset;
+  uint64_t stroff = header.localSymbolsOffset + si.stringsOffset;
+  size_t nsymbols = si.nlistCount;
+
+  size_t size = si.nlistCount * ( m64 ? sizeof(struct nlist_64) : sizeof(struct nlist) );
+  uint64_t stend = symoff + size;
+  uint64 mach_size = qlsize(li);
+  if ( stend < symoff || stend > mach_size )
+  {
+    msg("WARNING: local symbol table extends past end of file\n");
+    size = mach_size - symoff;
+    nsymbols = size / ( m64 ? sizeof(struct nlist_64) : sizeof(struct nlist) );
+  }
+
+  if ( nsymbols != 0 )
+  {
+    symbols.resize(nsymbols);
+    if ( m64 )
+    {
+      size = sizeof(struct nlist_64) * nsymbols;
+      qlseek(li, symoff);
+      qlread(li, &symbols[0], size);
+      if ( mf )
+        swap_nlist_64(&symbols[0], &symbols[0], nsymbols);
+    }
+    else
+    {
+      qvector<struct nlist> syms32;
+      syms32.resize(nsymbols);
+      size = sizeof(struct nlist) * nsymbols;
+      qlseek(li, symoff);
+      qlread(li, &syms32[0], size);
+      nlist_to64(&syms32[0], &symbols[0], nsymbols, mf);
+    }
+  }
+  if ( stroff >= mach_size )
+  {
+    msg("WARNING: string table offset is past end of file\n");
+  }
+  else
+  {
+    size_t strings_size;
+    size_t strend = stroff + si.stringsSize;
+    if ( strend < stroff || strend > mach_size )
+    {
+      msg("WARNING: string table extends past end of file\n");
+      strings_size = mach_size - stroff;
+    }
+    else
+    {
+      strings_size = si.stringsSize;
+    }
+
+    strings.resize(strings_size);
+    if ( strings_size != 0 )
+    {
+      qlseek(li, stroff);
+      qlread(li, &strings[0], strings_size);
+    }
+  }
+  localst_symbols = symbols;
+  localst_strings = strings;
+
+}
+
+struct dyld_single_macho_linput_t : public generic_linput_t
+{
+  linput_t *li_dyld;
+  qoff64_t region0_size;
+  qoff64_t start_off;
+  dyld_single_macho_linput_t(linput_t *li_dyld_, const dyld_cache_t &cache, const dyld_cache_image_info &ii)
+    : li_dyld(li_dyld_)
+  {
+
+    // find the text (r-x) region
+
+    dyld_cache_mapping_info mtext;
+    bool found = false;
+    for ( int i = 0; !found && i < cache.get_nummappings(); i++ )
+    {
+      const dyld_cache_mapping_info &mi = cache.get_mapping_info(i);
+      if ( ( mi.maxProt & ( VM_PROT_EXECUTE | VM_PROT_READ ) ) == ( VM_PROT_EXECUTE | VM_PROT_READ ) )
+      {
+        mtext = mi;
+        found = true;
+      }
+    }
+    if ( !found )
+    {
+      ask_for_feedback("Read/execute region not found in the cache");
+      loader_failure();
+    }
+    if ( cache.get_nummappings() >= 1 )
+    {
+      const dyld_cache_mapping_info &mLast = cache.get_mapping_info(cache.get_nummappings() - 1);
+      region0_size = mtext.size;
+      start_off = ii.address - mtext.address + mtext.fileOffset;
+      filesize = mLast.fileOffset + mLast.size;
+    }
+    else
+    {
+      region0_size = 0;
+      filesize = 0;
+    }
+    blocksize = 0; // don't cache
+  }
+  ssize_t idaapi read(qoff64_t off, void *buffer, size_t nbytes)
+  {
+    // offsets for the __TEXT segment are relative to the start of the r-x region
+    // they fall into the first region of the cache file (read-only region)
+    // the other parts (__DATA and __LINKEDIT) seem to use absolute offsets
+    if ( off < region0_size )
+      off += start_off;
+    if ( qlseek(li_dyld, off, 0) != off )
+      return -1;
+    return qlread(li_dyld, buffer, nbytes);
+  }
+};
+
+
+//--------------------------------------------------------------------------
+linput_t *dyld_cache_t::create_single_macho_input(size_t imgindex) const
+{
+  if ( get_nummappings() < 1 )
+    return NULL;
+  QASSERT(20069, imgindex < image_infos.size());
+  const dyld_cache_image_info &ii = get_image_info(imgindex);
+  dyld_single_macho_linput_t *dsmli = new dyld_single_macho_linput_t(li, *this, ii);
+  linput_t *dli = create_generic_linput(dsmli);
+  return dli;
+}
+
+//--------------------------------------------------------------------------
+linput_t *dyld_cache_t::create_single_island_input(size_t n) const
+{
+  if ( get_nummappings() < 1 )
+    return NULL;
+  dyld_cache_image_info ii;
+  QASSERT(20070, n < island_addrs.size());
+  ii.address = get_island_addr(n);
+  dyld_single_macho_linput_t *dsmli = new dyld_single_macho_linput_t(li, *this, ii);
+  linput_t *dli = create_generic_linput(dsmli);
+  return dli;
+}
+
+// Object that will free an linput_t upon deletion
+class linput_janitor_verbose_t
+{
+public:
+  linput_janitor_verbose_t(linput_t *r, const qstring &filename): name(filename), resource(r)
+  {
+#if 0
+    msg("got linput %s(%p)\n", name.c_str(), resource);
+#endif
+  }
+  ~linput_janitor_verbose_t()
+  {
+#if 0
+    msg("closing linput %s(%p)\n", name.c_str(), resource);
+#endif
+    close_linput(resource);
+  }
+private:
+  qstring name;
+  linput_t *resource;
+};
+
+//--------------------------------------------------------------------------
+uint64 dyld_cache_t::find_exported_symbol(
+        const char *_dylib,
+        const char *symname,
+        bool verbose) const
+{
+  if ( _dylib == NULL || _dylib[0] == '\0' || symname == NULL || symname[0] == '\0' )
+    return BADADDR64;
+
+  qstack<qstring> dylibs;
+  dylibs.push(_dylib);
+  linput_t *dlj = NULL;
+  while ( !dylibs.empty() )
+  {
+    const qstring &dylibname = dylibs.pop();
+    ssize_t j = get_image_index(dylibname);
+    dlj = create_single_macho_input(j);
+    QASSERT(1331, dlj != NULL);
+    linput_janitor_verbose_t li_janitor(dlj, dylibname);
+    macho_file_t mfile(dlj);
+    if ( mfile.parse_header() && mfile.set_subfile(0) )
+    {
+      if ( verbose )
+        msg("2 searching for symbol %s in %s\n", symname, dylibname.c_str());
+      uint64 tmp = mfile.find_exported_symbol(symname, verbose, this);
+      if ( tmp != BADADDR64 )
+        return tmp;
+    }
+    // not found in this dylib; check linked reexported dylibs
+    if ( (mfile.get_mach_header().flags & MH_NO_REEXPORTED_DYLIBS) == 0 )
+    {
+      dyliblist_t wlibs = mfile.get_dylib_list(LC_REEXPORT_DYLIB);
+      for ( dyliblist_t::const_iterator p = wlibs.begin(); p != wlibs.end(); ++p )
+      {
+        if ( verbose )
+          msg("2 checking reexported dylib %s for  %s\n", p->c_str(), dylibname.c_str());
+        dylibs.add_unique(*p);
+      }
+    }
+  }
+  return BADADDR64;
+}
+
+//--------------------------------------------------------------------------
+uint64 macho_file_t::find_exported_symbol(
+        const char *symname,
+        bool verbose,
+        const dyld_cache_t *dcache)
+{
+  if ( symname == NULL || symname[0] == '\0' )
+    return BADADDR64;
+
+  // first try using dyld export info (which is faster and also handles tricky
+  // reexported symbols like _memset)
+  uint64 tmp = find_exported_symbol_dyld(symname, verbose, dcache);
+  if ( tmp != BADADDR64 )
+    return tmp;
+
+  // else try the symtab approach
+
+  bool arm32 = !m64 && get_mach_header().cputype == CPU_TYPE_ARM;
+  qstring strings;
+  nlistvec_t symbols;
+  get_symbol_table_info(&symbols, &strings);
+  size_t nsymbols = symbols.size();
+  size_t strings_size = strings.size();
+  for ( uint32 i = 0; i < nsymbols; i++ )
+  {
+    const struct nlist_64 &nl = symbols[i];
+    int stype = nl.n_type & N_TYPE;
+    if ( stype == N_UNDF || stype == N_PBUD )
+      continue;
+    if ( nl.n_un.n_strx >= strings_size )
+      continue;
+    const char *sname = &strings[nl.n_un.n_strx];
+    if ( streq(symname, sname) )
+    {
+      uint64 v = nl.n_value;
+      // add thumb bit if needed
+      if ( arm32 && (nl.n_desc & N_ARM_THUMB_DEF) != 0 )
+        v |= 1;
+      return v;
+    }
+  }
+
+  return BADADDR64;
+}
+
+//--------------------------------------------------------------------------
+uint64 dyld_cache_t::find_exported_symbol_dyld(
+        const char *_dylib,
+        const char *symname,
+        bool verbose) const
+{
+  if ( _dylib == NULL || _dylib[0] == '\0' || symname == NULL || symname[0] == '\0' )
+    return BADADDR64;
+
+  qstack<qstring> dylibs;
+  dylibs.push(_dylib);
+  linput_t *dlj = NULL;
+  while ( !dylibs.empty() )
+  {
+    const qstring &dylibname = dylibs.pop();
+    ssize_t j = get_image_index(dylibname);
+    dlj = create_single_macho_input(j);
+    QASSERT(1330, dlj != NULL);
+    linput_janitor_verbose_t li_janitor(dlj, dylibname);
+    macho_file_t mfile(dlj);
+    if ( mfile.parse_header() && mfile.set_subfile(0) )
+    {
+      if ( verbose )
+        msg("1 searching for symbol %s in %s\n", symname, dylibname.c_str());
+      uint64 tmp = mfile.find_exported_symbol_dyld(symname, verbose, this);
+      if ( tmp != BADADDR64 )
+      {
+        if ( verbose && dylibname != _dylib )
+          msg("symbol '%s' found in dylib '%s', address: 0x%08" FMT_64"X\n",
+            symname, dylibname.c_str(), tmp);
+        return tmp;
+      }
+    }
+    // not found in this dylib; check linked reexported dylibs
+    dyliblist_t wlibs = mfile.get_dylib_list(LC_REEXPORT_DYLIB);
+    for ( dyliblist_t::const_iterator p = wlibs.begin(); p != wlibs.end(); ++p )
+    {
+      if ( verbose )
+        msg("1 checking reexported dylib %s for  %s\n", p->c_str(), dylibname.c_str());
+      dylibs.add_unique(*p);
+    }
+  }
+  return BADADDR64;
+}
+
+//--------------------------------------------------------------------------
+uint64 macho_file_t::find_exported_symbol_dyld(
+        const char *symname,
+        bool verbose,
+        const dyld_cache_t *dcache)
+{
+  if ( symname == NULL || symname[0] == '\0' )
+    return BADADDR64;
+
+  struct ida_local find_export_visitor_t : public macho_lc_visitor_t
+  {
+    macho_file_t &mfile;
+    qstring symbol;
+    const dyld_cache_t *dyldcache;
+    uint64 expaddr;
+    bool verbose;
+
+    find_export_visitor_t(
+        macho_file_t &_mfile,
+        const char *_symbol,
+        const dyld_cache_t *_dyldcache,
+        bool _verbose)
+      : mfile(_mfile),
+        symbol(_symbol),
+        dyldcache(_dyldcache),
+        expaddr(-1),
+        verbose(_verbose)
+    {
+    }
+    virtual ~find_export_visitor_t() {}
+
+    bool load_data(uint32_t offset, uint32_t size, bytevec_t &data)
+    {
+      if ( size == 0 )
+        return false;
+      data.resize(size);
+      size_t newsize = size;
+      if ( !mfile.load_linkedit_data(offset, &newsize, &data[0]) || newsize == 0 )
+      {
+        return false;
+      }
+      return true;
+    }
+
+    const uchar *trieWalk(const uchar *start, const uchar *end, const char *s) const
+    {
+      const uchar *p = start;
+      bytevec_t visited;
+      size_t len = end - start;
+      visited.resize((len+7)/8, 0);
+
+      uint32 nodeOffset = 0;
+      while ( p != NULL )
+      {
+        if ( p >= end || p < start )
+          return NULL;
+
+        if ( visited.test_bit(nodeOffset) )
+          return NULL; // endless loop
+        visited.set_bit(nodeOffset);
+
+        uint32_t terminalSize = unpack_db(&p, end);
+        if ( terminalSize > 127 )
+        {
+          // except for re-export-with-rename, all terminal sizes fit in one byte
+          --p;
+          if ( !unpack_uleb128(&terminalSize, &p, end) )
+            return NULL;
+        }
+
+        if ( *s == '\0' && terminalSize != 0 )
+          return p;
+
+        if ( p >= end || p < start )
+          return NULL;
+        const uchar *children = p + terminalSize;
+        if ( children >= end || children < start )
+          return NULL;
+        uint8_t childrenRemaining = *children++;
+        p = children;
+        nodeOffset = 0;
+        if ( p >= end || p < start )
+          return NULL;
+        for ( ; childrenRemaining > 0; --childrenRemaining )
+        {
+          const char *ss = s;
+          bool wrongEdge = false;
+          // scan whole edge to get to next edge
+          // if edge is longer than target symbol name, don't read past end of symbol name
+          char c = *p;
+          while ( c != '\0' )
+          {
+            if ( !wrongEdge )
+            {
+              if ( c != *ss )
+                wrongEdge = true;
+              ++ss;
+            }
+            ++p;
+            c = *p;
+          }
+          if ( wrongEdge )
+          {
+            // advance to next child
+            ++p; // skip over zero terminator
+                 // skip over uleb128 until last byte is found
+            while ( ( *p & 0x80 ) != 0 )
+              ++p;
+            ++p; // skil over last byte of uleb128
+          }
+          else
+          {
+            // the symbol so far matches this edge (child)
+            // so advance to the child's node
+            ++p;
+            if ( !unpack_uleb128(&nodeOffset, &p, end) )
+              return NULL;
+            s = ss;
+            break;
+          }
+        }
+        p = &start[nodeOffset];
+      }
+      return p;
+    }
+
+    bool process_export_info(const bytevec_t &data)
+    {
+      const uchar *begin = &data[0];
+      const uchar *end = begin + data.size();
+      const uchar *foundNodeStart = trieWalk(begin, end, symbol.c_str());
+      if ( foundNodeStart == NULL )
+        return false;
+      const uchar *p = foundNodeStart;
+      uint32 flags;
+      if ( !unpack_uleb128(&flags, &p, end) )
+        return false;
+      if ( (flags & EXPORT_SYMBOL_FLAGS_REEXPORT) != 0 )
+      {
+        // re-export from another dylib, lookup there
+        if ( dyldcache == NULL )
+        {
+          if ( verbose )
+            msg("symbol '%s' is reexported but can not follow without the dyld cache!\n", symbol.c_str() );
+          return false;
+        }
+        uint32 ordinal;
+        if ( !unpack_uleb128(&ordinal, &p, end) )
+          return false;
+        qstring importedName = (char*)p;
+        if ( importedName[0] == '\0' )
+          importedName = symbol;
+        dyliblist_t dylibs = mfile.get_dylib_list();
+        if ( ordinal > 0 && ordinal <= dylibs.size() )
+        {
+          const qstring &rdylib = dylibs[ordinal - 1];
+          if ( verbose )
+            msg("symbol '%s': looking up in reexported dylib '%s'\n", importedName.c_str(), rdylib.c_str());
+          expaddr = dyldcache->find_exported_symbol(rdylib.begin(), importedName.begin(), verbose);
+          if ( verbose )
+            msg("symbol '%s' found in dylib '%s', address: 0x%08" FMT_64"X\n",
+              importedName.c_str(), rdylib.c_str(), expaddr);
+        }
+      }
+      else
+      {
+        if ( !unpack_uleb128(&expaddr, &p, end) )
+          return false;
+        expaddr += mfile.get_base();
+      }
+
+      return true;
+    }
+
+    virtual int visit_dyld_info(const struct dyld_info_command *lc, const char *, const char *)
+    {
+      bytevec_t data;
+      if ( !load_data(lc->export_off, lc->export_size, data)
+        || !process_export_info(data) )
+      {
+        expaddr = BADADDR64;
+      }
+      return 1;
+    }
+  };
+
+  find_export_visitor_t v(*this, symname, dcache, verbose);
+  visit_load_commands(v);
+  return v.expaddr;
+}
+
+//------------------------------------------------------------------------
+uint64 dyld_cache_t::read_addr_at_va(uint64 addr) const
+{
+  for ( size_t i = 0; i < mappings.size(); i++ )
+  {
+    const dyld_cache_mapping_info &m = mappings[i];
+    if ( addr >= m.address )
+    {
+      uint64 off = addr - m.address;
+      if ( off > m.size )
+        continue;
+      off += m.fileOffset;
+      if ( qlseek(li, off, 0) != off )
+        return BADADDR64;
+      if ( m64 )
+      {
+        uint64 v;
+        if ( qlread(li, &v, 8) != 8 )
+          return BADADDR64;
+        return v;
+      }
+      else
+      {
+        uint32 v;
+        if ( qlread(li, &v, 4) != 4 )
+          return BADADDR64;
+        return v;
+      }
+    }
+  }
+  return BADADDR64;
 }

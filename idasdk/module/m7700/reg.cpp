@@ -1,6 +1,6 @@
 
 #include "m7700.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 // The netnode helper.
 // Using this node we will save current configuration information in the
@@ -28,9 +28,8 @@ static const char *const RegNames[] =
   "cs", "ds"  // these 2 registers are required by the IDA kernel
 };
 
-static size_t numports = 0;
-static ioport_t *ports = NULL;
-char device[MAXSTR] = "";
+static ioports_t ports;
+qstring device;
 static const char cfgname[] = "m7700.cfg";
 
 inline void get_cfg_filename(char *buf, size_t bufsize)
@@ -42,22 +41,62 @@ inline void get_cfg_filename(char *buf, size_t bufsize)
 #define NO_GET_CFG_PATH
 #include "../iocommon.cpp"
 
-inline static bool idaapi choose_device(TView *[] = NULL, int = 0)
+static bool choose_device()
 {
-  bool ok = choose_ioport_device(cfgname, device, sizeof(device), NULL);
+  bool ok = choose_ioport_device(&device, cfgname);
   if ( !ok )
-    qstrncpy(device, NONEPROC, sizeof(device));
+    device = NONEPROC;
   return ok;
-}
-
-const ioport_t *find_sym(ea_t address)
-{
-  return find_ioport(ports, numports, address);
 }
 
 const ioport_bit_t *find_bit(ea_t address, size_t bit)
 {
-  return find_ioport_bit(ports, numports, address, bit);
+  return find_ioport_bit(ports, address, bit);
+}
+
+const char *idaapi set_idp_options(
+        const char *keyword,
+        int /*value_type*/,
+        const void * /*value*/)
+{
+    if ( keyword != NULL )
+        return IDPOPT_BADKEY;
+
+    if ( !choose_ioport_device(&device, cfgname)
+      && device == NONEPROC )
+    {
+      warning("No devices are defined in the configuration file %s", cfgname);
+    }
+    else
+    {
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_ALL);
+    }
+    return IDPOPT_OK;
+}
+
+static ssize_t idaapi idb_callback(void *, int code, va_list va)
+{
+  switch ( code )
+  {
+    case idb_event::savebase:
+    case idb_event::closebase:
+      helper.supset(-1, device.c_str());
+      break;
+
+    case idb_event::sgr_changed:
+      {
+        ea_t ea1 = va_arg(va, ea_t);
+        ea_t ea2 = va_arg(va, ea_t);
+        int reg  = va_arg(va, int);
+        sel_t v  = va_arg(va, sel_t);
+        sel_t ov = va_arg(va, sel_t);
+        if ( (reg == rfM || reg == rfX) && v != ov )
+          set_sreg_at_next_code(ea1, ea2, reg, ov);
+      }
+      break;
+  }
+  return 0;
 }
 
 static const char *const m7700_help_message =
@@ -76,102 +115,141 @@ static const char *const m7700_help_message =
 
 // The kernel event notifications
 // Here you may take desired actions upon some kernel events
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-  // A well behavior processor module should call invoke_callbacks()
-  // in his notify() function. If this function returns 0, then
-  // the processor module should process the notification itself
-  // Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code )
-    return code;
-
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ m7700");
       break;
 
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       if ( choose_device() )
-          set_device_name(device, IORESP_ALL);
+        set_device_name(device.c_str(), IORESP_ALL);
       //  Set the default segment register values :
       //      -1 (badsel) for DR
       //      0 for fM and fX
-      for ( segment_t *s=get_first_seg(); s != NULL; s=get_next_seg(s->startEA) )
+      for ( segment_t *s=get_first_seg(); s != NULL; s=get_next_seg(s->start_ea) )
       {
-        set_default_segreg_value(s, rDR, BADSEL);
-        set_default_segreg_value(s, rfM, 0);
-        set_default_segreg_value(s, rfX, 0);
+        set_default_sreg_value(s, rDR, BADSEL);
+        set_default_sreg_value(s, rfM, 0);
+        set_default_sreg_value(s, rfX, 0);
       }
       info(m7700_help_message);
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
-    default:
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::newprc:
+    case processor_t::ev_newprc:
       ptype = processor_subtype_t(va_arg(va, int));
       break;
 
-    case processor_t::setsgr:
-      {
-        ea_t ea1 = va_arg(va, ea_t);
-        ea_t ea2 = va_arg(va, ea_t);
-        int reg  = va_arg(va, int);
-        sel_t v  = va_arg(va, sel_t);
-        sel_t ov = va_arg(va, sel_t);
-        if ( (reg == rfM || reg == rfX) && v != ov )
-          set_sreg_at_next_code(ea1, ea2, reg, ov);
-      }
-      break;
-
-    case processor_t::oldfile:
+    case processor_t::ev_oldfile:
       helper.create("$ m7700");
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_ALL);
-      }
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_ALL);
       break;
 
-    case processor_t::savebase:
-    case processor_t::closebase:
-      helper.supset(-1, device);
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        m7700_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        m7700_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        m7700_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        m7700_assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_get_frame_retsize:
+      {
+        int *frsize = va_arg(va, int *);
+        const func_t *pfn = va_arg(va, const func_t *);
+        *frsize = idp_get_frame_retsize(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
       break;
   }
-
-  va_end(va);
-
-  return 1;
-}
-
-const char *idaapi set_idp_options(
-    const char *keyword,
-    int /*value_type*/,
-    const void * /*value*/ )
-{
-    if ( keyword != NULL )
-        return IDPOPT_BADKEY;
-
-    if ( !choose_ioport_device(cfgname, device, sizeof(device), NULL)
-      && strcmp(device, NONEPROC) == 0 )
-    {
-      warning("No devices are defined in the configuration file %s", cfgname);
-    }
-    else
-    {
-      char buf[MAXSTR];
-      if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-        set_device_name(buf, IORESP_ALL);
-    }
-    return IDPOPT_OK;
+  return code;
 }
 
 static const asm_t as_asm =
@@ -185,7 +263,6 @@ static const asm_t as_asm =
   "Alfred Arnold's Macro Assembler",
   0,
   NULL,         // no headers
-  NULL,         // no bad instructions
   "ORG",        // origin directive
   "END",        // end directive
   ";",          // comment string
@@ -207,10 +284,6 @@ static const asm_t as_asm =
   "dfs %s",     // uninited arrays
   "equ",        // Equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline()
-  NULL,         // checkarg_atomprefix()
-  NULL,         // checkarg_operations()
-  NULL,         // translation to use in character & string constants
   "$",          // current IP (instruction pointer) symbol in assembler
   NULL,         // func_header
   NULL,         // func_footer
@@ -246,37 +319,36 @@ static const asm_t as_asm =
 //lint -e{818} could be declared const
 static bool mits_get_func_name(qstring *name, func_t *pfn)
 {
-  ea_t ea = pfn->startEA;
+  ea_t ea = pfn->start_ea;
   if ( get_demangled_name(name, ea, inf.long_demnames, DEMNAM_NAME) <= 0 )
     return false;
 
-  char tag[2+COLOR_ADDR_SIZE+1];
-  *tag_addr(tag, tag+sizeof(tag), ea) = '\0';
-  name->insert(tag);
+  tag_addr(name, ea, true);
   return true;
 }
 
 //--------------------------------------------------------------------------
 // prints function header
-static void idaapi mits_func_header(func_t *pfn)
+static void idaapi mits_func_header(outctx_t &ctx, func_t *pfn)
 {
-  std_gen_func_header(pfn);
+  ctx.gen_func_header(pfn);
 
   qstring name;
   if ( mits_get_func_name(&name, pfn) )
   {
-    printf_line(inf.indent, COLSTR(".FUNC %s", SCOLOR_ASMDIR), name.begin());
-    printf_line(0, COLSTR("%s:", SCOLOR_ASMDIR), name.begin());
+    ctx.gen_printf(inf.indent, COLSTR(".FUNC %s", SCOLOR_ASMDIR), name.begin());
+    ctx.gen_printf(0, COLSTR("%s:", SCOLOR_ASMDIR), name.begin());
+    ctx.ctxflags |= CTXF_LABEL_OK;
   }
 }
 
 //--------------------------------------------------------------------------
 // prints function footer
-static void idaapi mits_func_footer(func_t *pfn)
+static void idaapi mits_func_footer(outctx_t &ctx, func_t *pfn)
 {
   qstring name;
   if ( mits_get_func_name(&name, pfn) )
-    printf_line(inf.indent, COLSTR(".ENDFUNC %s", SCOLOR_ASMDIR), name.begin());
+    ctx.gen_printf(inf.indent, COLSTR(".ENDFUNC %s", SCOLOR_ASMDIR), name.begin());
 }
 
 static const asm_t mitsubishi_asm =
@@ -290,7 +362,6 @@ static const asm_t mitsubishi_asm =
   "Mitsubishi Macro Assembler for 7700 Family",
   0,
   NULL,         // no headers
-  NULL,         // no bad instructions
   ".ORG",       // origin directive
   ".END",       // end directive
   ";",          // comment string
@@ -312,10 +383,6 @@ static const asm_t mitsubishi_asm =
   ".BLKB %s",   // uninited arrays
   ".EQU",       // Equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline()
-  NULL,         // checkarg_atomprefix()
-  NULL,         // checkarg_operations()
-  NULL,         // translation to use in character & string constants
   "$",          // current IP (instruction pointer) symbol in assembler
   mits_func_header,    // func_header
   mits_func_footer,    // func_footer
@@ -379,16 +446,19 @@ static const bytes_t retcodes[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,// version
-  PLFM_M7700,           // id
-  PR_RNAMESOK           // can use register names for byte names
-  |PR_BINMEM            // The module creates RAM/ROM segments for binary files
-                        // (the kernel shouldn't ask the user about their sizes and addresses)
-  |PR_SEGS              // has segment registers?
-  |PR_SGROTHER,         // the segment registers don't contain
-                        // the segment selectors, something else
-  8,                    // 8 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_M7700,             // id
+                          // flag
+    PR_RNAMESOK           // can use register names for byte names
+  | PR_BINMEM             // The module creates RAM/ROM segments for binary files
+                          // (the kernel shouldn't ask the user about their sizes and addresses)
+  | PR_SEGS               // has segment registers?
+  | PR_SGROTHER,          // the segment registers don't contain
+                          // the segment selectors, something else
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,              // array of short processor names
                         // the short names are used to specify the processor
@@ -401,31 +471,8 @@ processor_t LPH =
 
   notify,               // the kernel event notification callback
 
-  header,               // generate the disassembly header
-  footer,               // generate the disassembly footer
-
-  gen_segm_header,      // generate a segment declaration (start of segment)
-  std_gen_segm_footer,  // generate a segment footer (end of segment)
-
-  gen_assumes,          // generate 'assume' directives
-
-  ana,                  // analyze an instruction and fill the 'cmd' structure
-  emu,                  // emulate an instruction
-
-  out,                  // generate a text representation of an instruction
-  outop,                // generate a text representation of an operand
-  intel_data,           // generate a text representation of a data item
-  NULL,                 // compare operands
-  NULL,                 // can an operand have a type?
-
-  qnumber(RegNames),    // Number of registers
   RegNames,             // Regsiter names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(RegNames),    // Number of registers
 
   rDR, rVds,
   2,                    // size of a segment register
@@ -435,28 +482,13 @@ processor_t LPH =
   retcodes,
 
   0, m7700_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 0 },      // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x);
-  create_func_frame,    // int (*create_func_frame)(func_t *pfn);
-  idp_get_frame_retsize, // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   m7700_rts,            // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL                  // mvm_t *mvm;
 };

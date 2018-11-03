@@ -9,23 +9,37 @@
 
 #include "f2mc.hpp"
 #include <frame.hpp>
-#include <srarea.hpp>
-#include <struct.hpp>
+#include <segregs.hpp>
 
 //----------------------------------------------------------------------
-static void out_address(ea_t ea,op_t &x)
+class out_f2mc_t : public outctx_t
+{
+  out_f2mc_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void out_address(ea_t ea, const op_t &x);
+  void out_reglist(ushort reglist);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_f2mc_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_f2mc_t)
+
+//----------------------------------------------------------------------
+void out_f2mc_t::out_address(ea_t ea, const op_t &x)
 {
   if ( !out_name_expr(x, ea, x.addr & 0xffff) )
   {
     out_tagon(COLOR_ERROR);
-    OutLong(x.addr, 16);
+    out_btoa(x.addr, 16);
     out_tagoff(COLOR_ERROR);
-    QueueSet(Q_noName, cmd.ea);
+    remember_problem(PR_NONAME, insn.ea);
   }
 }
 
 //----------------------------------------------------------------------
-static void out_reglist(ushort reglist)
+void out_f2mc_t::out_reglist(ushort reglist)
 {
   out_symbol('(');
   bool first = true;
@@ -35,14 +49,17 @@ static void out_reglist(ushort reglist)
     int size = 1;
     if ( (reglist>>i) & 1 )
     {
-      while ( (i + size < 8) && ((reglist>>(i+size)) & 1 ) ) size++;
-      if ( first ) first = false;
-        else out_symbol(',');
-      out_register(ph.regNames[RW0+i]);
+      while ( (i + size < 8) && ((reglist>>(i+size)) & 1 ) )
+        size++;
+      if ( first )
+        first = false;
+      else
+        out_symbol(',');
+      out_register(ph.reg_names[RW0+i]);
       if ( size > 1 )
       {
         out_symbol('-');
-        out_register(ph.regNames[RW0+i+size-1]);
+        out_register(ph.reg_names[RW0+i+size-1]);
       }
     }
     i+=size;
@@ -53,28 +70,37 @@ static void out_reglist(ushort reglist)
 //----------------------------------------------------------------------
 bool exist_bits(ea_t ea, int bitl, int bith)
 {
-  for (int i = bitl; i <= bith; i++)
-    if ( find_bit(ea, i) ) return true;
+  for ( int i = bitl; i <= bith; i++ )
+  {
+    const char *name = find_bit(ea, i);
+    if ( name != NULL && name[0] != '\0' )
+      return true;
+  }
   return false;
 }
 
 // adjust to respect 16 bits an 32 bits definitions
 static void adjust_ea_bit(ea_t &ea, int &bit)
 {
-  if ( find_sym(ea) ) return;
-  if ( find_sym(ea-1) && exist_bits(ea-1, 8, 15) )
+  const char *name = find_sym(ea);
+  if ( name != NULL && name[0] != '\0' )
+    return;
+  name = find_sym(ea-1);
+  if ( name != NULL && name[0] != '\0' && exist_bits(ea-1, 8, 15) )
   {
     ea--;
     bit+=8;
     return;
   }
-  if ( find_sym(ea-2) && exist_bits(ea-2, 16, 31) )
+  name = find_sym(ea-2);
+  if ( name != NULL && name[0] != '\0' && exist_bits(ea-2, 16, 31) )
   {
     ea-=2;
     bit+=16;
     return;
   }
-  if ( find_sym(ea-3) && exist_bits(ea-3, 16, 31) )
+  name = find_sym(ea-3);
+  if ( name != NULL && name[0] != '\0' && exist_bits(ea-3, 16, 31) )
   {
     ea-=3;
     bit+=24;
@@ -97,18 +123,19 @@ int calc_outf(const op_t &x)
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_f2mc_t::out_operand(const op_t &x)
 {
   ea_t ea;
 
-  if ( cmd.prefix_bank && (cmd.op_bank == x.n )
-    && (cmd.prefix_bank != cmd.default_bank))
+  if ( insn.prefix_bank && (insn.op_bank == x.n)
+    && (insn.prefix_bank != insn.default_bank) )
   {
-    out_register(ph.regNames[cmd.prefix_bank]);
+    out_register(ph.reg_names[insn.prefix_bank]);
     out_symbol(':');
   }
 
-  for (int i = 0; i < x.at; i++) out_symbol('@');
+  for ( int i = 0; i < x.at; i++ )
+    out_symbol('@');
 
   switch ( x.type )
   {
@@ -116,7 +143,7 @@ bool idaapi outop(op_t &x)
       return 0;
 
     case o_reg:
-      out_register(ph.regNames[x.reg]);
+      out_register(ph.reg_names[x.reg]);
       break;
 
     case o_near:
@@ -124,14 +151,14 @@ bool idaapi outop(op_t &x)
       {
         ea_t addr = x.addr;
         if ( x.type == o_near )
-          addr = calc_code_mem(addr);
+          addr = calc_code_mem(insn, addr);
         out_address(addr, x);
       }
       break;
 
     case o_imm:
       out_symbol('#');
-      OutValue(x, calc_outf(x));
+      out_value(x, calc_outf(x));
       break;
 
     case o_mem:
@@ -155,18 +182,22 @@ bool idaapi outop(op_t &x)
         {
           int bit = x.byte_bit;
           out_symbol('i'); out_symbol(':');
-          if ( x.special_mode == MODE_BIT) adjust_ea_bit(ea, bit );
+          if ( x.special_mode == MODE_BIT )
+            adjust_ea_bit(ea, bit);
           const char *name = find_sym(ea);
-          if ( name )
+          if ( name != NULL && name[0] != '\0' )
           {
             out_addr_tag(ea);
             out_line(name, COLOR_IMPNAME);
           }
-          else out_address(ea, x);
+          else
+          {
+            out_address(ea, x);
+          }
           if ( x.special_mode == MODE_BIT )
           {
             name = find_bit(ea,bit);
-            if ( name )
+            if ( name != NULL && name[0] != '\0' )
             {
               out_symbol('_');
               out_line(name, COLOR_IMPNAME);
@@ -175,7 +206,7 @@ bool idaapi outop(op_t &x)
             {
               out_symbol(':');
               out_tagon(COLOR_SYMBOL);
-              OutLong(bit, 10);
+              out_btoa(bit, 10);
               out_tagoff(COLOR_SYMBOL);
             }
           }
@@ -184,7 +215,7 @@ bool idaapi outop(op_t &x)
       break;
 
     case o_phrase:
-      out_register(ph.regNames[x.reg]);
+      out_register(ph.reg_names[x.reg]);
       switch ( x.special_mode )
       {
         case MODE_INC:
@@ -192,14 +223,14 @@ bool idaapi outop(op_t &x)
           break;
         case MODE_INDEX:
           out_symbol('+');
-          out_register(ph.regNames[x.index]);
+          out_register(ph.reg_names[x.index]);
           break;
       }
       break;
 
     case o_displ:
-      out_register(ph.regNames[x.reg]);
-      OutValue(x, calc_outf(x));
+      out_register(ph.reg_names[x.reg]);
+      out_value(x, calc_outf(x));
       break;
 
     case o_reglist:
@@ -214,116 +245,114 @@ bool idaapi outop(op_t &x)
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_f2mc_t::out_insn(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  OutMnem();
+  out_mnemonic();
   out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
-    if ( cmd.Op3.type != o_void )
+    if ( insn.Op3.type != o_void )
     {
       out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
       out_one_operand(2);
     }
   }
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea, uFlag, 2) ) OutImmChar(cmd.Op3);
 
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-static void print_segment_register(int reg, sel_t value)
+static void print_segment_register(outctx_t &ctx, int reg, sel_t value)
 {
-  if ( reg == ph.regDataSreg ) return;
+  if ( reg == ph.reg_data_sreg )
+    return;
   char buf[MAX_NUMBUF];
   btoa(buf, sizeof(buf), value);
-  gen_cmt_line("assume %s = %s", ph.regNames[reg], buf);
+  ctx.gen_cmt_line("assume %s = %s", ph.reg_names[reg], buf);
 }
 
 //--------------------------------------------------------------------------
 // function to produce assume directives
-void idaapi assumes(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+void idaapi f2mc_assumes(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( seg == NULL || !inf.s_assume )
+  if ( seg == NULL || (inf.outflags & OFLG_GEN_ASSUME) == 0 )
     return;
 
-  for ( int i = ph.regFirstSreg; i <= ph.regLastSreg; ++i )
+  for ( int i = ph.reg_first_sreg; i <= ph.reg_last_sreg; ++i )
   {
-    if ( i == ph.regCodeSreg )
+    if ( i == ph.reg_code_sreg )
       continue;
-    segreg_area_t sra;
-    if ( !get_srarea2(&sra, ea, i) )
+    sreg_range_t sra;
+    if ( !get_sreg_range(&sra, ea, i) )
       continue;
-    sel_t now  = get_segreg(ea, i);
-    bool seg_started = (ea == seg->startEA);
-    if ( seg_started || sra.startEA == ea )
+    sel_t now = get_sreg(ea, i);
+    bool seg_started = (ea == seg->start_ea);
+    if ( seg_started || sra.start_ea == ea )
     {
-      segreg_area_t prev_sra;
-      bool prev_exists = get_srarea2(&prev_sra, ea - 1, i);
-      if ( seg_started || (prev_exists && get_segreg(prev_sra.startEA, i) != now) )
-        print_segment_register(i, now);
+      sreg_range_t prev_sra;
+      bool prev_exists = get_sreg_range(&prev_sra, ea - 1, i);
+      if ( seg_started || (prev_exists && get_sreg(prev_sra.start_ea, i) != now) )
+        print_segment_register(ctx, i, now);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Srange) could be made const
+void idaapi f2mc_segstart(outctx_t &ctx, segment_t *Srange)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(Srange->type) )
+    return;
 
-  char sname[MAXNAMELEN];
-  char sclas[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sname;
+  qstring sclas;
+  get_visible_segm_name(&sname, Srange);
+  get_segm_class(&sclas, Srange);
 
-  printf_line(inf.indent, COLSTR(".section %s, %s", SCOLOR_ASMDIR),
-    sname,
-    strcmp(sclas,"CODE") == 0 ? "code"
-    : strcmp(sclas,"BSS") == 0 ? "data"
-    : "const");
-  if ( Sarea->orgbase != 0 )
+  ctx.gen_printf(inf.indent,
+                 COLSTR(".section %s, %s", SCOLOR_ASMDIR),
+                 sname.c_str(),
+                 sclas == "CODE" ? "code"
+                 : sclas == "BSS" ? "data"
+                 : "const");
+  if ( Srange->orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
-    btoa(buf, sizeof(buf), Sarea->orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    btoa(buf, sizeof(buf), Srange->orgbase);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t) {
+void idaapi f2mc_segend(outctx_t &, segment_t *) {}
+
+//--------------------------------------------------------------------------
+void idaapi f2mc_header(outctx_t &ctx)
+{
+  ctx.gen_header(GH_PRINT_PROC_AND_ASM, device.c_str(), deviceparams.c_str());
+  ctx.gen_printf(0,"");
+  ctx.gen_printf(0,COLSTR("#include <_ffmc16_a.asm>",SCOLOR_ASMDIR));
+  ctx.gen_header_extra();
+  ctx.gen_empty_line();
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi f2mc_footer(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_PROC_AND_ASM, device[0] ? device : NULL, deviceparams);
-  printf_line(0,"");
-  printf_line(0,COLSTR("#include <_ffmc16_a.asm>",SCOLOR_ASMDIR));
-  gen_header_extra();
-  MakeNull();
-}
-
-//--------------------------------------------------------------------------
-void idaapi footer(void)
-{
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
-  printf_line(inf.indent,
-              COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
-              ash.end,
-              ash.cmnt,
-              name);
+  ctx.gen_printf(inf.indent,
+                 COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                 ash.end,
+                 ash.cmnt,
+                 name);
 }

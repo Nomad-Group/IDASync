@@ -11,73 +11,73 @@
 
 static bool flow;
 //------------------------------------------------------------------------
-static void process_immediate_number(int n)
+static void process_immediate_number(const insn_t &insn, int n)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag,n) ) return;
-  switch ( cmd.itype )
+  set_immd(insn.ea);
+  if ( is_defarg(get_flags(insn.ea),n) )
+    return;
+  switch ( insn.itype )
   {
     case ST20_ajw:
-      op_num(cmd.ea, n);
+      op_num(insn.ea, n);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-ea_t calc_mem(ea_t ea)
+ea_t calc_mem(const insn_t &insn, ea_t ea)
 {
-  return toEA(cmd.cs, ea);
+  return to_ea(insn.cs, ea);
 }
 
 //----------------------------------------------------------------------
-static void process_operand(op_t &x,int /*isAlt*/,int isload)
+static void handle_operand(const insn_t &insn, const op_t &x, bool isload)
 {
   ea_t ea;
   switch ( x.type )
   {
     case o_imm:
       QASSERT(10110, isload);
-      process_immediate_number(x.n);
-      if ( op_adds_xrefs(uFlag, x.n) )
-        ua_add_off_drefs2(x, dr_O, 0);
+      process_immediate_number(insn, x.n);
+      if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
+        insn.add_off_drefs(x, dr_O, 0);
       break;
     case o_near:
       {
         cref_t ftype = fl_JN;
-        ea = calc_mem(x.addr);
-        if ( InstrIsSet(cmd.itype, CF_CALL) )
+        ea = calc_mem(insn, x.addr);
+        if ( has_insn_feature(insn.itype, CF_CALL) )
         {
           if ( !func_does_return(ea) )
             flow = false;
           ftype = fl_CN;
         }
-        ua_add_cref(x.offb, ea, ftype);
+        insn.add_cref(ea, x.offb, ftype);
       }
       break;
     default:
-      interr("emu");
+      interr(insn, "emu");
   }
 }
 
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+int idaapi st20_emu(const insn_t &insn)
 {
-  uint32 Feature = cmd.get_canon_feature();
-  int flag1 = is_forced_operand(cmd.ea, 0);
+  uint32 Feature = insn.get_canon_feature();
 
   flow = ((Feature & CF_STOP) == 0);
 
-  if ( Feature & CF_USE1 ) process_operand(cmd.Op1, flag1, 1);
-  if ( Feature & CF_CHG1 ) process_operand(cmd.Op1, flag1, 0);
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, true);
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, false);
 
 //
 //      Determine if the next instruction should be executed
 //
-  if ( segtype(cmd.ea) == SEG_XTRN )
+  if ( segtype(insn.ea) == SEG_XTRN )
     flow = false;
   if ( flow )
-    ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+    add_cref(insn.ea,insn.ea+insn.size,fl_F);
 
   return 1;
 }
@@ -86,27 +86,23 @@ int idaapi emu(void)
 int is_jump_func(const func_t * /*pfn*/, ea_t *jump_target)
 {
   *jump_target = BADADDR;
-  return 1; // means "no"
+  return 0; // means "don't know"
 }
 
 //----------------------------------------------------------------------
-int may_be_func(void)           // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
-                                // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
+int may_be_func(const insn_t &)
 {
-//  if ( cmd.itype == H8_push && isbp(cmd.Op1.reg) ) return 100;  // push.l er6
+//  if ( insn.itype == H8_push && isbp(insn.Op1.reg) ) return 100;  // push.l er6
   return 0;
 }
 
 //----------------------------------------------------------------------
-int is_sane_insn(int /*nocrefs*/)
+int is_sane_insn(const insn_t &insn, int /*nocrefs*/)
 {
-  if ( cmd.itype == ST20_nop )
+  if ( insn.itype == ST20_nop )
   {
     for ( int i=0; i < 8; i++ )
-      if ( get_word(cmd.ea-i*2) != 0 )
+      if ( get_word(insn.ea-i*2) != 0 )
         return 1;
     return 0; // too many nops in a row
   }
@@ -116,15 +112,16 @@ int is_sane_insn(int /*nocrefs*/)
 //----------------------------------------------------------------------
 int idaapi is_align_insn(ea_t ea)
 {
-  if ( !decode_insn(ea) )
+  insn_t insn;
+  if ( decode_insn(&insn, ea) < 1 )
     return 0;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case ST20_nop:
       break;
     default:
       return 0;
   }
-  return cmd.size;
+  return insn.size;
 }
 

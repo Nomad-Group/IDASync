@@ -27,7 +27,7 @@
 inline uchar get_first_byte(const array_info_t *a)
 {
   const uchar *ptr = (const uchar *)a->array;
-  if ( !inf.mf )
+  if ( !inf.is_be() )
     return ptr[0];
   return ptr[a->elsize-1];
 }
@@ -57,7 +57,7 @@ static bool match_array_pattern(ea_t ea, const array_info_t *ai)
     switch ( ai->elsize )
     {
       case 1:
-        if ( get_byte(ea) != *(uchar*)ptr  )
+        if ( get_byte(ea) != *(uchar*)ptr )
           return false;
         break;
       case 2:
@@ -65,15 +65,15 @@ static bool match_array_pattern(ea_t ea, const array_info_t *ai)
           return false;
         break;
       case 4:
-        if ( get_long(ea) != *(uint32*)ptr )
+        if ( get_dword(ea) != *(uint32*)ptr )
           return false;
         break;
       case 8:
-        if ( get_qword(ea)!= *(uint64*)ptr )
+        if ( get_qword(ea) != *(uint64*)ptr )
           return false;
         break;
       default:
-        error("interr: unexpected array '%s' element size %d",
+        error("interr: unexpected array '%s' element size %" FMT_Z,
               ai->name, ai->elsize);
     }
     ptr += ai->elsize;
@@ -88,18 +88,19 @@ static bool match_array_pattern(ea_t ea, const array_info_t *ai)
 static bool match_sparse_pattern(ea_t ea, const array_info_t *ai)
 {
   const word32 *ptr = (const word32*)ai->array;
-  if ( get_long(ea) != *ptr++ )
+  if ( get_dword(ea) != *ptr++ )
     return false;
   ea += 4;
   for ( size_t i=1; i < ai->size; i++ )
   {
     word32 c = *ptr++;
-    if ( inf.mf )
+    if ( inf.is_be() )
       c = swap32(c);
     // look for the constant in the next N bytes
     const size_t N = 64;
     uchar mem[N+4];
-    get_many_bytes(ea, mem, sizeof(mem));
+    memset(mem, 0xFF, sizeof(mem));
+    get_bytes(mem, sizeof(mem), ea);
     int j;
     for ( j=0; j < N; j++ )
       if ( *(uint32*)(mem+j) == c )
@@ -116,29 +117,27 @@ static bool match_sparse_pattern(ea_t ea, const array_info_t *ai)
 // use the first free slot for the marker
 static void mark_location(ea_t ea, const char *name)
 {
-  char buf[MAXSTR];
-  curloc cl;
-  cl.ea = ea;
-  cl.target = ea;
-  cl.x = 0;
-  cl.y = 5;
-  cl.lnnum = 0;
-  cl.flags = 0;
-  // find free marked location slot
-  int i;
-  for ( i=1; i <= MAX_MARK_SLOT; i++ )
+  idaplace_t ipl(ea, 0);
+  renderer_info_t rinfo;
+  rinfo.rtype = TCCRT_FLAT;
+  rinfo.pos.cx = 0;
+  rinfo.pos.cy = 5;
+  lochist_entry_t e(&ipl, rinfo);
+
+  uint32 i, n = bookmarks_t::size(e, NULL);
+  for ( i = 0; i < n; ++i )
   {
-    if ( cl.markdesc(i, buf, sizeof(buf)) <= 0 )
+    qstring desc;
+    lochist_entry_t loc(e);
+    if ( !bookmarks_t::get(&loc, &desc, &i, NULL) )
       break;
     // reuse old "Crypto: " slots
-    if ( strncmp(buf, "Crypto: ", 7) == 0 && cl.markedpos(&i) == ea )
+    if ( strneq(desc.c_str(), "Crypto: ", 7) && loc.place()->toea() == ea )
       break;
   }
-  if ( i <= MAX_MARK_SLOT )
-  {
-    qsnprintf(buf, sizeof(buf), "Crypto: %s", name);
-    cl.mark(i, NULL, buf);
-  }
+  qstring buf;
+  buf.sprnt("Crypto: %s", name);
+  bookmarks_t::mark(e, i, NULL, buf.c_str(), NULL);
 }
 
 //--------------------------------------------------------------------------
@@ -147,12 +146,12 @@ static void recognize_constants(ea_t ea1, ea_t ea2)
 {
   int count = 0;
   show_wait_box("Searching for crypto constants...");
-  for ( ea_t ea=ea1; ea < ea2; ea=nextaddr(ea) )
+  for ( ea_t ea=ea1; ea < ea2; ea=next_addr(ea) )
   {
     if ( (ea % 0x1000) == 0 )
     {
-      showAddr(ea);
-      if ( wasBreak() )
+      show_addr(ea);
+      if ( user_cancelled() )
         break;
     }
     uchar b = get_byte(ea);
@@ -165,7 +164,7 @@ static void recognize_constants(ea_t ea1, ea_t ea2)
       {
         msg("%a: found const array %s (used in %s)\n", ea, ptr->name, ptr->algorithm);
         mark_location(ea, ptr->algorithm);
-        do_name_anyway(ea, ptr->name);
+        force_name(ea, ptr->name);
         count++;
         break;
       }
@@ -191,19 +190,20 @@ static void recognize_constants(ea_t ea1, ea_t ea2)
 
 //--------------------------------------------------------------------------
 // This callback is called for IDP notification events
-static int idaapi search_callback(void * /*user_data*/, int event_id, va_list /*va*/)
+static ssize_t idaapi search_callback(void * /*user_data*/, int event_id, va_list /*va*/)
 {
-  if ( event_id == processor_t::newfile ) // A new file is loaded (already)
-    recognize_constants(inf.minEA, inf.maxEA);
+  if ( event_id == processor_t::ev_newfile ) // A new file is loaded (already)
+    recognize_constants(inf.min_ea, inf.max_ea);
   return 0;
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int)
+bool idaapi run(size_t)
 {
   ea_t ea1, ea2;
-  read_selection(&ea1, &ea2); // if fails, inf.minEA and inf.maxEA will be used
+  read_range_selection(NULL, &ea1, &ea2); // if fails, inf.min_ea and inf.max_ea will be used
   recognize_constants(ea1, ea2);
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -212,14 +212,14 @@ int idaapi init(void)
 //  verify_constants(non_sparse_consts);
 //  verify_constants(sparse_consts);
   // agree to work with any database
-  hook_to_notification_point(HT_IDP, search_callback, NULL);
+  hook_to_notification_point(HT_IDP, search_callback);
   return PLUGIN_KEEP;
 }
 
 //--------------------------------------------------------------------------
 void idaapi term(void)
 {
-  unhook_from_notification_point(HT_IDP, search_callback, NULL);
+  unhook_from_notification_point(HT_IDP, search_callback);
 }
 
 //--------------------------------------------------------------------------

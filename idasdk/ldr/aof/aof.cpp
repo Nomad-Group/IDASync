@@ -45,11 +45,11 @@ static void *read_chunk(linput_t *li, const chunk_entry_t &ce)
 //--------------------------------------------------------------------------
 static void check_chunk_ptr(
         const chunk_entry_t &ce,
-        const void *chunk_start,
+        const void *chunkstart,
         const void *chunkptr,
         size_t ptrsize)
 {
-  const char *p0 = (const char*)chunk_start;
+  const char *p0 = (const char*)chunkstart;
   const char *p1 = (const char*)chunkptr;
   if ( p1 < p0 || p1 + ptrsize < p0 || (p1 + ptrsize - p0) > ce.size )
     loader_failure("Corrupted file");
@@ -58,10 +58,10 @@ static void check_chunk_ptr(
 //--------------------------------------------------------------------------
 static void check_chunk_str(
         const chunk_entry_t &ce,
-        const void *chunk_start,
+        const void *chunkstart,
         const void *chunkptr)
 {
-  const char *p0 = (const char*)chunk_start;
+  const char *p0 = (const char*)chunkstart;
   const char *p1 = (const char*)chunkptr;
   if ( p1 >= p0 )
   {
@@ -82,34 +82,39 @@ static void check_chunk_str(
 //      and fill 'fileformatname'.
 //      otherwise return 0
 //
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
-  if ( n != 0 ) return 0;
-
   chunk_header_t hd;
-  if ( qlread(li, &hd, sizeof(hd)) != sizeof(hd) ) return 0;
-  if ( hd.ChunkFileId != AOF_MAGIC && hd.ChunkFileId != AOF_MAGIC_B ) return 0;
+  if ( qlread(li, &hd, sizeof(hd)) != sizeof(hd) )
+    return 0;
+  if ( hd.ChunkFileId != AOF_MAGIC && hd.ChunkFileId != AOF_MAGIC_B )
+    return 0;
 
-  qstrncpy(fileformatname, "ARM Object File", MAX_FILE_FORMAT_NAME);
+  *fileformatname = "ARM Object File";
+  *processor      = "arm";
   return 1;
 }
 
 //--------------------------------------------------------------------------
 static void create32(
         sel_t sel,
-        ea_t startEA,
-        ea_t endEA,
+        ea_t start_ea,
+        ea_t end_ea,
         const char *name,
         const char *classname)
 {
   set_selector(sel, 0);
 
   segment_t s;
-  s.sel    = sel;
-  s.startEA= startEA;
-  s.endEA  = endEA;
-  s.align  = saRelByte;
-  s.comb   = scPub;
+  s.sel     = sel;
+  s.start_ea = start_ea;
+  s.end_ea   = end_ea;
+  s.align   = saRelByte;
+  s.comb    = scPub;
   s.bitness = 1; // 32-bit
 
   if ( !add_segm_ex(&s, name, classname, ADDSEG_NOSREG|ADDSEG_SPARSE) )
@@ -122,7 +127,7 @@ static ea_t get_area_base(int idx)
   segment_t *s = get_segm_by_sel(idx+1);
   if ( s == NULL )
     return BADADDR;
-  return s->startEA;
+  return s->start_ea;
 }
 
 //--------------------------------------------------------------------------
@@ -154,13 +159,13 @@ static ea_t create_spec_seg(
   if ( nelem != 0 )
   {
     nelem *= 4;
-    ea = freechunk(inf.maxEA, nelem, 0xFFF);
+    ea = free_chunk(inf.max_ea, nelem, 0xFFF);
     (*nsegs)++;
     create32(*nsegs, ea, ea+nelem, name, CLASS_DATA);
     segment_t *s = getseg(ea);
     s->type = seg_type;
     s->update();
-    set_arm_segm_flags(s->startEA, 2 << SEGFL_SHIFT); // alignment
+    set_arm_segm_flags(s->start_ea, 2 << SEGFL_SHIFT); // alignment
   }
   return ea;
 }
@@ -173,34 +178,40 @@ static void process_name(ea_t ea, const char *name, uint32 flags, bool iscode)
     return;
   if ( flags & SF_PUB )
   {
-    add_entry(ea, ea, name, iscode);
+    add_entry(ea, ea, name, iscode, AEF_IDBENC);
     make_name_public(ea);
-  } else {
-    do_name_anyway(ea, name);
   }
-  if ( flags & SF_WEAK  ) make_name_weak(ea);
-  if ( flags & SF_ICASE ) add_long_cmt(ea, 1, "Case-insensitive label");
-  if ( flags & SF_STRNG ) add_long_cmt(ea, 1, "Strong name");
+  else
+  {
+    force_name(ea, name, SN_IDBENC);
+  }
+  if ( flags & SF_WEAK )
+    make_name_weak(ea);
+  if ( flags & SF_ICASE )
+    add_extra_cmt(ea, true, "Case-insensitive label");
+  if ( flags & SF_STRNG )
+    add_extra_cmt(ea, true, "Strong name");
 }
 
 //--------------------------------------------------------------------------
 static void reloc_insn(ea_t ea, uint32 rvalue, uint32 type)
 {
-  uint32 code = get_long(ea);
+  uint32 code = get_dword(ea);
   switch ( (code >> 24) & 0xF )
   {
     case 0x0A:  // B
     case 0x0B:  // BL
       {
         int32 off = code & 0x00FFFFFFL;
-        if ( off & 0x00800000L ) off |= ~0x00FFFFFFL; // extend sign
+        if ( off & 0x00800000L )
+          off |= ~0x00FFFFFFL; // extend sign
         off <<= 2;
         off += rvalue;
         off >>= 2;
         off &= 0xFFFFFFL;
         code &= 0xFF000000L;
         code |= off;
-        put_long(ea, code);
+        put_dword(ea, code);
       }
       break;
     default:
@@ -256,12 +267,11 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
 {
   int i;
   chunk_header_t hd;
-  if ( ph.id != PLFM_ARM )
-    set_processor_type("arm", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("arm", SETPROC_LOADER);
   lread(li, &hd, sizeof(hd));
   if ( hd.ChunkFileId == AOF_MAGIC_B )             // BIG ENDIAN
   {
-    inf.mf = 1;
+    inf.set_be(true);
     hd.max_chunks = swap32(hd.max_chunks);
     hd.num_chunks = swap32(hd.num_chunks);
   }
@@ -271,7 +281,7 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   if ( ce == NULL )
     nomem();
   lread(li, ce, sizeof(chunk_entry_t)*size_t(hd.max_chunks));
-  if ( inf.mf )
+  if ( inf.is_be() )
     for ( i=0; i < hd.max_chunks; i++ )
       swap_chunk_entry(ce+i);
 
@@ -285,11 +295,16 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   {
     if ( ce[i].file_offset == 0 )
       continue;
-    if ( strneq(ce[i].chunkId, OBJ_HEAD, sizeof(ce[i].chunkId)) ) head = i;
-    if ( strneq(ce[i].chunkId, OBJ_AREA, sizeof(ce[i].chunkId)) ) area = i;
-    if ( strneq(ce[i].chunkId, OBJ_IDFN, sizeof(ce[i].chunkId)) ) idfn = i;
-    if ( strneq(ce[i].chunkId, OBJ_SYMT, sizeof(ce[i].chunkId)) ) symt = i;
-    if ( strneq(ce[i].chunkId, OBJ_STRT, sizeof(ce[i].chunkId)) ) strt = i;
+    if ( strneq(ce[i].chunkId, OBJ_HEAD, sizeof(ce[i].chunkId)) )
+      head = i;
+    if ( strneq(ce[i].chunkId, OBJ_AREA, sizeof(ce[i].chunkId)) )
+      area = i;
+    if ( strneq(ce[i].chunkId, OBJ_IDFN, sizeof(ce[i].chunkId)) )
+      idfn = i;
+    if ( strneq(ce[i].chunkId, OBJ_SYMT, sizeof(ce[i].chunkId)) )
+      symt = i;
+    if ( strneq(ce[i].chunkId, OBJ_STRT, sizeof(ce[i].chunkId)) )
+      strt = i;
   }
   if ( head == -1 || area == -1 || strt == -1 || symt == -1 || idfn == -1 )
   {
@@ -300,7 +315,7 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   char *strings = (char *)read_chunk(li, ce[strt]);
   aof_header_t *ahd = (aof_header_t *)read_chunk(li, ce[head]);
   check_chunk_ptr(ce[head], ahd, ahd, sizeof(aof_header_t));
-  if ( inf.mf )
+  if ( inf.is_be() )
     swap_aof_header(ahd);
 
 //
@@ -308,7 +323,7 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
 //
 
   area_header_t *ah = (area_header_t *)(ahd + 1);
-  if ( inf.mf )
+  if ( inf.is_be() )
   {
     for ( i=0; i < ahd->num_areas; i++ )
     {
@@ -316,32 +331,32 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
       swap_area_header(ah+i);
     }
   }
-  uint32 offset = ce[area].file_offset;
-  inf.specsegs = 1;
-  ea_t ea = toEA(inf.baseaddr, 0);
+  qoff64_t offset = ce[area].file_offset;
+  inf.specsegs = inf.is_64bit() ? 8 : 4;
+  ea_t ea = to_ea(inf.baseaddr, 0);
   for ( i=0; i < ahd->num_areas; i++, ah++ )
   {
     check_chunk_ptr(ce[head], ahd, ah, sizeof(area_header_t));
     if ( ah->flags & AREA_DEBUG )
     {
       offset += ah->size;
-      offset += ah->num_relocs * sizeof(reloc_t);
+      offset += qoff64_t(ah->num_relocs) * sizeof(reloc_t);
       continue;
     }
     if ( ah->flags & AREA_ABS )
     {
       ea = ah->baseaddr;
-      if ( freechunk(ea, ah->size, 1) != ea )
+      if ( free_chunk(ea, ah->size, 1) != ea )
         error("Can not allocate area at %a", ea);
     }
     else
     {
-      ea = freechunk(ea, ah->size, 0xFFF);
+      ea = free_chunk(ea, ah->size, 0xFFF);
     }
     if ( (ah->flags & AREA_BSS) == 0 )
     {
       ea_t end = ea + ah->size;
-      uint32 fsize = qlsize(li);
+      uint64 fsize = qlsize(li);
       if ( offset > fsize
         || fsize-offset < ah->size
         || end < ea )
@@ -364,17 +379,26 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
 
     segment_t *s = getseg(ea);
     ushort sflags = (ah->flags & 0x1F) << SEGFL_SHIFT;       // alignment
-    if ( ah->flags & AREA_BASED  )               sflags |= (SEGFL_BASED|ah->get_based_reg());
-    if ( ah->flags & AREA_PIC    )               sflags |= SEGFL_PIC;
-    if ( ah->flags & AREA_REENTR )               sflags |= SEGFL_REENTR;
-    if ( ah->flags & AREA_HALFW  )               sflags |= SEGFL_HALFW;
-    if ( ah->flags & AREA_INTER  )               sflags |= SEGFL_INTER;
-    if ( ah->flags & AREA_COMMON )               sflags |= SEGFL_COMDEF;
-    if ( ah->flags & (AREA_COMMON|AREA_COMREF) ) s->comb = scCommon;
-    if ( ah->flags & AREA_RDONLY )               s->perm = SEGPERM_READ;
-    if ( ah->flags & AREA_ABS    )               s->align = saAbs;
+    if ( ah->flags & AREA_BASED )
+      sflags |= (SEGFL_BASED|ah->get_based_reg());
+    if ( ah->flags & AREA_PIC )
+      sflags |= SEGFL_PIC;
+    if ( ah->flags & AREA_REENTR )
+      sflags |= SEGFL_REENTR;
+    if ( ah->flags & AREA_HALFW )
+      sflags |= SEGFL_HALFW;
+    if ( ah->flags & AREA_INTER )
+      sflags |= SEGFL_INTER;
+    if ( ah->flags & AREA_COMMON )
+      sflags |= SEGFL_COMDEF;
+    if ( ah->flags & (AREA_COMMON|AREA_COMREF) )
+      s->comb = scCommon;
+    if ( ah->flags & AREA_RDONLY )
+      s->perm = SEGPERM_READ;
+    if ( ah->flags & AREA_ABS )
+      s->align = saAbs;
     s->update();
-    set_arm_segm_flags(s->startEA, sflags);
+    set_arm_segm_flags(s->start_ea, sflags);
 
     if ( i == 0 )
     {
@@ -387,17 +411,22 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
 
     if ( ah->flags & AREA_CODE )
     {
-      if ( (ah->flags & AREA_32BIT)  == 0 ) add_pgm_cmt("The 26-bit area");
-      if ( (ah->flags & AREA_EXTFP)  != 0 ) add_pgm_cmt("Extended FP instructions are used");
-      if ( (ah->flags & AREA_NOCHK)  != 0 ) add_pgm_cmt("No Software Stack Check");
-      if ( (ah->flags & AREA_THUMB)  != 0 ) add_pgm_cmt("Thumb code area");
+      if ( (ah->flags & AREA_32BIT) == 0 )
+        add_pgm_cmt("The 26-bit area");
+      if ( (ah->flags & AREA_EXTFP) != 0 )
+        add_pgm_cmt("Extended FP instructions are used");
+      if ( (ah->flags & AREA_NOCHK) != 0 )
+        add_pgm_cmt("No Software Stack Check");
+      if ( (ah->flags & AREA_THUMB) != 0 )
+        add_pgm_cmt("Thumb code area");
     }
     else
     {
-      if ( (ah->flags & AREA_SHARED)  != 0 ) add_pgm_cmt("Shared Library Stub Data");
+      if ( (ah->flags & AREA_SHARED) != 0 )
+        add_pgm_cmt("Shared Library Stub Data");
     }
     ea += ah->size;
-    offset += ah->num_relocs * sizeof(reloc_t);
+    offset += qoff64_t(ah->num_relocs) * sizeof(reloc_t);
   }
   int nsegs = i;
 
@@ -411,7 +440,7 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
     nomem();
   memset(delta, 0, sizeof(uint32)*size_t(ahd->num_syms));
   sym_t *syms = (sym_t *)read_chunk(li, ce[symt]);
-  if ( inf.mf )
+  if ( inf.is_be() )
   {
     for ( i=0; i < ahd->num_syms; i++ )
     {
@@ -456,10 +485,9 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
     }
   }
 
-  ea_t abs_ea   = create_spec_seg(&nsegs, n_abs,   NAME_ABS,   SEG_ABSSYM);
-  ea_t undef_ea = create_spec_seg(&nsegs, n_undef, NAME_UNDEF, SEG_XTRN);
-  ea_t comm_ea  = create_spec_seg(&nsegs, n_comm,  NAME_COMMON,  SEG_COMM);
-
+  ea_t abs_ea   = create_spec_seg(&nsegs, n_abs,   NAME_ABS,    SEG_ABSSYM);
+  ea_t undef_ea = create_spec_seg(&nsegs, n_undef, NAME_UNDEF,  SEG_XTRN);
+  ea_t comm_ea  = create_spec_seg(&nsegs, n_comm,  NAME_COMMON, SEG_COMM);
   if ( n_abs+n_undef+n_comm != 0 )
   {
     for ( i=0; i < ahd->num_syms; i++ )
@@ -471,29 +499,40 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
       {
         if ( s->flags & SF_ABS )
         {
-          put_long(abs_ea, s->value);
+          if ( inf.specsegs == 8 )
+          {
+            put_qword(abs_ea, s->value);
+            create_qword(abs_ea, 8);
+          }
+          else
+          {
+            put_dword(abs_ea, s->value);
+            create_dword(abs_ea, 4);
+          }
           process_name(abs_ea, name, s->flags, false);
-          doDwrd(abs_ea, 4);
           delta[i] = s->value;
           s->value = uint32(abs_ea - delta[i]);
-          abs_ea += 4;
+          abs_ea += inf.specsegs;
         }
       }
       else
       {
         if ( (s->flags & SF_PUB) && (s->flags & SF_COMM) )   // ref to common
         {
-          put_long(comm_ea, s->value);
+          if ( inf.specsegs == 8 )
+            put_qword(comm_ea, s->value);
+          else
+            put_dword(comm_ea, s->value);
           process_name(comm_ea, name, s->flags, false);
           delta[i] = (uint32)comm_ea;
-          comm_ea += 4;
+          comm_ea += inf.specsegs;
         }
         else
         {
-          put_long(undef_ea, 0xE1A0F00E);       // RET
+          put_dword(undef_ea, 0xE1A0F00E);       // RET
           process_name(undef_ea, name, s->flags, false);
           delta[i] = (uint32)undef_ea;
-          undef_ea += 4;
+          undef_ea += inf.specsegs;
         }
         s->value = 0;
       }
@@ -510,10 +549,11 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
     if ( ah->flags & AREA_DEBUG )
     {
       offset += ah->size;
-      offset += ah->num_relocs * sizeof(reloc_t);
+      offset += qoff64_t(ah->num_relocs) * sizeof(reloc_t);
       continue;
     }
-    if ( (ah->flags & AREA_BSS) == 0 ) offset += ah->size;
+    if ( (ah->flags & AREA_BSS) == 0 )
+      offset += ah->size;
     qlseek(li, offset);
     ea_t base = get_area_base(i);
     validate_array_count(li, &ah->num_relocs, sizeof(reloc_t), "Number of relocs");
@@ -521,7 +561,7 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
     {
       reloc_t r;
       lread(li, &r, sizeof(reloc_t));
-      if ( inf.mf )
+      if ( inf.is_be() )
       {
         r.type   = swap32(r.type);
         r.offset = swap32(r.offset);
@@ -533,27 +573,25 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
       if ( r.type & RF_A )
       {
         if ( sid >= ahd->num_syms )
-          loader_failure("Bad relocation record at file offset %x", int(qltell(li)-sizeof(reloc_t)));
+          loader_failure("Bad relocation record at file offset %" FMT_64 "x", qltell(li)-sizeof(reloc_t));
         rvalue = delta[sid];
         target = syms[sid].value + rvalue;
-        fd.type = FIXUP_EXTDEF;
+        fd.set_extdef();
       }
       else
       {
         rvalue = get_area_base((int)sid);
         target = rvalue;
         if ( rvalue == BADADDR )
-          loader_failure("Bad reference to area %" FMT_Z " at file offset %x", sid, int(qltell(li)-sizeof(reloc_t)));
-        fd.type = 0;
+          loader_failure("Bad reference to area %" FMT_Z " at file offset %" FMT_64 "x", sid, qltell(li)-sizeof(reloc_t));
       }
       segment_t *s = getseg(target);
       if ( s == NULL )
-        loader_failure("Can't find area for relocation target %a at %x", target, int(qltell(li)-sizeof(reloc_t)));
-      fd.sel = (ushort)s->sel;
+        loader_failure("Can't find area for relocation target %a at %" FMT_64 "x", target, qltell(li)-sizeof(reloc_t));
+      fd.sel = s->sel;
       fd.off = target - get_segm_base(s);
       if ( (r.type & RF_R) != 0 )
       {
-        fd.type |= FIXUP_SELFREL;
         if ( (r.type & RF_A) != 0 )
         {
                 // R=1 B=0 or R=1 B=1
@@ -616,34 +654,34 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
       switch ( r.type & RF_FT )
       {
         case RF_FT_BYTE: // 00 the field to be relocated is a byte
-          fd.type |= FIXUP_OFF8;
+          fd.set_type(FIXUP_OFF8);
           fd.displacement = get_byte(relea);
           add_byte(relea, (uint32)rvalue);
           break;
         case RF_FT_HALF: // 01 the field to be relocated is a halfword (two bytes)
-          fd.type |= FIXUP_OFF16;
+          fd.set_type(FIXUP_OFF16);
           fd.displacement = get_word(relea);
           add_word(relea, rvalue);
           break;
         case RF_FT_WORD: // 10 the field to be relocated is a word (four bytes)
-          fd.type |= FIXUP_OFF32;
-          fd.displacement = get_long(relea);
-          add_long(relea, rvalue);
+          fd.set_type(FIXUP_OFF32);
+          fd.displacement = get_dword(relea);
+          add_dword(relea, rvalue);
           break;
         case RF_FT_INSN: // 11 the field to be relocated is an instruction or instruction sequence
           reloc_insn(relea, (uint32)rvalue, r.type);
           break;
       }
-      set_fixup(relea, &fd);
+      fd.set(relea);
     }
-    offset += ah->num_relocs * sizeof(reloc_t);
+    offset += qoff64_t(ah->num_relocs) * sizeof(reloc_t);
   }
 
   if ( ahd->entry_area != 0 )
   {
     inf.start_cs = ahd->entry_area;
-    inf.startIP  = ahd->entry_offset;
-    inf.beginEA  = ahd->entry_offset;
+    inf.start_ip = ahd->entry_offset;
+    inf.start_ea = ahd->entry_offset;
   }
 
   qfree(syms);
@@ -679,5 +717,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

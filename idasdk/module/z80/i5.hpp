@@ -13,7 +13,7 @@
 #include "ins.hpp"
 
 //------------------------------------------------------------------
-// customization of cmd structure:
+// customization of insn_t structure:
 #define o_cond  o_idpspec0
 
 #define Cond    reg
@@ -50,10 +50,10 @@ enum opcond_t          // condition code types
 
 extern int pflag;
 
-inline bool isGB(void)    { return (pflag & PT_GB)  != 0;   }
-inline bool isZ380(void)  { return (pflag & PT_Z380)!= 0;   }
-inline bool isZ180(void)  { return (pflag & PT_Z180)!= 0;   }
-inline bool isZ80(void)   { return (pflag & PT_Z80) != 0;   }
+inline bool isGB(void)    { return (pflag & PT_GB)    != 0; }
+inline bool isZ380(void)  { return (pflag & PT_Z380)  != 0; }
+inline bool isZ180(void)  { return (pflag & PT_Z180)  != 0; }
+inline bool isZ80(void)   { return (pflag & PT_Z80)   != 0; }
 inline bool is64180(void) { return (pflag & PT_64180) != 0; }
 inline bool is8085(void)  { return !isZ80();                }
 
@@ -116,20 +116,20 @@ enum RegNo ENUM_SIZE(uint16)
 };
 
 
-extern char device[];
-extern char deviceparams[];
+//------------------------------------------------------------------
+extern qstring deviceparams;
+extern qstring device;
+
 //------------------------------------------------------------------
 
-void idaapi i5_header(void);
-void idaapi i5_footer(void);
+void idaapi i5_header(outctx_t &ctx);
+void idaapi i5_footer(outctx_t &ctx);
 
-void idaapi i5_assumes(ea_t ea);
-void idaapi i5_segstart(ea_t ea);
+void idaapi i5_segstart(outctx_t &ctx, segment_t *);
+void idaapi i5_assumes(outctx_t &ctx);
 
-int   idaapi i5_ana(void);
-int   idaapi i5_emu(void);
-void  idaapi i5_out(void);
-bool  idaapi i5_outop(op_t &op);
+int  idaapi i5_ana(insn_t *_insn);
+int  idaapi i5_emu(const insn_t &insn);
 
 //------------------------------------------------------------------
 const char *z80_find_ioport(uval_t port);

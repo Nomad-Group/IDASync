@@ -31,103 +31,137 @@ static const unsigned char icon_data[182] =
 static int icon_id = 0;
 
 //--------------------------------------------------------------------------
-// column widths
-static const int widths[] = { 40 };
+static int main_current_index = -1;
 
-// column headers
-static const char *const header[] =
+//---------------------------------------------------------------------------
+struct mainch_chooser_t : public chooser_t
 {
-  "Item",
+protected:
+  static const int widths_[];
+  static const char *const header_[];
+  friend struct auxch_chooser_t;
+
+public:
+  // this chooser is embedded into the modal form
+  inline mainch_chooser_t(int icon_id);
+
+  virtual size_t idaapi get_count() const { return 10; }
+  virtual void idaapi get_row(
+          qstrvec_t *cols,
+          int *icon_,
+          chooser_item_attrs_t *attrs,
+          size_t n) const;
 };
-CASSERT(qnumber(widths) == qnumber(header));
+
+//---------------------------------------------------------------------------
+struct auxch_chooser_t : public chooser_multi_t
+{
+public:
+  // this chooser is embedded into the modal form
+  auxch_chooser_t(int icon_id);
+
+  virtual size_t idaapi get_count() const { return main_current_index + 1; }
+  virtual void idaapi get_row(
+          qstrvec_t *cols,
+          int *icon_,
+          chooser_item_attrs_t *attrs,
+          size_t n) const;
+};
 
 //--------------------------------------------------------------------------
-static int main_current_index = 1;
+const int mainch_chooser_t::widths_[] = { 40 };
+const char *const mainch_chooser_t::header_[] = { "Item" };
 
 //-------------------------------------------------------------------------
-// function that generates the list line
-static void idaapi aux_choose_getl(void * /*obj*/, uint32 n, char *const *arrptr)
+mainch_chooser_t::mainch_chooser_t(int icon_)
+  : chooser_t(CH_KEEP | CH_NOIDB,
+              qnumber(widths_), widths_, header_)
 {
-  if ( n == 0 ) // generate the column headers
-    qstrncpy(arrptr[0], header[0], MAXSTR);
-  else
-    qsnprintf(arrptr[0], MAXSTR, "Item %u", n);
+  CASSERT(qnumber(widths_) == qnumber(header_));
+  icon = icon_;
 }
 
 //-------------------------------------------------------------------------
-// function that returns number of lines in the list
-static uint32 idaapi main_choose_sizer(void * /*obj*/)
+void idaapi mainch_chooser_t::get_row(
+        qstrvec_t *cols_,
+        int *,
+        chooser_item_attrs_t *,
+        size_t n) const
 {
-  return 10;
+  qstrvec_t &cols = *cols_;
+  cols[0].sprnt("Option %" FMT_Z, n + 1);
+  CASSERT(qnumber(header_) == 1);
 }
 
 //-------------------------------------------------------------------------
-// function that returns number of lines in the list
-static uint32 idaapi aux_choose_sizer(void * /*obj*/)
+auxch_chooser_t::auxch_chooser_t(int icon_)
+  : chooser_multi_t(
+            CH_KEEP | CH_NOIDB,
+            qnumber(mainch_chooser_t::widths_),
+            mainch_chooser_t::widths_,
+            mainch_chooser_t::header_)
 {
-  return main_current_index;
+  icon = icon_;
 }
-
 //-------------------------------------------------------------------------
-// function that generates the list line
-static void idaapi main_choose_getl(void * /*obj*/,uint32 n, char *const *arrptr)
+void idaapi auxch_chooser_t::get_row(
+        qstrvec_t *cols_,
+        int *,
+        chooser_item_attrs_t *,
+        size_t n) const
 {
-  // generate the column headers
-  if ( n == 0 )
-    qstrncpy(arrptr[0], header[0], MAXSTR);
-  else
-    qsnprintf(arrptr[0], MAXSTR, "Option %u", n);
+  qstrvec_t &cols = *cols_;
+  cols[0].sprnt("Item %" FMT_Z, n + 1);
 }
 
 //-------------------------------------------------------------------------
 static void refresh_selection_edit(form_actions_t & fa)
 {
-  static char str[MAXSTR], tmp[MAXSTR];
-  static intvec_t array;
+  static qstring str;
+  static sizevec_t array;
 
-  if ( main_current_index == 0 )
+  if ( main_current_index == -1 )
   {
-    qstrncpy(str, "No selection", sizeof(str));
+    str = "No selection";
   }
   else
   {
-    qsnprintf(str, sizeof(str), "Main %d", main_current_index);
+    str.sprnt("Main %d", main_current_index + 1);
 
     fa.get_chooser_value(4, &array);
     if ( array.size() > 0 )
     {
-      qstrncat(str, " - Aux item(s) ", sizeof(str));
-      for ( int i = 0; i < array.size() - 1; i++ )
+      str.append(" - Aux item(s) ");
+      for ( int i = 0; i < array.size(); i++ )
       {
-        qsnprintf(tmp, sizeof(tmp), "%d, ", array.at(i));
-        qstrncat(str, tmp, sizeof(str));
+        if ( i != 0 )
+          str.append(", ");
+        str.cat_sprnt("%" FMT_Z, array[i] + 1);
       }
-      qsnprintf(tmp, sizeof(tmp), "%d", array.at(array.size() - 1));
-      qstrncat(str, tmp, sizeof(str));
     }
   }
 
-  fa.set_ascii_value(5, str);
+  fa.set_string_value(5, &str);
 }
 
 //--------------------------------------------------------------------------
 static int idaapi modcb(int fid, form_actions_t &fa)
 {
-  static intvec_t array;
+  static sizevec_t array;
   switch ( fid )
   {
-    case -1:
+    case CB_INIT:
       msg("initializing\n");
       refresh_selection_edit(fa);
       break;
-    case -2:
+    case CB_YES:
       msg("terminating\n");
       break;
     // main chooser
     case 3:
       msg("main chooser selection change\n");
       fa.get_chooser_value(3, &array);
-      main_current_index = array.size() > 0 ? array[0] : 0;
+      main_current_index = !array.empty() ? array[0] : -1;
       // refresh auxiliar chooser
       fa.refresh_field(4);
       refresh_selection_edit(fa);
@@ -153,22 +187,22 @@ struct formchooser_ah_t : public action_handler_t
   virtual int idaapi activate(action_activation_ctx_t *ctx)
   {
     msg("Menu item clicked. Current selection:");
-    for ( int i = 0, n = ctx->chooser_selection.size(); i < n; ++i )
-      msg(" %d", ctx->chooser_selection[i]);
+    for ( size_t i = 0, n = ctx->chooser_selection.size(); i < n; ++i )
+      msg(" %" FMT_Z, ctx->chooser_selection[i]);
     msg("\n");
     return 1;
   }
 
   virtual action_state_t idaapi update(action_update_ctx_t *ctx)
   {
-    bool ok = ctx->form_type == BWN_CHOOSER;
+    bool ok = ctx->widget_type == BWN_CHOOSER;
     if ( ok )
     {
-      char name[MAXSTR];
-      ok = get_tform_title(ctx->form, name, sizeof(name))
-        && strneq(name, TITLE_PFX, qstrlen(TITLE_PFX));
+      qstring name;
+      ok = get_widget_title(&name, ctx->widget)
+        && strneq(name.c_str(), TITLE_PFX, qstrlen(TITLE_PFX));
     }
-    return ok ? AST_ENABLE_FOR_FORM : AST_DISABLE_FOR_FORM;
+    return ok ? AST_ENABLE_FOR_WIDGET : AST_DISABLE_FOR_WIDGET;
   }
 };
 static formchooser_ah_t formchooser_ah;
@@ -177,30 +211,30 @@ static formchooser_ah_t formchooser_ah;
 static const action_desc_t action = ACTION_DESC_LITERAL(ACTION_NAME, "Test", &formchooser_ah, "Ctrl-K", NULL, icon_id);
 
 //--------------------------------------------------------------------------
-static void idaapi run(int)
+static bool idaapi run(size_t)
 {
   struct ida_local lambda_t
   {
-    static int idaapi cb(void *, int code, va_list va)
+    static ssize_t idaapi cb(void *, int code, va_list va)
     {
-      if ( code == ui_finish_populating_tform_popup )
+      if ( code == ui_finish_populating_widget_popup )
       {
-        TForm *form = va_arg(va, TForm *);
+        TWidget *widget = va_arg(va, TWidget *);
         TPopupMenu *popup_handle = va_arg(va, TPopupMenu *);
         // Let the chooser populate itself normally first.
         // We'll add our own stuff on second pass.
-        char buf[MAXSTR];
-        if ( get_tform_type(form) == BWN_CHOOSER
-          && get_tform_title(form, buf, sizeof(buf))
-          && streq(buf, TITLE_PFX":3") )
+        qstring buf;
+        if ( get_widget_type(widget) == BWN_CHOOSER
+          && get_widget_title(&buf, widget)
+          && buf == TITLE_PFX":3" )
         {
-          attach_action_to_popup(form, popup_handle, ACTION_NAME);
+          attach_action_to_popup(widget, popup_handle, ACTION_NAME);
         }
       }
       return 0;
     }
   };
-  hook_to_notification_point(HT_UI, lambda_t::cb, NULL);
+  hook_to_notification_point(HT_UI, lambda_t::cb);
 
   static const char form[] =
     "STARTITEM 0\n"
@@ -209,60 +243,32 @@ static void idaapi run(int)
     "Select an item in the main chooser:\n"
     "\n"
     "<Main chooser:E3::30::><Auxiliar chooser (multi):E4::30::>\n\n"
-    "<Selection:A5:1023:40::>\n"
+    "<Selection:q5:1023:40::>\n"
     "\n";
-
-  static const chooser_info_t main_chi =
-  {
-    sizeof(chooser_info_t),
-    CH_NOIDB, // flags (doesn't need an open database)
-    0, 0, // width, height
-    NULL, //title
-    NULL, // obj
-    qnumber(header), // columns
-    widths,
-    icon_id, // icon
-    0, // deflt
-    NULL, // popup_names
-    main_choose_sizer,
-    main_choose_getl,
-    NULL, // del
-    NULL, // ins
-    NULL, // update
-    NULL, // edit
-    NULL, // enter
-    NULL, // destroyer
-    NULL, // get_icon
-    NULL, // select
-    NULL, // refresh
-    NULL, // get_attrs
-    NULL, // initializer
-    NULL, // popup command callback
-  };
 
   register_action(action);
 
-  chooser_info_t aux_chi = main_chi;
-  aux_chi.flags |= CH_MULTI;
-  aux_chi.sizer = aux_choose_sizer;
-  aux_chi.getl = aux_choose_getl;
+  mainch_chooser_t main_ch(icon_id);
+  sizevec_t main_sel; // no selection by default
+  main_current_index = -1;
 
-  intvec_t main_sel, aux_sel;
-  char str[MAXSTR];
-  str[0] = '\0';
+  auxch_chooser_t aux_ch(icon_id);
+  sizevec_t aux_sel; // no selection by default
 
-  // default selection for the main chooser
-  main_sel.push_back(main_current_index);
+  qstring str;
 
-  if ( AskUsingForm_c(form, modcb,
-                      &main_chi, &main_sel,
-                      &aux_chi, &aux_sel,
-                      str) > 0 )
+  CASSERT(IS_CHOOSER_BASE_T(main_ch));
+  CASSERT(IS_CHOOSER_BASE_T(aux_ch));
+  if ( ask_form(form, modcb,
+                &main_ch, &main_sel,
+                &aux_ch, &aux_sel,
+                &str) > 0 )
   {
-    msg("Selection: %s\n", str);
+    msg("Selection: %s\n", str.c_str());
   }
 
-  unhook_from_notification_point(HT_UI, lambda_t::cb, NULL);
+  unhook_from_notification_point(HT_UI, lambda_t::cb);
+  return true;
 }
 
 //--------------------------------------------------------------------------

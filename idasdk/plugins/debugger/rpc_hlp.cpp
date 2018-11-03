@@ -21,7 +21,7 @@ const char *get_rpc_name(int code)
     NULL,                           //  9
     "RPC_INIT",                     // 10
     "RPC_TERM",                     // 11
-    "RPC_GET_PROCESS_INFO",         // 12
+    "RPC_GET_PROCESSES",            // 12
     "RPC_START_PROCESS",            // 13
     "RPC_EXIT_PROCESS",             // 14
     "RPC_ATTACH_PROCESS",           // 15
@@ -92,7 +92,7 @@ void finalize_packet(bytevec_t &cmnd)
 void append_memory_info(bytevec_t &s, const memory_info_t *meminf)
 {
   append_ea64(s, meminf->sbase);
-  append_ea64(s, meminf->startEA - (meminf->sbase << 4));
+  append_ea64(s, meminf->start_ea - (meminf->sbase << 4));
   append_ea64(s, meminf->size());
   append_dd(s, meminf->perm | (meminf->bitness<<4));
   append_str(s, meminf->name.c_str());
@@ -102,29 +102,55 @@ void append_memory_info(bytevec_t &s, const memory_info_t *meminf)
 //--------------------------------------------------------------------------
 void extract_memory_info(const uchar **ptr, const uchar *end, memory_info_t *meminf)
 {
-  meminf->sbase   = extract_ea64(ptr, end);
-  meminf->startEA = (meminf->sbase << 4) + extract_ea64(ptr, end);
-  meminf->endEA   = meminf->startEA + extract_ea64(ptr, end);
+  meminf->sbase    = extract_ea64(ptr, end);
+  meminf->start_ea = (meminf->sbase << 4) + extract_ea64(ptr, end);
+  meminf->end_ea   = meminf->start_ea + extract_ea64(ptr, end);
   int v = extract_long(ptr, end);
-  meminf->perm    = uchar(v);
+  meminf->perm    = uchar(v) & SEGPERM_MAXVAL;
   meminf->bitness = uchar(v>>4);
   meminf->name    = extract_str(ptr, end);
   meminf->sclass  = extract_str(ptr, end);
 }
 
 //--------------------------------------------------------------------------
-void append_process_info(bytevec_t &s, const process_info_t *procinf)
+void append_scattered_segm(bytevec_t &s, const scattered_segm_t *ss)
 {
-  append_dd(s, procinf->pid);
-  append_str(s, procinf->name);
+  append_ea64(s, ss->start_ea);
+  append_ea64(s, ss->end_ea);
+  append_str(s, ss->name.c_str());
 }
 
 //--------------------------------------------------------------------------
-void extract_process_info(const uchar **ptr, const uchar *end, process_info_t *procinf)
+void extract_scattered_segm(const uchar **ptr, const uchar *end, scattered_segm_t *ss)
 {
-  procinf->pid = extract_long(ptr, end);
-  char *name = extract_str(ptr, end);
-  qstrncpy(procinf->name, name, sizeof(procinf->name));
+  ss->start_ea = extract_ea64(ptr, end);
+  ss->end_ea = extract_ea64(ptr, end);
+  ss->name = extract_str(ptr, end);
+}
+
+//--------------------------------------------------------------------------
+void append_process_info_vec(bytevec_t &s, const procinfo_vec_t *procs)
+{
+  size_t size = procs->size();
+  append_dd(s, size);
+  for ( size_t i = 0; i < size; i++ )
+  {
+    const process_info_t &pi = procs->at(i);
+    append_dd(s, pi.pid);
+    append_str(s, pi.name.c_str());
+  }
+}
+
+//--------------------------------------------------------------------------
+void extract_process_info_vec(const uchar **ptr, const uchar *end, procinfo_vec_t *procs)
+{
+  size_t size = extract_long(ptr, end);
+  for ( size_t i = 0; i < size; i++ )
+  {
+    process_info_t &pi = procs->push_back();
+    pi.pid = extract_long(ptr, end);
+    pi.name = extract_str(ptr, end);
+  }
 }
 
 //--------------------------------------------------------------------------
@@ -255,15 +281,12 @@ exception_info_t *extract_exception_info(
   if ( qty > 0 )
   {
     extable = OPERATOR_NEW(exception_info_t, qty);
-    if ( extable != NULL )
+    for ( int i=0; i < qty; i++ )
     {
-      for ( int i=0; i < qty; i++ )
-      {
-        extable[i].code  = extract_long(ptr, end);
-        extable[i].flags = extract_long(ptr, end);
-        extable[i].name  = extract_str(ptr, end);
-        extable[i].desc  = extract_str(ptr, end);
-      }
+      extable[i].code  = extract_long(ptr, end);
+      extable[i].flags = extract_long(ptr, end);
+      extable[i].name  = extract_str(ptr, end);
+      extable[i].desc  = extract_str(ptr, end);
     }
   }
   return extable;
@@ -343,7 +366,7 @@ static void extract_relobj(
 {
   int n = extract_long(ptr, end);
   stkargs->resize(n);
-  extract_memory(ptr, end, &(*stkargs)[0], n);
+  extract_memory(ptr, end, stkargs->begin(), n);
 
   stkargs->base = extract_ea64(ptr, end);
 

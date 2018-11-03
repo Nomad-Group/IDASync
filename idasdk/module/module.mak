@@ -51,7 +51,7 @@ OBJS=$(F)ins$(O) $(F)ana$(O) $(F)out$(O) $(F)reg$(O) $(F)emu$(O) \
 
 IDP_MODULE=$(R)procs/$(PROC)$(IDP)
 
-all:    objdir $(IDP_MODULE) $(ADDITIONAL_GOALS)
+all:    objdir $(IDP_MODULE) $(ADDITIONAL_GOALS) $(addprefix $(C),$(CONFIGS))
 include ../../objdir.mak
 
 ifdef __UNIX__
@@ -63,7 +63,7 @@ ifdef __UNIX__
   endif
 
 $(IDP_MODULE): ../idp.script $(OBJS) makefile
-	$(CCL) $(OUTDLL) $(OUTSW)$@ $(OBJS) -L$(R) $(LINKIDA) $(PLUGIN_SCRIPT) $(ADDITIONAL_LIBS) $(STDLIBS)
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(OBJS) -L$(L) $(LINKIDA) $(PLUGIN_SCRIPT) $(ADDITIONAL_LIBS) $(STDLIBS)
 
 else # Windows
 
@@ -80,3 +80,11 @@ $(IDP_MODULE): $(OBJS) $(IDALIB) $(DEFFILE)
 	@$(RM) $(@:$(IDP)=.exp) $(@:$(IDP)=.lib)
 
 endif
+
+$(C)%.cfg: %.cfg
+	$(CP) $? $@
+
+clean::
+	rm -f $(IDP_MODULE) $(OBJS) $(addprefix $(C),$(CONFIGS))
+	-@[ -d $(OBJDIR) ] && rmdir $(OBJDIR)
+	-@[ -d obj ] && rmdir obj

@@ -10,41 +10,51 @@
 #include "st7.hpp"
 
 //----------------------------------------------------------------------
-inline void outreg(int r)
+class out_st7_t : public outctx_t
 {
-  out_register(ph.regNames[r]);
-}
+  out_st7_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(int r) { out_register(ph.reg_names[r]); }
+  void outmem(const op_t &x, ea_t ea);
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_st7_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_st7_t)
 
 //----------------------------------------------------------------------
-static void outmem(op_t &x, ea_t ea)
+void out_st7_t::outmem(const op_t &x, ea_t ea)
 {
-  char buf[MAXSTR];
-  if ( get_name_expr(cmd.ea+x.offb, x.n, ea, BADADDR, buf, sizeof(buf)) <= 0 )
+  qstring qbuf;
+  if ( get_name_expr(&qbuf, insn.ea+x.offb, x.n, ea, BADADDR) <= 0 )
   {
     const ioport_t *p = find_sym(x.addr);
     if ( p == NULL )
     {
       out_tagon(COLOR_ERROR);
-      OutLong(x.addr, 16);
+      out_btoa(x.addr, 16);
       out_tagoff(COLOR_ERROR);
-      QueueSet(Q_noName,cmd.ea);
+      remember_problem(PR_NONAME, insn.ea);
     }
     else
     {
-      out_line(p->name, COLOR_IMPNAME);
+      out_line(p->name.c_str(), COLOR_IMPNAME);
     }
   }
   else
   {
-    bool complex = strchr(buf, '+') || strchr(buf, '-');
-    if ( complex ) out_symbol(ash.lbrace);
-    OutLine(buf);
-    if ( complex ) out_symbol(ash.rbrace);
+    bool complex = strchr(qbuf.begin(), '+') || strchr(qbuf.begin(), '-');
+    if ( complex )
+      out_symbol(ash.lbrace);
+    out_line(qbuf.begin());
+    if ( complex )
+      out_symbol(ash.rbrace);
   }
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_st7_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
@@ -58,16 +68,16 @@ bool idaapi outop(op_t &x)
 
     case o_imm:
       out_symbol('#');
-      OutValue(x, OOFS_IFSIGN|OOFW_IMM);
+      out_value(x, OOFS_IFSIGN|OOFW_IMM);
       break;
 
     case o_displ:
 // o_displ Short     Direct   Indexed  ld A,($10,X)             00..1FE                + 1
 // o_displ Long      Direct   Indexed  ld A,($1000,X)           0000..FFFF             + 2
       out_symbol('(');
-      OutValue(x, OOFS_IFSIGN
-                 |OOF_ADDR
-                 |((cmd.auxpref & aux_16) ? OOFW_16 : OOFW_8));
+      out_value(x, OOFS_IFSIGN
+                       |OOF_ADDR
+                       |((insn.auxpref & aux_16) ? OOFW_16 : OOFW_8));
       out_symbol(',');
       outreg(x.reg);
       out_symbol(')');
@@ -91,13 +101,19 @@ bool idaapi outop(op_t &x)
 // o_mem   Bit       Indirect          bset [$10],#7            00..FF     00..FF byte + 2
 // o_mem   Bit       Direct   Relative btjt $10,#7,skip         00..FF                 + 2
 // o_mem   Bit       Indirect Relative btjt [$10],#7,skip       00..FF     00..FF byte + 3
-      if ( cmd.auxpref & aux_index ) out_symbol('(');
-      if ( cmd.auxpref & aux_indir ) out_symbol('[');
-      outmem(x, calc_mem(x.addr));
-      if ( cmd.auxpref & aux_long  ) out_symbol('.');
-      if ( cmd.auxpref & aux_long  ) out_symbol('w');
-      if ( cmd.auxpref & aux_indir ) out_symbol(']');
-      if ( cmd.auxpref & aux_index )
+      if ( insn.auxpref & aux_index )
+        out_symbol('(');
+      if ( insn.auxpref & aux_indir )
+        out_symbol('[');
+      outmem(x, calc_mem(insn, x.addr));
+      if ( insn.auxpref & aux_long )
+      {
+        out_symbol('.');
+        out_symbol('w');
+      }
+      if ( insn.auxpref & aux_indir )
+        out_symbol(']');
+      if ( insn.auxpref & aux_index )
       {
         out_symbol(',');
         outreg(x.reg);
@@ -106,58 +122,51 @@ bool idaapi outop(op_t &x)
       break;
 
     case o_near:
-      outmem(x, calc_mem(x.addr));
+      outmem(x, calc_mem(insn, x.addr));
       break;
 
     default:
-      interr("out");
+      interr(insn, "out");
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_st7_t::out_insn(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  OutMnem();
+  out_mnemonic();
 
   out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
   }
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(2);
   }
 
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, seg) could be made const
+void idaapi st7_segstart(outctx_t &ctx, segment_t *seg)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(seg->type) )
+    return;
 
   const char *align;
-  switch ( Sarea->align )
+  switch ( seg->align )
   {
-    case saAbs:        align = "at: ";   break;
+    case saAbs:        align = "at: ";  break;
     case saRelByte:    align = "byte";  break;
     case saRelWord:    align = "word";  break;
     case saRelPara:    align = "para";  break;
@@ -168,29 +177,28 @@ void idaapi segstart(ea_t ea)
   }
   if ( align == NULL )
   {
-    gen_cmt_line("Segment alignment '%s' can not be represented in assembly",
-                 get_segment_alignment(Sarea->align));
+    ctx.gen_cmt_line("Segment alignment '%s' can not be represented in assembly",
+                     get_segment_alignment(seg->align));
     align = "";
   }
 
-  char sname[MAXNAMELEN];
-  char sclas[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sname;
+  qstring sclas;
+  get_visible_segm_name(&sname, seg);
+  get_segm_class(&sclas, seg);
 
-  char *ptr = buf + qsnprintf(buf, sizeof(buf),
-                              SCOLOR_ON SCOLOR_ASMDIR "%-*s segment %s ",
-                              inf.indent-1,
-                              sname,
-                              align);
-  if ( Sarea->align == saAbs )
+  ctx.out_printf(SCOLOR_ON SCOLOR_ASMDIR "%-*s segment %s ",
+                 inf.indent-1,
+                 sname.c_str(),
+                 align);
+  if ( seg->align == saAbs )
   {
-    ea_t absbase = get_segm_base(Sarea);
-    ptr += btoa(ptr, end-ptr, absbase);
-    APPCHAR(ptr, end, ' ');
+    ea_t absbase = get_segm_base(seg);
+    ctx.out_btoa(absbase);
+    ctx.out_char(' ');
   }
   const char *comb;
-  switch ( Sarea->comb )
+  switch ( seg->comb )
   {
     case scPub:
     case scPub2:
@@ -200,38 +208,38 @@ void idaapi segstart(ea_t ea)
   }
   if ( comb == NULL )
   {
-    gen_cmt_line("Segment combination '%s' can not be represented in assembly",
-                 get_segment_combination(Sarea->comb));
+    ctx.gen_cmt_line("Segment combination '%s' can not be represented in assembly",
+                     get_segment_combination(seg->comb));
     comb = "";
   }
-  ptr += qsnprintf(ptr, end-ptr, "%s '%s'", comb, sclas);
-  tag_off(ptr, end, COLOR_ASMDIR);
-  MakeLine(buf, 0);
+  ctx.out_printf("%s '%s'", comb, sclas.c_str());
+  ctx.out_tagoff(COLOR_ASMDIR);
+  ctx.flush_outbuf(0);
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t)
+void idaapi st7_segend(outctx_t &, segment_t *)
 {
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi st7_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_PROC | GH_PRINT_HEADER);
-  MakeNull();
+  ctx.gen_header(GH_PRINT_PROC | GH_PRINT_HEADER);
+  ctx.gen_empty_line();
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi st7_footer(outctx_t &ctx)
 {
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
   const char *end = ash.end;
   if ( end == NULL )
-    printf_line(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
+    ctx.gen_printf(inf.indent, COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
   else
-    printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR)
-                  " "
-                  COLSTR("%s %s",SCOLOR_AUTOCMT), ash.end, ash.cmnt, name);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                   ash.end, ash.cmnt, name);
 }
 

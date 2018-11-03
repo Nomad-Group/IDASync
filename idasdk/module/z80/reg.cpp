@@ -15,7 +15,7 @@ static const char *const RegNames[] =
   "bc", "de", "hl","psw","sp","ix","iy","af'",        // 8..15
   "r",  "i",  "f", "xl", "xh","yl","yh",              // 16..22
 
-  "w",  "lw",  "ixl", "ixu", "dsr", "xsr", "iyl",
+  "w", "lw", "ixl", "ixu", "dsr", "xsr", "iyl",
   "iyu", "ysr", "sr", "ib", "iw", "xm", "lck",
   "bc'", "de'", "hl'","ix'","iy'",
   "b'",  "c'",  "d'", "e'", "h'", "l'", "m'", "a'",
@@ -41,7 +41,6 @@ static const asm_t pseudosam =
   "PseudoSam by PseudoCode",
   0,
   ps_headers,
-  NULL,
   ".org",
   ".end",
 
@@ -64,10 +63,6 @@ static const asm_t pseudosam =
   ".rs %s",     // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -99,7 +94,6 @@ static const asm_t tasm =
   tasmname,
   0,
   NULL,
-  NULL,
   ".org",
   ".end",
 
@@ -122,10 +116,6 @@ static const asm_t tasm =
   ".block %s",  // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -149,8 +139,6 @@ static const asm_t tasm =
 //-----------------------------------------------------------------------
 //      TASM assembler definiton for Z80
 //-----------------------------------------------------------------------
-static const ushort tasmz80_bads[] = { I5_rst, Z80_srr, 0 };
-
 static const asm_t tasmz80 =
 {
   AS_COLON | AS_N2CHR | AS_1TEXT,
@@ -158,7 +146,6 @@ static const asm_t tasmz80 =
   "Table Driven Assembler (TASM) by Speech Technology Inc.",
   0,
   NULL,
-  tasmz80_bads,
   ".org",
   ".end",
 
@@ -181,10 +168,6 @@ static const asm_t tasmz80 =
   ".block %s",  // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -214,8 +197,6 @@ static const char *const cross16_headers[] =
   NULL
 };
 
-static const ushort cross_bads[] = { I5_cz, 0 };
-
 static const asm_t cross16 =
 {
   AS_COLON | AS_NHIAS,
@@ -223,7 +204,6 @@ static const asm_t cross16 =
   "Cross-16 by Universal Cross-Assemblers",
   0,
   cross16_headers,
-  cross_bads,
   "org",
   "end",
 
@@ -246,10 +226,6 @@ static const asm_t cross16 =
   "dfs %s",     // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -279,8 +255,6 @@ static const char *const cross16z80_headers[] =
   NULL
 };
 
-static const ushort cross16z80_bads[] = { Z80_set, Z80_srr, 0 };
-
 static const asm_t cross16z80 =
 {
   AS_COLON | AS_NHIAS,
@@ -288,7 +262,6 @@ static const asm_t cross16z80 =
   "Cross-16 by Universal Cross-Assemblers",
   0,
   cross16z80_headers,
-  cross16z80_bads,
   "org",
   "end",
 
@@ -311,10 +284,6 @@ static const asm_t cross16z80 =
   "dfs %s",     // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -338,8 +307,6 @@ static const asm_t cross16z80 =
 //-----------------------------------------------------------------------
 //      A80 assembler definiton
 //-----------------------------------------------------------------------
-static const ushort a80_bads[] = { I5_rim, I5_sim, 0 };
-
 static const asm_t a80 =
 {
   AS_COLON | ASD_DECF1 | ASH_HEXF2 | AS_UNEQU,
@@ -347,7 +314,6 @@ static const asm_t a80 =
   "A80 by ANTA electronics",
   0,
   NULL,
-  a80_bads,
   "org",
   NULL,
 
@@ -370,10 +336,6 @@ static const asm_t a80 =
   NULL,         // uninited arrays
   "equ",
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -404,7 +366,6 @@ static const asm_t a80z =
   "A80 by ANTA electronics",
   0,
   NULL,
-  a80_bads,
   "adr",
   NULL,
 
@@ -427,10 +388,6 @@ static const asm_t a80z =
   NULL,         // uninited arrays
   "equ",
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -462,8 +419,6 @@ static const char *const avocet_headers[] =
   NULL
 };
 
-static const ushort avocet_bads[] = { Z80_srr, 0 };
-
 static const asm_t avocet =
 {
   AS_NHIAS,
@@ -471,7 +426,6 @@ static const asm_t avocet =
   "Avocet Macro Preprocessor v1.0 by Avocet Systems, Inc.",
   0,
   avocet_headers,
-  avocet_bads,
   "org",
   "end",
 
@@ -494,10 +448,6 @@ static const asm_t avocet =
   "ds %s",      // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -529,8 +479,6 @@ static const char *const asxxxx_headers[] =
   NULL
 };
 
-static const ushort asxxxx_bads[] = { Z80_srr, I5_sub, 0 };
-
 static const asm_t asxxxx =
 {
   AS_NHIAS | AS_COLON | AS_NCHRE | AS_N2CHR | AS_1TEXT | ASH_HEXF3,
@@ -538,7 +486,6 @@ static const asm_t asxxxx =
   "ASxxxx by Alan R. Baldwin v1.5",
   0,
   asxxxx_headers,
-  asxxxx_bads,
   ".org",
   NULL,
 
@@ -561,10 +508,6 @@ static const asm_t asxxxx =
   ".ds %s",     // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -595,8 +538,6 @@ static const char *const xm80_headers[] =
   NULL
 };
 
-static const ushort xm80_bads[] = { I5_rim, I5_sim, Z80_srr, 0 };
-
 static const asm_t xm80 =
 {
   AS_COLON | AS_NHIAS,
@@ -604,7 +545,6 @@ static const asm_t xm80 =
   "X-M-80 by Leo Sandy",
   0,
   xm80_headers,
-  xm80_bads,
   "org",
   "end",
 
@@ -627,10 +567,6 @@ static const asm_t xm80 =
   "ds %s",      // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -667,7 +603,6 @@ static const asm_t xm80z =
   "X-M-80 by Leo Sandy",
   0,
   xm80z_headers,
-  xm80_bads,
   "org",
   "end",
 
@@ -690,10 +625,6 @@ static const asm_t xm80z =
   "ds %s",      // uninited arrays
   NULL,         // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -718,8 +649,6 @@ static const asm_t xm80z =
 //-----------------------------------------------------------------------
 //      Zilog Macro Assembler (ZMASM)
 //-----------------------------------------------------------------------
-static const ushort zmasm_bads[] = { Z80_srr, 0 };
-
 static const asm_t zmasm =
 {
   ASH_HEXF0 |       //   34h
@@ -735,7 +664,6 @@ static const asm_t zmasm =
   "Zilog Macro Assembler",
   0,
   NULL,         // headers
-  zmasm_bads,   // bads
   "org",
   "end",
 
@@ -758,10 +686,6 @@ static const asm_t zmasm =
   "ds %s",      // uninited arrays
   "equ",        // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   "$",          // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -798,7 +722,6 @@ static const asm_t rgbasm =
   "RGBAsm (part of ASMotor)",
   0,
   NULL,         // headers
-  NULL,         // bads
   "org",
   NULL,         // end
 
@@ -821,10 +744,6 @@ static const asm_t rgbasm =
   "ds %s",      // uninited arrays
   "equ",        // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   "@",          // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -851,94 +770,39 @@ static const asm_t *const HD64180asms[] = { &zmasm, &tasmz80, &avocet, &asxxxx, 
 static const asm_t *const GBasms[]      = { &rgbasm, NULL };
 //----------------------------------------------------------------------
 static netnode helper;
-char device[MAXSTR] = "";
-static size_t numports = 0;
-static ioport_t *ports = NULL; //lint -esym(844,ports) could be declared const
+qstring device;
+static ioports_t ports; //lint -esym(844,ports) could be declared const
 
 #include "../iocommon.cpp"
 
 //------------------------------------------------------------------
 const char *z80_find_ioport(uval_t port)
 {
-  const ioport_t *p = find_ioport(ports, numports, port);
-  return p ? p->name : NULL;
+  const ioport_t *p = find_ioport(ports, port);
+  return p ? p->name.c_str() : NULL;
 }
 
 //------------------------------------------------------------------
 const char *z80_find_ioport_bit(int port, int bit)
 {
-  const ioport_bit_t *p = find_ioport_bit(ports, numports, port, bit);
-  return p ? p->name : NULL;
+  const ioport_bit_t *p = find_ioport_bit(ports, port, bit);
+  return p ? p->name.c_str() : NULL;
 }
 
 //------------------------------------------------------------------
 const char *idaapi set_idp_options(const char *keyword,int /*value_type*/,const void * /*value*/)
 {
-  if ( keyword != NULL ) return IDPOPT_BADKEY;
+  if ( keyword != NULL )
+    return IDPOPT_BADKEY;
   char cfgfile[QMAXFILE];
   get_cfg_filename(cfgfile, sizeof(cfgfile));
-  if ( choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0) )
-    set_device_name(device, IORESP_NONE);
+  if ( choose_ioport_device(&device, cfgfile, parse_area_line0) )
+    set_device_name(device.c_str(), IORESP_NONE);
   return IDPOPT_OK;
 }
 
-//----------------------------------------------------------------------
-static char const features[] = { _PT_8085, _PT_Z80, _PT_64180, _PT_Z180, _PT_Z380, _PT_GB };
-
-static int idaapi notify(processor_t::idp_notify msgid, ...) { // Various messages:
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
-  switch ( msgid )
-  {
-    case processor_t::init:
-      helper.create("$ z80");
-      break;
-
-    case processor_t::newprc:
-      {
-        int np = va_arg(va, int);
-        pflag = features[np];
-        ph.assemblers = i8085asms;
-        if ( isZ80() ) ph.assemblers = Z80asms;
-        if ( is64180() ) ph.assemblers = HD64180asms;
-        if ( isGB() ) ph.assemblers = GBasms;
-        {
-          char buf[MAXSTR];
-          if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-            set_device_name(buf, IORESP_NONE);
-        }
-      }
-      break;
-
-    case processor_t::newfile:
-      if ( strcmp(inf.procName, "z180") == 0 )
-      {
-        char cfgfile[QMAXFILE];
-        get_cfg_filename(cfgfile, sizeof(cfgfile));
-        if ( choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0) )
-          set_device_name(device, IORESP_AREA);
-      }
-      break;
-
-    default:
-      break;
-  }
-  va_end(va);
-
-  return(1);
-}
-
 //-----------------------------------------------------------------------
-static bool idaapi can_have_type(op_t &x)      // returns 1 - operand can have
+static bool idaapi can_have_type(const op_t &x)      // returns 1 - operand can have
 {
   switch ( x.type )
   {
@@ -949,6 +813,119 @@ static bool idaapi can_have_type(op_t &x)      // returns 1 - operand can have
       return 0;
   }
   return 1;
+}
+
+//----------------------------------------------------------------------
+static char const features[] = { _PT_8085, _PT_Z80, _PT_64180, _PT_Z180, _PT_Z380, _PT_GB };
+
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+      helper.create("$ z80");
+      break;
+
+    case processor_t::ev_newprc:
+      {
+        int np = va_arg(va, int);
+        // bool keep_cfg = va_argi(va, bool);
+        pflag = features[np];
+        ph.assemblers = i8085asms;
+        if ( isZ80() )
+          ph.assemblers = Z80asms;
+        if ( is64180() )
+          ph.assemblers = HD64180asms;
+        if ( isGB() )
+          ph.assemblers = GBasms;
+        if ( helper.supstr(&device, -1) > 0 )
+          set_device_name(device.c_str(), IORESP_NONE);
+      }
+      break;
+
+    case processor_t::ev_newfile:
+      if ( streq(inf.procname, "z180") )
+      {
+        char cfgfile[QMAXFILE];
+        get_cfg_filename(cfgfile, sizeof(cfgfile));
+        if ( choose_ioport_device(&device, cfgfile, parse_area_line0) )
+          set_device_name(device.c_str(), IORESP_AREA);
+      }
+      break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i5_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i5_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        i5_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return i5_ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return i5_emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
+      break;
+  }
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -994,12 +971,15 @@ static const bytes_t retcodes[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,
-  PLFM_Z80,                     // id
-  PRN_HEX|PR_SEGTRANS,
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
-
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_Z80,               // id
+                          // flag
+    PRN_HEX
+  | PR_SEGTRANS,
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -1008,68 +988,24 @@ processor_t LPH =
 
   notify,
 
-  i5_header,
-  i5_footer,
-
-  i5_segstart,
-  std_gen_segm_footer,
-
-  NULL,                         // assumes
-
-  i5_ana,
-  i5_emu,
-
-  i5_out,
-  i5_outop,
-  intel_data,
-  NULL,                         // int  (*cmp_opnd)(op_t &op1,op_t &op2);
-                                // returns 1 - equal operands
-  can_have_type,                        // returns 1 - operand can have
-                                        // a user-defined type
-
-  R_vds+1,                              // number of registers
   RegNames,
-  NULL,
+  R_vds+1,              // number of registers
 
-  0,
-  NULL,
-  NULL,
-  NULL,
+  R_vcs,R_vds,          // first, last
+  0,                    // size of a segment register
+  R_vcs,R_vds,          // CS,DS
 
-//
-//      There will be 2 virtual registers: code segment register
-//                                         data segment register
-//
-
-  R_vcs,R_vds,                  // first, last
-  0,                            // size of a segment register
-  R_vcs,R_vds,                  // CS,DS
-
-  NULL,                         // No known code start sequences
-  retcodes,                     // 'Return' instruction codes
+  NULL,                 // No known code start sequences
+  retcodes,             // 'Return' instruction codes
 
   0,I5_last,
-  Instructions,
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 0, 0, 0 },       // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // long (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x); -- always, so leave it NULL
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,sval_t v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   I5_ret,               // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

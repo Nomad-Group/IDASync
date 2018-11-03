@@ -11,13 +11,12 @@
  */
 
 #include "java.hpp"
+#include "oututil.hpp"
 
 static char ind_fmt[] = "%s=%-5u"; // we write to this string!
-static char *g_bufbeg = NULL;
-static size_t g_bufsize = 0;
 
 //----------------------------------------------------------------------
-int32 print_loader_messages(char str[MAXSTR], const char *cmt)
+int32 print_loader_messages(char str[MAXSTR], const char *cmt, outctx_t *ctx)
 {
   netnode temp(curClass.msgNode);
 
@@ -34,8 +33,9 @@ BADIDB:
       goto BADIDB;
     if ( cmt )
     {
-      if ( printf_line(0, "%s%s", cmt, str))
-        return -1 ;
+      QASSERT(10264, ctx != NULL);
+      if ( ctx->gen_printf(0, "%s%s", cmt, str) )
+        return -1;
     }
     else
     {
@@ -49,7 +49,7 @@ BADIDB:
 }
 
 //----------------------------------------------------------------------
-static bool print_newline(void)
+bool out_java_t::print_newline(void) const
 {
   if ( ferror(myFile) )
     return false;
@@ -62,10 +62,10 @@ static bool print_newline(void)
 }
 
 //----------------------------------------------------------------------
-static size_t write_utf(void)
+//lint -esym(1762,out_java_t::write_utf) could be made const
+size_t out_java_t::write_utf(void)
 {
-  *set_output_ptr(g_bufbeg) = '\0';
-  qfprintf(myFile, "%s", g_bufbeg);
+  qfprintf(myFile, "%s", outbuf.c_str());
   if ( !print_newline() )
     return 0;
   return maxpos - 1;
@@ -74,31 +74,21 @@ static size_t write_utf(void)
 //----------------------------------------------------------------------
 static int utfstr(ushort index, const const_desc_t &)
 {
-  init_output_buffer(g_bufbeg, g_bufsize);
-  int i = fmtString(index, maxpos -= curpos, fmt_string, write_utf);
-  term_output_buffer();
+  out_java_t *pctx = (out_java_t *)create_outctx(BADADDR);
+  int i = pctx->fmtString(index, maxpos -= curpos, fmt_string, &out_java_t::write_utf);
   maxpos += curpos;
-  if ( i < 0 )
-    return 0;
-  qfprintf(myFile, "%s\n", g_bufbeg);
-  return ++i;
+  if ( i >= 0 )
+    qfprintf(myFile, "%s\n", pctx->outbuf.c_str());
+  delete pctx;
+  return i < 0 ? 0 : ++i;
 }
 
 //----------------------------------------------------------------------
-static int outnum(ushort type, const const_desc_t &co)
+static int outnum(ushort /*type*/, const const_desc_t &co)
 {
   op_t x;
   copy_const_to_opnd(x, co);
-  x.type = o_imm;
-  x.dtyp = (uchar)(type - 3);
-  x.offb = 0;
-
-  char str[40];
-  init_output_buffer(str, sizeof(str));
-  OutValue(x, OOF_NUMBER | OOF_SIGNED | OOFW_IMM);
-  term_output_buffer();
-  tag_remove(str, str, 0);
-  qfprintf(myFile, "value = %s\n", str);
+  qfprintf(myFile, "value = %" FMT_EA "u\n", x.value);
   return 1;
 }
 
@@ -197,10 +187,8 @@ int32 idaapi gen_map_file(FILE *fp)
 
   if ( !(idpflags & IDF_ENCODING) )
     ++encinc;  // |= 1
-  uFlag = decflag();  // Decimal OutValue
   width = 80;
-  g_bufsize = pos = sizeof(str)-32;
-  if ( !AskUsingForm_c(form, &width, &pos, &unus, &unsort, &typemask, &hexnum, &encinc) )
+  if ( !ask_form(form, &width, &pos, &unus, &unsort, &typemask, &hexnum, &encinc) )
     return 0;
   if ( encinc & 2 )
     unus = 0; // from error - all
@@ -245,7 +233,6 @@ set_max:
     curbit = typemask;
   }
   maxpos   = width;
-  g_bufbeg = str; //lint !e789
   myFile   = fp;
 
   do
@@ -324,6 +311,7 @@ set_max:
         case 8: // Long / Double
           DEB_ASSERT((i == curClass.maxCPindex), "map:CPend");
           ++i;
+          // fallthrough
         default:
           pos += j;
           break;
@@ -341,7 +329,7 @@ set_max:
     if ( (encinc & 2) && curClass.msgNode )
     {
       qfprintf(fp, "\nLoader problem messages\n\n");
-      int32 slen = print_loader_messages(str, NULL);
+      int32 slen = print_loader_messages(str, NULL, NULL);
       if ( slen == -1 )
         goto do_eof;
       numstr += slen + 5;
@@ -355,7 +343,6 @@ do_eof:
   }
   myFile = NULL;
   idpflags = save_flags;
-  g_bufbeg = NULL;
   return numstr;
 }
 GCC_DIAG_ON(format-nonliteral);
@@ -468,9 +455,9 @@ uchar loadDialog(bool manual)
     uval_t minv = curClass.MinVers;
     uval_t jdk  = curClass.JDKsubver;
 
-    if ( !AskUsingForm_c(fmt, &maxv, &minv, &jdk,
-                         jdk == 3 ? "/CLDC" : "",
-                         &rtyp, &mod) )
+    if ( !ask_form(fmt, &maxv, &minv, &jdk,
+                  jdk == 3 ? "/CLDC" : "",
+                  &rtyp, &mod) )
       qexit(1);
   }
 

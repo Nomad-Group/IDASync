@@ -35,12 +35,30 @@
 #ifndef _IDP_TMS320C1X_OUT_H
 #define _IDP_TMS320C1X_OUT_H
 
-void idaapi outSegStart(ea_t);
-void idaapi outSegEnd(ea_t);
-void idaapi outHeader(void);
-void idaapi outFooter(void);
-bool idaapi outOp(op_t &);
-void idaapi out(void);
+void idaapi outSegStart(outctx_t &, segment_t *);
+void idaapi outSegEnd(outctx_t &, segment_t *);
+void idaapi outHeader(outctx_t &);
+void idaapi outFooter(outctx_t &);
+bool idaapi outOp(outctx_t &ctx, const op_t &op);
+void idaapi out(outctx_t &ctx);
+
+// simple wrapper class for syntactic sugar of member functions
+// this class may have only simple member functions.
+// virtual functions and data fields are forbidden, otherwise the class
+// layout may change
+class out_tms320c1_t : public outctx_t
+{
+  out_tms320c1_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void outreg(int r) { out_register(ph.reg_names[r]); }
+  void outPhrase(int phrase);
+  void outNear(const op_t &op);
+  void outMem(const op_t &op);
+};
+CASSERT(sizeof(out_tms320c1_t) == sizeof(outctx_t));
+
 
 #endif  // _IDP_TMS320C1X_OUT_H
 

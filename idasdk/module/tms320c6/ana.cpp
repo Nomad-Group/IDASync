@@ -84,69 +84,69 @@ struct tmsinsn_t
 #define t_dwu4          54
 
 //--------------------------------------------------------------------------
-static void swap_op1_and_op2(void)
+static void swap_op1_and_op2(insn_t &insn)
 {
-  if ( (cmd.cflags & aux_pseudo) == 0 )
+  if ( (insn.cflags & aux_pseudo) == 0 )
   {
-    op_t tmp = cmd.Op1;
-    cmd.Op1 = cmd.Op2;
-    cmd.Op2 = tmp;
-    cmd.Op1.n = 0;
-    cmd.Op2.n = 1;
+    op_t tmp = insn.Op1;
+    insn.Op1 = insn.Op2;
+    insn.Op2 = tmp;
+    insn.Op1.n = 0;
+    insn.Op2.n = 1;
   }
 }
 
 //--------------------------------------------------------------------------
-static void swap_op2_and_op3(void)
+static void swap_op2_and_op3(insn_t &insn)
 {
-  if ( (cmd.cflags & aux_pseudo) == 0 )
+  if ( (insn.cflags & aux_pseudo) == 0 )
   {
-    op_t tmp = cmd.Op3;
-    cmd.Op3 = cmd.Op2;
-    cmd.Op2 = tmp;
-    cmd.Op2.n = 1;
-    cmd.Op3.n = 2;
+    op_t tmp = insn.Op3;
+    insn.Op3 = insn.Op2;
+    insn.Op2 = tmp;
+    insn.Op2.n = 1;
+    insn.Op3.n = 2;
   }
 }
 
 //--------------------------------------------------------------------------
-inline int op_spmask(op_t &x, uint32 code)
+inline int op_spmask(const insn_t &insn, op_t &x, uint32 code)
 {
-  x.type = o_spmask;
-  x.dtyp = dt_dword;
-  x.reg = (code >> 18) & 0xFF;
-  return cmd.size;
+  x.type  = o_spmask;
+  x.dtype = dt_dword;
+  x.reg   = (code >> 18) & 0xFF;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
 inline void op_reg(op_t &x, int reg)
 {
-  x.type = o_reg;
-  x.dtyp = dt_dword;
-  x.reg = reg;
+  x.type  = o_reg;
+  x.dtype = dt_dword;
+  x.reg   = reg;
 }
 
 //--------------------------------------------------------------------------
 inline void op_ucst15(op_t &x, uint32 code)
 {
-  x.type = o_imm;
-  x.dtyp = dt_dword;
+  x.type  = o_imm;
+  x.dtype = dt_dword;
   x.value = (code >> 8) & 0x7FFF;
 }
 
 //--------------------------------------------------------------------------
-inline bool second_unit(void)
+inline bool second_unit(const insn_t &insn)
 {
-  return cmd.funit == FU_L2
-      || cmd.funit == FU_S2
-      || cmd.funit == FU_M2
-      || cmd.funit == FU_D2;
+  return insn.funit == FU_L2
+      || insn.funit == FU_S2
+      || insn.funit == FU_M2
+      || insn.funit == FU_D2;
 }
 
 //--------------------------------------------------------------------------
-static uchar make_reg(int32 v, bool isother)
+static uchar make_reg(const insn_t &insn, int32 v, bool isother)
 {
-  if ( second_unit() == isother )
+  if ( second_unit(insn) == isother )
     return uchar(v);
   else
     return uchar((v) + rB0);
@@ -155,23 +155,28 @@ static uchar make_reg(int32 v, bool isother)
 //--------------------------------------------------------------------------
 inline void op_imm(op_t &x, uval_t val)
 {
-  x.type = o_imm;
-  x.dtyp = dt_dword;
+  x.type  = o_imm;
+  x.dtype = dt_dword;
   x.value = val;
 }
 
 //--------------------------------------------------------------------------
 // bcb __ea64__ fails with backend error if this function is declared inline
-static void op_near(op_t &x, uint32 code, int shift, uval_t mask)
+static void op_near(
+        const insn_t &insn,
+        op_t &x,
+        uint32 code,
+        int shift,
+        uval_t mask)
 {
   x.type = o_near;
-  x.dtyp = dt_code;
+  x.dtype = dt_code;
   sval_t cst = (code >> shift) & mask;
   int signbit = (mask + 1) >> 1;
   if ( cst & signbit )
     cst |= ~mask;     // extend sign
   cst <<= 2;
-  x.addr = (cmd.ip & ~0x1F) + cst;
+  x.addr = (insn.ip & ~0x1F) + cst;
 }
 
 //--------------------------------------------------------------------------
@@ -224,7 +229,13 @@ static int find_crreg(int idx)
 }
 
 //--------------------------------------------------------------------------
-static int make_op(op_t &x, uint32 code, uchar optype, int32 v, bool isother)
+static int make_op(
+        const insn_t &insn,
+        op_t &x,
+        uint32 code,
+        uchar optype,
+        int32 v,
+        bool isother)
 {
   switch ( optype )
   {
@@ -251,9 +262,9 @@ static int make_op(op_t &x, uint32 code, uchar optype, int32 v, bool isother)
     case t_xs4:
     case t_xsint:
     case t_xuint:
-      x.type = o_reg;
-      x.dtyp = dt_dword;
-      x.reg = make_reg(v, isother);
+      x.type  = o_reg;
+      x.dtype = dt_dword;
+      x.reg   = make_reg(insn, v, isother);
       break;
     case t_slsb16:
     case t_ulsb16:
@@ -265,9 +276,9 @@ static int make_op(op_t &x, uint32 code, uchar optype, int32 v, bool isother)
     case t_xulsb16:
     case t_xsmsb16:
     case t_xumsb16:
-      x.type = o_reg;
-      x.dtyp = dt_word;
-      x.reg = make_reg(v, isother);
+      x.type  = o_reg;
+      x.dtype = dt_word;
+      x.reg   = make_reg(insn, v, isother);
       break;
     case t_dint:
     case t_slong:
@@ -280,25 +291,25 @@ static int make_op(op_t &x, uint32 code, uchar optype, int32 v, bool isother)
       // no break
     case t_xslong:
     case t_xulong:
-      x.type = o_regpair;
-      x.dtyp = dt_qword;
-      x.reg = make_reg(v, isother);
+      x.type  = o_regpair;
+      x.dtype = dt_qword;
+      x.reg   = make_reg(insn, v, isother);
       break;
     case t_sp:
       isother = false;
       // no break
     case t_xsp:
-      x.type = o_reg;
-      x.dtyp = dt_float;
-      x.reg = make_reg(v, isother);
+      x.type  = o_reg;
+      x.dtype = dt_float;
+      x.reg   = make_reg(insn, v, isother);
       break;
     case t_dp:
       isother = false;
       // no break
     case t_xdp:
-      x.type = o_regpair;
-      x.dtyp = dt_double;
-      x.reg = make_reg(v & ~1, isother);
+      x.type  = o_regpair;
+      x.dtype = dt_double;
+      x.reg   = make_reg(insn, v & ~1, isother);
       break;
     case t_ucst1:
       op_imm(x, v & 1);
@@ -317,23 +328,26 @@ static int make_op(op_t &x, uint32 code, uchar optype, int32 v, bool isother)
       op_imm(x, (code >> 13) & 7);
       break;
     case t_scst7:
-      op_near(x, code, 16, 0x7F);
+      op_near(insn, x, code, 16, 0x7F);
       break;
     case t_scst10:
-      op_near(x, code, 13, 0x3FF);
+      op_near(insn, x, code, 13, 0x3FF);
       break;
     case t_scst12:
-      op_near(x, code, 16, 0xFFF);
+      op_near(insn, x, code, 16, 0xFFF);
       break;
     case t_scst21:
-      op_near(x, code, 7, 0x1FFFFF);
+      op_near(insn, x, code, 7, 0x1FFFFF);
       break;
     case t_irp:
       x.type = o_reg;
-      x.dtyp = dt_word;
-      if      ( v == 6 ) x.reg = rIRP;
-      else if ( v == 7 ) x.reg = rNRP;
-      else return 0;
+      x.dtype = dt_word;
+      if ( v == 6 )
+        x.reg = rIRP;
+      else if ( v == 7 )
+        x.reg = rNRP;
+      else
+        return 0;
       break;
     case t_cregr: // read control reg
       {
@@ -361,7 +375,7 @@ static int make_op(op_t &x, uint32 code, uchar optype, int32 v, bool isother)
       op_reg(x, rB14 + ((code >> 7) & 1));
       break;
     case t_a3:
-      op_reg(x, make_reg(rA3, isother));
+      op_reg(x, make_reg(insn, rA3, isother));
       break;
     default:
       INTERR(257);
@@ -370,87 +384,96 @@ static int make_op(op_t &x, uint32 code, uchar optype, int32 v, bool isother)
 }
 
 //--------------------------------------------------------------------------
-static void make_pseudo(void)
+static void make_pseudo(insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS6_add:
     case TMS6_or:
-      if ( cmd.Op1.type == o_imm && cmd.Op1.value == 0 )
+      if ( insn.Op1.type == o_imm && insn.Op1.value == 0 )
       {
-        cmd.itype = TMS6_mv;
+        insn.itype = TMS6_mv;
 SHIFT_OPS:
-        cmd.Op1 = cmd.Op2;
-        cmd.Op2 = cmd.Op3;
-        cmd.Op1.n = 0;
-        cmd.Op2.n = 1;
-        cmd.Op3.type = o_void;
-        cmd.cflags |= aux_pseudo;
+        insn.Op1 = insn.Op2;
+        insn.Op2 = insn.Op3;
+        insn.Op1.n = 0;
+        insn.Op2.n = 1;
+        insn.Op3.type = o_void;
+        insn.cflags |= aux_pseudo;
       }
       break;
     case TMS6_sub:
-      if ( cmd.Op1.type == o_imm
-        && cmd.Op1.value == 0
-        && cmd.funit != FU_D1
-        && cmd.funit != FU_D2 )
+      if ( insn.Op1.type == o_imm
+        && insn.Op1.value == 0
+        && insn.funit != FU_D1
+        && insn.funit != FU_D2 )
       {
-        cmd.itype = TMS6_neg;
+        insn.itype = TMS6_neg;
         goto SHIFT_OPS;
       }
-      if ( cmd.Op1.type == o_reg
-        && cmd.Op2.type == o_reg
-        && cmd.Op3.type == o_reg
-        && cmd.Op1.reg  == cmd.Op2.reg )
+      if ( insn.Op1.type == o_reg
+        && insn.Op2.type == o_reg
+        && insn.Op3.type == o_reg
+        && insn.Op1.reg  == insn.Op2.reg )
       {
-        cmd.itype = TMS6_zero;
-        cmd.Op1.reg = cmd.Op3.reg;
-        cmd.Op2.type = o_void;
-        cmd.Op3.type = o_void;
-        cmd.cflags |= aux_pseudo;
+        insn.itype = TMS6_zero;
+        insn.Op1.reg = insn.Op3.reg;
+        insn.Op2.type = o_void;
+        insn.Op3.type = o_void;
+        insn.cflags |= aux_pseudo;
       }
       break;
     case TMS6_xor:
-      if ( cmd.Op1.type == o_imm && cmd.Op1.value == uval_t(-1) )
+      if ( insn.Op1.type == o_imm && insn.Op1.value == uval_t(-1) )
       {
-        cmd.itype = TMS6_not;
+        insn.itype = TMS6_not;
         goto SHIFT_OPS;
       }
       break;
     case TMS6_packlh2:
-      if ( cmd.Op1.type == o_reg
-        && cmd.Op2.type == o_reg
-        && cmd.Op1.reg  == cmd.Op2.reg )
+      if ( insn.Op1.type == o_reg
+        && insn.Op2.type == o_reg
+        && insn.Op1.reg  == insn.Op2.reg )
       {
-        cmd.itype = TMS6_swap2;
-        swap_op2_and_op3();
-        cmd.Op3.type = o_void;
-        cmd.cflags |= aux_pseudo;
+        insn.itype = TMS6_swap2;
+        swap_op2_and_op3(insn);
+        insn.Op3.type = o_void;
+        insn.cflags |= aux_pseudo;
       }
       break;
   }
 }
 
 //--------------------------------------------------------------------------
-static int table_insns(uint32 code, const tmsinsn_t *insn, bool isother)
+static int table_insns(
+        insn_t &insn,
+        uint32 code,
+        const tmsinsn_t *tinsn,
+        bool isother)
 {
 // +------------------------------------------...
 // |31    29|28|27    23|22   18|17        13|...
 // |  creg  |z |  dst   |  src2 |  src1/cst  |...
 // +------------------------------------------...
 
-  if ( insn->itype == TMS6_null )
+  if ( tinsn->itype == TMS6_null )
     return 0;
-  cmd.itype = insn->itype;
+  insn.itype = tinsn->itype;
   if ( isother )
-    cmd.cflags |= aux_xp;  // xpath is used
-  op_t *xptr = &cmd.Op1;
-  if ( !make_op(*xptr, code, insn->src1, (code >> 13) & 0x1F, isother) ) return 0;
-  if ( xptr->type != o_void ) xptr++;
-  if ( !make_op(*xptr, code, insn->src2, (code >> 18) & 0x1F, isother) ) return 0;
-  if ( xptr->type != o_void ) xptr++;
-  if ( !make_op(*xptr, code, insn->dst,  (code >> 23) & 0x1F, isother) ) return 0;
-  make_pseudo();
-  return cmd.size;
+    insn.cflags |= aux_xp;  // xpath is used
+  op_t *xptr = &insn.Op1;
+  if ( !make_op(insn, *xptr, code, tinsn->src1, (code >> 13) & 0x1F, isother) )
+    return 0;
+  if ( xptr->type != o_void )
+    xptr++;
+  if ( !make_op(insn, *xptr, code, tinsn->src2, (code >> 18) & 0x1F, isother) )
+    return 0;
+  if ( xptr->type != o_void )
+    xptr++;
+  if ( !make_op(insn, *xptr, code, tinsn->dst, (code >> 23) & 0x1F, isother) )
+    return 0;
+  make_pseudo(insn);
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
@@ -629,7 +652,7 @@ static const tmsinsn_t esc1A[32] =
   { TMS6_null,   t_none,        t_none,         t_none          }, // 1 1111
 };
 
-static int l_ops(uint32 code)
+static int l_ops(insn_t &insn, uint32 code)
 {
 // +--------------------------------------------------------------+
 // |31    29|28|27    23|22   18|17        13|12|11    5|4|3|2|1|0|
@@ -648,10 +671,10 @@ static int l_ops(uint32 code)
     case 0x71: // subsp
     case 0x72: // adddp
     case 0x73: // subdp
-      cmd.funit += 2; // move from L to S unit
+      insn.funit += 2; // move from L to S unit
       break;
   }
-  return table_insns(code, table + opcode, (code & BIT12) != 0);
+  return table_insns(insn, code, table + opcode, (code & BIT12) != 0);
 }
 
 //--------------------------------------------------------------------------
@@ -693,14 +716,14 @@ static const tmsinsn_t mops[32] =
   { TMS6_mpyu,    t_ulsb16,     t_xulsb16,      t_uint          }, // 1 1111
 };
 
-inline int m_ops(uint32 code)
+inline int m_ops(insn_t &insn, uint32 code)
 {
 // +------------------------------------------------------------------+
 // |31    29|28|27    23|22   18|17        13|12|11    7|6|5|4|3|2|1|0|
 // |  creg  |z |  dst   |  src2 |  src1/cst  |x |   op  |0|0|0|0|0|s|p|
 // +------------------------------------------------------------------+
 
-  return table_insns(code, mops + ((code >> 7) & 0x1F), (code & BIT12) != 0);
+  return table_insns(insn, code, mops + ((code >> 7) & 0x1F), (code & BIT12) != 0);
 }
 
 //--------------------------------------------------------------------------
@@ -758,7 +781,7 @@ static const tmsinsn_t dops[] =
   { TMS6_null,  t_none,         t_none,         t_none          }, // 11 1111
 };
 
-static int d_ops(uint32 code)
+static int d_ops(insn_t &insn, uint32 code)
 {
 // +--------------------------------------------------------------+
 // |31    29|28|27    23|22   18|17        13|12   7|6|5|4|3|2|1|0|
@@ -770,13 +793,13 @@ static int d_ops(uint32 code)
   if ( opcode == 0 )
   {
     static const tmsinsn_t mvk = { TMS6_mvk, t_scst5, t_none, t_sint };
-    res = table_insns(code, &mvk, 0);
+    res = table_insns(insn, code, &mvk, 0);
   }
   else if ( opcode >= 0x10 )
   {
-    res = table_insns(code, dops + (opcode - 0x10), 0);
+    res = table_insns(insn, code, dops + (opcode - 0x10), 0);
     if ( res != 0 )
-      swap_op1_and_op2();
+      swap_op1_and_op2(insn);
   }
   return res;
 }
@@ -822,37 +845,37 @@ static const tmsinsn_t dxops[32] =
   { TMS6_null,    t_none,       t_none,         t_none          }, // 1 1111
 };
 
-static int handle_dx(const tmsinsn_t *table, uint32 code)
+static int handle_dx(insn_t &insn, const tmsinsn_t *table, uint32 code)
 {
   int opcode = (code >> 7) & 0x1F;
   if ( opcode < 0x10 )
-    cmd.funit -= 2; // D -> M
+    insn.funit -= 2; // D -> M
   else if ( opcode >= 0x18 )
-    cmd.funit -= 4; // D -> S
-  int size = table_insns(code, table + opcode, (code & BIT12) != 0);
+    insn.funit -= 4; // D -> S
+  int size = table_insns(insn, code, table + opcode, (code & BIT12) != 0);
   if ( size > 0 )
   {
-    switch ( cmd.itype )
+    switch ( insn.itype )
     {
       case TMS6_rotl:
       case TMS6_sshvl:
       case TMS6_sshvr:
       case TMS6_shru2:
-        swap_op1_and_op2();
+        swap_op1_and_op2(insn);
         break;
     }
   }
   return size;
 }
 
-inline int dx_ops(uint32 code)
+inline int dx_ops(insn_t &insn, uint32 code)
 {
 // +-----------------------------------------------------------------+
 // |31    29|28|27    23|22   18|17        13|12|11   7|6|5|4|3|2|1|0|
 // |  creg  |z |  dst   |  src2 |  src1/cst  |x |  op  |0|1|1|0|0|s|p|
 // +-----------------------------------------------------------------+
 
-  return handle_dx(dxops, code);
+  return handle_dx(insn, dxops, code);
 }
 
 //--------------------------------------------------------------------------
@@ -910,25 +933,25 @@ static const uint16 bititypes[32] =
   TMS6_shfl,  TMS6_deal,  TMS6_bitc4, TMS6_bitr,
 };
 
-static int dxc_ops(uint32 code)
+static int dxc_ops(insn_t &insn, uint32 code)
 {
 // +-----------------------------------------------------------------+
 // |31    29|28|27    23|22   18|17        13|12|11   7|6|5|4|3|2|1|0|
 // |  creg  |z |  dst   |  src2 |  src1/cst  |x |  op  |1|1|1|0|0|s|p|
 // +-----------------------------------------------------------------+
 
-  int size =  handle_dx(dxcops, code);
+  int size =  handle_dx(insn, dxcops, code);
   if ( size > 0 )
   {
-    switch ( cmd.itype )
+    switch ( insn.itype )
     {
       case BITGRP:
-        cmd.itype = bititypes[(code >>13) & 0x1F];
-        if ( cmd.itype == TMS6_null )
+        insn.itype = bititypes[(code >>13) & 0x1F];
+        if ( insn.itype == TMS6_null )
           return 0;
         break;
       case TMS6_shr2:
-        swap_op1_and_op2();
+        swap_op1_and_op2(insn);
         break;
     }
   }
@@ -965,27 +988,27 @@ static const tms_ldinfo_t ldinfo[] =
   { TMS6_stndw, dt_qword, 3 },  // 1111
 };
 
-static int ld_common(uint32 code, bool use_bit8)
+static int ld_common(insn_t &insn, uint32 code, bool use_bit8)
 {
   int idx = (code >> 4) & 7;
   if ( use_bit8 )
     idx |= (code & BIT8) >> 5;
   const tms_ldinfo_t *ld = &ldinfo[idx];
-  cmd.itype = ld->itype;
-  if ( cmd.itype == TMS6_null )
+  insn.itype = ld->itype;
+  if ( insn.itype == TMS6_null )
     return -1;
-  cmd.Op2.type = o_reg;
-  cmd.Op2.dtyp = dt_dword;
-  cmd.Op2.reg  = (code >> 23) & 0x1F;
+  insn.Op2.type  = o_reg;
+  insn.Op2.dtype = dt_dword;
+  insn.Op2.reg   = (code >> 23) & 0x1F;
   if ( code & BIT1 )
-    cmd.Op2.reg += rB0;
-  cmd.Op1.dtyp = ld->dtype;
+    insn.Op2.reg += rB0;
+  insn.Op1.dtype = ld->dtype;
   if ( ld->shift == 3 )
   {
-    cmd.Op2.reg &= ~1;
-    cmd.Op2.type = o_regpair;
+    insn.Op2.reg &= ~1;
+    insn.Op2.type = o_regpair;
     if ( (code & BIT23) == 0 )
-      if ( cmd.itype == TMS6_ldndw || cmd.itype == TMS6_stndw )
+      if ( insn.itype == TMS6_ldndw || insn.itype == TMS6_stndw )
         return 1; // no scaling
   }
   return ld->shift;
@@ -1007,39 +1030,39 @@ static bool is_store_insn(ushort itype)
   }
 }
 
-static int ld15(uint32 code)
+static int ld15(insn_t &insn, uint32 code)
 {
-  int shift = ld_common(code, false);
+  int shift = ld_common(insn, code, false);
   if ( shift == -1 )
     return 0;
-  cmd.Op1.type = o_displ;
-  cmd.Op1.mode = 5;             // *+R[cst]
-  cmd.Op1.reg  = code & BIT7 ? rB15 : rB14;
-  cmd.Op1.addr = (code >> 8) & 0x7FFF;
-  bool is_store = is_store_insn(cmd.itype);
-  if ( isOff(get_flags_novalue(cmd.ea), is_store) )
-    cmd.Op1.addr <<= shift;
+  insn.Op1.type = o_displ;
+  insn.Op1.mode = 5;             // *+R[cst]
+  insn.Op1.reg  = code & BIT7 ? rB15 : rB14;
+  insn.Op1.addr = (code >> 8) & 0x7FFF;
+  bool is_store = is_store_insn(insn.itype);
+  if ( is_off(get_flags(insn.ea), is_store) )
+    insn.Op1.addr <<= shift;
   if ( is_store )
-    swap_op1_and_op2();
-  return cmd.size;
+    swap_op1_and_op2(insn);
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
 //      LOAD/STORE BASER+OFFSETR/CONST (ON D UNITS)
 //--------------------------------------------------------------------------
-static int ldbase(uint32 code)
+static int ldbase(insn_t &insn, uint32 code)
 {
 // +------------------------------------------------------------------------+
 // |31    29|28|27   23|22     18|17           13|12   9|8|7|6     4|3|2|1|0|
 // |  creg  |z |  dst  |  baseR  | offsetR/ucst5 | mode |r|y| ld/st |0|1|s|p|
 // +------------------------------------------------------------------------+
 
-  int shift = ld_common(code, true);
+  int shift = ld_common(insn, code, true);
   if ( shift == -1 )
     return 0;
-  cmd.Op1.mode = (code >> 9) & 0xF;
-  bool is_store = is_store_insn(cmd.itype);
-  switch ( cmd.Op1.mode )
+  insn.Op1.mode = (code >> 9) & 0xF;
+  bool is_store = is_store_insn(insn.itype);
+  switch ( insn.Op1.mode )
   {
     case 0x02:  // 0010
     case 0x03:  // 0011
@@ -1052,10 +1075,10 @@ static int ldbase(uint32 code)
     case 0x09:  // 1001 *++R[cst]
     case 0x0A:  // 1010 *R--[cst]
     case 0x0B:  // 1011 *R++[cst]
-      cmd.Op1.type = o_displ;
-      cmd.Op1.addr = (code >> 13) & 0x1F;
-      if ( isOff(uFlag, is_store) )
-        cmd.Op1.addr <<= shift;
+      insn.Op1.type = o_displ;
+      insn.Op1.addr = (code >> 13) & 0x1F;
+      if ( is_off(get_flags(insn.ea), is_store) )
+        insn.Op1.addr <<= shift;
       break;
     case 0x04:  // 0100 *-Rb[Ro]
     case 0x05:  // 0101 *+Rb[Ro]
@@ -1063,14 +1086,14 @@ static int ldbase(uint32 code)
     case 0x0D:  // 1101 *++Rb[Ro]
     case 0x0E:  // 1110 *Rb--[Ro]
     case 0x0F:  // 1111 *Rb++[Ro]
-      cmd.Op1.type   = o_phrase;
-      cmd.Op1.secreg = make_reg((code >> 13) & 0x1F, 0);
+      insn.Op1.type   = o_phrase;
+      insn.Op1.secreg = make_reg(insn, (code >> 13) & 0x1F, 0);
       break;
   }
-  cmd.Op1.reg = make_reg((code >> 18) & 0x1F, 0);
+  insn.Op1.reg = make_reg(insn, (code >> 18) & 0x1F, 0);
   if ( is_store )
-    swap_op1_and_op2();
-  return cmd.size;
+    swap_op1_and_op2(insn);
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
@@ -1144,7 +1167,7 @@ static const tmsinsn_t sops[64] =
   { TMS6_clr,    t_uint,        t_xuint,        t_uint          }, // 11 1111
 };
 
-static int s_ops(uint32 code)
+static int s_ops(insn_t &insn, uint32 code)
 {
 // +----------------------------------------------------------------+
 // |31    29|28|27    23|22   18|17        13|12|11    6|5|4|3|2|1|0|
@@ -1152,18 +1175,18 @@ static int s_ops(uint32 code)
 // +----------------------------------------------------------------+
 
   int opcode = (code >> 6) & 0x3F;
-  if ( !table_insns(code, sops + opcode, (code & BIT12) != 0) )
+  if ( !table_insns(insn, code, sops + opcode, (code & BIT12) != 0) )
     return 0;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS6_mvc:
-      cmd.cflags &= ~aux_xp;            // XPATH should not be displayed
+      insn.cflags &= ~aux_xp;            // XPATH should not be displayed
                                         // (assembler does not like it)
-      if ( cmd.funit != FU_S2 )
+      if ( insn.funit != FU_S2 )
         return 0;
       break;
     case TMS6_b:
-      if ( cmd.funit != FU_S2 )
+      if ( insn.funit != FU_S2 )
         return 0;
       if ( opcode != 3 )        // b irp
       {
@@ -1172,8 +1195,8 @@ static int s_ops(uint32 code)
           case 0:  // b
             break;
           case 1:  // bnop
-            cmd.itype = TMS6_bnop;
-            make_op(cmd.Op2, code, t_ucst3, (code >> 13) & 0x1F, false);
+            insn.itype = TMS6_bnop;
+            make_op(insn, insn.Op2, code, t_ucst3, (code >> 13) & 0x1F, false);
             break;
           default:
             return 0;
@@ -1181,15 +1204,15 @@ static int s_ops(uint32 code)
       }
       break;
     case TMS6_bdec:
-      cmd.cflags &= ~aux_xp;            // XPATH should not be displayed
+      insn.cflags &= ~aux_xp;            // XPATH should not be displayed
       if ( (code & BIT12) == 0 )
-        cmd.itype = TMS6_bpos;
+        insn.itype = TMS6_bpos;
       break;
     case TMS6_extu:
     case TMS6_ext:
     case TMS6_set:
     case TMS6_clr:
-      cmd.cflags &= ~aux_xp;            // XPATH should not be displayed
+      insn.cflags &= ~aux_xp;            // XPATH should not be displayed
                                         // (assembler does not like it)
       /* fall thru */
     case TMS6_shl:
@@ -1198,39 +1221,39 @@ static int s_ops(uint32 code)
     case TMS6_shru:
     case TMS6_shr2:
     case TMS6_shru2:
-      swap_op1_and_op2();
+      swap_op1_and_op2(insn);
       break;
     case TMS6_addkpc:
-      swap_op2_and_op3();
+      swap_op2_and_op3(insn);
       break;
   }
-  return cmd.size;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
 //      ADDK ON S UNITS
 //--------------------------------------------------------------------------
-static int addk(uint32 code)
+static int addk(insn_t &insn, uint32 code)
 {
 // +-----------------------------------------------------+
 // |31    29|28|27    23|22               7|6|5|4|3|2|1|0|
 // |  creg  |z |  dst   |        cst       |1|0|1|0|0|s|p|
 // +-----------------------------------------------------+
 
-  cmd.itype = TMS6_addk;
-  cmd.Op1.type = o_imm;
-  cmd.Op1.dtyp = dt_word;
-  cmd.Op1.value = short(code >> 7);
-  cmd.Op2.type = o_reg;
-  cmd.Op2.dtyp = dt_dword;
-  cmd.Op2.reg  = make_reg((code >> 23) & 0x1F, 0);
-  return cmd.size;
+  insn.itype     = TMS6_addk;
+  insn.Op1.type  = o_imm;
+  insn.Op1.dtype = dt_word;
+  insn.Op1.value = short(code >> 7);
+  insn.Op2.type  = o_reg;
+  insn.Op2.dtype = dt_dword;
+  insn.Op2.reg   = make_reg(insn, (code >> 23) & 0x1F, 0);
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
 //      FIELD OPERATIONS (IMMEDIATE FORMS) ON S UNITS
 //--------------------------------------------------------------------------
-static int field_ops(uint32 code)
+static int field_ops(insn_t &insn, uint32 code)
 {
 // +---------------------------------------------------------------+
 // |31    29|28|27    23|22   18|17    13|12     8|7  6|5|4|3|2|1|0|
@@ -1243,54 +1266,54 @@ static int field_ops(uint32 code)
     TMS6_set,   // 10
     TMS6_clr,   // 11
   };
-  cmd.itype = itypes[(code >> 6) & 3];
-  cmd.Op1.type  = o_imm;
-  cmd.Op1.value = (code >> 13) & 0x1F;
-  cmd.Op2.type  = o_imm;
-  cmd.Op2.value = (code >>  8) & 0x1F;
-  cmd.Op3.type  = o_reg;
-  cmd.Op3.reg   = make_reg((code >> 23) & 0x1F, 0);
-  cmd.Op1.src2  = make_reg((code >> 18) & 0x1F, 0);
-  cmd.cflags   |= aux_src2;
-  return cmd.size;
+  insn.itype = itypes[(code >> 6) & 3];
+  insn.Op1.type  = o_imm;
+  insn.Op1.value = (code >> 13) & 0x1F;
+  insn.Op2.type  = o_imm;
+  insn.Op2.value = (code >> 8) & 0x1F;
+  insn.Op3.type  = o_reg;
+  insn.Op3.reg   = make_reg(insn, (code >> 23) & 0x1F, 0);
+  insn.Op1.src2  = make_reg(insn, (code >> 18) & 0x1F, 0);
+  insn.cflags   |= aux_src2;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
 //      MVK AND MVKH ON S UNITS
 //--------------------------------------------------------------------------
-static int mvk(uint32 code)
+static int mvk(insn_t &insn, uint32 code)
 {
 // +-----------------------------------------------------+
 // |31    29|28|27    23|22               7|6|5|4|3|2|1|0|
 // |  creg  |z |  dst   |        cst       |x|1|0|1|0|s|p|
 // +-----------------------------------------------------+
 
-  cmd.itype     = code & BIT6 ? TMS6_mvkh : TMS6_mvk;
-  cmd.Op1.type  = o_imm;
-  cmd.Op1.dtyp  = dt_dword;
-  cmd.Op1.value = int16(code >> 7);
-  if ( cmd.itype == TMS6_mvkh )
+  insn.itype     = code & BIT6 ? TMS6_mvkh : TMS6_mvk;
+  insn.Op1.type  = o_imm;
+  insn.Op1.dtype = dt_dword;
+  insn.Op1.value = int16(code >> 7);
+  if ( insn.itype == TMS6_mvkh )
     // we can not use <<= 16 because bcb6 generates wrong code for __EA64__
-    cmd.Op1.value = uint32(cmd.Op1.value << 16);
-  cmd.Op2.type  = o_reg;
-  cmd.Op2.dtyp  = dt_word;
-  cmd.Op2.reg   = make_reg((code >> 23) & 0x1F, 0);
-  return cmd.size;
+    insn.Op1.value = uint32(insn.Op1.value << 16);
+  insn.Op2.type  = o_reg;
+  insn.Op2.dtype = dt_word;
+  insn.Op2.reg   = make_reg(insn, (code >> 23) & 0x1F, 0);
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
 //      BCOND DISP ON S UNITS
 //--------------------------------------------------------------------------
-static int bcond(uint32 code)
+static int bcond(insn_t &insn, uint32 code)
 {
 // +--------------------------------------------+
 // |31    29|28|27               7|6|5|4|3|2|1|0|
 // |  creg  |z |        cst       |0|0|1|0|0|s|p|
 // +--------------------------------------------+
 
-  cmd.itype = TMS6_b;
-  op_near(cmd.Op1, code, 7, 0x1FFFFF);
-  return cmd.size;
+  insn.itype = TMS6_b;
+  op_near(insn, insn.Op1, code, 7, 0x1FFFFF);
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
@@ -1339,7 +1362,7 @@ static const tmsinsn_indexed_t nopreds[] =
   { TMS6_rint,     t_none,      t_none,         t_none,  0x0001800, 0x3FFFFFF, FU_NONE },
 };
 
-static int nopred(uint32 code)
+static int nopred(insn_t &insn, uint32 code)
 {
   int idx = (code >> 2) & 0x3FFFFFF;
   const tmsinsn_indexed_t *p = nopreds;
@@ -1347,13 +1370,13 @@ static int nopred(uint32 code)
   {
     if ( p->index == (idx & p->mask) )
     {
-      cmd.funit = p->unit + ((code & BIT1) >> 1);
+      insn.funit = p->unit + ((code & BIT1) >> 1);
       bool other = (code & BIT1) != 0;
       if ( p->unit == FU_M1 || p->unit == FU_L1 )
         other = (code & BIT12) != 0;
-      int size = table_insns(code, (tmsinsn_t *)p, other);
+      int size = table_insns(insn, code, (tmsinsn_t *)p, other);
       if ( p->src1 == t_b14 )
-        cmd.cflags &= ~aux_xp;
+        insn.cflags &= ~aux_xp;
       return size;
     }
   }
@@ -1361,18 +1384,19 @@ static int nopred(uint32 code)
 }
 
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
-  if ( cmd.ip & 3 )
+  insn_t &insn = *_insn;
+  if ( insn.ip & 3 )
     return 0;           // alignment error
 
-  uint32 code = ua_next_long();
+  uint32 code = insn.get_next_dword();
 
   if ( code & BIT0 )
-    cmd.cflags |= aux_para;     // parallel execution with the next insn
+    insn.cflags |= aux_para;     // parallel execution with the next insn
 
-  cmd.cond = code >> 28;
-  switch ( cmd.cond )
+  insn.cond = code >> 28;
+  switch ( insn.cond )
   {
     case 0x0: // 0000 unconditional
     case 0x2: // 0010 B0
@@ -1392,8 +1416,8 @@ int idaapi ana(void)
     case 0xF: // 1111 reserved
       return 0;
     case 0x1: // 0001 no predicate
-      cmd.cond = 0;
-      return nopred(code);
+      insn.cond = 0;
+      return nopred(insn, code);
   }
 
   switch ( (code >> 2) & 0x1F )
@@ -1405,38 +1429,38 @@ int idaapi ana(void)
     case 0x0E: // 01110
     case 0x16: // 10110
     case 0x1E: // 11110
-      cmd.funit = code & BIT1 ? FU_L2 : FU_L1;
-      return l_ops(code);
+      insn.funit = code & BIT1 ? FU_L2 : FU_L1;
+      return l_ops(insn, code);
 //
 //      Operations on M units
 //
     case 0x00: // 00000
       if ( (code & 0x3FFFCL) == 0x1E000L )
       {
-        cmd.itype = TMS6_idle;
-        return cmd.size;
+        insn.itype = TMS6_idle;
+        return insn.size;
       }
       if ( (code & 0x21FFEL) == 0 )
       {
-        cmd.Op1.type = o_imm;
-        cmd.Op1.dtyp = dt_dword;
-        cmd.Op1.value = ((code >> 13) & 0xF) + 1;
-        if ( cmd.Op1.value > 9 )
+        insn.Op1.type  = o_imm;
+        insn.Op1.dtype = dt_dword;
+        insn.Op1.value = ((code >> 13) & 0xF) + 1;
+        if ( insn.Op1.value > 9 )
           return 0;
-        if ( cmd.Op1.value == 1 )
-          cmd.Op1.clr_shown();
-        cmd.itype = TMS6_nop;
-        return cmd.size;
+        if ( insn.Op1.value == 1 )
+          insn.Op1.clr_shown();
+        insn.itype = TMS6_nop;
+        return insn.size;
       }
       if ( (code & 0x0C03FFFC) == 0x32000 )
       {
-        cmd.itype = TMS6_spmaskr;
-        return op_spmask(cmd.Op1, code);
+        insn.itype = TMS6_spmaskr;
+        return op_spmask(insn, insn.Op1, code);
       }
       if ( (code & 0x0C03FFFC) == 0x30000 )
       {
-        cmd.itype = TMS6_spmask;
-        return op_spmask(cmd.Op1, code);
+        insn.itype = TMS6_spmask;
+        return op_spmask(insn, insn.Op1, code);
       }
       if ( (code & 0x371FFC) == 0x030000 )
       {
@@ -1446,49 +1470,49 @@ int idaapi ana(void)
           TMS6_sploop, TMS6_sploopd, TMS6_null,      TMS6_sploopw,
         };
         int idx = (code >> 13) & 7;
-        cmd.itype = itypes[idx];
+        insn.itype = itypes[idx];
         switch ( idx )
         {
           default:
             return 0;
           case 2:               // spkernel
-            cmd.Op1.type = o_stgcyc;
-            cmd.Op1.dtyp = dt_dword;
-            cmd.Op1.value = ((code >> 22) & 0x3F);
+            insn.Op1.type  = o_stgcyc;
+            insn.Op1.dtype = dt_dword;
+            insn.Op1.value = ((code >> 22) & 0x3F);
             break;
           case 3:               // spkernelr
             break;
           case 4:               // sploop
           case 5:               // sploopd
           case 7:               // sploopw
-            cmd.Op1.type = o_imm;
-            cmd.Op1.dtyp = dt_dword;
-            cmd.Op1.value = ((code >> 23) & 0x1F) + 1;
+            insn.Op1.type  = o_imm;
+            insn.Op1.dtype = dt_dword;
+            insn.Op1.value = ((code >> 23) & 0x1F) + 1;
             break;
 
         }
-        return cmd.size;
+        return insn.size;
       }
-      cmd.funit = code & BIT1 ? FU_M2 : FU_M1;
-      return m_ops(code);
+      insn.funit = code & BIT1 ? FU_M2 : FU_M1;
+      return m_ops(insn, code);
 //
 //      Operations on D units
 //
     case 0x10: // 10000
-      cmd.funit = code & BIT1 ? FU_D2 : FU_D1;
-      return d_ops(code);
+      insn.funit = code & BIT1 ? FU_D2 : FU_D1;
+      return d_ops(insn, code);
 //
 //      Operations on D units (with cross path)
 //
     case 0x0C: // 01100
-      cmd.funit = code & BIT1 ? FU_D2 : FU_D1;
-      return dx_ops(code);
+      insn.funit = code & BIT1 ? FU_D2 : FU_D1;
+      return dx_ops(insn, code);
 //
 //      Operations on D units (cross path used with a constant)
 //
     case 0x1C: // 11100
-      cmd.funit = code & BIT1 ? FU_D2 : FU_D1;
-      return dxc_ops(code);
+      insn.funit = code & BIT1 ? FU_D2 : FU_D1;
+      return dxc_ops(insn, code);
 //
 //      Load/store with 15-bit offset (on D2 unit)
 //
@@ -1500,8 +1524,8 @@ int idaapi ana(void)
     case 0x17: // 10111
     case 0x1B: // 11011
     case 0x1F: // 11111
-      cmd.funit = FU_D2;
-      return ld15(code);
+      insn.funit = FU_D2;
+      return ld15(insn, code);
 //
 //      Load/store baseR+offsetR/const (on D units)
 //
@@ -1513,41 +1537,41 @@ int idaapi ana(void)
     case 0x15: // 10101
     case 0x19: // 11001
     case 0x1D: // 11101
-      cmd.funit = code & BIT7 ? FU_D2 : FU_D1;
-      return ldbase(code);
+      insn.funit = code & BIT7 ? FU_D2 : FU_D1;
+      return ldbase(insn, code);
 //
 //      Operations on S units
 //
     case 0x08: // 01000
     case 0x18: // 11000
-      cmd.funit = code & BIT1 ? FU_S2 : FU_S1;
-      return s_ops(code);
+      insn.funit = code & BIT1 ? FU_S2 : FU_S1;
+      return s_ops(insn, code);
 //
 //      ADDK on S units
 //
     case 0x14: // 10100
-      cmd.funit = code & BIT1 ? FU_S2 : FU_S1;
-      return addk(code);
+      insn.funit = code & BIT1 ? FU_S2 : FU_S1;
+      return addk(insn, code);
 //
 //      Field operations (immediate forms) on S units
 //
     case 0x02: // 00010
     case 0x12: // 10010
-      cmd.funit = code & BIT1 ? FU_S2 : FU_S1;
-      return field_ops(code);
+      insn.funit = code & BIT1 ? FU_S2 : FU_S1;
+      return field_ops(insn, code);
 //
 //      MVK and MVKH on S units
 //
     case 0x0A: // 01010
     case 0x1A: // 11010
-      cmd.funit = code & BIT1 ? FU_S2 : FU_S1;
-      return mvk(code);
+      insn.funit = code & BIT1 ? FU_S2 : FU_S1;
+      return mvk(insn, code);
 //
 //      Bcond disp on S units
 //
     case 0x04: // 00100
-      cmd.funit = code & BIT1 ? FU_S2 : FU_S1;
-      return bcond(code);
+      insn.funit = code & BIT1 ? FU_S2 : FU_S1;
+      return bcond(insn, code);
   }
   return 0;
 }

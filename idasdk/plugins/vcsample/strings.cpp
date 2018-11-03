@@ -19,49 +19,65 @@
 //--------------------------------------------------------------------------
 // Example of a user-defined IDC function in C++
 
-#if 0
-static const char myfunc5_args[] = { VT_LONG, VT_STR, 0 };
+//#define DEFINE_IDC_FUNC
+#ifdef DEFINE_IDC_FUNC
 static error_t idaapi myfunc5(idc_value_t *argv, idc_value_t *res)
 {
-  msg("myfunc is called with arg0=%x and arg1=%s\n", argv[0].num, argv[1].str);
+  msg("myfunc is called with arg0=%x and arg1=%s\n", argv[0].num, argv[1].c_str());
   res->num = 5;     // let's return 5
   return eOk;
 }
-#endif
+static const char myfunc5_args[] = { VT_LONG, VT_STR, 0 };
+static const ext_idcfunc_t myfunc5_desc =
+{
+  { "MyFunc5", myfunc5, myfunc5_args, NULL, 0, 0 }
+};
+#endif // DEFINE_IDC_FUNC
 
 //--------------------------------------------------------------------------
 // This callback is called for UI notification events
-static int idaapi sample_callback(void * /*user_data*/, int event_id, va_list /*va*/)
+//#define DEFINE_SAMPLE_CALLBACK
+#ifdef DEFINE_SAMPLE_CALLBACK
+static ssize_t idaapi sample_callback(void * /*user_data*/, int event_id, va_list /*va*/)
 {
-  if ( event_id != ui_msg )     // avoid recursion
-    if ( event_id != ui_obsolete_setstate
-      && event_id != ui_obsolete_showauto
-      && event_id != ui_refreshmarked ) // ignore uninteresting events
-                    msg("ui_callback %d\n", event_id);
+  if ( event_id != ui_msg     // avoid recursion
+    && event_id != ui_obsolete_setstate
+    && event_id != ui_obsolete_showauto
+    && event_id != ui_refreshmarked ) // ignore uninteresting events
+  {
+    msg("ui_callback %d\n", event_id);
+  }
   return 0;                     // 0 means "process the event"
                                 // otherwise the event would be ignored
 }
+#endif // DEFINE_SAMPLE_CALLBACK
 
 //--------------------------------------------------------------------------
 // A sample how to generate user-defined line prefixes
-#if 0
+//#define HAS_USER_DEFINED_PREFIX
+#ifdef HAS_USER_DEFINED_PREFIX
 static const int prefix_width = 8;
 
-static void get_user_defined_prefix(ea_t ea,
-                                    int lnnum,
-                                    int indent,
-                                    const char *line,
-                                    char *buf,
-                                    size_t bufsize)
+static void gen_user_defined_prefix(
+        qstring *buf,
+        ea_t ea,
+        int lnnum,
+        int indent,
+        const char *line)
 {
-  buf[0] = '\0';        // empty prefix by default
+  buf->qclear();        // empty prefix by default
 
   // We want to display the prefix only the lines which
   // contain the instruction itself
 
-  if ( indent != -1 ) return;           // a directive
-  if ( line[0] == '\0' ) return;        // empty line
-  if ( tag_advance(line,1)[-1] == ash.cmnt[0] ) return; // comment line...
+  if ( indent != -1 )           // a directive
+    return;
+
+  if ( line[0] == '\0' )        // empty line
+    return;
+
+  if ( tag_advance(line,1)[-1] == ash.cmnt[0] ) // comment line...
+    return;
 
   // We don't want the prefix to be printed again for other lines of the
   // same instruction/data. For that we remember the line number
@@ -69,7 +85,8 @@ static void get_user_defined_prefix(ea_t ea,
 
   static ea_t old_ea = BADADDR;
   static int old_lnnum;
-  if ( old_ea == ea && old_lnnum == lnnum ) return;
+  if ( old_ea == ea && old_lnnum == lnnum )
+    return;
 
   // Ok, seems that we found an instruction line.
 
@@ -79,14 +96,14 @@ static void get_user_defined_prefix(ea_t ea,
   // We don't bother about the width of the prefix
   // because it will be padded with spaces by the kernel
 
-  qsnprintf(buf, bufsize, " %ld", our_size);
+  buf->sprnt(" %ld", long(our_size));
 
   // Remember the address and line number we produced the line prefix for:
   old_ea = ea;
   old_lnnum = lnnum;
 
 }
-#endif
+#endif // HAS_USER_DEFINED_PREFIX
 
 //--------------------------------------------------------------------------
 //
@@ -111,17 +128,25 @@ static void get_user_defined_prefix(ea_t ea,
 //
 int idaapi init(void)
 {
-  if ( inf.filetype == f_ELF ) return PLUGIN_SKIP;
+  if ( inf.filetype == f_ELF )
+    return PLUGIN_SKIP;
 
-// Please uncomment the following line to see how the notification works
-//  hook_to_notification_point(HT_UI, sample_callback, NULL);
-//  PLUGIN.flags &= ~PLUGIN_UNL;
+  // notifications
+#ifdef DEFINE_SAMPLE_CALLBACK
+  hook_to_notification_point(HT_UI, sample_callback);
+  PLUGIN.flags &= ~PLUGIN_UNL;
+#endif // DEFINE_SAMPLE_CALLBACK
 
-// Please uncomment the following line to see how to the user-defined prefix works
-//  set_user_defined_prefix(prefix_width, get_user_defined_prefix);
+  // user-defined prefix
+#ifdef HAS_USER_DEFINED_PREFIX
+  set_user_defined_prefix(prefix_width, gen_user_defined_prefix);
+#endif // HAS_USER_DEFINED_PREFIX
 
-// Please uncomment the following line to see how to define IDC functions
-//  set_idc_func_ex("MyFunc5", myfunc5, myfunc5_args, 0);
+  // custom IDC function
+#ifdef DEFINE_IDC_FUNC
+  add_idc_func(myfunc5_desc);
+  PLUGIN.flags &= ~PLUGIN_UNL;
+#endif // DEFINE_IDC_FUNC
 
   const char *options = get_plugin_options("vcsample");
   if ( options != NULL )
@@ -140,9 +165,17 @@ int idaapi init(void)
 
 void idaapi term(void)
 {
+#ifdef DEFINE_SAMPLE_CALLBACK
   unhook_from_notification_point(HT_UI, sample_callback);
+#endif
+
+#ifdef HAS_USER_DEFINED_PREFIX
   set_user_defined_prefix(0, NULL);
-  set_idc_func_ex("MyFunc5", NULL, NULL, 0);
+#endif
+
+#ifdef DEFINE_IDC_FUNC
+  del_idc_func(myfunc5_desc.name);
+#endif
 }
 
 //--------------------------------------------------------------------------
@@ -158,11 +191,12 @@ void idaapi term(void)
 //
 //
 
-void idaapi run(int arg)
+bool idaapi run(size_t arg)
 {
-  warning("plugin \"line_prefixes\" is called with arg %x\n", arg);
+  warning("plugin \"line_prefixes\" is called with arg %x", int(arg));
 
 //  msg("just fyi: the current screen address is: %a\n", get_screen_ea());
+  return true;
 }
 
 //--------------------------------------------------------------------------

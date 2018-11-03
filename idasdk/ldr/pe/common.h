@@ -11,6 +11,7 @@ struct pe_section_visitor_t
 };
 
 //------------------------------------------------------------------------
+//-V:pe_import_visitor_t:730 not all members of a class are initialized inside the constructor
 struct pe_import_visitor_t
 {
   bool withbase;
@@ -94,6 +95,7 @@ public:
   inline uint32 valong(linput_t *li, uint32 addr, bool *ok) { return varead<uint32>(li, addr, ok); }
   inline uint64 vaint64(linput_t *li, uint32 addr, bool *ok) { return varead<uint64>(li, addr, ok); }
   char *asciiz(linput_t *li, uint32 rva, char *buf, size_t bufsize, bool *ok);
+  char *asciiz2(linput_t *li, uint32 rva, char *buf, size_t bufsize, bool *ok);
   int process_sections(linput_t *li, off_t fist_sec_pos, int nojbs, pe_section_visitor_t &psv);
   int process_sections(linput_t *li, pe_section_visitor_t &psv);
   // If 'zero_bad_data==true' (i.e., the default), extra 'directories'

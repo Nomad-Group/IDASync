@@ -11,8 +11,7 @@
 #include <kernwin.hpp>  // for btoa()
 #include <lines.hpp>    // for colors
 #include <xref.hpp>     // add_cref()
-
-#pragma pack(push, 1)   // IDA uses 1 byte alignments!
+#include <bytes.hpp>    // get_byte(), ...
 
 /*! \file ua.hpp
 
@@ -33,7 +32,8 @@
 
   The kernel calls the IDP module to perform these steps.
   At first, the kernel always calls analysis. The analyzer
-  must decode the instruction and fill ::cmd.
+  must decode the instruction and fill the insn_t instance
+  that it receives through its callback.
   It has no rights to change anything in the database.
 
   The second step, emulation, is called for each instruction.
@@ -50,8 +50,9 @@
   is displayed on the screen. The kernel will always call the analysis step first
   (the analysis should be very fast) and then will call conversion to text.
   The emulation and conversion steps should use information stored
-  in ::cmd. They should not access the bytes of the instruction
-  and decode it again - this should only be done in the analysis step.
+  in the insn_t instance they receive. They should not access the bytes
+  of the instruction  and decode it again - this should only be done in
+  the analysis step.
 */
 
 /// \defgroup operands Operands
@@ -60,7 +61,6 @@
 //--------------------------------------------------------------------------
 //      T Y P E   O F   O P E R A N D
 //--------------------------------------------------------------------------
-#ifndef SWIG
 typedef uchar optype_t; ///< see \ref o_
 /// \defgroup o_ Operand types
 /// \ingroup operands
@@ -70,7 +70,7 @@ typedef uchar optype_t; ///< see \ref o_
 /// with fields in ::op_t.
 ///
 /// IDA also allows you define processor specific operand types (o_idpspec...).
-/// You are free to give any meaning to these types. I suggest you to create a
+/// You are free to give any meaning to these types. We suggest you to create a
 /// #define to use mnemonic names. However, don't forget that the kernel will
 /// know nothing about operands of those types.
 /// You may use any additional fields of ::op_t to store
@@ -102,10 +102,10 @@ const optype_t
 /// \var o_mem
 /// A direct memory data reference whose target address is known at compilation time.
 /// The target virtual address is stored in op_t::addr and the full address
-/// is calculated as toEA( \cmd{cs}, op_t::addr ). For the processors with
+/// is calculated as to_ea( \insn_t{cs}, op_t::addr ). For the processors with
 /// complex memory organization the final address can be calculated
 /// using other segment registers. For flat memories, op_t::addr is the final
-/// address and \cmd{cs} is usually equal to zero. In any case, the address
+/// address and \insn_t{cs} is usually equal to zero. In any case, the address
 /// within the segment should be stored in op_t::addr.
 ///
 /// \var o_phrase
@@ -126,7 +126,7 @@ const optype_t
 /// \var o_imm
 /// Any operand consisting of only a number is represented by this operand type.
 /// The value should be stored in op_t::value. You may sign extend short (1-2 byte) values.
-/// In any case don't forget to specify op_t::dtyp (should be set for all operand types).
+/// In any case don't forget to specify op_t::dtype (should be set for all operand types).
 ///
 /// \var o_far
 /// If the current processor has a special addressing mode for inter-segment
@@ -137,14 +137,13 @@ const optype_t
 /// \var o_near
 /// A direct memory code reference whose target address is known at the compilation time.
 /// The target virtual address is stored in op_t::addr and the final address
-/// is always toEA(\cmd{cs}, op_t::addr). Usually this operand type is used for
+/// is always to_ea(\insn_t{cs}, op_t::addr). Usually this operand type is used for
 /// the branches and calls whose target address is known. If the current
 /// processor has 2 different types of references for inter-segment and intra-segment
 /// references, then this should be used only for intra-segment references.
 ///
 /// If the above operand types do not cover all possible addressing modes,
 /// then use o_idpspec... operand types.
-
 
 //--------------------------------------------------------------------------
 //      O P E R A N D   O F   I N S T R U C T I O N
@@ -216,10 +215,10 @@ public:
   /// Type of operand value (see \ref dt_). Usually first 9 types are used.
   /// This is the type of the operand itself, not the size of the addressing mode.
   /// for example, byte ptr [epb+32_bit_offset]  will have #dt_byte type.
-  char          dtyp;
+  op_dtype_t dtype;
 /// \defgroup dt_ Operand value types
 /// \ingroup operands_t
-/// Used by op_t::dtyp
+/// Used by op_t::dtype
 //@{
 // from here..
 #define dt_byte         0       ///< 8 bit
@@ -238,10 +237,9 @@ public:
 #define dt_bitfild      12      ///< bit field (mc680x0)
 #define dt_string       13      ///< pointer to asciiz string
 #define dt_unicode      14      ///< pointer to unicode string
-#define dt_3byte        15      ///< 3-byte data
-#define dt_ldbl         16      ///< long double (which may be different from tbyte)
-#define dt_byte32       17      ///< 256 bit
-#define dt_byte64       18      ///< 512 bit
+#define dt_ldbl         15      ///< long double (which may be different from tbyte)
+#define dt_byte32       16      ///< 256 bit
+#define dt_byte64       17      ///< 512 bit
 //@}
 
   // REG
@@ -259,7 +257,8 @@ public:
   //  Next 12 bytes are used by mc68k for some float types
 
   // VALUE
-  union {
+  union
+  {
     uval_t value;               ///< operand value (::o_imm) or
                                 ///< outer displacement (::o_displ+#OF_OUTER_DISP).
                                 ///< integer values should be in IDA's (little-endian) order.
@@ -270,7 +269,8 @@ public:
 
     /// This structure is defined for
     /// your convenience only
-    struct {
+    struct
+    {
         uint16 low;
         uint16 high;
     } value_shorts;
@@ -280,24 +280,28 @@ public:
   bool is_imm(uval_t v) const { return type == o_imm && value == v; }
 
   // VIRTUAL ADDRESS (offset within the segment)
-  union {
+  union
+  {
     ea_t addr;                  ///< virtual address pointed or used by the operand.
                                 ///< (::o_mem,::o_displ,::o_far,::o_near)
 
     /// This structure is defined for
     /// your convenience only
-    struct {
+    struct
+    {
         uint16 low;
         uint16 high;
     } addr_shorts;
   };
 
   // IDP SPECIFIC INFORMATION
-  union {
+  union
+  {
     ea_t specval;               ///< This field may be used as you want.
     /// This structure is defined for
     /// your convenience only
-    struct {
+    struct
+    {
         uint16 low;             ///< IBM PC: segment register number (::o_mem,::o_far,::o_near)
         uint16 high;            ///< IBM PC: segment selector value  (::o_mem,::o_far,::o_near)
     } specval_shorts;
@@ -308,10 +312,10 @@ public:
   /// You may use them as you want to store additional information about
   /// the operand.
   //@{
-  char          specflag1;
-  char          specflag2;
-  char          specflag3;
-  char          specflag4;
+  char         specflag1;
+  char         specflag2;
+  char         specflag3;
+  char         specflag4;
   //@}
 };
 
@@ -325,11 +329,25 @@ public:
 /// Structure to hold information about an instruction. \ingroup instruction
 /// This structure is filled by the analysis step of IDP and used by
 /// the emulation and conversion to text steps. The kernel uses this structure too.
-/// All structure fields except #cs, #ip, #ea, and op_t::n,op_t::flags of #Operands
+/// All structure fields except #cs, #ip, #ea, and op_t::n,op_t::flags of #ops
 /// are initialized to zero by the kernel. The rest should be filled by ana().
+
+class insn_t;
+#define DECLARE_INSN_HELPERS(decl) \
+decl bool ida_export insn_create_op_data(const insn_t &insn, ea_t ea, int opoff, op_dtype_t dtype); \
+decl void ida_export insn_add_cref(const insn_t &insn, ea_t to, int opoff, cref_t type); \
+decl void ida_export insn_add_dref(const insn_t &insn, ea_t to, int opoff, dref_t type); \
+decl ea_t ida_export insn_add_off_drefs(const insn_t &insn, const op_t &x, dref_t type, int outf); \
+decl bool ida_export insn_create_stkvar(const insn_t &insn, const op_t &x, adiff_t v, int flags);
+
+DECLARE_INSN_HELPERS(idaman)
+
+//-V:insn_t:730 not all members of a class are initialized inside the constructor
 class insn_t
 {
 public:
+  insn_t() : ea(BADADDR), itype(0), size(0) {}
+
   /// Current segment base paragraph. Initialized by the kernel.
   ea_t cs;
 
@@ -357,34 +375,31 @@ public:
 
   union
   {
-    uint16 auxpref;             ///< processor dependent field
-    /// This structure is defined for
-    /// your convenience only
-    struct
-    {
-      uchar low;
-      uchar high;
-    } auxpref_chars;
+    uint32 auxpref;             ///< processor dependent field
+    uint16 auxpref_u16[2];
+    uint8  auxpref_u8[4];
   };
-  char segpref;                 ///< processor dependent field
-  char insnpref;                ///< processor dependent field
+  /*u*/ char segpref;           ///< processor dependent field
+  /*u*/ char insnpref;          ///< processor dependent field
 
-#define UA_MAXOP        6       ///< max number of operands allowed for an instruction
-  op_t Operands[UA_MAXOP];      ///< array of operands
+  /*u*/ int16 flags;            ///< \ref INSN_
+
+  op_t ops[UA_MAXOP];           ///< array of operands
 
   /// \defgroup Op_ Operand shortcuts
   /// \ingroup instruction
-  /// Used for accessing members of insn_t::Operands
+  /// Used for accessing members of insn_t::ops
   //@{
-  #define Op1 Operands[0]       ///< first operand
-  #define Op2 Operands[1]       ///< second operand
-  #define Op3 Operands[2]       ///< third operand
-  #define Op4 Operands[3]       ///< fourth operand
-  #define Op5 Operands[4]       ///< fifth operand
-  #define Op6 Operands[5]       ///< sixth operand
+  #define Op1 ops[0]       ///< first operand
+  #define Op2 ops[1]       ///< second operand
+  #define Op3 ops[2]       ///< third operand
+  #define Op4 ops[3]       ///< fourth operand
+  #define Op5 ops[4]       ///< fifth operand
+  #define Op6 ops[5]       ///< sixth operand
+  #define Op7 ops[6]       ///< seventh operand
+  #define Op8 ops[7]       ///< eighth operand
   //@}
 
-  char flags;                   ///< \ref INSN_
 /// \defgroup INSN_ Instruction flags
 /// \ingroup instruction
 /// Used by insn_t::flags
@@ -396,13 +411,139 @@ public:
   /// Is a macro instruction?
   bool is_macro(void) const { return (flags & INSN_MACRO) != 0; }
 
-};
+  /// \name Analysis helpers
+  /// The following functions return the next byte, 2 bytes, 4 bytes,
+  /// and 8 bytes of insn. They use and modify the size field (\insn_t{size}).
+  /// Normally they are used in the analyzer to get bytes of the instruction.
+  /// \warning These methods work only for normal (8bit) byte processors!
+  //@{
+  uint8 get_next_byte()
+  {
+    uint8 x = get_byte(ea + size);
+    size += 1;
+    return x;
+  }
+  uint16 get_next_word()
+  {
+    uint16 x = get_word(ea + size);
+    size += 2;
+    return x;
+  }
+  uint32 get_next_dword()
+  {
+    uint32 x = get_dword(ea + size);
+    size += 4;
+    return x;
+  }
+  uint64 get_next_qword()
+  {
+    uint64 x = get_qword(ea + size);
+    size += 8;
+    return x;
+  }
+  //@}
 
+  /// \name Emulator helpers
+  //@{
+
+  /// Convert to data using information about operand value type (op_t::dtype).
+  /// Emulator could use this function to convert unexplored bytes to data
+  /// when an instruction references them.
+  /// This function creates data only if the address was unexplored.
+  /// \param ea     linear address to be converted to data
+  /// \param opoff  offset of the operand from the start of instruction
+  ///               if the offset is unknown, then 0
+  /// \param dtype  operand value type (from op_t::dtype)
+  /// \retval true  ok
+  /// \retval false failed to create data item
+
+  bool create_op_data(ea_t ea_, int opoff, op_dtype_t dtype) const
+  {
+    return insn_create_op_data(*this, ea_, opoff, dtype);
+  }
+
+  /// Convenient alias
+  bool create_op_data(ea_t ea_, const op_t &op) const
+  {
+    return insn_create_op_data(*this, ea_, op.offb, op.dtype);
+  }
+
+
+  /// Create or modify a stack variable in the function frame.
+  /// The emulator could use this function to create stack variables
+  /// in the function frame before converting the operand to a stack variable.
+  /// Please check with may_create_stkvars() before calling this function.
+  /// \param x       operand (used to determine the addressing type)
+  /// \param v       a displacement in the operand
+  /// \param flags_  \ref STKVAR_2
+  /// \retval 1  ok, a stack variable exists now
+  /// \retval 0  no, couldn't create stack variable
+
+  bool create_stkvar(const op_t &x, adiff_t v, int flags_) const
+  {
+    return insn_create_stkvar(*this, x, v, flags_);
+  }
+
+  /// \defgroup STKVAR_2 Stack variable flags
+  /// Passed as 'flags' parameter to create_stkvar()
+  //@{
+#define STKVAR_VALID_SIZE       0x0001 ///< x.dtype contains correct variable type
+                                       ///< (for insns like 'lea' this bit must be off)
+                                       ///< in general, dr_O references do not allow
+                                       ///< to determine the variable size
+  //@}
+
+
+  /// Add a code cross-reference from the instruction.
+  /// \param opoff  offset of the operand from the start of instruction.
+  ///               if the offset is unknown, then 0.
+  /// \param to     target linear address
+  /// \param type   type of xref
+
+  void add_cref(ea_t to, int opoff, cref_t type) const
+  {
+    insn_add_cref(*this, to, opoff, type);
+  }
+
+
+  /// Add a data cross-reference from the instruction.
+  /// See add_off_drefs() - usually it can be used in most cases.
+  /// \param opoff  offset of the operand from the start of instruction
+  ///               if the offset is unknown, then 0
+  /// \param to     target linear address
+  /// \param type   type of xref
+
+  void add_dref(ea_t to, int opoff, dref_t type) const
+  {
+    insn_add_dref(*this, to, opoff, type);
+  }
+
+
+  /// Add xrefs for an operand of the instruction.
+  /// This function creates all cross references for 'offset' and
+  /// 'structure offset' operands.
+  /// Use add_off_drefs() in the presence of negative offsets.
+  /// \param x     reference to operand
+  /// \param type  type of xref
+  /// \param outf  out_value() flags. These flags should match
+  ///              the flags used to output the operand
+  /// \return if is_off(), the reference target address (the same as calc_reference_data).
+  ///          else, #BADADDR, because for stroffs the target address is unknown
+
+  ea_t add_off_drefs(const op_t &x, dref_t type, int outf) const
+  {
+    return insn_add_off_drefs(*this, x, type, outf);
+  }
+
+  //@}
+
+
+};
 
 //--------------------------------------------------------------------------
 //      V A L U E   O F   O P E R A N D
 //--------------------------------------------------------------------------
-
+#ifndef SWIG
 /// This structure is used to pass values of bytes to helper functions.
 union value_u
 {
@@ -420,23 +561,26 @@ union value_u
 
 #endif // SWIG
 
-/// Get immediate values used in the operand if it fits into ::uval_t.
-/// \param ea  linear address
-/// \param n   number of operand (0..#UA_MAXOP-1), -1 means all operands
-/// \param v   array of immediate values (at least 2*#UA_MAXOP elements)
+/// Get immediate values at the specified address.
+/// This function decodes instruction at the specified address or inspects
+/// the data item. It finds immediate values and copies them to 'out'.
+/// \param out   array of immediate values (at least 2*#UA_MAXOP elements)
+/// \param ea    address to analyze
+/// \param n     number of operand (0..#UA_MAXOP-1), -1 means all operands
+/// \param F     flags for the specified address
+/// \param cache optional already decoded instruction or buffer for it.
+///              if the cache does not contain the decoded instruction,
+///              it will be updated (useful if we call get_immvals for the same
+///              address multiple times)
 /// \return number of immediate values (0..2*#UA_MAXOP)
 
-idaman size_t ida_export get_operand_immvals(ea_t ea, int n, uval_t *v);
+idaman size_t ida_export get_immvals(
+        uval_t *out,
+        ea_t ea,
+        int n,
+        flags_t F,
+        insn_t *cache=NULL);
 
-
-//--------------------------------------------------------------------------
-//      T H E   M A I N   S T R U C T U R E
-//--------------------------------------------------------------------------
-
-/// Structure holding information about the current instruction.
-/// Analyzer should fill this structure.
-
-idaman insn_t ida_export_data cmd;
 
 /// Number of instructions to look back.
 /// This variable is not used by the kernel.
@@ -445,179 +589,205 @@ idaman insn_t ida_export_data cmd;
 /// IDP may use it as you like it.
 /// (TMS module uses it)
 
-idaman int ida_export_data lookback;
+idaman int ida_export get_lookback(void);
 
 
 //--------------------------------------------------------------------------
 //      I D P   H E L P E R   F U N C T I O N S  -  C O M M O N
 //--------------------------------------------------------------------------
 
-/// Flags value for the byte at the start of the current instruction.
-/// (see bytes.hpp for explanation of flags).
-/// The kernel retrieves flags value and stores it in this variable for
-/// your convenience. Anytime you change the database by calling functions
-/// that change flags value you should refresh it using get_flags_novalue()
-/// uFlag does not contain #MS_VAL and #FF_IVL fields of flags, so please
-/// don't call hasValue() on it.
-
-idaman flags_t ida_export_data uFlag;
-
-/// \name Segment bases
-/// The following functions return segment base linear addresses of
-/// the data or code segment for the current instruction.
-/// They use values of segment registers, operand types, etc.
+/// \name Address translation
+/// The following functions can be used by processor modules to map
+/// addresses from one region to another. They are especially useful
+/// for microprocessors that map the same memory region to multiple address
+/// ranges or use memory bank switching.
+/// The user can use the following techniques to desribe address translations:
+///   - some processors support the segment transation feature.
+///     the user can specify the mapping in Edit, Segments, Change segment translation
+///   - the user can specify mapping for an individual direct call instruction
+///     by specifying it as an offset (Edit, Operand types, Offset)
+///   - specify the value of the data segment virtual register (ds).
+///     it will be used to calculate data addresses
 //@{
 
-/// Get data segment by operand.
+/// Get data segment for the instruction operand.
 /// 'opnum' and 'rgnum' are meaningful only if the processor
 /// has segment registers.
 
-idaman ea_t ida_export dataSeg_opreg(int opnum, int rgnum);
+idaman ea_t ida_export calc_dataseg(const insn_t &insn, int n=-1, int rgnum=-1);
 
-/// Get data segment by operand number
-
-idaman ea_t ida_export dataSeg_op(int opnum);
-
-/// Get data segment regardless of operand number
-
-idaman ea_t ida_export dataSeg(void);
-
-/// Get code segment.
-/// This function takes into account the segment translations.
-/// \param addr   the referenced address used by translations
+/// Map a data address.
+/// \param insn   the current instruction
+/// \param addr   the referenced address to map
 /// \param opnum  operand number
 
-idaman ea_t ida_export codeSeg(ea_t addr, int opnum);
-//@}
-
-//--------------------------------------------------------------------------
-/// 3-byte (tribyte) data item order
-enum tribyte_order_t
+inline ea_t map_data_ea(const insn_t &insn, ea_t addr, int opnum=-1)
 {
-  tbo_123,      ///< regular most significant byte first (big endian) - default
-  tbo_132,
-  tbo_213,
-  tbo_231,
-  tbo_312,
-  tbo_321,      ///< regular least significant byte first (little endian)
-};
+  return to_ea(calc_dataseg(insn, opnum), addr);
+}
 
-//--------------------------------------------------------------------------
-//      I D P   H E L P E R   F U N C T I O N S  -  A N A L Y S I S
-//--------------------------------------------------------------------------
+inline ea_t map_data_ea(const insn_t &insn, const op_t &op)
+{
+  return map_data_ea(insn, op.addr, op.n);
+}
 
-/// \name Analysis helpers
-/// The following functions return the next byte, 2 bytes, 4 bytes,
-/// and 8 bytes of ::cmd. They use and modify the size field (\cmd{size}).
-/// Normally they are used in the analyzer to get bytes of the instruction.
-/// \warning These functions work only for normal (8bit) byte processors!
-//@{
-idaman uint8  ida_export ua_next_byte(void);
-idaman uint16 ida_export ua_next_word(void);
-idaman uint32 ida_export ua_next_long(void);
-idaman uint64 ida_export ua_next_qword(void);
+/// Map a code address.
+/// This function takes into account the segment translations.
+/// \param insn   the current instruction
+/// \param addr   the referenced address to map
+/// \param opnum  operand number
+
+idaman ea_t ida_export map_code_ea(const insn_t &insn, ea_t addr, int opnum);
+
+inline ea_t map_code_ea(const insn_t &insn, const op_t &op)
+{
+  return map_code_ea(insn, op.addr, op.n);
+}
+
+inline ea_t map_ea(const insn_t &insn, const op_t &op, bool iscode)
+{
+  return iscode ? map_code_ea(insn, op) : map_data_ea(insn, op);
+}
+
+inline ea_t map_ea(const insn_t &insn, ea_t addr, int opnum, bool iscode)
+{
+  return iscode ? map_code_ea(insn, addr, opnum) : map_data_ea(insn, addr, opnum);
+}
+
 //@}
 
 //--------------------------------------------------------------------------
 //      I D P   H E L P E R   F U N C T I O N S  -  O U T P U T
 //--------------------------------------------------------------------------
+struct outctx_base_t
+{
+  // information for creating one line
+  ea_t insn_ea;
+  qstring outbuf;      // buffer for the current output line
+                       // once ready, it is moved to lnar
+  ssize_t regname_idx; // to rename registers
+  int suspop;          // controls color for out_long()
+  flags_t F;           // flag bits for insn_ea
+  uval_t *outvalues;   // at least 2*UA_MAXOP elements
+  int outvalue_getn_flags; // additional flags for print_operand()
+  void *user_data;     // pointer to be used by the processor module for any purpose
+  void *kern_data;     // internal info used by the kernel
 
-/// \defgroup output_helpers Output helpers
-/// Functions to help display instruction information.
-/// All output functions use ::cmd structure to get information.
-//@{
+  // information for generating many lines
+  qstrvec_t *lnar;     // vector of output lines
+  int lnar_maxsize;    // max permitted size of lnar
+  int default_lnnum;   // index of the most important line in lnar
 
-/// Initialize output buffer.
-/// Must be called before using any out/Out functions.
+  qstring line_prefix; // usually segname:offset
+  ssize_t prefix_len;  // visible length of line_prefix
+  int ctxflags;        // various bits
+#define CTXF_MAIN      0x0001 // produce only the essential line(s)
+#define CTXF_MULTI     0x0002 // enable multi-line essential lines
+#define CTXF_CODE      0x0004 // display as code regardless of the database flags
+#define CTXF_STACK     0x0008 // stack view
+#define CTXF_GEN_XREFS 0x0010 // generate the xrefs along with the next line
+#define CTXF_XREF_STATE 0x0060 // xref state:
+#define   XREFSTATE_NONE 0x0000 // not generated yet
+#define   XREFSTATE_GO   0x0020 // being generated
+#define   XREFSTATE_DONE 0x0040 // have been generated
+#define CTXF_GEN_CMT   0x0080 // generate the comment along with the next line
+#define CTXF_CMT_STATE 0x0300 // comment state:
+#define   COMMSTATE_NONE 0x0000 // not generated yet
+#define   COMMSTATE_GO   0x0100 // being generated
+#define   COMMSTATE_DONE 0x0200 // have been generated
+#define CTXF_VOIDS     0x0400 // display void marks
+#define CTXF_NORMAL_LABEL 0x0800 // generate plain label (+demangled label as cmt)
+#define CTXF_DEMANGLED_LABEL 0x1000 // generate only demangled label as comment
+#define CTXF_LABEL_OK  0x2000 // the label have been generated
+#define CTXF_DEMANGLED_OK 0x4000 // the label has been demangled successfully
 
-idaman void ida_export init_output_buffer(char *buf, size_t bufsize);
+  // internal data used by the kernel
+  int ind0;
+  ea_t cmt_ea;         // indirectly referenced address (used to generate cmt)
+  qstring cmtbuf;      // indented comment
+  const char *cmtptr;  // rest of indented comment
+  color_t cmtcolor;    // comment color
 
+  inline bool only_main_line() const { return (ctxflags & CTXF_MAIN) != 0; }
+  inline bool multiline() const { return (ctxflags & CTXF_MULTI) != 0; }
+  inline bool force_code() const { return (ctxflags & CTXF_CODE) != 0; }
+  inline bool stack_view() const { return (ctxflags & CTXF_STACK) != 0; }
+  inline bool display_voids() const { return (ctxflags & CTXF_VOIDS) != 0; }
+  inline void set_gen_xrefs(bool on=true) { setflag(ctxflags, CTXF_GEN_XREFS, on); }
+  inline int get_xrefgen_state() const { return ctxflags & CTXF_XREF_STATE; }
+  inline void set_gen_cmt(bool on=true) { setflag(ctxflags, CTXF_GEN_CMT, on); }
+  inline int get_cmtgen_state() const { return ctxflags & CTXF_CMT_STATE; }
+  inline void clr_gen_label(void) { ctxflags &= ~(CTXF_NORMAL_LABEL|CTXF_DEMANGLED_LABEL); }
+  inline void set_gen_label(void) { ctxflags |= CTXF_NORMAL_LABEL; }
+  inline void set_gen_demangled_label(void) { ctxflags |= CTXF_DEMANGLED_LABEL; ctxflags &= ~CTXF_NORMAL_LABEL; }
+  inline void set_comment_addr(ea_t ea) { cmt_ea = ea; }
+  inline bool print_label_now() const
+  {
+    return (ctxflags & (CTXF_LABEL_OK|CTXF_MAIN)) == 0                 // label not ready
+        && (ctxflags & (CTXF_NORMAL_LABEL|CTXF_DEMANGLED_LABEL)) != 0; // requested it
+  }
+  int forbid_annotations()
+  { // temporarily forbid printing of xrefs, label, cmt
+    int bits = CTXF_GEN_XREFS|CTXF_NORMAL_LABEL|CTXF_DEMANGLED_LABEL|CTXF_GEN_CMT;
+    int saved_flags = ctxflags & bits;
+    ctxflags &= ~bits;
+    return saved_flags;
+  }
+  void restore_ctxflags(int saved_flags)
+  {
+    ctxflags |= saved_flags;
+  }
 
-/// Terminate output buffer.
-/// Must be called after using all out/Out functions to form the output string.
-/// \return pointer to the end of the output string.
+  outctx_base_t(ea_t ea, flags_t flags, int _suspop=0)
+    : insn_ea(ea), regname_idx(-1), suspop(_suspop), F(flags),
+      outvalues(NULL), outvalue_getn_flags(0), user_data(NULL), kern_data(NULL),
+      lnar(NULL), lnar_maxsize(0), default_lnnum(-1),
+      prefix_len(0), ctxflags(0), ind0(0), cmt_ea(BADADDR), cmtptr(NULL), cmtcolor(0xFF)
+  {
+    outbuf.reserve(MAXSTR);
+  }
+  virtual ~outctx_base_t(void);
 
-idaman char *ida_export term_output_buffer(void);
+  ///-------------------------------------------------------------------------
+  /// Functions to append text to the current output buffer (outbuf)
 
+  /// Append a formatted string to the output string.
+  /// \return the number of characters appended
+  AS_PRINTF(2, 3) void out_printf(const char *format, ...)
+  {
+    va_list va;
+    va_start(va, format);
+    out_vprintf(format, va);
+    va_end(va);
+  }
 
-/// Append a formatted string to the output string.
-/// \return the number of characters appended
+  GCC_DIAG_OFF(format-nonliteral);
+  void nowarn_out_printf(const char *format, ...) //-V524 body is equal to out_printf
+  {
+    va_list va;
+    va_start(va, format);
+    out_vprintf(format, va);
+    va_end(va);
+  }
+  GCC_DIAG_ON(format-nonliteral);
 
-idaman AS_PRINTF(1, 2) int ida_export out_snprintf(const char *format, ...);
+  virtual AS_PRINTF(2, 0) void idaapi out_vprintf(const char *format, va_list va);
 
+  /// Output immediate value.
+  /// Try to use this function to output all constants of instruction operands.
+  /// This function outputs a number from x.addr or x.value in the form
+  /// determined by ::uFlag. It outputs a colored text.
+  ///   - -1 is output with #COLOR_ERROR
+  ///   -  0 is output as a number or character or segment
+  /// \param x         value to output
+  /// \param outflags  \ref OOF_
+  /// \return flags of the output value
+  virtual flags_t idaapi out_value(const op_t &x, int outf=0);
 
-/// Set the pointer to the output buffer.
-/// \param ptr  if NULL, the pointer value is not changed (essentially this
-///             function becomes get_output_ptr() in this case)
-/// \return the old value of the pointer
-
-idaman char *ida_export set_output_ptr(char *ptr);
-
-/// Get pointer to the output buffer
-
-inline char *idaapi get_output_ptr(void) { return set_output_ptr(NULL); }
-
-
-/// Insert a string into the output string.
-/// \param ptr     place to insert to. should come from get_output_ptr()
-/// \param string  string to insert
-
-idaman void ida_export out_insert(char *ptr, const char *string);
-
-
-/// Output instruction mnemonics using information in ::cmd.
-/// This function outputs a colored text.
-/// It will output at least one space after the instruction
-/// mnemonics even if the specified 'width' is not enough.
-/// \param width    width of field with mnemonics.
-///                 if < 0, then 'postfix' will be output before
-///                 the mnemonics, i.e. as a prefix
-/// \param postfix  optional postfix added to the instruction mnemonics
-/// \retval 0  displayed as bytes
-/// \retval 1  displayed as instruction
-
-idaman int ida_export OutMnem(int width=8, const char *postfix=NULL);
-
-
-/// Output instruction as a sequence of bytes,
-/// followed by a comment character and instruction mnemonics.
-/// This function is used to display undocumented instructions or
-/// instructions that are improperly handled by the target assembler.
-/// OutMnem() calls this function if the current instruction is present
-/// in the array of bad instructions (\ash{badworks}).
-/// This function outputs a colored text.
-
-idaman void ida_export OutBadInstruction(void);
-
-
-/// Use this function to output an operand of an instruction.
-/// This function checks for the existence of a manually defined operand
-/// and will output it if it exists.
-/// Otherwise it will call \ph{u_outop()} to output operand.
-/// This function outputs a colored text.
-/// \param n  number of operand
-/// \retval 1  operand is displayed
-/// \retval 0  operand is hidden
-
-idaman bool ida_export out_one_operand(int n);
-
-
-/// Output immediate value.
-/// Try to use this function to output all constants of instruction operands.
-/// This function outputs a number from x.addr or x.value in the form
-/// determined by ::uFlag. It outputs a colored text.
-///   - -1 is output with #COLOR_ERROR
-///   -  0 is output as a number or character or segment
-/// \param x         value to output
-/// \param outflags  \ref OOF_
-/// \return flags of the output value
-
-idaman flags_t ida_export OutValue(const op_t &x, int outflags=0);
-
-/// \defgroup OOF_ Output value flags
-/// Flags passed to OutValue() and get_immval().
-/// (don't use #OOF_SIGNMASK and #OOF_WIDTHMASK, they are for the kernel)
-//@{
+  /// \defgroup OOF_ Output value flags
+  /// Flags passed to out_value().
+  /// (don't use #OOF_SIGNMASK and #OOF_WIDTHMASK, they are for the kernel)
+  //@{
 #define OOF_SIGNMASK    0x0003      ///< sign symbol (+/-) output
 #define   OOFS_IFSIGN   0x0000      ///<   output sign if needed
 #define   OOFS_NOSIGN   0x0001      ///<   don't output sign, forbid the user to change the sign
@@ -625,7 +795,7 @@ idaman flags_t ida_export OutValue(const op_t &x, int outflags=0);
 #define OOF_SIGNED      0x0004      ///< output as signed if < 0
 #define OOF_NUMBER      0x0008      ///< always as a number
 #define OOF_WIDTHMASK   0x0070      ///< width of value in bits
-#define   OOFW_IMM      0x0000      ///<   take from x.dtyp
+#define   OOFW_IMM      0x0000      ///<   take from x.dtype
 #define   OOFW_8        0x0010      ///<   8 bit width
 #define   OOFW_16       0x0020      ///<   16 bit width
 #define   OOFW_24       0x0030      ///<   24 bit width
@@ -633,7 +803,7 @@ idaman flags_t ida_export OutValue(const op_t &x, int outflags=0);
 #define   OOFW_64       0x0050      ///<   64 bit width
 #define OOF_ADDR        0x0080      ///< output x.addr, otherwise x.value
 #define OOF_OUTER       0x0100      ///< output outer operand
-#define OOF_ZSTROFF     0x0200      ///< meaningful only if isStroff(uFlag)
+#define OOF_ZSTROFF     0x0200      ///< meaningful only if is_stroff(uFlag)
                                     ///< append a struct field name if
                                     ///< the field offset is zero?
                                     ///< if #AFL_ZSTROFF is set, then this flag
@@ -641,238 +811,389 @@ idaman flags_t ida_export OutValue(const op_t &x, int outflags=0);
 #define OOF_NOBNOT      0x0400      ///< prohibit use of binary not
 #define OOF_SPACES      0x0800      ///< do not suppress leading spaces
                                     ///< currently works only for floating point numbers
-//@}
+  //@}
 
-/// Extract immediate value from the operand according to the specified flags.
-/// This is an internal function. Use get_operand_immvals() instead
-/// \param x                 operand
-/// \param outf              \ref OOF_
-/// \param extend_sign       should the sign be extended?
-/// \param[out] dtyp_ptr     pointer to the dtyp which will be filled by this function
-/// \param[out] nbytes_ptr   pointer to the 'nbytes' which will be filled by this function -
-///                          number of bytes required to store the value
+  /// Output a character with #COLOR_SYMBOL color.
+  virtual void idaapi out_symbol(char c);
 
-uval_t get_immval(const op_t &x,
-                  int outf=0,
-                  bool extend_sign=false,
-                  char *dtyp_ptr=NULL,
-                  size_t *nbytes_ptr=NULL);
+  /// Append a character multiple times
+  virtual void idaapi out_chars(char c, int n);
+
+  /// Appends spaces to outbuf until its tag_strlen becomes 'len'
+  void out_spaces(ssize_t len) { add_spaces(&outbuf, len); }
+  virtual void idaapi add_spaces(qstring *buf, ssize_t len);
+
+  /// Output a string with the specified color.
+  virtual void idaapi out_line(const char *str, color_t color=0);
+
+  /// Output a string with #COLOR_KEYWORD color.
+  inline void out_keyword(const char *str)
+  {
+    out_line(str, COLOR_KEYWORD);
+  }
+
+  /// Output a character with #COLOR_REG color.
+  inline void out_register(const char *str)
+  {
+    out_line(str, COLOR_REG);
+  }
+
+  /// Output "turn color on" escape sequence
+  virtual void idaapi out_tagon(color_t tag);
+
+  /// Output "turn color off" escape sequence
+  virtual void idaapi out_tagoff(color_t tag);
+
+  /// Output "address" escape sequence
+  virtual void idaapi out_addr_tag(ea_t ea);
+
+  /// Output a colored line with register names in it.
+  /// The register names will be substituted by user-defined names (regvar_t)
+  /// Please note that out_tagoff tries to make substitutions too (when called with COLOR_REG)
+  virtual void idaapi out_colored_register_line(const char *str);
+
+  /// Output one character.
+  /// The character is output without color codes.
+  /// see also out_symbol()
+  virtual void idaapi out_char(char c) { outbuf.append(c); }
+
+  /// Output a number with the specified base (binary, octal, decimal, hex)
+  /// The number is output without color codes.
+  /// see also out_long()
+  virtual void idaapi out_btoa(uval_t Word, char radix=0);
+
+  /// \fn void out_long(sval_t, char)
+  /// Output a number with appropriate color.
+  /// Low level function. Use out_value() if you can.
+  /// if 'suspop' is set then
+  ///   this function uses #COLOR_VOIDOP instead of #COLOR_NUMBER.
+  /// 'suspop' is initialized:
+  ///   - in out_one_operand()
+  ///   - in ..\ida\gl.cpp (before calling \ph{d_out()})
+  /// \param v      value to output
+  /// \param radix  base (2,8,10,16)
+  /// \param suspop ::suspop
+  ///               - suspop==0: operand is ok
+  ///               - suspop==1: operand is suspicious and should be output with #COLOR_VOIDOP
+  ///               - suspop==2: operand can't be output as requested and should be output with #COLOR_ERROR
+  virtual void idaapi out_long(sval_t v, char radix);
+
+  /// Output a name expression.
+  /// \param x    instruction operand referencing the name expression
+  /// \param ea   address to convert to name expression
+  /// \param off  the value of name expression. this parameter is used only to
+  ///             check that the name expression will have the wanted value.
+  ///             You may pass #BADADDR for this parameter but I discourage it
+  ///             because it prohibits checks.
+  /// \return true if the name expression has been produced
+  virtual bool idaapi out_name_expr(
+          const op_t &x,
+          ea_t ea,
+          adiff_t off=BADADDR);
+
+  // Generate the closing comment if if it required by the assembler
+
+  inline void close_comment(void) { out_line(closing_comment()); }
+
+  ///-------------------------------------------------------------------------
+  /// Functions to populate the output line array (lnar)
+
+  /// Move the contents of the output buffer to the line array (outbuf->lnar)
+  /// The kernel augments the outbuf contents with additional text like
+  /// the line prefix, user-defined comments, xrefs, etc at this call.
+  virtual bool idaapi flush_outbuf(int indent=-1);
+
+  /// Append contents of 'buf' to the line array.
+  /// Behaves like flush_outbuf but accepts an arbitrary buffer
+  virtual bool idaapi flush_buf(const char *buf, int indent=-1);
+
+  /// Finalize the output context.
+  /// \return the number of generated lines.
+  virtual int idaapi term_outctx(const char *prefix=NULL);
+
+  /// See gen_printf()
+  virtual AS_PRINTF(3, 0) bool idaapi gen_vprintf(
+        int indent,
+        const char *format,
+        va_list va);
+
+  /// printf-like function to add lines to the line array.
+  /// \param indent   indention of the line.
+  ///                 if indent == -1, the kernel will indent the line
+  ///                 at \inf{indent}. if indent < 0, -indent will be used for indention.
+  ///                 The first line printed with indent < 0 is considered as the
+  ///                 most important line at the current address. Usually it is
+  ///                 the line with the instruction itself. This line will be
+  ///                 displayed in the cross-reference lists and other places.
+  ///                 If you need to output an additional line before the main line
+  ///                 then pass \inf{indent} instead of -1. The kernel will know
+  ///                 that your line is not the most important one.
+  /// \param format   printf style colored line to generate
+  /// \return overflow, lnar_maxsize has been reached
+
+  AS_PRINTF(3, 4) inline bool gen_printf(int indent, const char *format, ...)
+  {
+    va_list va;
+    va_start(va, format);
+    bool code = gen_vprintf(indent, format, va);
+    va_end(va);
+    return code;
+  }
+
+  /// Generate empty line. This function does nothing if generation of empty
+  /// lines is disabled.
+  /// \return overflow, lnar_maxsize has been reached
+
+  virtual bool idaapi gen_empty_line(void);
 
 
-/// Output a character with #COLOR_SYMBOL color.
+  /// Generate thin border line. This function does nothing if generation
+  /// of border lines is disabled.
+  /// \param solid generate solid border line (with =), otherwise with -
+  /// \return overflow, lnar_maxsize has been reached
 
-idaman void ida_export out_symbol(char c);
+  virtual bool idaapi gen_border_line(bool solid=false);
+
+  /// See gen_cmt_line()
+  virtual AS_PRINTF(3, 0) bool idaapi gen_colored_cmt_line_v(
+          color_t color,
+          const char *format,
+          va_list va);
+
+  /// See gen_cmt_line()
+
+  AS_PRINTF(2, 0) inline bool gen_cmt_line_v(const char *format, va_list va)
+  {
+    return gen_colored_cmt_line_v(COLOR_AUTOCMT, format, va);
+  }
+
+  /// Generate one non-indented comment line, colored with ::COLOR_AUTOCMT.
+  /// \param format  printf() style format line. The resulting comment line
+  ///                should not include comment character (;)
+  /// \return overflow, lnar_maxsize has been reached
+
+  AS_PRINTF(2, 3) inline bool gen_cmt_line(const char *format, ...)
+  {
+    va_list va;
+    va_start(va, format);
+    bool code = gen_cmt_line_v(format, va);
+    va_end(va);
+    return code;
+  }
+
+  /// Generate one non-indented comment line, colored with ::COLOR_COLLAPSED.
+  /// \param format  printf() style format line. The resulting comment line
+  ///                should not include comment character (;)
+  /// \return overflow, lnar_maxsize has been reached
+
+  AS_PRINTF(2, 3) inline bool gen_collapsed_line(const char *format, ...)
+  {
+    va_list va;
+    va_start(va,format);
+    bool answer = gen_colored_cmt_line_v(COLOR_COLLAPSED, format, va);
+    va_end(va);
+    return answer;
+  }
+
+  /// Generate big non-indented comment lines.
+  /// \param cmt    comment text. may contain \\n characters to denote new lines.
+  ///               should not contain comment character (;)
+  /// \param color  color of comment text (one of \ref COLOR_)
+  /// \return overflow, lnar_maxsize has been reached
+
+  virtual bool idaapi gen_block_cmt(const char *cmt, color_t color);
+
+  //-------------------------------------------------------------------------
+  /// Initialization; normally used only by the kernel
+  virtual void idaapi setup_outctx(const char *prefix, int makeline_flags);
+#define MAKELINE_NONE           0x00
+#define MAKELINE_BINPREF        0x01    // allow display of binary prefix
+#define MAKELINE_VOID           0x02    // allow display of '<suspicious>' marks
+#define MAKELINE_STACK          0x04    // allow display of sp trace prefix
+
+  virtual ssize_t idaapi retrieve_cmt(void) { return -1; }
+  virtual ssize_t idaapi retrieve_name(qstring *, color_t *) { return -1; }
+  virtual bool idaapi gen_xref_lines(void) { return false; }
+
+  virtual void idaapi init_lines_array(qstrvec_t *answers, int maxsize);
+
+  virtual member_t *idaapi get_stkvar(const op_t &, uval_t, sval_t *, int *);
+
+  void gen_empty_line_without_annotations(void)
+  {
+    int saved_flags = forbid_annotations();
+    gen_empty_line();
+    restore_ctxflags(saved_flags);
+  }
 
 
-/// Output a string with the specified color.
 
-idaman void ida_export out_line(const char *str, color_t color);
+protected:
+  virtual bool idaapi flush_and_reinit(void);
+  virtual void idaapi append_user_prefix(const char *, int) {}
+  virtual void idaapi add_aux_prefix(const char *, int) {}
+  virtual void idaapi out_label_addr_tag(void) {}
+  virtual void idaapi out_aux_cmts(void) {}
+};
 
-
-/// Output a string with #COLOR_KEYWORD color.
-
-inline void out_keyword(const char *str)
+//--------------------------------------------------------------------------
+// This class is used to print instructions and data items
+struct outctx_t : public outctx_base_t
 {
-  out_line(str, COLOR_KEYWORD);
-}
+  // kernel only data:
+  ea_t bin_ea;                 // Current binary format EA
+  char bin_state;              // =0 not generated,1-in process,2-finished
+  int gl_bpsize;               // binary line prefix size
+  int bin_width;
+
+  // instruction to display:
+  insn_t insn;                 // valid only when ph.out_insn() is called
+
+  // colorized and demangled label of the current address
+  qstring curlabel;
+
+  outctx_t(ea_t ea, flags_t flags=0, int _suspop=0)
+    : outctx_base_t(ea, flags, _suspop), bin_ea(ea), bin_state(2),
+      gl_bpsize(0), bin_width(0)
+  {
+  }
+  ~outctx_t(void)
+  {
+  }
+  void idaapi setup_outctx(const char *prefix, int flags);
+  ssize_t idaapi retrieve_cmt(void);
+  ssize_t idaapi retrieve_name(qstring *, color_t *);
+  bool idaapi gen_xref_lines(void);
+
+  /// Output instruction mnemonic for 'insn' using information in 'ph.instruc' array.
+  /// This function outputs a colored text.
+  /// It should be called from \ph{ev_out_insn()} or \ph{ev_out_mnem()} handler.
+  /// It will output at least one space after the instruction.
+  /// mnemonic even if the specified 'width' is not enough.
+  /// \param width    width of field with mnemonic.
+  ///                 if < 0, then 'postfix' will be output before
+  ///                 the mnemonic, i.e. as a prefix
+  /// \param postfix  optional postfix added to the instruction mnemonic
+  virtual void idaapi out_mnem(int width=8, const char *postfix=NULL);
+
+  /// Output custom mnemonic for 'insn'.
+  /// E.g. if it should differ from the one in 'ph.instruc'.
+  /// This function outputs colored text. See \ref out_mnem
+  /// \param mnem     custom mnemonic
+  /// \param width    width of field with mnemonic.
+  ///                 if < 0, then 'postfix' will be output before
+  ///                 the mnemonic, i.e. as a prefix
+  /// \param postfix  optional postfix added to 'mnem'
+  virtual void idaapi out_custom_mnem(const char *mnem, int width=8, const char *postfix=NULL);
+
+  /// Output instruction mnemonic using information in 'insn'.
+  /// It should be called from \ph{ev_out_insn()} and
+  /// it will call \ph{ev_out_mnem()} or \ref out_mnem.
+  /// This function outputs a colored text.
+  virtual void idaapi out_mnemonic(void);
+
+  /// Use this function to output an operand of an instruction.
+  /// This function checks for the existence of a manually defined operand
+  /// and will output it if it exists.
+  /// It should be called from \ph{ev_out_insn()} and it will call \ph{ev_out_operand()}.
+  /// This function outputs a colored text.
+  /// \param n    number of operand
+  /// \retval 1  operand is displayed
+  /// \retval 0  operand is hidden
+  virtual bool idaapi out_one_operand(int n);
+
+  /// Get the immediate values used at the specified address.
+  /// This function can handle instructions and data items.
+  /// \param out array of values, size at least 2*UA_MAXOP
+  /// \param i   operand number
+  /// \return number of immediate values
+  virtual size_t idaapi get_immvals(uval_t *out, int i);
+
+  /// Print all operand values as commented character constants.
+  /// Printing is done only for is_susp_operand() operands
+  /// This function is used to comment void operands with their representation
+  /// in the form of character constants.
+  /// This function outputs a colored text.
+  virtual void idaapi out_immchar_cmts(void);
+
+  virtual void idaapi gen_func_header(func_t *pfn);
+  virtual void idaapi gen_func_footer(const func_t *pfn);
+
+  // display data items and undefined bytes.
+  virtual void idaapi out_data(bool analyze_only);
+
+  // generate declaration for item in a special segment
+  // return: 0-ok, 1-overflow
+  virtual bool idaapi out_specea(uchar segtype);
+
+  // convenience functions for processor modules
+  // print lines from ash.header
+  virtual void idaapi gen_header_extra();
+
+  // flags for gen_header()
+#define GH_PRINT_PROC           (1 << 0)  //processor name
+#define GH_PRINT_ASM            (1 << 1)  //selected assembler
+#define GH_PRINT_BYTESEX        (1 << 2)  //byte sex
+#define GH_PRINT_HEADER         (1 << 3)  //lines from ash.header
+#define GH_BYTESEX_HAS_HIGHBYTE (1 << 4)  //describe inf.is_wide_high_byte_first()
+#define GH_PRINT_PROC_AND_ASM (GH_PRINT_PROC | GH_PRINT_ASM)
+#define GH_PRINT_PROC_ASM_AND_BYTESEX (GH_PRINT_PROC_AND_ASM | GH_PRINT_BYTESEX)
+#define GH_PRINT_ALL (GH_PRINT_PROC_ASM_AND_BYTESEX | GH_PRINT_HEADER)
+#define GH_PRINT_ALL_BUT_BYTESEX (GH_PRINT_PROC_AND_ASM | GH_PRINT_HEADER)
+  virtual void idaapi gen_header(
+        int flags = GH_PRINT_PROC_AND_ASM,
+        const char *proc_name = NULL,
+        const char *proc_flavour = NULL);
+};
+
+//--------------------------------------------------------------------------
+/// Create a new output context.
+/// To delete it, just use "delete pctx"
+
+idaman outctx_base_t *ida_export create_outctx(ea_t ea, flags_t F=0, int suspop=0);
 
 
-/// Output a character with #COLOR_REG color.
+/// Print instruction mnemonics.
+/// \param out      output buffer
+/// \param ea       linear address of the instruction
+/// \return success
 
-inline void out_register(const char *str)
-{
-  out_line(str, COLOR_REG);
-}
-
-
-/// Output "turn color on" escape sequence
-
-idaman void ida_export out_tagon(color_t tag);
+idaman bool ida_export print_insn_mnem(qstring *out, ea_t ea);
 
 
-/// Output "turn color off" escape sequence
-
-idaman void ida_export out_tagoff(color_t tag);
-
-
-/// Output "address" escape sequence
-
-idaman void ida_export out_addr_tag(ea_t ea);
-
-
-/// Output a colored line with register names in it.
-/// The register names will be substituted by user-defined names (regvar_t)
-/// Please note that out_tagoff tries to make substitutions too (when called with COLOR_REG)
-
-idaman void ida_export out_colored_register_line(const char *str);
-
-
-/// Output plain text without color codes.
-/// see also out_line()
-
-idaman void ida_export OutLine(const char *s);
-
-
-/// Output one character.
-/// The character is output without color codes.
-/// see also out_symbol()
-
-idaman void ida_export OutChar(char c);
-
-
-/// Output a number with the specified base (binary, octal, decimal, hex)
-/// The number is output without color codes.
-/// see also out_long()
-
-idaman void ida_export OutLong(uval_t Word, char radix);
-
-
-/// Output operand value as a commented character constant.
-/// This function is used to comment void operands with their representation
-/// in the form of character constants.
-/// This function outputs a colored text.
-
-idaman void ida_export OutImmChar(const op_t &x);
-
-
-/// Try to display value as a character constant.
-/// This is low level function, it is called from OutValue().
-/// This function outputs uncolored text.
-/// \param ptr   pointer to value to convert
+/// Print a character constant.
+/// This is low level function, it is called from out_value().
 /// \param buf   output buffer
+/// \param ptr   pointer to value to print
 /// \param size  size of input value in bytes
 /// \retval 1  ok, the buffer contains character constant.
 ///            its form depends on \ash{flags}.
 /// \retval 0  failed, probably the constant is invalid for the target
 ///            assembler
 
-idaman bool ida_export showAsChar(const void *ptr, char *buf, int size);
+idaman bool ida_export print_charlit(char *buf, const void *ptr, int size);
 
 
-/// Output a floating point value.
-/// Low level function. Use OutValue() if you can.
-/// This function outputs uncolored text.
-/// \param v        floating point value in processor native format
-/// \param size     size of the value in bytes
+/// Print a floating point value.
 /// \param buf      output buffer. may be NULL
 /// \param bufsize  size of the output buffer
+/// \param v        floating point value in processor native format
+/// \param size     size of the value in bytes
 /// \return true    ok
 /// \return false   can't represent as floating point number
 
-idaman bool ida_export out_real(const void *v, int size, char *buf, size_t bufsize);
+idaman bool ida_export print_fpval(char *buf, size_t bufsize, const void *v, int size);
 
-
-/// \fn void out_long(sval_t, char)
-/// Output a number with appropriate color.
-/// Low level function. Use OutValue() if you can.
-/// if 'voidop' is set then
-///   this function uses #COLOR_VOIDOP instead of #COLOR_NUMBER.
-/// 'voidop' is initialized:
-///   - in out_one_operand()
-///   - in ..\ida\gl.cpp (before calling \ph{d_out()})
-/// \param v      value to output
-/// \param radix  base (2,8,10,16)
-/// \param voidop ::voidop
-///               - voidop==0: operand is ok
-///               - voidop==1: operand is void and should be output with #COLOR_VOIDOP
-///               - voidop==2: operand can't be output as requested and should be output with #COLOR_ERROR
-
-idaman int ida_export_data voidop; ///< see out_long()
-idaman void ida_export out_long(sval_t v, char radix);
-
-/// Output a name expression.
-/// \param x    instruction operand referencing the name expression
-/// \param ea   address to convert to name expression
-/// \param off  the value of name expression. this parameter is used only to
-///             check that the name expression will have the wanted value.
-///             You may pass #BADADDR for this parameter but I discourage it
-///             because it prohibits checks.
-/// \return true if the name expression has been produced
-
-idaman bool ida_export out_name_expr(const op_t &x,
-                                     ea_t ea,
-                                     adiff_t off=BADADDR);
-
-//@} output_helpers
 
 //--------------------------------------------------------------------------
 //      I D P   H E L P E R   F U N C T I O N S  -  E M U L A T O R
 //--------------------------------------------------------------------------
-
-/// Convert to data using information about operand value type (op_t::dtyp).
-/// Emulator could use this function to convert unexplored bytes to data
-/// when an instruction references them.
-/// This function creates data only if the address was unexplored.
-/// \param opoff  offset of the operand from the start of instruction
-///               if the offset is unknown, then 0
-/// \param ea     linear address to be converted to data
-/// \param dtype  operand value type (from op_t::dtyp)
-/// \retval 1  ok
-/// \retval 0  failed to create data item
-
-idaman bool ida_export ua_dodata2(int opoff, ea_t ea, int dtype);
-
-
-/// Create or modify a stack variable in the function frame.
-/// The emulator could use this function to create stack variables
-/// in the function frame before converting the operand to a stack variable.
-/// Please check with may_create_stkvars() before calling this function.
-/// \param x      operand (used to determine the addressing type)
-/// \param v      a displacement in the operand
-/// \param flags  \ref STKVAR_2
-/// \retval 1  ok, a stack variable exists now
-/// \retval 0  no, couldn't create stack variable
-
-idaman bool ida_export ua_stkvar2(const op_t &x, adiff_t v, int flags);
-
-/// \defgroup STKVAR_2 Stack variable flags
-/// Passed as 'flags' parameter to ua_stkvar2()
-//@{
-#define STKVAR_VALID_SIZE       0x0001 ///< x.dtyp contains correct variable type
-                                       ///< (for insns like 'lea' this bit must be off)
-                                       ///< in general, dr_O references do not allow
-                                       ///< to determine the variable size
-//@}
-
-/// Add a code cross-reference from the current instruction (\cmd{ea}).
-/// \param opoff  offset of the operand from the start of instruction.
-///               if the offset is unknown, then 0.
-/// \param to     target linear address
-/// \param type   type of xref
-
-idaman void ida_export ua_add_cref(int opoff, ea_t to, cref_t type);
-
-
-/// Add a data cross-reference from the current instruction (\cmd{ea}).
-/// See ua_add_off_drefs() - usually it can be used in most cases.
-/// \param opoff  offset of the operand from the start of instruction
-///               if the offset is unknown, then 0
-/// \param to     target linear address
-/// \param type   type of xref
-
-idaman void ida_export ua_add_dref(int opoff, ea_t to, dref_t type);
-
-
-/// Add xrefs for an operand of the current instruction (\cmd{ea}).
-/// This function creates all cross references for 'offset' and
-/// 'structure offset' operands.
-/// Use ua_add_off_drefs2() in the presence of negative offsets.
-/// \param x     reference to operand
-/// \param type  type of xref
-/// \param outf  OutValue() flags. These flags should match
-///              the flags used to output the operand
-/// \return if isOff(), the reference target address (the same as calc_reference_target).
-///          else, #BADADDR, because for stroffs the target address is unknown
-
-idaman ea_t ida_export ua_add_off_drefs(const op_t &x, dref_t type);
-idaman ea_t ida_export ua_add_off_drefs2(const op_t &x, dref_t type, int outf); ///< See ua_add_off_drefs()
-
-/// Get flags for op_t::dtyp field
-idaman flags_t ida_export get_dtyp_flag(char dtype);
-/// Get size of opt_::dtyp field
-idaman size_t ida_export get_dtyp_size(char dtype);
-/// Get op_t::dtyp from size
-idaman char ida_export get_dtyp_by_size(asize_t size);
+/// Get flags for op_t::dtype field
+idaman flags_t ida_export get_dtype_flag(op_dtype_t dtype);
+/// Get size of opt_::dtype field
+idaman size_t ida_export get_dtype_size(op_dtype_t dtype);
+/// Get op_t::dtype from size
+idaman op_dtype_t ida_export get_dtype_by_size(asize_t size);
 
 
 //--------------------------------------------------------------------------
@@ -882,66 +1203,68 @@ idaman char ida_export get_dtyp_by_size(asize_t size);
 /// This function checks if an instruction is present at the specified address
 /// and will try to create one if there is none. It will fail if there is
 /// a data item or other items hindering the creation of the new instruction.
-/// This function will also fill the ::cmd structure.
-/// \param ea  linear address
+/// This function will also fill the 'out' structure.
+/// \param ea   linear address
+/// \param out  the resulting instruction
 /// \return the length of the instruction or 0
+idaman int ida_export create_insn(ea_t ea, insn_t *out=NULL);
 
-idaman int ida_export create_insn(ea_t ea);
 
-
-/// Analyze the specified address and fill ::cmd.
+/// Analyze the specified address and fill 'out'.
 /// This function does not modify the database.
 /// It just tries to interpret the specified address as an instruction and fills
-/// the ::cmd structure with the results.
+/// the 'out' structure.
+/// \param out  the resulting instruction
 /// \param ea  linear address
 /// \return the length of the (possible) instruction or 0
 
-idaman int ida_export decode_insn(ea_t ea);
+idaman int ida_export decode_insn(insn_t *out, ea_t ea);
+
+/// Can the bytes at address 'ea' be decoded as instruction?
+/// \param ea linear address
+/// \return whether or not the contents at that address could be a valid instruction
+
+inline bool can_decode(ea_t ea) { insn_t insn; return decode_insn(&insn, ea) > 0; }
 
 
 /// Generate text representation for operand #n.
 /// This function will generate the text representation of the specified operand.
-/// If the instruction is not present in the database, it will be created.
-/// This function will also fill the ::cmd structure.
-/// \param ea       linear address
-/// \param buf      output buffer
-/// \param bufsize  size of output buffer
-/// \param n        operand number (0,1,2...)
-/// \param flags    \ref GETN_ -
-///                 Currently only #GETN_NODUMMY is allowed.
+/// \param out      output buffer
+/// \param ea       the item address (instruction or data)
+/// \param n        operand number (0,1,2...). meaningful only for instructions
+/// \param flags    \ref GETN_
+///                 Currently only #GETN_NODUMMY is accepted.
+/// \param newtype  if specified, print the operand using the specified type
 /// \return success
 
-idaman bool ida_export ua_outop2(ea_t ea, char *buf, size_t bufsize, int n, int flags=0);
+idaman bool ida_export print_operand(
+        qstring *out,
+        ea_t ea,
+        int n,
+        int getn_flags=0,
+        struct printop_t *newtype=NULL);
 
-
-/// Generate text representation of the instruction mnemonics.
-/// This function will generate the text representation of the instruction mnemonics,
-/// like 'mov', 'add', etc.
-/// If the instruction is not present in the database, it will be created.
-/// This function will also fill the ::cmd structure.
-/// \param ea       linear address
-/// \param buf      output buffer
-/// \param bufsize  size of output buffer
-/// \return pointer to buf or NULL if failure
-
-idaman const char *ida_export ua_mnem(ea_t ea, char *buf, size_t bufsize);
 
 //--------------------------------------------------------------------------
 //      Helper functions for the processor emulator/analyzer
 //--------------------------------------------------------------------------
 
-/// Decode previous instruction if it exists, fill ::cmd.
+/// Decode previous instruction if it exists, fill 'out'.
+/// \param out      the resulting instruction
+/// \param ea       the address to decode the previous instruction from
 /// \return the previous instruction address (#BADADDR-no such insn)
 
-idaman ea_t ida_export decode_prev_insn(ea_t ea);
+idaman ea_t ida_export decode_prev_insn(insn_t *out, ea_t ea);
 
 
 /// Decode preceding instruction in the execution flow.
 /// Prefer far xrefs from addresses < the current to ordinary flows.
-/// \return the preceding instruction address (#BADADDR-no such insn) and fill ::cmd.
+/// \param ea       the address to decode the preceding instruction from
+/// \param out      the resulting instruction
+/// \return the preceding instruction address (#BADADDR-no such insn) and 'out'.
 /// *p_farref will contain 'true' if followed an xref, false otherwise.
 
-idaman ea_t ida_export decode_preceding_insn(ea_t ea, bool *p_farref);
+idaman ea_t ida_export decode_preceding_insn(insn_t *out, ea_t ea, bool *p_farref=NULL);
 
 
 /// Construct a macro instruction.
@@ -954,41 +1277,34 @@ idaman ea_t ida_export decode_preceding_insn(ea_t ea, bool *p_farref);
 /// Here we just create the instruction in the database when the macro
 /// generation is turned on/off.
 ///
+/// \param insn         the instruction
 /// \param enable       enable macro generation
-/// \param build_macro  try to grow the instruction in 'cmd' to a macro
-/// \retval true   the macro instruction is generated in 's'
+/// \param build_macro  try to grow the instruction in 'insn' to a macro
+/// \retval true   the macro instruction is generated in 'out'
 /// \retval false  no macro
 
-idaman bool ida_export construct_macro(bool enable,
-                        bool (idaapi *build_macro)(insn_t &s, bool may_go_forward));
-
+idaman bool ida_export construct_macro(
+        insn_t &insn,
+        bool enable,
+        bool (idaapi *build_macro)(insn_t &insn, bool may_go_forward));
 
 /// Guess the jump table address (ibm pc specific)
 
-idaman ea_t ida_export guess_table_address(void);
-
+idaman ea_t ida_export guess_table_address(const insn_t &insn);
 
 /// Guess the jump table size
 
-idaman asize_t ida_export guess_table_size(ea_t jump_table);
+idaman asize_t ida_export guess_table_size(const insn_t &insn, ea_t jump_table);
 
 
-/// Does the instruction in ::cmd spoil any register from 'regs'?.
+/// Does the instruction spoil any register from 'regs'?.
 /// This function checks the \ref CF_ flags from the instructions array.
 /// Only ::o_reg operand types are consulted.
+/// \param  insn  the instruction
 /// \return index in the 'regs' array or -1
 
-idaman int ida_export get_spoiled_reg(const uint32 *regs, size_t n);
+idaman int ida_export get_spoiled_reg(const insn_t &insn, const uint32 *regs, size_t n);
 
 
 
-#ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED void ida_export ua_dodata(ea_t ea, int dtype);                       // use ua_dodata2
-idaman DEPRECATED bool ida_export ua_outop(ea_t ea, char *buf, size_t bufsize, int n); // use ua_outop2
-idaman DEPRECATED bool ida_export ua_stkvar(const op_t &x, adiff_t v);                 // use ua_stkvar2
-idaman DEPRECATED int ida_export ua_ana0(ea_t ea);                                     // use decode_insn
-idaman DEPRECATED int ida_export ua_code(ea_t ea);                                     // use create_insn
-#endif
-
-#pragma pack(pop)
 #endif // _UA_HPP

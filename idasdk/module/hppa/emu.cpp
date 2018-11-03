@@ -21,11 +21,11 @@ ea_t calc_mem(ea_t ea)
 }
 
 //------------------------------------------------------------------------
-static ea_t get_dp(void)
+static ea_t get_dp(const insn_t &insn)
 {
   if ( got == BADADDR )
     return BADADDR;
-  sel_t delta = get_segreg(cmd.ea, DPSEG);
+  sel_t delta = get_sreg(insn.ea, DPSEG);
   if ( delta == BADSEL )
     return BADADDR;
   // calculate the return value
@@ -40,9 +40,9 @@ static ea_t get_dp(void)
 //      -1: doesn't spoil anything
 //      -2: spoils everything
 //     >=0: the number of the register which is spoiled
-static int spoils(const uint32 *regs, int n)
+static int spoils(const insn_t &insn, const uint32 *regs, int n)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case HPPA_call:
     case HPPA_blr:
@@ -50,45 +50,46 @@ static int spoils(const uint32 *regs, int n)
         if ( regs[i] >= 23 && regs[i] != DP ) // assume the first 8 registers are not spoiled
           return i;                           // dp is never spoiled
   }
-  return get_spoiled_reg(regs, n);
+  return get_spoiled_reg(insn, regs, n);
 }
 
 //----------------------------------------------------------------------
-static bool find_addil_or_ldil(uint32 r, ea_t dp, uval_t *pv)
+static bool find_addil_or_ldil(ea_t ea, uint32 r, ea_t dp, uval_t *pv)
 {
-  func_item_iterator_t fii(get_func(cmd.ea), cmd.ea);
   uval_t v;
-  while ( fii.decode_prev_insn() )
+  insn_t insn;
+  func_item_iterator_t fii(get_func(ea), ea);
+  while ( fii.decode_prev_insn(&insn) )
   {
-    switch ( cmd.itype )
+    switch ( insn.itype )
     {
       case HPPA_addil:
-        if ( cmd.Op3.reg == r )
+        if ( insn.Op3.reg == r )
         {
-          if ( cmd.Op2.reg == R0 )
+          if ( insn.Op2.reg == R0 )
           {
-            v = cmd.Op1.value;
+            v = insn.Op1.value;
 RETTRUE:
             *pv = v;
             return true;
           }
-          if ( cmd.Op2.reg == DP )
+          if ( insn.Op2.reg == DP )
           {
-            v = dp + cmd.Op1.value;
+            v = dp + insn.Op1.value;
             goto RETTRUE;
           }
         }
         continue;
       case HPPA_ldil:
-        if ( cmd.Op2.reg == r )
+        if ( insn.Op2.reg == r )
         {
-          v = cmd.Op1.value;
+          v = insn.Op1.value;
           goto RETTRUE;
         }
       case HPPA_copy:
-        if ( cmd.Op2.reg == r )
+        if ( insn.Op2.reg == r )
         {
-          r = cmd.Op1.reg;
+          r = insn.Op1.reg;
           if ( r == R0 )
           {
             v = 0;
@@ -97,7 +98,7 @@ RETTRUE:
         }
         continue;
     }
-    if ( spoils(&r, 1) != -1 )
+    if ( spoils(insn, &r, 1) != -1 )
       break;
   }
   return false;
@@ -106,9 +107,9 @@ RETTRUE:
 //----------------------------------------------------------------------
 //      addil           -0x2800, %dp, %r1
 //      stw             %r5, 0x764(%sr0,%r1)
-ea_t calc_possible_memref(const op_t &x)
+ea_t calc_possible_memref(const insn_t &insn, const op_t &x)
 {
-  ea_t dp = get_dp();
+  ea_t dp = get_dp(insn);
   if ( dp != BADADDR )
   {
     if ( x.phrase == DP )
@@ -117,17 +118,15 @@ ea_t calc_possible_memref(const op_t &x)
     }
     else
     {
-      insn_t saved = cmd;
       int r = x.phrase;
       uval_t v = x.addr;
       uval_t v2 = 0;
-      if ( find_addil_or_ldil(r, dp, &v2) )
+      if ( find_addil_or_ldil(insn.ea, r, dp, &v2) )
       {
         dp = v + v2;
       }
       else
         dp = BADADDR;
-      cmd = saved;
     }
   }
   return dp;
@@ -140,27 +139,27 @@ inline bool is_stkreg(int r)
 }
 
 //------------------------------------------------------------------------
-int idaapi is_sp_based(const op_t &x)
+int idaapi is_sp_based(const insn_t &/*insn*/, const op_t &x)
 {
   return OP_SP_ADD | (is_stkreg(x.phrase) ? OP_SP_BASED : OP_FP_BASED);
 }
 
 //------------------------------------------------------------------------
 // is the register the frame pointer?
-static bool is_frreg(int reg)
+static bool is_frreg(const insn_t &insn, int reg)
 {
   if ( reg != 0 )
   {
-    func_t *pfn = get_func(cmd.ea);
+    func_t *pfn = get_func(insn.ea);
     if ( pfn != NULL )
     {
-      ea_t ea = pfn->startEA;
+      ea_t ea = pfn->start_ea;
       static ea_t oldea = BADADDR;
       static int oldreg;
       if ( ea != oldea )
       {
         oldea = ea;
-        oldreg = (int)helper.altval(oldea);
+        oldreg = helper.altval_ea(oldea);
       }
       return reg == oldreg;
     }
@@ -169,26 +168,26 @@ static bool is_frreg(int reg)
 }
 
 //------------------------------------------------------------------------
-inline bool stldwm(void)
+inline bool stldwm(const insn_t &insn)
 {
-  return cmd.itype == HPPA_ldo && cmd.Op2.reg == SP     // ldo .., %sp
-      || (opcode(get_long(cmd.ea)) & 0x13) == 0x13;     // st/ldw,m
+  return insn.itype == HPPA_ldo && insn.Op2.reg == SP     // ldo .., %sp
+      || (opcode(get_dword(insn.ea)) & 0x13) == 0x13;     // st/ldw,m
 }
 
 //------------------------------------------------------------------------
-inline void remove_unwanted_typeinfo(int n)
+inline void remove_unwanted_typeinfo(const insn_t &insn, int n)
 {
-  if ( isDefArg(uFlag,n) )
-    noType(cmd.ea, n);
+  if ( is_defarg(get_flags(insn.ea), n) )
+    clr_op_type(insn.ea, n);
 }
 
 //------------------------------------------------------------------------
-static void process_immediate_number(int n)
+static void process_immediate_number(const insn_t &insn, int n)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag, n) )
+  set_immd(insn.ea);
+  if ( is_defarg(get_flags(insn.ea), n) )
     return;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case HPPA_depd:
     case HPPA_depw:
@@ -205,19 +204,19 @@ static void process_immediate_number(int n)
     case HPPA_shrw:
     case HPPA_shld:
     case HPPA_shlw:
-      op_dec(cmd.ea, n);
+      op_dec(insn.ea, n);
       break;
     case HPPA_depdi:
     case HPPA_depwi:
       if ( n == 0 )
-        op_num(cmd.ea, n);
+        op_num(insn.ea, n);
       else
-        op_dec(cmd.ea, n);
+        op_dec(insn.ea, n);
       break;
     case HPPA_popbts:
     case HPPA_rsm:
     case HPPA_ssm:
-      op_num(cmd.ea, n);
+      op_num(insn.ea, n);
       break;
   }
 }
@@ -227,10 +226,10 @@ enum nullicode_t { NEVER, SKIP, NULLIFY };
 static nullicode_t may_skip_next_insn(ea_t ea)
 {
   nullicode_t may = NEVER;
-  insn_t saved = cmd;
-  if ( decode_insn(ea) )
+  insn_t insn;
+  if ( decode_insn(&insn, ea) > 0 )
   {
-    switch ( cmd.itype )
+    switch ( insn.itype )
     {
       case HPPA_pmdis:    // format 55
       case HPPA_spop0:    // format 34
@@ -238,7 +237,7 @@ static nullicode_t may_skip_next_insn(ea_t ea)
       case HPPA_spop2:    // format 36
       case HPPA_spop3:    // format 37
       case HPPA_copr:     // format 38
-        may = (get_long(ea) & BIT26) != 0 ? SKIP : NEVER;
+        may = (get_dword(ea) & BIT26) != 0 ? SKIP : NEVER;
         break;
       case HPPA_addb:     // format 17
       case HPPA_addib:
@@ -254,14 +253,13 @@ static nullicode_t may_skip_next_insn(ea_t ea)
       case HPPA_call:     // pseudo-op
       case HPPA_bve:      // format 22
       case HPPA_ret:      // pseudo-op
-        may = ((get_long(ea) & BIT30) != 0) ? NULLIFY : NEVER;
+        may = ((get_dword(ea) & BIT30) != 0) ? NULLIFY : NEVER;
         break;
       default:
-        may = (cmd.auxpref & aux_cndc) != 0 ? SKIP : NEVER;
+        may = (insn.auxpref & aux_cndc) != 0 ? SKIP : NEVER;
         break;
     }
   }
-  cmd = saved;
   return may;
 }
 
@@ -352,7 +350,7 @@ static bool is_call_branch(uint32 code)
 //----------------------------------------------------------------------
 static nullicode_t may_be_skipped(ea_t ea)
 {
-  if ( !isFlow(get_flags_novalue(ea)) )
+  if ( !is_flow(get_flags(ea)) )
     return NEVER;
   return may_skip_next_insn(ea-4);
 }
@@ -361,19 +359,18 @@ static nullicode_t may_be_skipped(ea_t ea)
 static ea_t calc_branch_target(ea_t ea)
 {
   ea_t res = BADADDR;
-  insn_t saved = cmd;
-  if ( decode_insn(ea) )
+  insn_t insn;
+  if ( decode_insn(&insn, ea) > 0 )
   {
     for ( int i=0; i < UA_MAXOP; i++ )
     {
-      if ( cmd.Operands[i].type == o_near )
+      if ( insn.ops[i].type == o_near )
       {
-        res = cmd.Operands[i].addr;
+        res = insn.ops[i].addr;
         break;
       }
     }
   }
-  cmd = saved;
   return res;
 }
 
@@ -382,7 +379,7 @@ inline bool is_stop(uint32 code, bool include_calls_and_conds)
 {
   return is_uncond_branch(code)
       || include_calls_and_conds
-                && (is_cond_branch(code) || is_call_branch(code));
+      && (is_cond_branch(code) || is_call_branch(code));
 }
 
 //----------------------------------------------------------------------
@@ -392,58 +389,58 @@ static bool has_delay_slot(ea_t ea, bool include_calls_and_conds)
   if ( (include_calls_and_conds || may_be_skipped(ea) != SKIP)
     && calc_branch_target(ea) != ea+4 )
   {
-    uint32 code = get_long(ea);
-    return is_stop(code, include_calls_and_conds)  && (code & BIT30) == 0;
+    uint32 code = get_dword(ea);
+    return is_stop(code, include_calls_and_conds) && (code & BIT30) == 0;
   }
   return false;
 }
 
 //----------------------------------------------------------------------
 // is the current insruction in a delay slot?
-static bool is_delayed_stop(bool include_calls_and_conds)
+static bool is_delayed_stop(const insn_t &insn, bool include_calls_and_conds)
 {
-  uint32 code = get_long(cmd.ea);
+  uint32 code = get_dword(insn.ea);
   if ( (code & BIT30) != 0              // ,n
     && is_stop(code, include_calls_and_conds)
-    && (include_calls_and_conds || may_be_skipped(cmd.ea) != SKIP) )
+    && (include_calls_and_conds || may_be_skipped(insn.ea) != SKIP) )
   {
     // seems to be a branch which nullifies the next instruction
     return true;
   }
 
-  if ( !isFlow(uFlag) )
+  if ( !is_flow(get_flags(insn.ea)) )
     return false;
 
-  return has_delay_slot(cmd.ea-4, include_calls_and_conds);
+  return has_delay_slot(insn.ea-4, include_calls_and_conds);
 }
 
 //----------------------------------------------------------------------
-static void add_near_ref(const op_t &x, ea_t ea)
+static void add_near_ref(const insn_t &insn, const op_t &x, ea_t ea)
 {
   cref_t ftype = fl_JN;
-  if ( is_call_branch(get_long(cmd.ea)) )
+  if ( is_call_branch(get_dword(insn.ea)) )
     ftype = fl_CN;
-  if ( InstrIsSet(cmd.itype, CF_CALL) )
+  if ( has_insn_feature(insn.itype, CF_CALL) )
   {
     if ( !func_does_return(ea) )
       flow = false;
     ftype = fl_CN;
   }
-  ua_add_cref(x.offb, ea, ftype);
+  insn.add_cref(ea, x.offb, ftype);
   if ( ftype == fl_CN )
-    auto_apply_type(cmd.ea, ea);
+    auto_apply_type(insn.ea, ea);
 }
 
 //----------------------------------------------------------------------
-inline dref_t calc_dref_type(bool isload)
+inline dref_t calc_dref_type(const insn_t &insn, bool isload)
 {
-  if ( cmd.itype == HPPA_ldo )
+  if ( insn.itype == HPPA_ldo )
     return dr_O;
   return isload ? dr_R : dr_W;
 }
 
 //----------------------------------------------------------------------
-static bool create_lvar(const op_t &x, uval_t v)
+static bool create_lvar(const insn_t &insn, const op_t &x, uval_t v)
 {
   struct lvar_info_t
   {
@@ -462,17 +459,17 @@ static bool create_lvar(const op_t &x, uval_t v)
     { -32,  "LPT"         },    // (external Data/LT pointer)
   };
 
-  func_t *pfn = get_func(cmd.ea);
+  func_t *pfn = get_func(insn.ea);
   if ( pfn == NULL )
     return false;
 
   sval_t delta;
-  member_t *mptr = get_stkvar(x, v, &delta);
+  member_t *mptr = get_stkvar(&delta, insn, x, v);
   if ( mptr == NULL )
   {
-    if ( !ua_stkvar2(x, v, STKVAR_VALID_SIZE) )
+    if ( !insn.create_stkvar(x, v, STKVAR_VALID_SIZE) )
       return false;
-    mptr = get_stkvar(x, v, &delta);
+    mptr = get_stkvar(&delta, insn, x, v);
     if ( mptr == NULL )
       return false;   // should not happen but better check
     delta -= pfn->argsize;
@@ -488,13 +485,13 @@ static bool create_lvar(const op_t &x, uval_t v)
     if ( delta <= -0x34 )       // seems to be an argument in the stack
     {                           // this means that the current function
                                 // has at least 4 register arguments
-      pfn = get_func(cmd.ea);
+      pfn = get_func(insn.ea);
       while ( pfn->regargqty < 4 )
-        add_regarg2(pfn, R26-pfn->regargqty, tinfo_t(BT_INT), NULL);
+        add_regarg(pfn, R26-pfn->regargqty, tinfo_t(BT_INT), NULL);
     }
   }
 
-  return op_stkvar(cmd.ea, x.n);
+  return op_stkvar(insn.ea, x.n);
 }
 
 //----------------------------------------------------------------------
@@ -508,74 +505,72 @@ static bool create_lvar(const op_t &x, uval_t v)
 static int get_syscall_number(ea_t ea)
 {
   int syscall = -1;
-  if ( get_long(ea) == 0x20200801
-    && get_long(ea+4) == 0xE420E008 )
+  if ( get_dword(ea) == 0x20200801
+    && get_dword(ea+4) == 0xE420E008 )
   {
-    insn_t saved = cmd;
-    decode_insn(ea+8);
-    if ( cmd.itype == HPPA_ldi && cmd.Op2.reg == R22 )
-      syscall = (int)cmd.Op1.value;
-    cmd = saved;
+    insn_t l;
+    decode_insn(&l, ea+8);
+    if ( l.itype == HPPA_ldi && l.Op2.reg == R22 )
+      syscall = (int)l.Op1.value;
   }
   return syscall;
 }
 
 //----------------------------------------------------------------------
-static void process_operand(const op_t &x, bool isAlt, bool isload)
+static void process_operand(const insn_t &insn, const op_t &x, bool isAlt, bool isload)
 {
   switch ( x.type )
   {
     case o_reg:
 /*      if ( x.reg == GP
-        && cmd.itype != ALPHA_lda
-        && cmd.itype != ALPHA_ldah
-        && cmd.itype != ALPHA_br
-        && !isload ) split_srarea(cmd.ea+cmd.size, GPSEG, BADSEL, SR_auto);*/
+        && insn.itype != ALPHA_lda
+        && insn.itype != ALPHA_ldah
+        && insn.itype != ALPHA_br
+        && !isload ) split_srarea(insn.ea+insn.size, GPSEG, BADSEL, SR_auto);*/
       break;
     default:
-      if ( cmd.itype == HPPA_fcmp
-        || cmd.itype == HPPA_b
-        || cmd.itype == HPPA_ftest ) return;
-      interr("emu");
+      if ( insn.itype == HPPA_fcmp
+        || insn.itype == HPPA_b
+        || insn.itype == HPPA_ftest )
+      {
+        return;
+      }
+      interr(insn, "emu");
       break;
     case o_based:     // (%r5)
       break;
     case o_imm:
-      process_immediate_number(x.n);
-      if ( op_adds_xrefs(uFlag, x.n) )
-        ua_add_off_drefs2(x, dr_O, OOF_SIGNED);
+      process_immediate_number(insn, x.n);
+      if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
+        insn.add_off_drefs(x, dr_O, OOF_SIGNED);
       break;
     case o_displ:
-      process_immediate_number(x.n);
-      if ( is_stkreg(x.reg) || is_frreg(x.reg) )
+      process_immediate_number(insn, x.n);
+      if ( is_stkreg(x.reg) || is_frreg(insn, x.reg) )
       {
-        if ( may_create_stkvars() && !isDefArg(uFlag, x.n) )
+        if ( may_create_stkvars() && !is_defarg(get_flags(insn.ea), x.n) )
         {
-          if ( stldwm() )
-            op_num(cmd.ea, -1);
+          if ( stldwm(insn) )
+            op_num(insn.ea, -1);
           else
-            create_lvar(x, x.addr);
+            create_lvar(insn, x, x.addr);
         }
       }
       else
       {
-        ea_t ea = calc_possible_memref(x);
+        ea_t ea = calc_possible_memref(insn, x);
         if ( ea != BADADDR )
         {
-          if ( cmd.itype == HPPA_be )
-            add_near_ref(x, ea);
+          if ( insn.itype == HPPA_be )
+            add_near_ref(insn, x, ea);
           else
-            ua_add_dref(x.offb, ea, calc_dref_type(isload));
-          ua_dodata2(x.offb, ea, x.dtyp);
-          if ( !isload )
+            insn.add_dref(ea, x.offb, calc_dref_type(insn, isload));
+          insn.create_op_data(ea, x);
+          if ( isload )
           {
-            doVar(ea);
-          }
-          else
-          {
-            ea_t ea2 = get_long(ea);
-            if ( isEnabled(ea2) )
-              ua_add_dref(x.offb, ea2, dr_O);
+            ea_t ea2 = get_dword(ea);
+            if ( is_mapped(ea2) )
+              insn.add_dref(ea2, x.offb, dr_O);
           }
         }
       }
@@ -583,73 +578,69 @@ static void process_operand(const op_t &x, bool isAlt, bool isload)
     case o_phrase:
       if ( isAlt )
         break;
-      if ( op_adds_xrefs(uFlag, x.n) )
+      if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
       {
-        ea_t ea = ua_add_off_drefs2(x, isload ? dr_R : dr_W, OOF_SIGNED|OOF_ADDR);
+        ea_t ea = insn.add_off_drefs(x, isload ? dr_R : dr_W, OOF_SIGNED|OOF_ADDR);
         if ( ea != BADADDR )
-        {
-          ua_dodata2(x.offb, ea, x.dtyp);
-          if ( !isload )
-            doVar(ea);
-        }
+          insn.create_op_data(ea, x);
       }
       break;
     case o_near:
-      add_near_ref(x, calc_mem(x.addr));
+      add_near_ref(insn, x, calc_mem(x.addr));
       break;
   }
 }
 
 //----------------------------------------------------------------------
-static bool add_stkpnt(sval_t delta)
+static bool add_stkpnt(const insn_t &insn, sval_t delta)
 {
-  func_t *pfn = get_func(cmd.ea);
+  func_t *pfn = get_func(insn.ea);
   if ( pfn == NULL )
     return false;
 
-  return add_auto_stkpnt2(pfn, cmd.ea+cmd.size, delta);
+  return add_auto_stkpnt(pfn, insn.ea+insn.size, delta);
 }
 
 //----------------------------------------------------------------------
-static void trace_sp(void)
+static void trace_sp(const insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     // stw,m           %r3, 0x80(%sr0,%sp)
     case HPPA_stw:
-      if ( opcode(get_long(cmd.ea)) == 0x1B     // stw,m
-        && is_stkreg(cmd.Op2.reg) )
+      if ( opcode(get_dword(insn.ea)) == 0x1B     // stw,m
+        && is_stkreg(insn.Op2.reg) )
       {
-        add_stkpnt(cmd.Op2.addr);
+        add_stkpnt(insn, insn.Op2.addr);
       }
       break;
     // ldw,m           -0x80(%sr0,%sp), %r3
     case HPPA_ldw:
-      if ( opcode(get_long(cmd.ea)) == 0x13     // ldw,m
-        && is_stkreg(cmd.Op1.reg) )
+      if ( opcode(get_dword(insn.ea)) == 0x13     // ldw,m
+        && is_stkreg(insn.Op1.reg) )
       {
-        add_stkpnt(cmd.Op1.addr);
+        add_stkpnt(insn, insn.Op1.addr);
       }
       break;
     case HPPA_ldo:
-      if ( is_stkreg(cmd.Op2.reg) )
+      if ( is_stkreg(insn.Op2.reg) )
       {
         // ldo -0x80(%sp), %sp
-        if ( is_stkreg(cmd.Op1.reg) )
+        if ( is_stkreg(insn.Op1.reg) )
         {
-          add_stkpnt(cmd.Op1.addr);
+          add_stkpnt(insn, insn.Op1.addr);
         }
-        else if ( is_frreg(cmd.Op1.reg) )
+        else if ( is_frreg(insn, insn.Op1.reg) )
         {
           // analog of the 'leave' instruction
           // (restores the original value of sp + optional delta
           // using the frame pointer register)
           // ldo 4(%r4), %sp
-          func_t *pfn = get_func(cmd.ea);
+          func_t *pfn = get_func(insn.ea);
           if ( pfn != NULL )
           {
-            sval_t delta = cmd.Op1.addr + pfn->frregs - get_spd(pfn,cmd.ea);
-            add_stkpnt(-delta);
+            sval_t delta = insn.Op1.addr + pfn->frregs - get_spd(pfn,insn.ea);
+            add_stkpnt(insn, -delta);
           }
         }
       }
@@ -658,33 +649,34 @@ static void trace_sp(void)
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+
+int idaapi emu(const insn_t &insn)
 {
 
-  if ( segtype(cmd.ea) == SEG_XTRN )
+  if ( segtype(insn.ea) == SEG_XTRN )
     return 1;
 
-  uint32 Feature = cmd.get_canon_feature();
+  uint32 Feature = insn.get_canon_feature();
   flow = ((Feature & CF_STOP) == 0);
 
   int i;
   for ( i=0; i < UA_MAXOP; i++ )
     if ( Feature & (CF_USE1<<i) )
-      process_operand(cmd.Operands[i], is_forced_operand(cmd.ea, i), true);
+      process_operand(insn, insn.ops[i], is_forced_operand(insn.ea, i), true);
 
   for ( i=0; i < UA_MAXOP; i++ )
     if ( Feature & (CF_CHG1<<i) )
-      process_operand(cmd.Operands[i], is_forced_operand(cmd.ea, i), false);
+      process_operand(insn, insn.ops[i], is_forced_operand(insn.ea, i), false);
 
 //
 //      Determine if the next instruction should be executed
 //
   if ( Feature & CF_STOP )
     flow = false;
-  if ( is_delayed_stop(false) )
+  if ( is_delayed_stop(insn, false) )
     flow = false;
   if ( flow )
-    ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+    add_cref(insn.ea, insn.ea+insn.size,fl_F);
 
 //
 //      Handle SP modifications
@@ -692,24 +684,24 @@ int idaapi emu(void)
   if ( may_trace_sp() )
   {
     if ( !flow )
-      recalc_spd(cmd.ea);     // recalculate SP register for the next insn
+      recalc_spd(insn.ea);     // recalculate SP register for the next insn
     else
-      trace_sp();
+      trace_sp(insn);
   }
 
 // Handle system calls
-  if ( cmd.itype == HPPA_ldi && !has_cmt(uFlag) )
+  if ( insn.itype == HPPA_ldi && !has_cmt(get_flags(insn.ea)) )
   {
-    int syscall = get_syscall_number(cmd.ea-8);
+    int syscall = get_syscall_number(insn.ea-8);
     if ( syscall >= 0 )
     {
       const char *syscall_name = get_syscall_name(syscall);
       if ( syscall_name != NULL )
       {
-        append_cmt(cmd.ea, syscall_name, false);
-        flags_t F = get_flags_novalue(cmd.ea-8);
-        if ( hasRef(F) && !has_user_name(F) )
-          set_name(cmd.ea-8, syscall_name, SN_NOWARN);
+        append_cmt(insn.ea, syscall_name, false);
+        flags_t F = get_flags(insn.ea-8);
+        if ( has_xref(F) && !has_user_name(F) )
+          set_name(insn.ea-8, syscall_name, SN_NOCHECK|SN_NOWARN);
       }
     }
   }
@@ -717,26 +709,23 @@ int idaapi emu(void)
 }
 
 //----------------------------------------------------------------------
-int may_be_func(void)           // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
-                                // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
+int may_be_func(const insn_t &/*insn*/) // can a function start here?
+                                    // returns: probability 0..100
 {
 //      ldah    $gp, 0x2000($27)
-//  if ( cmd.itype == ALPHA_ldah && cmd.Op1.reg == GP )
+//  if ( insn.itype == ALPHA_ldah && insn.Op1.reg == GP )
 //    return 100;
   return 0;
 }
 
 //----------------------------------------------------------------------
-int is_sane_insn(int /*nocrefs*/)
+int is_sane_insn(const insn_t &insn, int /*nocrefs*/)
 {
   // disallow jumps to nowhere
-  if ( cmd.Op1.type == o_near && !isEnabled(calc_mem(cmd.Op1.addr)) )
+  if ( insn.Op1.type == o_near && !is_mapped(calc_mem(insn.Op1.addr)) )
     return 0;
   // don't disassemble 0 as break 0,0 automatically
-  if ( cmd.itype == HPPA_break && get_long(cmd.ea) == 0 )
+  if ( insn.itype == HPPA_break && get_dword(insn.ea) == 0 )
     return 0;
   return 1;
 }
@@ -744,12 +733,13 @@ int is_sane_insn(int /*nocrefs*/)
 //----------------------------------------------------------------------
 int idaapi is_align_insn(ea_t ea)
 {
-  if ( !decode_insn(ea) )
+  insn_t insn;
+  if ( decode_insn(&insn, ea) < 1 )
     return 0;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case HPPA_break:
-      if ( get_long(cmd.ea) )
+      if ( get_dword(insn.ea) )
         return 0;
       break;
     case HPPA_nop:
@@ -757,11 +747,11 @@ int idaapi is_align_insn(ea_t ea)
     default:
       return 0;
   }
-  return cmd.size;
+  return insn.size;
 }
 
 //----------------------------------------------------------------------
-int idaapi hppa_get_frame_retsize(func_t *)
+int idaapi hppa_get_frame_retsize(const func_t *)
 {
   return 0;     // ALPHA doesn't use stack for function return addresses
 }
@@ -770,19 +760,20 @@ int idaapi hppa_get_frame_retsize(func_t *)
 //lint -e{818} could be declared as pointing to const
 bool idaapi create_func_frame(func_t *pfn)
 {
-  ea_t ea = pfn->startEA;
+  ea_t ea = pfn->start_ea;
   int frame_reg = 0;
   for ( int i=0; i < 16; i++ )
   {
-    decode_insn(ea);
-    if ( cmd.itype == HPPA_copy && is_stkreg(cmd.Op1.reg) )
-      frame_reg = cmd.Op2.reg;
-    if ( opcode(get_long(ea)) == 0x1B )    // stw,m
+    insn_t insn;
+    decode_insn(&insn, ea);
+    if ( insn.itype == HPPA_copy && is_stkreg(insn.Op1.reg) )
+      frame_reg = insn.Op2.reg;
+    if ( opcode(get_dword(ea)) == 0x1B )    // stw,m
     {
       if ( frame_reg != 0 )
-        helper.altset(pfn->startEA, frame_reg);
+        helper.altset_ea(pfn->start_ea, frame_reg);
 //      return true;//add_frame(pfn, 0, 0, 0);
-      return add_frame(pfn, cmd.Op2.addr, 0, 0);
+      return add_frame(pfn, insn.Op2.addr, 0, 0);
     }
     ea += 4;
   }
@@ -790,11 +781,11 @@ bool idaapi create_func_frame(func_t *pfn)
 }
 
 //----------------------------------------------------------------------
-bool is_basic_block_end(void)
+bool is_basic_block_end(const insn_t &insn)
 {
-  if ( is_delayed_stop(true) )
+  if ( is_delayed_stop(insn, true) )
     return true;
-  return !isFlow(get_flags_novalue(cmd.ea+cmd.size));
+  return !is_flow(get_flags(insn.ea+insn.size));
 }
 
 //-------------------------------------------------------------------------
@@ -821,6 +812,7 @@ bool calc_hppa_arglocs(func_type_data_t *fti)
 
 //-------------------------------------------------------------------------
 static bool hppa_set_op_type(
+        const insn_t &insn,
         const op_t &x,
         const tinfo_t &tif,
         const char *name,
@@ -832,9 +824,9 @@ static bool hppa_set_op_type(
     case o_imm:
       if ( type.is_ptr()
         && x.value != 0
-        && !isDefArg(get_flags_novalue(cmd.ea), x.n) )
+        && !is_defarg(get_flags(insn.ea), x.n) )
       {
-        return set_offset(cmd.ea, x.n, 0);
+        return op_plain_offset(insn.ea, x.n, 0);
       }
       break;
     case o_mem:
@@ -843,40 +835,42 @@ static bool hppa_set_op_type(
         return apply_once_tinfo_and_name(dea, type, name);
       }
     case o_displ:
-      return apply_tinfo_to_stkarg(x, x.addr, type, name);
+      return apply_tinfo_to_stkarg(insn, x, x.addr, type, name);
     case o_reg:
       {
         uint32 r = x.reg;
-        func_t *pfn = get_func(cmd.ea);
+        func_t *pfn = get_func(insn.ea);
         if ( pfn == NULL )
           return false;
         bool ok;
         bool farref;
         func_item_iterator_t fii;
-        for ( ok=fii.set(pfn, cmd.ea);
-              ok && (ok=fii.decode_preceding_insn(&visited, &farref)) != false; )
+        insn_t l;
+        for ( ok=fii.set(pfn, insn.ea);
+              ok && (ok=fii.decode_preceding_insn(&visited, &farref, &l)) != false;
+              )
         {
           if ( visited.size() > 4096 )
             break; // decoded enough of it, abandon
           if ( farref )
             continue;
-          switch ( cmd.itype )
+          switch ( l.itype )
           {
             case HPPA_ldo:
-              if ( cmd.Op2.reg != r )
+              if ( l.Op2.reg != r )
                 continue;
-              remove_tinfo_pointer(idati, &type, &name);
+              remove_tinfo_pointer(&type, &name);
               // no break
             case HPPA_copy:
             case HPPA_ldw:
             case HPPA_ldi:
             case HPPA_ldil:
-              if ( cmd.Op2.reg != r )
+              if ( l.Op2.reg != r )
                 continue;
-              return hppa_set_op_type(cmd.Op1, type, name, visited);
+              return hppa_set_op_type(l, l.Op1, type, name, visited);
             default:
               {
-                int code = spoils(&r, 1);
+                int code = spoils(insn, &r, 1);
                 if ( code == -1 )
                   continue;
               }
@@ -884,9 +878,9 @@ static bool hppa_set_op_type(
           }
           break;
         }
-        if ( !ok && cmd.ea == pfn->startEA )
+        if ( !ok && l.ea == pfn->start_ea )
         { // reached the function start, this looks like a register argument
-          add_regarg2(pfn, r, type, name);
+          add_regarg(pfn, r, type, name);
           break;
         }
       }
@@ -896,18 +890,19 @@ static bool hppa_set_op_type(
 }
 
 //-------------------------------------------------------------------------
-//lint -e{1764} could be declared const ref
-static bool idaapi set_op_type(op_t &x, const tinfo_t &type, const char *name)
+
+static bool idaapi set_op_type(const insn_t &insn, const op_t &x, const tinfo_t &type, const char *name)
 {
   eavec_t visited;
-  return hppa_set_op_type(x, type, name, visited);
+  return hppa_set_op_type(insn, x, type, name, visited);
 }
 
 //-------------------------------------------------------------------------
 int use_hppa_regarg_type(ea_t ea, const funcargvec_t &rargs)
 {
+  insn_t insn;
   int idx = -1;
-  if ( decode_insn(ea) )
+  if ( decode_insn(&insn, ea) > 0 )
   {
     qvector<uint32> regs;
     int n = rargs.size();
@@ -915,21 +910,21 @@ int use_hppa_regarg_type(ea_t ea, const funcargvec_t &rargs)
     for ( int i=0; i < n; i++ )
       regs[i] = rargs[i].argloc.reg1();
 
-    idx = spoils(regs.begin(), n);
+    idx = spoils(insn, regs.begin(), n);
     if ( idx >= 0 )
     {
       tinfo_t type = rargs[idx].type;
       const char *name = rargs[idx].name.begin();
-      switch ( cmd.itype )
+      switch ( insn.itype )
       {
         case HPPA_ldo:
-          remove_tinfo_pointer(idati, &type, &name);
+          remove_tinfo_pointer(&type, &name);
           // no break
         case HPPA_copy:
         case HPPA_ldw:
         case HPPA_ldi:
         case HPPA_ldil:
-          set_op_type(cmd.Op1, type, name);
+          set_op_type(insn, insn.Op1, type, name);
         case HPPA_depw:
         case HPPA_depwi:
         case HPPA_depd:
@@ -952,9 +947,9 @@ static bool idaapi has_delay_slot(ea_t ea)
   return has_delay_slot(ea, true);
 }
 
-static bool idaapi is_stkarg_load(int *src, int *dst)
+static bool idaapi is_stkarg_load(const insn_t &insn, int *src, int *dst)
 {
-  if ( cmd.itype == HPPA_stw )
+  if ( insn.itype == HPPA_stw )
   {
     *src = 0;
     *dst = 1;

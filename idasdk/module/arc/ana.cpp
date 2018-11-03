@@ -24,7 +24,7 @@ address by 4, since it's granularity are words then (and not bytes)
 FYI:
 register code 61 means "short immediate with .f-flag set", 63 "short immediate
 without .f-flag" and 62 means "long immediate (4 bytes following the instruction,
-making the instruction 8 bytes long (cmd.size)).
+making the instruction 8 bytes long (insn.size)).
 */
 
 //----------------------------------------------------------------------
@@ -33,7 +33,7 @@ void doRegisterOperand(int code, op_t &op, int d, int li, int isbranch)
   /* we always deal with double words, exceptions are load/stores
      with 8 or 16 bits. these are covered by the instruction decoding */
 
-  op.dtyp = dt_dword;
+  op.dtype = dt_dword;
   if ( code == SHIMM_F || code == SHIMM )     // short immediate with/wo flags
   {
     if ( isbranch )
@@ -78,7 +78,7 @@ void doRegisterOperand(int code, op_t &op, int d, int li, int isbranch)
 // reg imm  displ: [reg, imm]
 // imm reg  displ: [imm, reg] (membase=1)
 // reg reg  phrase: [reg, reg]
-void doIndirectOperand(int b, int c, op_t &op, int d, int li, bool special)
+void doIndirectOperand(const insn_t &insn, int b, int c, op_t &op, int d, int li, bool special)
 {
    if ( is_imm(b) && is_imm(c) )
    {
@@ -117,16 +117,16 @@ void doIndirectOperand(int b, int c, op_t &op, int d, int li, bool special)
        op.membase = 1;
      }
    }
-   switch ( cmd.auxpref & aux_zmask )
+   switch ( insn.auxpref & aux_zmask )
    {
      default:
-       op.dtyp = dt_dword;
+       op.dtype = dt_dword;
        break;
      case aux_b:
-       op.dtyp = dt_byte;
+       op.dtype = dt_byte;
        break;
      case aux_w:
-       op.dtyp = dt_word;
+       op.dtype = dt_word;
        break;
    }
 }
@@ -134,15 +134,16 @@ void doIndirectOperand(int b, int c, op_t &op, int d, int li, bool special)
 //----------------------------------------------------------------------
 // doBranchOperand handles pc-relative word offsets.
 // nothing special here.
-void doBranchOperand(op_t &op, int l)
+void doBranchOperand(const insn_t &insn, op_t &op, int l)
 {
-  op.dtyp = dt_dword;
+  op.dtype = dt_dword;
   op.type = o_near;
-  op.addr = cmd.ip + l * 4 + 4;
+  op.addr = insn.ip + l * 4 + 4;
   op.offb = 0;
 }
 
-void doRegisterInstruction(uint32 code)
+//----------------------------------------------------------------------
+void doRegisterInstruction(insn_t &insn, uint32 code)
 {
 
   int i = (code >> 27) & 31;
@@ -159,148 +160,148 @@ void doRegisterInstruction(uint32 code)
 
   /* store the flags. if there are actually no flags at that place, they */
   /* will be reconstructed later */
-  cmd.auxpref = code & (aux_cmask|aux_f);
+  insn.auxpref = code & (aux_cmask|aux_f);
 
   switch ( i )
   {
     case 0:                    // LD register+register
-      cmd.itype = ARC_ld;
-      cmd.auxpref |= (code & aux_di);
+      insn.itype = ARC_ld;
+      insn.auxpref |= (code & aux_di);
       break;
     case 1:                    // LD register+offset, LR
       if ( code & (1 << 13) )
-        cmd.itype = ARC_lr;
+        insn.itype = ARC_lr;
       else
-        cmd.itype = ARC_ld;
+        insn.itype = ARC_ld;
       break;
     case 2:                    // ST, SR
       if ( code & (1 << 25) )
       {
-        cmd.itype = ARC_sr;
+        insn.itype = ARC_sr;
       }
       else
       {
-        cmd.itype = ARC_st;
+        insn.itype = ARC_st;
         // 26 = Di
         // 24 = A
         // 23..22 = ZZ
-        cmd.auxpref = (code >> 20) & (aux_di|aux_amask|aux_zmask);
+        insn.auxpref = (code >> 20) & (aux_di|aux_amask|aux_zmask);
       }
       break;
     case 3:                    // single operand instructions
       switch ( c )
       {
         case 0:
-          cmd.itype = ARC_flag;
+          insn.itype = ARC_flag;
           a = b;                // flag has no 'a' operand, so we're moving the b-operand to a.
           break;
         case 1:
-          cmd.itype = ARC_asr;
+          insn.itype = ARC_asr;
           break;
         case 2:
-          cmd.itype = ARC_lsr;
+          insn.itype = ARC_lsr;
           break;
         case 3:
-          cmd.itype = ARC_ror;
+          insn.itype = ARC_ror;
           break;
         case 4:
-          cmd.itype = ARC_rrc;
+          insn.itype = ARC_rrc;
           break;
         case 5:
-          cmd.itype = ARC_sexb;
+          insn.itype = ARC_sexb;
           break;
         case 6:
-          cmd.itype = ARC_sexw;
+          insn.itype = ARC_sexw;
           break;
         case 7:
-          cmd.itype = ARC_extb;
+          insn.itype = ARC_extb;
           break;
         case 8:
-          cmd.itype = ARC_extw;
+          insn.itype = ARC_extw;
           break;
         case 9:
-          cmd.itype = ARC_swap;
+          insn.itype = ARC_swap;
           break;
         case 10:
-          cmd.itype = ARC_norm;
+          insn.itype = ARC_norm;
           break;
         case 0x3F:
           switch ( d )
           {
             case 0:
-              cmd.itype = ARC_brk;
+              insn.itype = ARC_brk;
               break;
             case 1:
-              cmd.itype = ARC_sleep;
+              insn.itype = ARC_sleep;
               break;
             case 2:
-              cmd.itype = ARC_swi;
+              insn.itype = ARC_swi;
               break;
             default:
               return;
           }
           a = b = -1;
-          cmd.auxpref = 0;
+          insn.auxpref = 0;
           break;
       }
       c = -1;                   // c operand is no real operand, so don't try to convert it.
       break;
     case 7:                    // Jcc, JLcc
-      cmd.itype = ARC_j;
+      insn.itype = ARC_j;
       if ( code & (1<<9) )
-        cmd.itype = ARC_jl;
+        insn.itype = ARC_jl;
       else
-        cmd.itype = ARC_j;
+        insn.itype = ARC_j;
       // copy the NN bits
-      cmd.auxpref |= (code & aux_nmask);
+      insn.auxpref |= (code & aux_nmask);
       break;
     case 8:                    // ADD
-      cmd.itype = ARC_add;
+      insn.itype = ARC_add;
       break;
     case 9:                    // ADC
-      cmd.itype = ARC_adc;
+      insn.itype = ARC_adc;
       break;
     case 10:                   // SUB
-      cmd.itype = ARC_sub;
+      insn.itype = ARC_sub;
       break;
     case 11:                   // SBC
-      cmd.itype = ARC_sbc;
+      insn.itype = ARC_sbc;
       break;
     case 12:                   // AND
-      cmd.itype = ARC_and;
+      insn.itype = ARC_and;
       break;
     case 13:                   // OR
-      cmd.itype = ARC_or;
+      insn.itype = ARC_or;
       break;
     case 14:                   // BIC
-      cmd.itype = ARC_bic;
+      insn.itype = ARC_bic;
       break;
     case 15:                   // XOR
-      cmd.itype = ARC_xor;
+      insn.itype = ARC_xor;
       break;
     case 0x10:
-      cmd.itype = ARC_asl;
+      insn.itype = ARC_asl;
       break;
     case 0x11:
-      cmd.itype = ARC_lsr;
+      insn.itype = ARC_lsr;
       break;
     case 0x12:
-      cmd.itype = ARC_asr;
+      insn.itype = ARC_asr;
       break;
     case 0x13:
-      cmd.itype = ARC_ror;
+      insn.itype = ARC_ror;
       break;
     case 0x14:
-      cmd.itype = ARC_mul64;
+      insn.itype = ARC_mul64;
       break;
     case 0x15:
-      cmd.itype = ARC_mulu64;
+      insn.itype = ARC_mulu64;
       break;
     case 0x1E:
-      cmd.itype = ARC_max;
+      insn.itype = ARC_max;
       break;
     case 0x1F:
-      cmd.itype = ARC_min;
+      insn.itype = ARC_min;
       break;
   }
 
@@ -308,13 +309,13 @@ void doRegisterInstruction(uint32 code)
   int noop3 = 0, isnop = 0;
 
   if ( a == SHIMM_F || b == SHIMM_F || c == SHIMM_F )
-    cmd.auxpref = aux_f;       // .f
+    insn.auxpref = aux_f;       // .f
 
   if ( b == SHIMM || c == SHIMM )
-    cmd.auxpref = 0;
+    insn.auxpref = 0;
 
   if ( b == LIMM || c == LIMM )
-    immediate = ua_next_long();
+    immediate = insn.get_next_dword();
 
   /*
   pseudo instruction heuristic:
@@ -331,7 +332,7 @@ void doRegisterInstruction(uint32 code)
   nop                     xxx 0, 0, 0
   */
 
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case ARC_flag:
       // special handling for flag, since its a-operand is a source here
@@ -343,7 +344,7 @@ void doRegisterInstruction(uint32 code)
       if ( b == c )
       {
         noop3 = 1;
-        cmd.itype = ARC_mov;
+        insn.itype = ARC_mov;
       }
       break;
 
@@ -354,13 +355,13 @@ void doRegisterInstruction(uint32 code)
         if ( b >= SHIMM_F )
         {
           // add rD, imm, imm -> move rD, imm*2
-          cmd.itype = ARC_mov;
+          insn.itype = ARC_mov;
           d <<= 1;
           immediate <<= 1;
         }
         else
         {
-          cmd.itype = ARC_lsl;
+          insn.itype = ARC_lsl;
         }
       }
       break;
@@ -369,17 +370,17 @@ void doRegisterInstruction(uint32 code)
       if ( b == c )
       {
         noop3 = 1;
-        cmd.itype = ARC_rlc;
+        insn.itype = ARC_rlc;
       }
       break;
 
     case ARC_xor:
-      if ( code == 0x7FFFFFFF) // XOR 0x1FF, 0x1FF, 0x1FF
+      if ( code == 0x7FFFFFFF ) // XOR 0x1FF, 0x1FF, 0x1FF
         isnop = 1;
       break;
   }
 
-  //if ( (i>=8) && (i != 0x14) && (i!=0x15) && (a>62) && !(cmd.auxpref&(1<<8)) )        // 3 operands, but target is immediate and no flags to set
+  //if ( (i>=8) && (i != 0x14) && (i!=0x15) && (a>62) && !(insn.auxpref&(1<<8)) )        // 3 operands, but target is immediate and no flags to set
   //  isnop=1;
 
   if ( !isnop )
@@ -387,53 +388,54 @@ void doRegisterInstruction(uint32 code)
     if ( i == 0 )
     {
       // ld a, [b,c]
-      doRegisterOperand(a, cmd.Op1, d, immediate, 0);
-      doIndirectOperand(b, c, cmd.Op2, d, immediate, false);
+      doRegisterOperand(a, insn.Op1, d, immediate, 0);
+      doIndirectOperand(insn, b, c, insn.Op2, d, immediate, false);
     }
     else if ( i == 1 || i == 2 )
     {
       /* fetch the flag-bits from the right location */
-      if ( cmd.itype == ARC_ld )
-        cmd.auxpref = (code >> 9) & 0x3F;
-      else if ( cmd.itype == ARC_st )
-        cmd.auxpref = (code >> 21) & 0x3F;
+      if ( insn.itype == ARC_ld )
+        insn.auxpref = (code >> 9) & 0x3F;
+      else if ( insn.itype == ARC_st )
+        insn.auxpref = (code >> 21) & 0x3F;
       else
-        cmd.auxpref = 0;
-      if ( cmd.itype == ARC_st || cmd.itype == ARC_sr )
+        insn.auxpref = 0;
+      if ( insn.itype == ARC_st || insn.itype == ARC_sr )
       {
         /* in a move to special register or load from special register,
            we have the target operand somewhere else */
         a = c;
         /* c=-1; not used anyway */
       }
-      doRegisterOperand(a, cmd.Op1, d, immediate, 0);
-      doIndirectOperand(b, SHIMM, cmd.Op2, d, immediate, cmd.itype == ARC_lr || cmd.itype == ARC_sr);
+      doRegisterOperand(a, insn.Op1, d, immediate, 0);
+      doIndirectOperand(insn, b, SHIMM, insn.Op2, d, immediate, insn.itype == ARC_lr || insn.itype == ARC_sr);
     }
     else if ( i == 7 )
     {
       /* the jump (absolute) instruction, with a special imm-encoding */
-      doRegisterOperand(b, cmd.Op1, d, immediate, 1);
+      doRegisterOperand(b, insn.Op1, d, immediate, 1);
     }
     else
     {
       if ( a != -1 )
-        doRegisterOperand(a, cmd.Op1, 0, immediate, 0);
+        doRegisterOperand(a, insn.Op1, 0, immediate, 0);
       /* this is a bugfix for the gnu-as: long immediate must be equal, while short */
       /* immediates don't have to. */
       if ( b != -1 )
-        doRegisterOperand(b, cmd.Op2, d, immediate, 0);
-      if ( c != -1  && !noop3 )
-        doRegisterOperand(c, cmd.Op3, d, immediate, 0);
+        doRegisterOperand(b, insn.Op2, d, immediate, 0);
+      if ( c != -1 && !noop3 )
+        doRegisterOperand(c, insn.Op3, d, immediate, 0);
     }
   }
   else
   {
-    cmd.itype = ARC_nop;
-    cmd.auxpref = 0;
+    insn.itype = ARC_nop;
+    insn.auxpref = 0;
   }
 }
 
-void doBranchInstruction(uint32 code)
+//----------------------------------------------------------------------
+void doBranchInstruction(insn_t &insn, uint32 code)
 {
   int i = (code >> 27) & 31;
 
@@ -442,52 +444,52 @@ void doBranchInstruction(uint32 code)
   if ( l >= 0x80000 )             // sign-extend
     l = l - 0x100000;
 
-  doBranchOperand(cmd.Op1, l);
+  doBranchOperand(insn, insn.Op1, l);
 
   switch ( i )
   {
     case 4:                    // Bcc
-      cmd.itype = ARC_b;
+      insn.itype = ARC_b;
       break;
     case 5:                    // BLcc
-      cmd.itype = ARC_bl;
+      insn.itype = ARC_bl;
       break;
     case 6:                    // LPcc
-      cmd.itype = ARC_lp;
+      insn.itype = ARC_lp;
       break;
   }
-  cmd.auxpref = code & 0x1FF;
+  insn.auxpref = code & 0x1FF;
 }
 
 //----------------------------------------------------------------------
 // analyze ARCTangent-A4 (32-bit) instruction
-static int ana_old(void)
+static int ana_old(insn_t &insn)
 {
-  if ( cmd.ea & 3 )
+  if ( insn.ea & 3 )
     return 0;
 
-  cmd.Op1.dtyp = dt_dword;
-  cmd.Op2.dtyp = dt_dword;
-  cmd.Op3.dtyp = dt_dword;
+  insn.Op1.dtype = dt_dword;
+  insn.Op2.dtype = dt_dword;
+  insn.Op3.dtype = dt_dword;
 
-  uint32 code = ua_next_long();
+  uint32 code = insn.get_next_dword();
 
   int i = (code >> 27) & 31;
 
-  cmd.itype = 0;
+  insn.itype = 0;
 
-  switch (i)
+  switch ( i )
   {
     case 0:                    // LD register+register
     case 1:                    // LD register+offset, LR
     case 2:                    // ST, SR
     case 3:                    // single operand instructions
-      doRegisterInstruction(code);
+      doRegisterInstruction(insn, code);
       break;
     case 4:                    // Bcc
     case 5:                    // BLcc
     case 6:                    // LPcc
-      doBranchInstruction(code);
+      doBranchInstruction(insn, code);
       break;
     case 7:                    // Jcc, JLcc
     case 8:                    // ADD
@@ -499,15 +501,15 @@ static int ana_old(void)
     case 14:                   // BIC
     case 15:                   // XOR
       default:
-      doRegisterInstruction(code);
+      doRegisterInstruction(insn, code);
       break;
   }
 
-  return cmd.size;
+  return insn.size;
 }
 
-#define SUBTABLE(high, low, name) (0x80000000 | (high << 8) | low), 0, {0,0,0}, name
-#define SUBTABLE2(high1, low1, high2, low2, name) (0x80000000 | (high1 << 24) | (low1 << 16) | (high2 << 8) | low2), 0, {0,0,0}, name
+#define SUBTABLE(high, low, name) (0x80000000 | (high << 8) | low), 0, { 0,0,0 }, name
+#define SUBTABLE2(high1, low1, high2, low2, name) (0x80000000 | (high1 << 24) | (low1 << 16) | (high2 << 8) | low2), 0, { 0,0,0 }, name
 
 //----------------------------------------------------------------------
 struct arcompact_opcode_t
@@ -515,10 +517,10 @@ struct arcompact_opcode_t
   uint32 mnem;   // instruction itype, or indicator of sub-field decoding
   uint32 aux;    // auxpref and other flags
   uint32 ops[3]; // description of operands
-  const struct arcompact_opcode_t *subtable; //lint !e958 padding is required to align members
+  const arcompact_opcode_t *subtable; //lint !e958 padding is required to align members
 };
 
-enum aux_flags_t
+enum aux_flags_t ENUM_SIZE(uint32)
 {
   AUX_B = 1,          // implicit byte size access
   AUX_W = 2,          // implicit word size access
@@ -532,11 +534,11 @@ enum aux_flags_t
   N_5     = 0x200,    //  5..5     N delay slot bit
   AUX_GEN  = 0x400,   // 4..0 = Q if 23..22=0x3, bit 15 = F
   AUX_GEN2 = 0x800,   // 4..0 = Q if 23..22=0x3
-  AUX_GEN3 = 
+  AUX_GEN3 =
     AUX_GEN|AUX_GEN2, // 4..0 = Q if 23..22=0x3, bit 15 = Di
 };
 
-enum op_fields_t
+enum op_fields_t ENUM_SIZE(uint32)
 {
   fA32=1,         //  5..0                   a register operand (6 bits, r0-r63)
   fA16,           //  2..0                   a register operand (3 bits, r0-r3, r12-r15)
@@ -586,19 +588,22 @@ enum op_fields_t
 };
 
 // indexed by bit 16 (maj = 0)
-static const struct arcompact_opcode_t arcompact_maj0[2] = {
+static const arcompact_opcode_t arcompact_maj0[2] =
+{
   { ARC_b, Q_4_0 | N_5, {S21, 0, 0}, NULL }, // 0
-  { ARC_b, N_5        , {S25, 0, 0}, NULL }, // 1
+  { ARC_b, N_5,         {S25, 0, 0}, NULL }, // 1
 };
 
 // indexed by bit 17 (maj = 1, b16 = 0)
-static const struct arcompact_opcode_t arcompact_bl[2] = {
+static const arcompact_opcode_t arcompact_bl[2] =
+{
   { ARC_bl, Q_4_0 | N_5, {S21L, 0, 0}, NULL }, // 0
-  { ARC_bl, N_5        , {S25L, 0, 0}, NULL }, // 1
+  { ARC_bl, N_5,         {S25L, 0, 0}, NULL }, // 1
 };
 
 // indexed by bits 3..0 (maj = 1, b16 = 1, b4 = 0)
-static const struct arcompact_opcode_t arcompact_br_regreg[0x10] = {
+static const arcompact_opcode_t arcompact_br_regreg[0x10] =
+{
   { ARC_br, AUX_CND|cEQ|N_5, {fB32, fC32, S9}, NULL }, // 0x00
   { ARC_br, AUX_CND|cNE|N_5, {fB32, fC32, S9}, NULL }, // 0x01
   { ARC_br, AUX_CND|cLT|N_5, {fB32, fC32, S9}, NULL }, // 0x02
@@ -618,7 +623,8 @@ static const struct arcompact_opcode_t arcompact_br_regreg[0x10] = {
 };
 
 // indexed by bits 3..0 (maj = 1, b16 = 1, b4 = 1)
-static const struct arcompact_opcode_t arcompact_br_regimm[0x10] = {
+static const arcompact_opcode_t arcompact_br_regimm[0x10] =
+{
   { ARC_br, AUX_CND|cEQ|N_5, {fB32, U6, S9}, NULL }, // 0x00
   { ARC_br, AUX_CND|cNE|N_5, {fB32, U6, S9}, NULL }, // 0x01
   { ARC_br, AUX_CND|cLT|N_5, {fB32, U6, S9}, NULL }, // 0x02
@@ -638,19 +644,22 @@ static const struct arcompact_opcode_t arcompact_br_regimm[0x10] = {
 };
 
 // indexed by bit 4 (maj = 1, b16 = 1)
-static const struct arcompact_opcode_t arcompact_br[4] = {
+static const arcompact_opcode_t arcompact_br[4] =
+{
   { SUBTABLE( 3,  0, arcompact_br_regreg)       }, // 0
   { SUBTABLE( 3,  0, arcompact_br_regimm)       }, // 1
 };
 
 // indexed by bit 16 (maj = 1)
-static const struct arcompact_opcode_t arcompact_maj1[0x40] = {
+static const arcompact_opcode_t arcompact_maj1[0x40] =
+{
   { SUBTABLE(17, 17, arcompact_bl)              }, // 0
   { SUBTABLE( 4,  4, arcompact_br)              }, // 1
 };
 
 // indexed by bits 14..12 & 26..24 (maj = 4, 21..16=0x2F, 5..0=0x3F)
-static const struct arcompact_opcode_t arcompact_zop[0x40] = {
+static const arcompact_opcode_t arcompact_zop[0x40] =
+{
   { 0 },                                  // 0x00
   { ARC_sleep, 0,   {GENC, 0, 0}, NULL }, // 0x01
   { ARC_swi,   0,   {   0, 0, 0}, NULL }, // 0x02
@@ -702,7 +711,8 @@ static const struct arcompact_opcode_t arcompact_zop[0x40] = {
 };
 
 // indexed by bits 5..0 (maj = 4, 21..16=0x2F)
-static const struct arcompact_opcode_t arcompact_sop[0x40] = {
+static const arcompact_opcode_t arcompact_sop[0x40] =
+{
   { ARC_asl,  AUX_GEN, {GENB, GENC,    0}, NULL }, // 0x00
   { ARC_asr,  AUX_GEN, {GENB, GENC,    0}, NULL }, // 0x01
   { ARC_lsr,  AUX_GEN, {GENB, GENC,    0}, NULL }, // 0x02
@@ -766,11 +776,12 @@ static const struct arcompact_opcode_t arcompact_sop[0x40] = {
   { 0 },                                       // 0x3C
   { 0 },                                       // 0x3D
   { 0 },                                       // 0x3E
-  { SUBTABLE2(14, 12, 26, 24, arcompact_zop)}, // 0x3F
+  { SUBTABLE2(14, 12, 26, 24, arcompact_zop) },// 0x3F
 };
 
 // indexed by bits 21..16 (maj = 4)
-static const struct arcompact_opcode_t arcompact_maj4[0x40] = {
+static const arcompact_opcode_t arcompact_maj4[0x40] =
+{
   { ARC_add,  AUX_GEN, {GENA, GENB, GENC}, NULL }, // 0x00
   { ARC_adc,  AUX_GEN, {GENA, GENB, GENC}, NULL }, // 0x01
   { ARC_sub,  AUX_GEN, {GENA, GENB, GENC}, NULL }, // 0x02
@@ -838,7 +849,8 @@ static const struct arcompact_opcode_t arcompact_maj4[0x40] = {
 };
 
 // indexed by bits 14..12 & 26..24 (maj = 5, 21..16=0x2F, 5..0=0x3F)
-static const struct arcompact_opcode_t arcompact_zop5[0x40] = {
+static const arcompact_opcode_t arcompact_zop5[0x40] =
+{
   { 0 },                                  // 0x00
   { 0 },                                  // 0x01
   { 0 },                                  // 0x02
@@ -890,7 +902,8 @@ static const struct arcompact_opcode_t arcompact_zop5[0x40] = {
 };
 
 // indexed by bits 5..0 (maj = 5, 21..16=0x2F)
-static const struct arcompact_opcode_t arcompact_sop5[0x40] = {
+static const arcompact_opcode_t arcompact_sop5[0x40] =
+{
   { ARC_swap,  AUX_GEN, {GENB, GENC,    0}, NULL }, // 0x00
   { ARC_norm,  AUX_GEN, {GENB, GENC,    0}, NULL }, // 0x01
   { ARC_sat16, AUX_GEN, {GENB, GENC,    0}, NULL }, // 0x02
@@ -954,11 +967,12 @@ static const struct arcompact_opcode_t arcompact_sop5[0x40] = {
   { 0 },                                            // 0x3C
   { 0 },                                            // 0x3D
   { 0 },                                            // 0x3E
-  { SUBTABLE2(14, 12, 26, 24, arcompact_zop5)},     // 0x3F
+  { SUBTABLE2(14, 12, 26, 24, arcompact_zop5) },    // 0x3F
 };
 
 // indexed by bits 21..16 (maj = 5)
-static const struct arcompact_opcode_t arcompact_maj5[0x40] = {
+static const arcompact_opcode_t arcompact_maj5[0x40] =
+{
   { ARC_asl,     AUX_GEN, {GENA, GENB, GENC}, NULL }, // 0x00
   { ARC_lsr,     AUX_GEN, {GENA, GENB, GENC}, NULL }, // 0x01
   { ARC_asr,     AUX_GEN, {GENA, GENB, GENC}, NULL }, // 0x02
@@ -1025,8 +1039,87 @@ static const struct arcompact_opcode_t arcompact_maj5[0x40] = {
   { 0 },                                              // 0x3F
 };
 
+// indexed by bits 21..16
+static const arcompact_opcode_t arcompact_maj6_1[0x40] =
+{
+  { ARC_fmul, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 00
+  { ARC_fadd, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 01
+  { ARC_fsub, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 02
+  { 0 },                                               // 03
+  { 0 },                                               // 04
+  { 0 },                                               // 05
+  { 0 },                                               // 06
+  { 0 },                                               // 07
+  { ARC_dmulh11, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 08
+  { ARC_dmulh12, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 09
+  { ARC_dmulh21, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 0a
+  { ARC_dmulh22, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 0b
+  { ARC_daddh11, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 0c
+  { ARC_daddh12, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 0d
+  { ARC_daddh21, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 0e
+  { ARC_daddh22, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 0f
+  { ARC_dsubh11, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 10
+  { ARC_dsubh12, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 11
+  { ARC_dsubh21, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 12
+  { ARC_dsubh22, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 13
+  { ARC_drsubh11, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 14
+  { ARC_drsubh12, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 15
+  { ARC_drsubh21, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 16
+  { ARC_drsubh22, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 17
+  { ARC_dexcl1, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 18
+  { ARC_dexcl2, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 19
+  { 0 },                                                // 1a
+  { 0 },                                                // 1b
+  { 0 },                                                // 1c
+  { 0 },                                                // 1d
+  { 0 },                                                // 1e
+  { 0 },                                                // 1f
+  { ARC_pkqb,  AUX_GEN, {GENA, GENB, GENC}, NULL },  // 20
+  { ARC_upkqb, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 21
+  { ARC_xpkqb, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 22
+  { ARC_avgqb, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 23
+  { ARC_addqbs, AUX_GEN, {GENA, GENB, GENC}, NULL },// 24
+  { ARC_mpyqb, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 25
+  { ARC_fxtr, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 26
+  { ARC_iaddr, AUX_GEN, {GENA, GENB, GENC}, NULL }, // 27
+  { ARC_acm, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 28
+  { ARC_sfxtr, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 29
+  { ARC_clamp, AUX_GEN, {GENA, GENB, GENC}, NULL },  // 2a
+  { 0 },                                               // 2b
+  { 0 },                                               // 2c
+  { 0 },                                               // 2d
+  { 0 },                                               // 2e
+  { 0 },                                               // 2f
+  { 0 },                                                // 30
+  { 0 },                                                // 31
+  { 0 },                                                // 32
+  { 0 },                                                // 33
+  { 0 },                                                // 34
+  { 0 },                                                // 35
+  { 0 },                                                // 36
+  { 0 },                                                // 37
+  { 0 },                                                // 38
+  { 0 },                                                // 39
+  { 0 },                                                // 3a
+  { 0 },                                                // 3b
+  { 0 },                                                // 3c
+  { 0 },                                                // 3d
+  { 0 },                                                // 3e
+  { 0 }                                                // 3f
+};
+
+// indexed by bits 23..22
+static const arcompact_opcode_t arcompact_maj6[4] =
+{
+  { SUBTABLE(21, 16, arcompact_maj6_1) }, // 00
+  { SUBTABLE(21, 16, arcompact_maj6_1) }, // 01
+  { SUBTABLE(21, 16, arcompact_maj6_1) }, // 02
+  { 0 } // to be implemented
+};
+
 // indexed by bits 4..3 (maj = 0xC)
-static const struct arcompact_opcode_t arcompact_maj0C[4] = {
+static const arcompact_opcode_t arcompact_maj0C[4] =
+{
   { ARC_ld, 0,     { fA16, fBC16_IND, 0}, NULL }, // 0x0
   { ARC_ld, AUX_B, { fA16, fBC16_IND, 0}, NULL }, // 0x1
   { ARC_ld, AUX_W, { fA16, fBC16_IND, 0}, NULL }, // 0x2
@@ -1034,7 +1127,8 @@ static const struct arcompact_opcode_t arcompact_maj0C[4] = {
 };
 
 // indexed by bits 4..3 (maj = 0xD)
-static const struct arcompact_opcode_t arcompact_maj0D[4] = {
+static const arcompact_opcode_t arcompact_maj0D[4] =
+{
   { ARC_add, 0, {fC16, fB16, U3 }, NULL }, // 0x00
   { ARC_sub, 0, {fC16, fB16, U3 }, NULL }, // 0x01
   { ARC_asl, 0, {fC16, fB16, U3 }, NULL }, // 0x02
@@ -1042,7 +1136,8 @@ static const struct arcompact_opcode_t arcompact_maj0D[4] = {
 };
 
 // indexed by bits 4..3 (maj = 0xE)
-static const struct arcompact_opcode_t arcompact_maj0E[4] = {
+static const arcompact_opcode_t arcompact_maj0E[4] =
+{
   { ARC_add, 0, {fB16, fB16, fH16}, NULL }, // 0x00
   { ARC_mov, 0, {fB16, fH16, 0   }, NULL }, // 0x01
   { ARC_cmp, 0, {fB16, fH16, 0   }, NULL }, // 0x02
@@ -1051,7 +1146,8 @@ static const struct arcompact_opcode_t arcompact_maj0E[4] = {
 
 // indexed by bits 10..8 (maj = 0xF, 4..0 = 0x0, 7..5=0x7)
 // 01111 iii 111 00000
-static const struct arcompact_opcode_t arcompact_zop16[8] = {
+static const arcompact_opcode_t arcompact_zop16[8] =
+{
   { ARC_nop,          0, { 0, 0, 0},            NULL }, // 0x00
   { ARC_unimp,        0, { 0, 0, 0},            NULL }, // 0x01
   { 0 },                                                // 0x02
@@ -1064,7 +1160,8 @@ static const struct arcompact_opcode_t arcompact_zop16[8] = {
 
 // indexed by bits 7..5 (maj = 0xF, 4..0 = 0x0)
 // 01111 bbb iii 00000
-static const struct arcompact_opcode_t arcompact_sop16[8] = {
+static const arcompact_opcode_t arcompact_sop16[8] =
+{
   { ARC_j,            0,  {fB16|O_IND, 0, 0}, NULL }, // 0x00
   { ARC_j,        AUX_D,  {fB16|O_IND, 0, 0}, NULL }, // 0x01
   { ARC_jl,           0,  {fB16|O_IND, 0, 0}, NULL }, // 0x02
@@ -1077,7 +1174,8 @@ static const struct arcompact_opcode_t arcompact_sop16[8] = {
 
 // indexed by bits 4..0 (maj = 0xF)
 // 01111 bbb ccc iiiii
-static const struct arcompact_opcode_t arcompact_maj0F[0x20] = {
+static const arcompact_opcode_t arcompact_maj0F[0x20] =
+{
   { SUBTABLE(7, 5, arcompact_sop16)        }, // 0x00
   { 0 },                                      // 0x01
   { ARC_sub,   0, {fB16, fB16, fC16}, NULL }, // 0x02
@@ -1113,7 +1211,8 @@ static const struct arcompact_opcode_t arcompact_maj0F[0x20] = {
 };
 
 // indexed by bits 7..5 (maj = 0x17)
-static const struct arcompact_opcode_t arcompact_maj17[8] = {
+static const arcompact_opcode_t arcompact_maj17[8] =
+{
   { ARC_asl,   0, {fB16, fB16, U5}, NULL }, // 0x00
   { ARC_lsr,   0, {fB16, fB16, U5}, NULL }, // 0x01
   { ARC_asr,   0, {fB16, fB16, U5}, NULL }, // 0x02
@@ -1125,7 +1224,8 @@ static const struct arcompact_opcode_t arcompact_maj17[8] = {
 };
 
 // indexed by bits 10..8 (maj = 0x18, i=5)
-static const struct arcompact_opcode_t arcompact_sp_addsub[8] = {
+static const arcompact_opcode_t arcompact_sp_addsub[8] =
+{
   { ARC_add, 0,     {R_SP, R_SP, U7L }, NULL }, // 0x00
   { ARC_sub, 0,     {R_SP, R_SP, U7L }, NULL }, // 0x01
   { 0 },                                        // 0x02
@@ -1137,7 +1237,8 @@ static const struct arcompact_opcode_t arcompact_sp_addsub[8] = {
 };
 
 // indexed by bits 10..8 (maj = 0x18, i=6)
-static const struct arcompact_opcode_t arcompact_sp_pops[0x20] = {
+static const arcompact_opcode_t arcompact_sp_pops[0x20] =
+{
   { 0 },                                         // 0x00
   { ARC_pop, 0,     {fB16, 0, 0 }, NULL },       // 0x01
   { 0 },                                         // 0x02
@@ -1173,7 +1274,8 @@ static const struct arcompact_opcode_t arcompact_sp_pops[0x20] = {
 };
 
 // indexed by bits 10..8 (maj = 0x18, i=7)
-static const struct arcompact_opcode_t arcompact_sp_pushs[0x20] = {
+static const arcompact_opcode_t arcompact_sp_pushs[0x20] =
+{
   { 0 },                                         // 0x00
   { ARC_push, 0,     {fB16, 0, 0 }, NULL },      // 0x01
   { 0 },                                         // 0x02
@@ -1210,7 +1312,8 @@ static const struct arcompact_opcode_t arcompact_sp_pushs[0x20] = {
 
 // indexed by bits 7..5 (maj = 0x18)
 // sp-based instructions
-static const struct arcompact_opcode_t arcompact_maj18[8] = {
+static const arcompact_opcode_t arcompact_maj18[8] =
+{
   { ARC_ld,  0,     {fB16, SP_U7,    0 }, NULL }, // 0x00
   { ARC_ld,  AUX_B, {fB16, SP_U7,    0 }, NULL }, // 0x01
   { ARC_st,  0,     {fB16, SP_U7,    0 }, NULL }, // 0x02
@@ -1223,7 +1326,8 @@ static const struct arcompact_opcode_t arcompact_maj18[8] = {
 
 // indexed by bits 10..9 (maj = 0x19)
 // gp-based ld/add (data aligned offset)
-static const struct arcompact_opcode_t arcompact_maj19[4] = {
+static const arcompact_opcode_t arcompact_maj19[4] =
+{
   { ARC_ld,  0,     {R_R0, GP_S11,   0 }, NULL }, // 0x00
   { ARC_ld,  AUX_B, {R_R0, GP_S9,    0 }, NULL }, // 0x01
   { ARC_ld,  AUX_W, {R_R0, GP_S10,   0 }, NULL }, // 0x02
@@ -1231,19 +1335,22 @@ static const struct arcompact_opcode_t arcompact_maj19[4] = {
 };
 
 // indexed by bits 7..7 (maj = 0x1C)
-static const struct arcompact_opcode_t arcompact_maj1C[2] = {
+static const arcompact_opcode_t arcompact_maj1C[2] =
+{
   { ARC_add, 0, { fB16, fB16, U7}, NULL }, // 0x00
   { ARC_cmp, 0, { fB16, U7,    0}, NULL }, // 0x01
 };
 
 // indexed by bits 7..7 (maj = 0x1D)
-static const struct arcompact_opcode_t arcompact_maj1D[2] = {
+static const arcompact_opcode_t arcompact_maj1D[2] =
+{
   { ARC_br, AUX_CND|cEQ, { fB16, O_ZERO, S8}, NULL }, // 0x00
   { ARC_br, AUX_CND|cNE, { fB16, O_ZERO, S8}, NULL }, // 0x01
 };
 
 // indexed by bits 8..6 (maj = 0x1E, 10..9=0x3)
-static const struct arcompact_opcode_t arcompact_bcc16[8] = {
+static const arcompact_opcode_t arcompact_bcc16[8] =
+{
   { ARC_b,  AUX_CND|cGT, { S7, 0, 0}, NULL }, // 0x00
   { ARC_b,  AUX_CND|cGE, { S7, 0, 0}, NULL }, // 0x01
   { ARC_b,  AUX_CND|cLT, { S7, 0, 0}, NULL }, // 0x02
@@ -1255,7 +1362,8 @@ static const struct arcompact_opcode_t arcompact_bcc16[8] = {
 };
 
 // indexed by bits 10..9 (maj = 0x1E)
-static const struct arcompact_opcode_t arcompact_maj1E[4] = {
+static const arcompact_opcode_t arcompact_maj1E[4] =
+{
   { ARC_b,            0, { S10, 0, 0}, NULL }, // 0x00
   { ARC_b,  AUX_CND|cEQ, { S10, 0, 0}, NULL }, // 0x01
   { ARC_b,  AUX_CND|cNE, { S10, 0, 0}, NULL }, // 0x02
@@ -1263,14 +1371,15 @@ static const struct arcompact_opcode_t arcompact_maj1E[4] = {
 };
 
 // indexed by major opcode (bits 15..11)
-static const struct arcompact_opcode_t arcompact_major[0x20] = {
+static const arcompact_opcode_t arcompact_major[0x20] =
+{
   { SUBTABLE(16, 16, arcompact_maj0) },          // 0x00
   { SUBTABLE(16, 16, arcompact_maj1) },          // 0x01
   { ARC_ld, DAAZZX_11_6, {fA32, fB_S9, 0}, NULL},// 0x02
   { ARC_st, DAAZZR_5_0,  {fC32, fB_S9, 0}, NULL},// 0x03
   { SUBTABLE(21, 16, arcompact_maj4) },          // 0x04
   { SUBTABLE(21, 16, arcompact_maj5) },          // 0x05
-  { 0 },                                         // 0x06
+  { SUBTABLE(23, 22, arcompact_maj6) },          // 0x06
   { 0 },                                         // 0x07
   { 0 },                                         // 0x08
   { 0 },                                         // 0x09
@@ -1305,7 +1414,7 @@ static const struct arcompact_opcode_t arcompact_major[0x20] = {
 static sval_t SIGNEXT(sval_t x, int b)
 {
   uint32 m = 1 << (b - 1);
-  x &= ((1 << b) - 1);
+  x &= ((sval_t(1) << b) - 1);
   return (x ^ m) - m;
 }
 
@@ -1314,13 +1423,13 @@ static sval_t SIGNEXT(sval_t x, int b)
 
 //----------------------------------------------------------------------
 bool got_limm;
-static int get_limm()
+static int get_limm(insn_t &insn)
 {
   static int g_limm;
   if ( !got_limm )
   {
-    g_limm  = (ua_next_word() << 16);
-    g_limm |= ua_next_word();
+    g_limm  = (insn.get_next_word() << 16);
+    g_limm |= insn.get_next_word();
     got_limm = true;
   }
   return g_limm;
@@ -1328,7 +1437,7 @@ static int get_limm()
 
 //----------------------------------------------------------------------
 // register, or a reference to long immediate (r62)
-inline void opreg(op_t &x, int rgnum)
+inline void opreg(insn_t &insn, op_t &x, int rgnum)
 {
   if ( rgnum != LIMM )
   {
@@ -1340,12 +1449,12 @@ inline void opreg(op_t &x, int rgnum)
     x.type = o_imm;
     // limm as destination is not used
     // so check for instructions where first operand is source
-    if ( x.n == 0 && (cmd.get_canon_feature() & CF_CHG1) != 0 )
+    if ( x.n == 0 && (insn.get_canon_feature() & CF_CHG1) != 0 )
       x.value = 0;
     else
-      x.value = get_limm();
+      x.value = get_limm(insn);
   }
-  x.dtyp = dt_dword;
+  x.dtype = dt_dword;
 }
 
 //----------------------------------------------------------------------
@@ -1353,11 +1462,11 @@ inline void opimm(op_t &x, uval_t val)
 {
   x.value = val;
   x.type  = o_imm;
-  x.dtyp  = dt_dword;
+  x.dtype = dt_dword;
 }
 
 //----------------------------------------------------------------------
-inline void opdisp(op_t &x, int rgnum, ea_t disp)
+inline void opdisp(insn_t &insn, op_t &x, int rgnum, ea_t disp)
 {
   if ( rgnum != LIMM )
   {
@@ -1368,9 +1477,9 @@ inline void opdisp(op_t &x, int rgnum, ea_t disp)
   else
   {
     x.type = o_mem;
-    x.addr = get_limm() + disp;
+    x.addr = get_limm(insn) + disp;
   }
-  x.dtyp = dt_dword;
+  x.dtype = dt_dword;
 }
 
 //----------------------------------------------------------------------
@@ -1382,18 +1491,18 @@ inline int reg16(int rgnum)
 }
 
 //----------------------------------------------------------------------
-inline void opbranch(op_t &x, sval_t delta)
+inline void opbranch(const insn_t &insn, op_t &x, sval_t delta)
 {
   // cPC <- (cPCL+delta)
   // PCL is current instruction address with 2 low bits set to 0
-  ea_t pcl = cmd.ip & ~3ul;
+  ea_t pcl = insn.ip & ~3ul;
   x.type = o_near;
-  x.dtyp = dt_code;
+  x.dtype = dt_code;
   x.addr = pcl + delta;
 }
 
 //----------------------------------------------------------------------
-static void decode_operand(uint32 code, op_t &x, uint32 opkind)
+static void decode_operand(insn_t &insn, uint32 code, op_t &x, uint32 opkind)
 {
   if ( opkind == 0 )
   {
@@ -1405,28 +1514,28 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
   switch ( opkind & ~O_IND )
   {
     case fA16:
-      opreg(x, reg16(BITS(code, 2, 0)));
+      opreg(insn, x, reg16(BITS(code, 2, 0)));
       break;
     case fB16:
-      opreg(x, reg16(BITS(code, 10, 8)));
+      opreg(insn, x, reg16(BITS(code, 10, 8)));
       break;
     case fC16:
-      opreg(x, reg16(BITS(code, 7, 5)));
+      opreg(insn, x, reg16(BITS(code, 7, 5)));
       break;
 
     case fA32:    //  5..0                   a register operand (6 bits, r0-r63)
-      opreg(x, BITS(code, 5, 0));
+      opreg(insn, x, BITS(code, 5, 0));
       break;
     case fB32:    // 14..12 & 26..24         b register operand (6 bits)
-      opreg(x, (BITS(code, 14, 12)<<3) | BITS(code, 26, 24));
+      opreg(insn, x, (BITS(code, 14, 12)<<3) | BITS(code, 26, 24));
       break;
     case fC32:    // 11..6                   c register operand (6 bits)
-      opreg(x, BITS(code, 11, 6));
+      opreg(insn, x, BITS(code, 11, 6));
       break;
 
     case fH16:  //  2..0 & 7..5            h register operand (6 bits)
       reg = (BITS(code, 2, 0) << 3) | BITS(code, 7, 5);
-      opreg(x, reg);
+      opreg(insn, x, reg);
       break;
     case S25L:           // 15..6 & 26..18 & 0..3 s25 signed branch displacement for branch and link
     case S21L:           // 15..6 & 26..18        s21 signed branch displacement for branch and link
@@ -1449,44 +1558,44 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
         // branch-and-link uses 32-bit aligned target
         displ &= ~1ul;
       }
-      opbranch(x, displ * 2);
+      opbranch(insn, x, displ * 2);
       break;
 
     case S9:              // 15&23..17             s9 signed branch displacement (16-bit aligned)
       displ = BITS(code, 23, 17);
       if ( BITS(code, 15, 15) ) // sign bit
         displ -= (1ul<<7);
-      opbranch(x, displ * 2);
+      opbranch(insn, x, displ * 2);
       break;
 
     case S7:              // 5..0                  s7 signed branch displacement (16-bit aligned)
       displ = SBITS(code, 5, 0);
-      opbranch(x, displ * 2);
+      opbranch(insn, x, displ * 2);
       break;
 
     case S8:              // 6..0                  s8 signed branch displacement (16-bit aligned)
       displ = SBITS(code, 6, 0);
-      opbranch(x, displ * 2);
+      opbranch(insn, x, displ * 2);
       break;
 
     case S10:             // 8..0                  s10 signed branch displacement (16-bit aligned)
       displ = SBITS(code, 8, 0);
-      opbranch(x, displ * 2);
+      opbranch(insn, x, displ * 2);
       break;
 
     case S13:             // 10..0                 s13 signed branch displacement (32-bit aligned)
       displ = SBITS(code, 10, 0);
-      opbranch(x, displ * 4);
+      opbranch(insn, x, displ * 4);
       break;
 
     case PCL_U10:
       displ = BITS(code, 7, 0);
-      opdisp(x, PCL, displ*4);
+      opdisp(insn, x, PCL, displ*4);
       break;
 
     case SP_U7: //  4..0                 [SP, u7]   stack + offset (u7 = u5*4)
       displ = BITS(code, 4, 0);
-      opdisp(x, SP, displ*4);
+      opdisp(insn, x, SP, displ*4);
       break;
 
     case U3:             //  2..0                  u2 unsigned immediate
@@ -1522,7 +1631,7 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
       else if ( opkind == fB_U7 )
         displ *= 4;
       reg = reg16(BITS(code, 10, 8));
-      opdisp(x, reg, displ);
+      opdisp(insn, x, reg, displ);
       break;
 
     case fB_S9:          //  14..12&26..26, 15&23..16   [b, s9]
@@ -1530,7 +1639,7 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
       if ( BITS(code, 15, 15) ) // sign bit
         displ -= (1ul<<8);
       reg = (BITS(code, 14, 12)<<3) | BITS(code, 26, 24);
-      opdisp(x, reg, displ);
+      opdisp(insn, x, reg, displ);
       break;
 
     // handing of the "gen" format:
@@ -1556,12 +1665,12 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
         reg = BITS(code, 5, 0);
       else
         reg = (BITS(code, 14, 12)<<3) | BITS(code, 26, 24);
-      opreg(x, reg);
+      opreg(insn, x, reg);
       break;
 
     case GENB:    // 14..12 & 26..24
       reg = (BITS(code, 14, 12)<<3) | BITS(code, 26, 24);
-      opreg(x, reg);
+      opreg(insn, x, reg);
       break;
 
     case GENC:       // 11..6 reg/u6 or 0..5&11..6 s12
@@ -1571,7 +1680,7 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
       {
         reg = BITS(code, 11, 6);
         if ( p == 0 || (p == 3 && BITS(code, 5, 5) == 0) )
-          opreg(x, reg);
+          opreg(insn, x, reg);
         else
           opimm(x, reg);
       }
@@ -1583,7 +1692,7 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
         opimm(x, reg);
       }
       if ( (opkind & ~O_IND) == GENC_PCREL && x.type == o_imm )
-        opbranch(x, reg * 2);
+        opbranch(insn, x, reg * 2);
       break;
 
     case fBC_IND:
@@ -1592,8 +1701,8 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
         int c = BITS(code, 11, 6);
         int li = 0;
         if ( b == LIMM || c == LIMM )
-          li = get_limm();
-        doIndirectOperand(b, c, x, 0, li, false);
+          li = get_limm(insn);
+        doIndirectOperand(insn, b, c, x, 0, li, false);
       }
       break;
 
@@ -1601,7 +1710,7 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
       {
         int b = BITS(code, 10, 8);
         int c = BITS(code,  7, 5);
-        doIndirectOperand(reg16(b), reg16(c), x, 0, 0, false);
+        doIndirectOperand(insn, reg16(b), reg16(c), x, 0, 0, false);
       }
       break;
 
@@ -1610,19 +1719,19 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
       break;
 
     case R_SP:           // implicit SP
-      opreg(x, SP);
+      opreg(insn, x, SP);
       break;
 
     case R_BLINK:        // implicit BLINK
-      opreg(x, BLINK);
+      opreg(insn, x, BLINK);
       break;
 
     case R_R0:           // implicit R0
-      opreg(x, R0);
+      opreg(insn, x, R0);
       break;
 
     case R_GP:           // implicit GP
-      opreg(x, GP);
+      opreg(insn, x, GP);
       break;
 
     case GP_S9:          //  8..0  [GP, s9]   GP + offset
@@ -1637,11 +1746,11 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
       if ( opkind == S11 )
         opimm(x, displ);
       else
-        opdisp(x, GP, displ);
+        opdisp(insn, x, GP, displ);
       break;
 
     default:
-      msg("%a: cannot decode operand %d (opkind=%u)\n", cmd.ea, x.n, opkind);
+      msg("%a: cannot decode operand %d (opkind=%u)\n", insn.ea, x.n, opkind);
       return;
   }
   if ( opkind & O_IND )
@@ -1654,7 +1763,7 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
     }
     else if ( x.type == o_imm )
     {
-      if ( cmd.itype == ARC_j || cmd.itype == ARC_jl )
+      if ( insn.itype == ARC_j || insn.itype == ARC_jl )
         x.type = o_near;
       else
         x.type = o_mem;
@@ -1665,18 +1774,18 @@ static void decode_operand(uint32 code, op_t &x, uint32 opkind)
 
 //----------------------------------------------------------------------
 // decode non-operand bits of the instruction
-static void decode_aux(uint32 code, uint32 aux)
+static void decode_aux(insn_t &insn, uint32 code, uint32 aux)
 {
   if ( aux & AUX_CND )
   {
     // condition in low bits of 'aux'
-    cmd.auxpref = (cmd.auxpref & ~aux_cmask) | (aux & aux_cmask);
+    insn.auxpref = (insn.auxpref & ~aux_cmask) | (aux & aux_cmask);
     aux &= ~(AUX_CND | aux_cmask);
   }
   if ( aux & Q_4_0 )
   {
     // condition in low bits of instruction
-    cmd.auxpref = (cmd.auxpref & ~aux_cmask) | (code & aux_cmask);
+    insn.auxpref = (insn.auxpref & ~aux_cmask) | (code & aux_cmask);
     aux &= ~Q_4_0;
   }
   if ( aux & AUX_GEN3 )
@@ -1685,65 +1794,65 @@ static void decode_aux(uint32 code, uint32 aux)
     if ( BITS(code, 15, 15) )
     {
       if ( (aux & AUX_GEN3) == AUX_GEN )
-        cmd.auxpref |= aux_f;
+        insn.auxpref |= aux_f;
       else if ( (aux & AUX_GEN3) == AUX_GEN3 )
-        cmd.auxpref |= aux_di;
+        insn.auxpref |= aux_di;
     }
     if ( BITS(code, 23, 22) == 3 )
-      cmd.auxpref = (cmd.auxpref & ~aux_cmask) | (code & aux_cmask);
+      insn.auxpref = (insn.auxpref & ~aux_cmask) | (code & aux_cmask);
     aux &= ~AUX_GEN3;
   }
   if ( aux & N_5 )
   {
-    cmd.auxpref = (cmd.auxpref & ~aux_d) | (code & aux_d);
+    insn.auxpref = (insn.auxpref & ~aux_d) | (code & aux_d);
     aux &= ~N_5;
   }
   if ( aux & AUX_W )
   {
-    cmd.auxpref = (cmd.auxpref & ~aux_zmask) | aux_w;
+    insn.auxpref = (insn.auxpref & ~aux_zmask) | aux_w;
     aux &= ~AUX_W;
   }
   if ( aux & AUX_B )
   {
-    cmd.auxpref = (cmd.auxpref & ~aux_zmask) | aux_b;
+    insn.auxpref = (insn.auxpref & ~aux_zmask) | aux_b;
     aux &= ~AUX_B;
   }
   if ( aux & AUX_X )
   {
-    cmd.auxpref |= aux_x;
+    insn.auxpref |= aux_x;
     aux &= ~AUX_X;
   }
   if ( aux & AUX_D )
   {
-    cmd.auxpref = (cmd.auxpref & ~aux_nmask) | aux_d;
+    insn.auxpref = (insn.auxpref & ~aux_nmask) | aux_d;
     aux &= ~AUX_D;
   }
   if ( aux & DAAZZX_11_6 ) // 11..6   Di, aa, ZZ, X flags (load)
   {
-    cmd.auxpref = (cmd.auxpref & ~0x3F) | (BITS(code, 11, 6));
+    insn.auxpref = (insn.auxpref & ~0x3F) | (BITS(code, 11, 6));
     aux &= ~DAAZZX_11_6;
   }
   if ( aux & DAAZZR_5_0 ) //  5..0   Di, aa, ZZ, R flags (store)
   {
-    cmd.auxpref = (cmd.auxpref & ~0x3F) | (BITS(code, 5, 0));
+    insn.auxpref = (insn.auxpref & ~0x3F) | (BITS(code, 5, 0));
     aux &= ~DAAZZR_5_0;
   }
   if ( aux & AAZZXD_23_15 ) //  23..22,18..15  aa, ZZ, X, D flags (load reg+reg)
   {
     // load instructions flags: Di.AA.ZZ.X
-    cmd.auxpref &= ~0x3F;
-    cmd.auxpref |= BITS(code, 15, 15) << 5; // Di
-    cmd.auxpref |= BITS(code, 23, 22) << 3; // aa
-    cmd.auxpref |= BITS(code, 18, 17) << 1; // ZZ
-    cmd.auxpref |= BITS(code, 16, 16) << 0; // X
+    insn.auxpref &= ~0x3F;
+    insn.auxpref |= BITS(code, 15, 15) << 5; // Di
+    insn.auxpref |= BITS(code, 23, 22) << 3; // aa
+    insn.auxpref |= BITS(code, 18, 17) << 1; // ZZ
+    insn.auxpref |= BITS(code, 16, 16) << 0; // X
     aux &= ~AAZZXD_23_15;
   }
   if ( aux != 0 )
-    msg("%a: unhandled aux bits: %08X\n", cmd.ea, aux);
+    msg("%a: unhandled aux bits: %08X\n", insn.ea, aux);
 }
 
 //----------------------------------------------------------------------
-static int analyze_compact(uint32 code, int idx, const struct arcompact_opcode_t *table)
+static int analyze_compact(insn_t &insn, uint32 code, int idx, const arcompact_opcode_t *table)
 {
   const arcompact_opcode_t *line = &table[idx];
   while ( (line->mnem & 0x80000000) != 0 )
@@ -1764,50 +1873,50 @@ static int analyze_compact(uint32 code, int idx, const struct arcompact_opcode_t
     return 0;
   }
 
-  cmd.itype = line->mnem;
-  decode_aux(code, line->aux);
+  insn.itype = line->mnem;
+  decode_aux(insn, code, line->aux);
   for ( int i = 0; i < 3; i++ )
-    decode_operand(code, cmd.Operands[i], line->ops[i]);
-  return cmd.size;
+    decode_operand(insn, code, insn.ops[i], line->ops[i]);
+  return insn.size;
 }
 
 //----------------------------------------------------------------------
 // analyze ARCompact instruction
-static int ana_compact(void)
+static int ana_compact(insn_t &insn)
 {
   // must be 16-bit aligned
-  if ( cmd.ea & 1 )
+  if ( insn.ea & 1 )
     return 0;
-  uint32 code = ua_next_word();
+  uint32 code = insn.get_next_word();
   got_limm = false;
   // first 5 bits is the major opcode
   int i = (code >> 11) & 0x1F;
-  if ( i < 0xC )
+  if ( i < 0x8 )
   {
     // this is a 32-bit instruction
     // get the full word
-    code = (code << 16) | ua_next_word();
+    code = (code << 16) | insn.get_next_word();
   }
-  return analyze_compact(code, i, arcompact_major);
+  return analyze_compact(insn, code, i, arcompact_major);
 }
 
 //----------------------------------------------------------------------
-static void simplify()
+static void simplify(insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case ARC_st:
     case ARC_ld:
       // ld.as r1, [r2, delta] -> ld r1, [r2, delta*size]
-      if ( cmd.Op2.type == o_displ && (cmd.auxpref & aux_amask) == aux_as && cmd.Op2.membase == 0 )
+      if ( insn.Op2.type == o_displ && (insn.auxpref & aux_amask) == aux_as && insn.Op2.membase == 0 )
       {
         int mul = 4;
-        if ( (cmd.auxpref & aux_zmask) == aux_w )
+        if ( (insn.auxpref & aux_zmask) == aux_w )
           mul = 2;
-        else if ( (cmd.auxpref & aux_zmask) != aux_l )
+        else if ( (insn.auxpref & aux_zmask) != aux_l )
           break;
-        cmd.Op2.addr *= mul;
-        cmd.auxpref &= ~aux_amask;
+        insn.Op2.addr *= mul;
+        insn.auxpref &= ~aux_amask;
       }
       break;
     case ARC_add1:
@@ -1817,47 +1926,47 @@ static void simplify()
     case ARC_sub2:
     case ARC_sub3:
       // addN a, b, c -> add a, b, c<<N
-      if ( cmd.Op3.type == o_imm )
+      if ( insn.Op3.type == o_imm )
       {
-        switch ( cmd.itype )
+        switch ( insn.itype )
         {
           case ARC_add1:
           case ARC_sub1:
-            cmd.Op3.value *= 2;
+            insn.Op3.value *= 2;
             break;
           case ARC_add2:
           case ARC_sub2:
-            cmd.Op3.value *= 4;
+            insn.Op3.value *= 4;
             break;
           case ARC_add3:
           case ARC_sub3:
-            cmd.Op3.value *= 8;
+            insn.Op3.value *= 8;
             break;
         }
-        switch ( cmd.itype )
+        switch ( insn.itype )
         {
           case ARC_add1:
           case ARC_add2:
           case ARC_add3:
-            cmd.itype = ARC_add;
+            insn.itype = ARC_add;
             break;
           case ARC_sub3:
           case ARC_sub2:
           case ARC_sub1:
-            cmd.itype = ARC_sub;
+            insn.itype = ARC_sub;
             break;
         }
       }
       break;
     case ARC_sub:
       // sub.f   0, a, b -> cmp a, b
-      if ( cmd.Op1.is_imm(0) && (cmd.auxpref & aux_f) != 0 )
+      if ( insn.Op1.is_imm(0) && (insn.auxpref & aux_f) != 0 )
       {
-        cmd.auxpref &= ~aux_f;
-        cmd.itype = ARC_cmp;
-        cmd.Op1 = cmd.Op2;
-        cmd.Op2 = cmd.Op3;
-        cmd.Op3.type = o_void;
+        insn.auxpref &= ~aux_f;
+        insn.itype = ARC_cmp;
+        insn.Op1 = insn.Op2;
+        insn.Op2 = insn.Op3;
+        insn.Op3.type = o_void;
       }
       break;
   }
@@ -1865,17 +1974,17 @@ static void simplify()
 
 //----------------------------------------------------------------------
 // fix operand size for byte or word loads/stores
-inline void fix_ldst()
+inline void fix_ldst(insn_t &insn)
 {
-  if ( cmd.itype == ARC_ld || cmd.itype == ARC_st )
+  if ( insn.itype == ARC_ld || insn.itype == ARC_st )
   {
-    switch ( cmd.auxpref & aux_zmask )
+    switch ( insn.auxpref & aux_zmask )
     {
       case aux_b:
-        cmd.Op2.dtyp = dt_byte;
+        insn.Op2.dtype = dt_byte;
         break;
       case aux_w:
-        cmd.Op2.dtyp = dt_word;
+        insn.Op2.dtype = dt_word;
         break;
     }
   }
@@ -1884,35 +1993,36 @@ inline void fix_ldst()
 //----------------------------------------------------------------------
 // convert pc-relative loads
 // ld r1, [pc,#delta] -> ld r1, [memaddr]
-static void inline_const()
+static void inline_const(insn_t &insn)
 {
-  if ( cmd.itype == ARC_ld
-    && cmd.Op2.type == o_displ
-    && cmd.Op2.reg == PCL
-    && (cmd.auxpref & (aux_a|aux_zmask)) == 0 ) // no .a and 32-bit access
+  if ( insn.itype == ARC_ld
+    && insn.Op2.type == o_displ
+    && insn.Op2.reg == PCL
+    && (insn.auxpref & (aux_a|aux_zmask)) == 0 ) // no .a and 32-bit access
   {
-    ea_t val_ea = (cmd.ea & ~3ul) + cmd.Op2.addr;
-    if ( isEnabled(val_ea) )
+    ea_t val_ea = (insn.ea & ~3ul) + insn.Op2.addr;
+    if ( is_mapped(val_ea) )
     {
-      cmd.Op2.type = o_mem;
-      cmd.Op2.addr = val_ea;
-      cmd.auxpref |= aux_pcload;
+      insn.Op2.type = o_mem;
+      insn.Op2.addr = val_ea;
+      insn.auxpref |= aux_pcload;
     }
   }
 }
 
 //----------------------------------------------------------------------
 // analyze an instruction
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
-  int sz = is_a4() ? ana_old() : ana_compact();
+  insn_t &insn = *_insn;
+  int sz = is_a4() ? ana_old(insn) : ana_compact(insn);
   if ( sz != 0 )
   {
-    fix_ldst();
+    fix_ldst(insn);
     if ( (idpflags & ARC_SIMPLIFY) != 0 )
-      simplify();
+      simplify(insn);
     if ( (idpflags & ARC_INLINECONST) != 0 )
-      inline_const();
+      inline_const(insn);
   }
-  return cmd.size;
+  return insn.size;
 }

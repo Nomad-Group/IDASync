@@ -28,11 +28,11 @@ bool callgraph_t::visited(ea_t func_ea, int *nid)
 
 //--------------------------------------------------------------------------
 void callgraph_t::add_fathers(
-    func_t *func,
-    ea_t func_start,
-    int id,
-    funcs_walk_options_t *opt,
-    int level)
+        func_t *func,
+        ea_t func_start,
+        int id,
+        funcs_walk_options_t *opt,
+        int level)
 {
   qnotused(func);
   if ( level >= (opt->callers_recurse_limit+2) )
@@ -44,30 +44,30 @@ void callgraph_t::add_fathers(
   xrefblk_t xb_to;
 
   for ( bool xb_to_ok = xb_to.first_to(func_start, XREF_FAR);
-    xb_to_ok && xb_to.iscode;
-    xb_to_ok = xb_to.next_to() )
+        xb_to_ok && xb_to.iscode;
+        xb_to_ok = xb_to.next_to() )
   {
     func_t *f_from = get_func(xb_to.from);
     if ( f_from == NULL )
       continue;
 
-    int idto = add(f_from->startEA);
+    int idto = add(f_from->start_ea);
     //msg("Adding XREF to 1st node %d\n", idto);
     create_edge(idto, id);
 
-    add_fathers(f_from, f_from->startEA, idto, opt, level+1);
+    add_fathers(f_from, f_from->start_ea, idto, opt, level+1);
   }
 }
 
 //--------------------------------------------------------------------------
 int callgraph_t::walk_func(
-    eavec_t *hide_nodes,
-    func_t *func,
-    funcs_walk_options_t *opt,
-    int level)
+        eavec_t *hide_nodes,
+        func_t *func,
+        funcs_walk_options_t *opt,
+        int level)
 {
   // add a node for this function
-  ea_t func_start = func->startEA;
+  ea_t func_start = func->start_ea;
 
   int id = add(func_start);
 
@@ -84,8 +84,8 @@ int callgraph_t::walk_func(
   {
     xrefblk_t xb;
     for ( bool xb_ok = xb.first_from(fii.current(), XREF_FAR);
-      xb_ok && xb.iscode;
-      xb_ok = xb.next_from() )
+          xb_ok && xb.iscode;
+          xb_ok = xb.next_from() )
     {
       bool is_func_lib;
       ea_t ea;
@@ -96,12 +96,12 @@ int callgraph_t::walk_func(
         ea = xb.to;
         is_func_lib = true;
 
-        if ((opt->flags & FWO_SKIPLIB) != 0)
+        if ( (opt->flags & FWO_SKIPLIB) != 0 )
           continue;
       }
       else
       {
-        ea = f->startEA;
+        ea = f->start_ea;
         is_func_lib = false;
       }
 
@@ -128,12 +128,9 @@ int callgraph_t::walk_func(
 
         if ( opt != NULL )
         {
-          skip =
-            // skip lib funcs?
-            (((is_func_lib) && ((opt->flags & FWO_SKIPLIB) != 0))
-            // max recursion is off, and limit is reached?
-            || (  ((opt->flags & FWO_CALLEE_RECURSE_UNLIM) == 0)
-            && (level > opt->callees_recurse_limit) ));
+          skip = is_func_lib && (opt->flags & FWO_SKIPLIB) != 0 // skip lib funcs?
+              || ((opt->flags & FWO_CALLEE_RECURSE_UNLIM) == 0 // max recursion is off, and limit is reached?
+               && level > opt->callees_recurse_limit);
         }
 
         // More nodes in this level than the maximum specified?
@@ -208,7 +205,7 @@ void callgraph_t::reset()
 }
 
 //--------------------------------------------------------------------------
-ea_t callgraph_t::get_addr(int nid)
+ea_t callgraph_t::get_addr(int nid) const
 {
   int_ea_map_t::const_iterator it = node2ea.find(nid);
   return it == node2ea.end() ? BADADDR : it->second;
@@ -220,29 +217,19 @@ ea_t callgraph_t::get_addr(int nid)
 // FIXME: not comprehensive, better follow the settings in strings options
 size_t get_string(ea_t ea, qstring *out)
 {
-  char buf[MAXSTR];
-
-  out->qclear();
-  size_t len = get_max_ascii_length(ea, ASCSTR_C);
-  if ( len > 4 )
-  {
-    if( get_ascii_contents2(ea, len, ASCSTR_C, buf, sizeof(buf)) )
+  const char *encodings[2] =
     {
-      *out = buf;
-      return true;
-    }
-  }
-  else
+      encoding_from_strtype(STRTYPE_C),
+      inf.is_be() ? ENC_UTF16BE : ENC_UTF16LE
+    };
+  for ( int i = 0; i < qnumber(encodings); i++ )
   {
-    len = get_max_ascii_length(ea, ASCSTR_UNICODE);
-    if ( len > 4 )
-    {
-      if( get_ascii_contents2(ea, len, ASCSTR_UNICODE, buf, sizeof(buf)) )
-      {
-        *out = buf;
-        return true;
-      }
-    }
+    int enc_idx = add_encoding(encodings[i]);
+    uint32 strtype = STRTYPE_C | (enc_idx << 24);
+    size_t len = get_max_strlit_length(ea, strtype);
+    if ( len > 4 && get_strlit_contents(out, ea, len, strtype) > 0 )
+      break;
+    out->qclear();
   }
   return out->size();
 }
@@ -258,8 +245,8 @@ bool get_strings(ea_t ea, qstring *out)
   {
     xrefblk_t xb;
     for ( bool xb_ok = xb.first_from(fii.current(), XREF_DATA);
-      xb_ok;
-      xb_ok = xb.next_from() )
+          xb_ok;
+          xb_ok = xb.next_from() )
       {
         if ( get_string(xb.to, &tmp) > 0 )
           *out += tmp + "\n";
@@ -296,7 +283,7 @@ callgraph_t::funcinfo_t *callgraph_t::get_info(int nid)
     funcinfo_t fi;
 
     qstring buf;
-    if ( get_true_name(&buf, it_ea->second) <= 0 )
+    if ( ::get_name(&buf, it_ea->second) <= 0 )
     {
       /*
       ** NOTE: With patched databases it may fail for a reason unknown (ATM).
@@ -317,7 +304,7 @@ callgraph_t::funcinfo_t *callgraph_t::get_info(int nid)
     {
       qstring outbuf = buf;
       qstring demangled;
-      if ( demangle_name2(&demangled, buf.begin(), MNG_SHORT_FORM) > 0 )
+      if ( demangle_name(&demangled, buf.begin(), MNG_SHORT_FORM) > 0 )
       {
         outbuf.append("\n");
         outbuf.append(demangled);
@@ -412,7 +399,7 @@ graph_info_t::graphinfo_list_t graph_info_t::instances;
 
 //--------------------------------------------------------------------------
 graph_info_t::graph_info_t()
-  : gv(NULL), form (NULL), func_ea(BADADDR), refresh_needed(true)
+  : gv(NULL), widget(NULL), func_ea(BADADDR), refresh_needed(true)
 {
 }
 
@@ -452,6 +439,19 @@ graph_info_t *graph_info_t::find(const char *_title)
   return NULL;
 }
 
+//-------------------------------------------------------------------------
+graph_info_t *graph_info_t::find(const graph_viewer_t *v)
+{
+  iterator it, end = instances.end();
+  for ( it = instances.begin(); it != end; ++it )
+  {
+    graph_info_t *gi = *it;
+    if ( gi->gv == v )
+      return gi;
+  }
+  return NULL;
+}
+
 //--------------------------------------------------------------------------
 graph_info_t *graph_info_t::create(ea_t ea)
 {
@@ -467,7 +467,7 @@ graph_info_t *graph_info_t::create(ea_t ea)
 
     r = new graph_info_t();
     get_title(ea, &r->title);
-    r->func_ea = pfn->startEA;
+    r->func_ea = pfn->start_ea;
     instances.push_back(r);
 
     setup_hooks(r);
@@ -476,35 +476,55 @@ graph_info_t *graph_info_t::create(ea_t ea)
 }
 
 //--------------------------------------------------------------------------
-// We hook to IDP event to receive processor module notifications
-static int idaapi idp_callback(void *user_data, int notification_code, va_list va)
+// Check if the user changed any of the functions in the current graph
+static void check_func_changed(graph_info_t *gi, ea_t ea)
 {
-  switch (notification_code)
+  ea_int_map_t::const_iterator it = gi->fg.ea2node.find(ea);
+  if ( it != gi->fg.ea2node.end() )
   {
-    case processor_t::add_func:
-    case processor_t::del_func:
-    case processor_t::set_func_start:
-    case processor_t::set_func_end:
-    case processor_t::create_switch_xrefs:
-    case processor_t::add_cref:
-    case processor_t::del_cref:
+    // The center node has been changed, destroy the current callgraph
+    if ( it->second == 0 )
+      close_widget(gi->widget, WCLS_SAVE);
+    else
+      // A function shown in the callgraph has been changed, refresh
+      // the callgraph
+      gi->refresh();
+  }
+}
+
+//--------------------------------------------------------------------------
+// We hook to IDP event to receive processor module notifications
+static ssize_t idaapi idb_callback(void *user_data, int notification_code, va_list va)
+{
+  switch ( notification_code )
+  {
+    case idb_event::func_added:
+    case idb_event::func_updated:
+    case idb_event::deleting_func:
+    case idb_event::set_func_start:
+    case idb_event::set_func_end:
     {
-      // Check if the user changed any of the functions in the current graph
-      graph_info_t *gi = (graph_info_t*)user_data;
+      func_t *pfn = va_arg(va, func_t *);
+      check_func_changed((graph_info_t *)user_data, pfn->start_ea);
+      break;
+    }
+  }
+
+  return 0;
+}
+
+//--------------------------------------------------------------------------
+// We hook to IDP event to receive processor module notifications
+static ssize_t idaapi idp_callback(void *user_data, int notification_code, va_list va)
+{
+  switch ( notification_code )
+  {
+    case processor_t::ev_create_switch_xrefs:
+    case processor_t::ev_add_cref:
+    case processor_t::ev_del_cref:
+    {
       ea_t ea = va_arg(va, ea_t);
-      ea_int_map_t::const_iterator it = gi->fg.ea2node.find(ea);
-
-      if ( it != gi->fg.ea2node.end() )
-      {
-        // The center node has been changed, destroy the current callgraph
-        if ( it->second == 0 )
-          close_tform(gi->form, FORM_SAVE);
-        else
-          // A function shown in the callgraph has been changed, refresh
-          // the callgraph
-          gi->refresh();
-      }
-
+      check_func_changed((graph_info_t *)user_data, ea);
       break;
     }
   }
@@ -517,17 +537,19 @@ void graph_info_t::setup_hooks(graph_info_t *r)
 {
   // hook to processor module events
   hook_to_notification_point(HT_IDP, idp_callback, r);
+  hook_to_notification_point(HT_IDB, idb_callback, r);
 
   /*
   // hook events about user interface modifications
   hook_to_notification_point(HT_UI, ui_callback, r);
    * */
-}
+}   //lint -esym(429,r) has not been freed or returned
 
 //--------------------------------------------------------------------------
 void graph_info_t::remove_hooks(graph_info_t *gi)
 {
   unhook_from_notification_point(HT_IDP, idp_callback, gi);
+  unhook_from_notification_point(HT_IDB, idb_callback, gi);
   /*
   unhook_from_notification_point(HT_UI, ui_callback, gi);
    * */
@@ -556,14 +578,14 @@ bool graph_info_t::get_new_title(ea_t ea, qstring *out)
 
   // We should succeed in getting the name
   qstring func_name;
-  if ( get_func_name2(&func_name, ea) <= 0 )
+  if ( get_func_name(&func_name, ea) <= 0 )
     return false;
 
-  for ( i=1; i < 255; i++)
+  for ( i=1; i < 255; i++ )
   {
-    tmp.sprnt("Call graph of: %s (%d)", func_name.begin(), i);
+    tmp.sprnt("Call graph: %s (%d)", func_name.begin(), i);
 
-    if ( find_tform(tmp.c_str()) == NULL)
+    if ( find_widget(tmp.c_str()) == NULL )
     {
       *out = tmp; //->sprnt("Call graph %d of: %s", callgraph_num, func_name.begin());
       break;
@@ -578,10 +600,10 @@ bool graph_info_t::get_title(ea_t ea, qstring *out)
 {
   // we should succeed in getting the name
   qstring func_name;
-  if ( get_func_name2(&func_name, ea) <= 0 )
+  if ( get_func_name(&func_name, ea) <= 0 )
     return false;
 
-  out->sprnt("Call graph of: %s", func_name.begin());
+  out->sprnt("Call graph: %s", func_name.begin());
   return true;
 }
 
@@ -605,35 +627,16 @@ void graph_info_t::refresh()
 }
 
 //--------------------------------------------------------------------------
-//--------------------------------------------------------------------------
-//--------------------------------------------------------------------------
-//lint -esym(773,DECLARE_GI_VAR) not parenthesized
-#define DECLARE_GI_VAR \
-  graph_info_t *gi = (graph_info_t *) ud
-
-#define DECLARE_GI_VARS \
-  DECLARE_GI_VAR;       \
-  callgraph_t *fg = &gi->fg
-
-//--------------------------------------------------------------------------
-void idaapi callgraph_t::jump_disasm(void *ud, int code, va_list va) const
-{
-  DECLARE_GI_VARS;
-  qnotused(code);
-  va_arg(va, graph_viewer_t *);
-  selection_item_t *s = va_arg(va, selection_item_t *);
-  if ( s != NULL && s->is_node )
-    jumpto(fg->get_addr(s->node));
-}
-
+//
 //--------------------------------------------------------------------------
 void idaapi callgraph_t::user_refresh(
-    void *ud,
-    int code,
-    va_list va,
-    int current_node)
+        void *ud,
+        int code,
+        va_list va,
+        int current_node)
 {
-  DECLARE_GI_VARS;
+  graph_info_t *gi = (graph_info_t *) ud;
+  callgraph_t *fg = &gi->fg;
   qnotused(code);
   qnotused(current_node);
   if ( !gi->is_refresh_needed() )
@@ -661,18 +664,17 @@ void idaapi callgraph_t::user_refresh(
   callgraph_t::edge_iterator end = fg->end_edges();
 
   for ( it=fg->begin_edges(); it != end; ++it )
-  {
     mg->add_edge(it->id1, it->id2, NULL);
-  }
 
   fg->clear_edges();
 }
 
 //--------------------------------------------------------------------------
-int idaapi callgraph_t::gr_callback(void *ud, int code, va_list va)
+ssize_t idaapi callgraph_t::gr_callback(void *ud, int code, va_list va)
 {
   bool result = false;
-
+  graph_info_t *gi = (graph_info_t *) ud;
+  callgraph_t *fg = &gi->fg;
   switch ( code )
   {
     // a graph node has been double clicked
@@ -681,7 +683,7 @@ int idaapi callgraph_t::gr_callback(void *ud, int code, va_list va)
     // out: 0-ok, 1-ignore click
     case grcode_dblclicked:
     {
-      result = menu_center_cb(ud);
+      result = fg->center(gi);
       break;
     }
     // refresh user-defined graph nodes and edges
@@ -702,8 +704,6 @@ int idaapi callgraph_t::gr_callback(void *ud, int code, va_list va)
     // out: must return 0, result must be filled
     case grcode_user_text:
     {
-      DECLARE_GI_VARS;
-
       va_arg(va, mutable_graph_t *);
       int node           = va_arg(va, int);
       const char **text  = va_arg(va, const char **);
@@ -734,7 +734,6 @@ int idaapi callgraph_t::gr_callback(void *ud, int code, va_list va)
     // out: 0-use default hint, 1-use proposed hint
     case grcode_user_hint:
     {
-      DECLARE_GI_VARS;
       va_arg(va, mutable_graph_t *);
 
       int mousenode = va_argi(va, int);
@@ -747,18 +746,17 @@ int idaapi callgraph_t::gr_callback(void *ud, int code, va_list va)
       ea_t addr;
       if ( mousenode != -1 && (addr = fg->get_addr(mousenode)) != BADADDR )
       {
-        char *lines[1024];
+        qstrvec_t lines;
         qstring all_lines;
 
         for ( int j=0; j < 16; j++ )
         {
-          int nl = generate_disassembly(addr, lines, qnumber(lines), NULL, false);
+          int nl = generate_disassembly(&lines, NULL, addr, 1024, false);
 
-          for ( int i = 0; i < nl; i++)
+          for ( int i = 0; i < nl; i++ )
           {
-            all_lines += lines[i],
-              all_lines += "\n";
-            qfree(lines[i]);
+            all_lines.append(lines[i]);
+            all_lines.append('\n');
           }
           addr = get_item_end(addr);
         }
@@ -792,14 +790,6 @@ int idaapi callgraph_t::gr_callback(void *ud, int code, va_list va)
       }
       break;
     }
-    // graph is being destroyed
-    case grcode_destroyed:
-    {
-      DECLARE_GI_VAR;
-
-      graph_info_t::destroy(gi);
-      break;
-    }
   }
   return (int)result;
 }
@@ -828,7 +818,7 @@ static int idaapi options_cb(int fid, form_actions_t &fa)
 {
   ushort opt = 0;
 
-  if ( fid == FIELD_ID_CHILDS || fid == -1 )
+  if ( fid == FIELD_ID_CHILDS || fid == CB_INIT )
   {
     if ( !fa.get_checkbox_value(FIELD_ID_CHILDS, &opt) )
       INTERR(562);
@@ -874,13 +864,12 @@ static bool show_options()
   sval_t callees_limit = fg_opts.callees_recurse_limit;
   sval_t max_nodes = fg_opts.max_nodes;
 
-  if ( !AskUsingForm_c(
-          opt_form,
-          options_cb,
-          &callers_limit,
-          &opt,
-          &callees_limit,
-          &max_nodes) )
+  if ( !ask_form(opt_form,
+                 options_cb,
+                 &callers_limit,
+                 &opt,
+                 &callees_limit,
+                 &max_nodes) )
   {
     return false;
   }
@@ -891,7 +880,7 @@ static bool show_options()
     opt |= FWO_CALLEE_RECURSE_UNLIM;
   }
 
-  fg_opts.flags  = opt;
+  fg_opts.flags = opt;
   fg_opts.callees_recurse_limit = callees_limit;
   fg_opts.callers_recurse_limit = callers_limit;
   fg_opts.max_nodes = max_nodes;
@@ -926,13 +915,13 @@ static int findfirst_node(callgraph_t *fg)
   static const char form[] =
     "Enter search substring\n"
     "\n"
-    " <#Search is not case sensitive#Function name:A:1000:50::>\n\n";
+    " <#Search is not case sensitive#Function name:q:1000:50::>\n\n";
 
-  static char last_text[MAXSTR] = "";
-  if ( !AskUsingForm_c(form, last_text) )
+  static qstring last_text;
+  if ( !ask_form(form, &last_text) )
     return -2;
 
-  return fg->find_first(last_text);
+  return fg->find_first(last_text.c_str());
 }
 
 //--------------------------------------------------------------------------
@@ -954,43 +943,54 @@ static void display_node_search_result(graph_info_t *gi, int nid)
   }
 }
 
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_refresh_cb(void *ud)
+
+
+//-------------------------------------------------------------------------
+struct cg_ah_t : public action_handler_t
 {
-  DECLARE_GI_VAR;
-  gi->refresh();
-  return true;
-}
+  virtual int act(graph_info_t *gi) = 0;
+
+  virtual int idaapi activate(action_activation_ctx_t *ctx)
+  {
+    graph_info_t *gi = graph_info_t::find((graph_viewer_t *) ctx->widget);
+    return gi != NULL ? act(gi) : 0;
+  }
+
+  virtual action_state_t idaapi update(action_update_ctx_t *ctx)
+  {
+    return graph_info_t::find((graph_viewer_t *) ctx->widget) != NULL
+         ? AST_ENABLE_FOR_WIDGET
+         : AST_DISABLE_FOR_WIDGET;
+  }
+};
+
+//-------------------------------------------------------------------------
+#define DEF_TRAMPOLINE(Method)                                          \
+struct Method##_ah_t : public cg_ah_t                                   \
+{                                                                       \
+  virtual int act(graph_info_t *gi) { return int(gi->fg.Method(gi)); }  \
+};                                                                      \
+static Method##_ah_t Method##_ah;
+DEF_TRAMPOLINE(options);
+DEF_TRAMPOLINE(refresh);
+DEF_TRAMPOLINE(jumpxref);
+DEF_TRAMPOLINE(jumpaddr);
+DEF_TRAMPOLINE(jump);
+DEF_TRAMPOLINE(back);
+DEF_TRAMPOLINE(forward);
+DEF_TRAMPOLINE(center);
+DEF_TRAMPOLINE(select);
+DEF_TRAMPOLINE(home);
+DEF_TRAMPOLINE(searchfirst);
+DEF_TRAMPOLINE(searchnext);
+DEF_TRAMPOLINE(hidenode);
+DEF_TRAMPOLINE(showhidden);
+DEF_TRAMPOLINE(showall);
+#undef DEF_TRAMPOLINE
 
 //--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_home_cb(void *ud)
+bool callgraph_t::options(graph_info_t *gi) const
 {
-  DECLARE_GI_VARS;
-  if ( fg->count() > 1 )
-    jump_to_node(gi, 0);
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_searchfirst_cb(void *ud)
-{
-  DECLARE_GI_VARS;
-  display_node_search_result(gi, findfirst_node(fg));
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_searchnext_cb(void *ud)
-{
-  DECLARE_GI_VARS;
-  display_node_search_result(gi, fg->find_next());
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_options_cb(void *ud)
-{
-  DECLARE_GI_VAR;
   if ( show_options() )
     gi->refresh();
 
@@ -998,9 +998,281 @@ bool idaapi callgraph_t::menu_options_cb(void *ud)
 }
 
 //--------------------------------------------------------------------------
-bool idaapi callgraph_t::navigate(void *ud, ea_t addr)
+bool callgraph_t::refresh(graph_info_t *gi) const
 {
-  DECLARE_GI_VAR;
+  gi->refresh();
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::jumpxref(graph_info_t *gi) const
+{
+  int node;
+  ea_t addr;
+
+  node = viewer_get_curnode(gi->gv);
+  if ( node != -1 )
+  {
+    addr = gi->fg.get_addr(node);
+    ea_t xref = choose_xref(addr);
+
+    if ( xref != 0 && xref != BADADDR )
+      navigate(gi, xref);
+
+  }
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::jumpaddr(graph_info_t *gi) const
+{
+  ea_t addr;
+
+  if ( ask_addr(&addr, "Jump address") )
+  {
+    func_t *pfn = get_func(addr);
+    if ( pfn == NULL )
+    {
+      warning("You have entered an invalid address");
+      return false;
+    }
+    navigate(gi, addr);
+  }
+
+  return true;
+}
+
+
+//--------------------------------------------------------------------------
+bool callgraph_t::jump(const graph_info_t *gi) const
+{
+  int node;
+  ea_t addr;
+
+  node = viewer_get_curnode(gi->gv);
+  if ( node != -1 )
+  {
+    addr = gi->fg.get_addr(node);
+    jumpto(addr);
+  }
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::back(graph_info_t *gi) const
+{
+  if ( gi->queue.empty() )
+    close_widget(gi->widget, WCLS_SAVE);
+  else
+    go_back(gi);
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::forward(graph_info_t *gi) const
+{
+  if ( !gi->forward_queue.empty() )
+    go_forward(gi);
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::center(graph_info_t *gi) const
+{
+  int node;
+  ea_t addr;
+
+  node = viewer_get_curnode(gi->gv);
+  if ( node != -1 )
+  {
+    addr = gi->fg.get_addr(node);
+    return navigate(gi, addr);
+  }
+  else
+    return false;
+
+}
+
+//-------------------------------------------------------------------------
+// node chooser's helper
+struct node_chooser_t : public chooser_t
+{
+protected:
+  static const int widths_[];
+  static const char *const header_[];
+
+public:
+  // this chooser is modal
+  node_chooser_t(const char * title);
+};
+
+const int node_chooser_t::widths_[] =
+{
+  CHCOL_HEX | 32, // Function
+  10,             // Address
+};
+const char *const node_chooser_t::header_[] =
+{
+  "Function", // 0
+  "Address",  // 1
+};
+
+inline node_chooser_t::node_chooser_t(const char *title_)
+  : chooser_t(CH_MODAL | CH_KEEP,
+              qnumber(widths_), widths_, header_,
+              title_)
+{
+  CASSERT(qnumber(widths_) == qnumber(header_));
+}
+
+
+//-------------------------------------------------------------------------
+// modal call node chooser
+struct call_node_chooser_t : public node_chooser_t
+{
+  const callgraph_t &fg;
+
+  // this chooser is modal
+  call_node_chooser_t(const callgraph_t &fg_)
+    : node_chooser_t("Select function"), fg(fg_) {}
+
+  virtual size_t idaapi get_count() const { return fg.count(); }
+  virtual void idaapi get_row(
+          qstrvec_t *cols,
+          int *icon_,
+          chooser_item_attrs_t *attrs,
+          size_t n) const;
+};
+
+void idaapi call_node_chooser_t::get_row(
+        qstrvec_t *cols_,
+        int *,
+        chooser_item_attrs_t *,
+        size_t n) const
+{
+  ea_t ea = fg.get_addr(n);
+
+  qstrvec_t &cols = *cols_;
+  if ( get_name(&cols[0], ea) > 0 )
+    cols[1].sprnt("%a", ea);
+  CASSERT(qnumber(header_) == 2);
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::select(const graph_info_t *gi) const
+{
+  call_node_chooser_t ch(gi->fg);
+  ssize_t n = ch.choose(chooser_base_t::NO_SELECTION); // why?
+  if ( n >= 0 )
+    jump_to_node(gi, n);
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::home(const graph_info_t *gi) const
+{
+  if ( count() > 1 )
+    jump_to_node(gi, 0);
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::searchfirst(graph_info_t *gi)
+{
+  display_node_search_result(gi, findfirst_node(this));
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::searchnext(graph_info_t *gi)
+{
+  display_node_search_result(gi, find_next());
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::hidenode(graph_info_t *gi) const
+{
+  int node;
+  ea_t addr;
+
+  node = viewer_get_curnode(gi->gv);
+  if ( node != -1 )
+  {
+    addr = gi->fg.get_addr(node);
+    //msg("Should hide 0x%08x\n", addr);
+    gi->hide_nodes.push_back(addr);
+    gi->refresh();
+  }
+
+  return true;
+}
+
+//-------------------------------------------------------------------------
+// modal hidden node chooser
+struct hidden_node_chooser_t : public node_chooser_t
+{
+  const eavec_t &hn;
+
+  // this chooser is modal
+  hidden_node_chooser_t(const eavec_t &hn_)
+    : node_chooser_t("Show function"), hn(hn_) {}
+
+  virtual size_t idaapi get_count() const { return hn.size(); }
+  virtual void idaapi get_row(
+          qstrvec_t *cols,
+          int *icon_,
+          chooser_item_attrs_t *attrs,
+          size_t n) const;
+};
+
+void idaapi hidden_node_chooser_t::get_row(
+        qstrvec_t *cols_,
+        int *,
+        chooser_item_attrs_t *,
+        size_t n) const
+{
+  ea_t ea = hn[n];
+
+  qstrvec_t &cols = *cols_;
+  if ( get_name(&cols[0], ea) > 0 )
+    cols[1].sprnt("%a", ea);
+  CASSERT(qnumber(header_) == 2);
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::showhidden(graph_info_t *gi) const
+{
+  if ( gi->hide_nodes.empty() )
+  {
+    info("No functions hidden\n");
+    return true;
+  }
+
+  hidden_node_chooser_t ch(gi->hide_nodes);
+  ssize_t n = ch.choose(chooser_base_t::NO_SELECTION); // why?
+  if ( n >= 0 )
+  {
+    eavec_t::iterator it = gi->hide_nodes.begin() + n;
+    gi->hide_nodes.erase(it);
+    gi->refresh();
+  }
+
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::showall(graph_info_t *gi) const
+{
+  gi->hide_nodes.clear();
+  gi->refresh();
+
+  return true;
+}
+
+//--------------------------------------------------------------------------
+bool callgraph_t::navigate(graph_info_t *gi, ea_t addr) const
+{
   ea_t func_ea;
 
   func_ea = gi->fg.get_addr(0);
@@ -1010,7 +1282,7 @@ bool idaapi callgraph_t::navigate(void *ud, ea_t addr)
   if ( pfn != NULL )
   {
     // Is it the same function?
-    if (gi->func_ea != addr)
+    if ( gi->func_ea != addr )
     {
       // Clear the forward queue
       gi->forward_queue.clear();
@@ -1034,10 +1306,8 @@ bool idaapi callgraph_t::navigate(void *ud, ea_t addr)
 }
 
 //--------------------------------------------------------------------------
-void idaapi callgraph_t::go_back(void *ud)
+void callgraph_t::go_back(graph_info_t *gi) const
 {
-  DECLARE_GI_VAR;
-
   gi->forward_queue.push_front(gi->func_ea);
   gi->func_ea = gi->queue.front();
   gi->queue.pop_front();
@@ -1047,9 +1317,8 @@ void idaapi callgraph_t::go_back(void *ud)
 }
 
 //--------------------------------------------------------------------------
-void idaapi callgraph_t::go_forward(void *ud)
+void callgraph_t::go_forward(graph_info_t *gi) const
 {
-  DECLARE_GI_VAR;
   ea_t ea;
 
   ea = gi->forward_queue.front();
@@ -1061,335 +1330,77 @@ void idaapi callgraph_t::go_forward(void *ud)
   jump_to_node(gi, 0);
 }
 
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_center_cb(void *ud)
-{
-  DECLARE_GI_VAR;
-
-  int node;
-  ea_t addr;
-
-  node = viewer_get_curnode(gi->gv);
-  if ( node != -1 )
-  {
-    addr = gi->fg.get_addr(node);
-    return navigate(ud, addr);
-  }
-  else
-    return false;
-
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_jump_cb(void *ud)
-{
-  DECLARE_GI_VAR;
-
-  int node;
-  ea_t addr;
-
-  node = viewer_get_curnode(gi->gv);
-  if (node != -1)
-  {
-    addr = gi->fg.get_addr(node);
-    jumpto(addr);
-  }
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_jumpxref_cb(void *ud)
-{
-  DECLARE_GI_VAR;
-
-  int node;
-  ea_t addr;
-
-  node = viewer_get_curnode(gi->gv);
-  if ( node != -1 )
-  {
-    addr = gi->fg.get_addr(node);
-    ea_t xref = choose_xref(addr);
-
-    if ( xref != 0 && xref != BADADDR )
-      navigate(ud, xref);
-
-  }
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_jumpaddr_cb(void *ud)
-{
-  ea_t addr;
-
-  if ( askaddr(&addr, "Jump address") )
-  {
-    func_t *pfn = get_func(addr);
-    if ( pfn == NULL )
-    {
-      warning("You have entered an invalid address");
-      return false;
-    }
-    navigate(ud, addr);
-  }
-
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_back_cb(void *ud)
-{
-  DECLARE_GI_VAR;
-
-  if (gi->queue.empty())
-  {
-    //msg("Queue is empty\n");
-    close_tform(gi->form, FORM_SAVE);
-    return true;
-  }
-  else
-  {
-    go_back(ud);
-  }
-
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_forward_cb(void *ud)
-{
-  DECLARE_GI_VAR;
-
-  if ( !gi->forward_queue.empty() )
-  {
-    go_forward(ud);
-  }
-
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_hidenode_cb(void *ud)
-{
-  DECLARE_GI_VAR;
-
-  int node;
-  ea_t addr;
-
-  node = viewer_get_curnode(gi->gv);
-  if (node != -1)
-  {
-    addr = gi->fg.get_addr(node);
-    //msg("Should hide 0x%08x\n", addr);
-    gi->hide_nodes.push_back(addr);
-    gi->refresh();
-  }
-
-  return true;
-}
-
-//--------------------------------------------------------------------------
-// column headers
-static const char *const show_header[] =
-{
-  "Function",
-  "Address",
-};
-static const int show_widths[] = { CHCOL_HEX|32, 10 };
-
-CASSERT(qnumber(show_widths) == qnumber(show_header));
-
 //-------------------------------------------------------------------------
-// function that returns number of lines in the list
-static uint32 idaapi show_hidden_sizer(void *obj)
+static bool actions_registered = false;
+static void ensure_actions_registered()
 {
-  graph_info_t *gi = (graph_info_t *)obj;
-  return gi->hide_nodes.size();
-}
-
-//--------------------------------------------------------------------------
-static void idaapi show_hidden_desc(void *obj,uint32 n,char * const *arrptr)
-{
-  if ( n == 0 ) // generate the column headers
+  if ( !actions_registered )
   {
-    for ( size_t i=0;i < qnumber(show_header); i++ )
-      qstrncpy(arrptr[i], show_header[i], MAXSTR);
-    return;
-  }
+    static const action_desc_t actions[] =
+      {
+#define ROW(Method, Label, Shortcut)                                    \
+        ACTION_DESC_LITERAL("callgraph:" #Method, Label, &Method##_ah, Shortcut, NULL, -1)
+        ROW(options, "Options", "O"),
+        ROW(refresh, "Refresh", "R"),
+        ROW(jumpxref, "Jump to xref", "X"),
+        ROW(jumpaddr, "Jump to address", "G"),
+        ROW(jump, "Jump to function", "SPACE"),
+        ROW(back, "Jump to previous node", "ESC"),
+        ROW(forward, "Jump to next node", "Ctrl+Enter"),
+        ROW(center, "Center node", "Enter"),
+        ROW(select, "Select node", "Ctrl+L"),
+        ROW(home, "Goto to first node", "H"),
+        ROW(searchfirst, "Search first", "S"),
+        ROW(searchnext, "Search next", "N"),
+        ROW(hidenode, "Hide selected node", NULL),
+        ROW(showhidden, "Show hidden node", NULL),
+        ROW(showall, "Show all nodes", NULL),
+#undef ROW
+      };
 
-  graph_info_t *gi = (graph_info_t *)obj;
-  ea_t ea = gi->hide_nodes.at(n-1);
+    for ( int i = 0, n = qnumber(actions); i < n; ++i )
+      register_action(actions[i]);
 
-  qstring func_name;
-  if ( get_true_name(&func_name, ea) > 0 )
-  {
-    qstrncpy(arrptr[0], func_name.begin(), MAXSTR);
-    qsnprintf(arrptr[1], MAXSTR, "%a", ea);
-  }
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_showhidden_cb(void *ud)
-{
-  DECLARE_GI_VAR;
-  size_t ret;
-
-  if (gi->hide_nodes.empty())
-  {
-    info("No functions hidden\n");
-    return true;
-  }
-
-  // now open the window
-  ret = choose2(CH_MODAL,               // modal window
-          -1, -1, -1, -1,               // position is determined by Windows
-          gi,                           // pass the callgraph_t object
-          qnumber(show_header),         // number of columns
-          show_widths,                  // widths of columns
-          show_hidden_sizer,            // function that returns number of lines
-          show_hidden_desc,             // function that generates a line
-          "Show function",              // window title
-          -1,                           // use the default icon for the window
-          0,                            // position the cursor on the first line
-          NULL,                         // "kill" callback
-          NULL,                         // "new" callback
-          NULL,                         // "update" callback
-          NULL,                         // "edit" callback
-          NULL,                         // function to call when the user pressed Enter
-          NULL,                         // function to call when the window is closed
-          NULL,                         // use default popup menu items
-          NULL);                        // use the same icon for all lines
-
-  if ( ret > 0 )
-  {
-    eavec_t::iterator it;
-
-    it = gi->hide_nodes.begin();
-    gi->hide_nodes.erase(it+ret-1, it+ret);
-    gi->refresh();
-  }
-
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_showall_cb(void *ud)
-{
-  DECLARE_GI_VAR;
-
-  gi->hide_nodes.clear();
-  gi->refresh();
-
-  return true;
-}
-
-//-------------------------------------------------------------------------
-// function that returns number of lines in the list
-static uint32 idaapi show_select_sizer(void *obj)
-{
-  graph_info_t *gi = (graph_info_t *)obj;
-  return gi->fg.count();
-}
-
-//--------------------------------------------------------------------------
-static void idaapi show_select_desc(void *obj,uint32 n,char * const *arrptr)
-{
-  if ( n == 0 ) // generate the column headers
-  {
-    for (size_t i=0;i<qnumber(show_header);i++)
-      qstrncpy(arrptr[i], show_header[i], MAXSTR);
-    return;
-  }
-
-  graph_info_t *gi = (graph_info_t *)obj;
-  ea_t ea = gi->fg.get_addr(n-1);
-
-  qstring func_name;
-  if ( get_true_name(&func_name, ea) > 0 )
-  {
-    qstrncpy(arrptr[0], func_name.begin(), MAXSTR);
-    qsnprintf(arrptr[1], MAXSTR, "%a", ea);
+    actions_registered = true;
   }
 }
 
 //--------------------------------------------------------------------------
-bool idaapi callgraph_t::menu_select_cb(void *ud)
+bool idaapi run(size_t arg)
 {
-  DECLARE_GI_VAR;
-  int ret;
-
-  // now open the window
-  ret = choose2(CH_MODAL,               // modal window
-          -1, -1, -1, -1,               // position is determined by Windows
-          gi,                           // pass the callgraph_t object
-          qnumber(show_header),         // number of columns
-          show_widths,                  // widths of columns
-          show_select_sizer,            // function that returns number of lines
-          show_select_desc,             // function that generates a line
-          "Select function",            // window title
-          -1,                           // use the default icon for the window
-          0,                            // position the cursor on the first line
-          NULL,                         // "kill" callback
-          NULL,                         // "new" callback
-          NULL,                         // "update" callback
-          NULL,                         // "edit" callback
-          NULL,                         // function to call when the user pressed Enter
-          NULL,                         // function to call when the window is closed
-          NULL,                         // use default popup menu items
-          NULL);                        // use the same icon for all lines
-
-  if ( ret > 0 )
-  {
-    jump_to_node(gi, ret-1);
-  }
-
-  return true;
-}
-
-//--------------------------------------------------------------------------
-bool idaapi donothing(void *)
-{
-  return true;
-}
-
-//--------------------------------------------------------------------------
-void idaapi run(int arg)
-{
-  if ( arg == -1 )
+  if ( ssize_t(arg) == -1 )
   {
     load_options();
     show_options();
-    return;
+    return true;
   }
 
   func_t *pfn = get_func(get_screen_ea());
   if ( pfn == NULL )
   {
     warning("Please position the cursor in a function first!");
-    return;
+    return true;
   }
 
   load_options();
   qstring title;
 
-  graph_info_t::get_new_title(pfn->startEA, &title);
+  graph_info_t::get_new_title(pfn->start_ea, &title);
 
-  HWND hwnd = NULL;
-  TForm *form = create_tform(title.c_str(), &hwnd);
-  if ( hwnd != NULL )
+  TWidget *form = find_widget(title.c_str());
+  if ( form == NULL )
   {
-    // Window is new, but instance is in the list?
+    // no current window, but instance is in the list?
     graph_info_t *gi = graph_info_t::find(title.c_str());
     if ( gi != NULL )
     {
       // In that case let us "recycle" the instance
-      gi->func_ea = pfn->startEA;
+      gi->func_ea = pfn->start_ea;
     }
     else
     {
       // we create a new instance
-      gi = graph_info_t::create(pfn->startEA);
+      gi = graph_info_t::create(pfn->start_ea);
     }
 
     if ( gi != NULL )
@@ -1401,35 +1412,34 @@ void idaapi run(int arg)
       gi->hide_nodes.begin();
 
       gi->mark_for_refresh();
-      gi->form = form;
-      gi->gv = create_graph_viewer(form, id, callgraph_t::gr_callback, gi, 0);
-
-      open_tform(form, FORM_TAB|FORM_MENU|FORM_QWIDGET);
-
+      // gi->form = form;
+      gi->gv = create_graph_viewer(title.c_str(), id, callgraph_t::gr_callback, gi, 0);
       if ( gi->gv != NULL )
       {
+        display_widget(/*form*/ gi->gv, WOPN_TAB|WOPN_MENU);
+
+        ensure_actions_registered();
+
         viewer_fit_window(gi->gv);
-#define ADD_POPUP(name, func, hotkey) \
-        viewer_add_menu_item(gi->gv, name, callgraph_t::func, gi, hotkey, 0);
-#define ADD_SEPARATOR() \
-        viewer_add_menu_item(gi->gv, "-", donothing, gi, NULL, 0);
-        ADD_POPUP("Options", menu_options_cb, "O");
-        ADD_POPUP("Refresh", menu_refresh_cb, "R");
-        ADD_SEPARATOR()
-        ADD_POPUP("Jump to xref", menu_jumpxref_cb, "X");
-        ADD_POPUP("Jump to address", menu_jumpaddr_cb, "G");
-        ADD_POPUP("Jump to function", menu_jump_cb, "SPACE");
-        ADD_POPUP("Jump to previous node", menu_back_cb, "ESC");
-        ADD_POPUP("Jump to next node", menu_forward_cb, "Ctrl+Enter");
-        ADD_SEPARATOR()
-        ADD_POPUP("Center node", menu_center_cb, "Enter");
-        ADD_POPUP("Select node", menu_select_cb, "Ctrl+L");
-        ADD_POPUP("Goto to first node", menu_home_cb, "H");
-        ADD_POPUP("Search first", menu_searchfirst_cb, "S");
-        ADD_POPUP("Search next", menu_searchnext_cb, "N");
-        ADD_POPUP("Hide selected node", menu_hidenode_cb, NULL);
-        ADD_POPUP("Show hidden node", menu_showhidden_cb, NULL);
-        ADD_POPUP("Show all nodes", menu_showall_cb, NULL);
+#define ADD_POPUP(Method) viewer_attach_menu_item(gi->gv, "callgraph:" #Method)
+#define ADD_SEPARATOR() viewer_attach_menu_item(gi->gv, NULL)
+        ADD_POPUP(options);
+        ADD_POPUP(refresh);
+        ADD_SEPARATOR();
+        ADD_POPUP(jumpxref);
+        ADD_POPUP(jumpaddr);
+        ADD_POPUP(jump);
+        ADD_POPUP(back);
+        ADD_POPUP(forward);
+        ADD_SEPARATOR();
+        ADD_POPUP(center);
+        ADD_POPUP(select);
+        ADD_POPUP(home);
+        ADD_POPUP(searchfirst);
+        ADD_POPUP(searchnext);
+        ADD_POPUP(hidenode);
+        ADD_POPUP(showhidden);
+        ADD_POPUP(showall);
 #undef ADD_SEPARATOR
 #undef ADD_POPUP
       }
@@ -1443,8 +1453,8 @@ void idaapi run(int arg)
     // Failed to create a graph view?
     if ( gi == NULL )
     {
-      warning("Failed to create call graph window!\n");
-      return;
+      warning("Failed to create call graph window!");
+      return true;
     }
   }
   else
@@ -1453,9 +1463,10 @@ void idaapi run(int arg)
     if ( gi != NULL )
     {
       gi->refresh();
-      open_tform(gi->form, FORM_TAB|FORM_MENU|FORM_QWIDGET);
+      display_widget(gi->gv, WOPN_TAB|WOPN_MENU);
     }
   }
+  return true;
 }
 
 //-------------------------------------------------------------------------
@@ -1477,11 +1488,24 @@ static show_callgraph_ah_t show_callgraph_ah;
 #define ACTION_NAME "callgraph:ShowCallgraph"
 #define ACTION_LABEL "Function call graph"
 
+//-------------------------------------------------------------------------
+static ssize_t idaapi ui_hook(void *, int notification_code, va_list va)
+{
+  if ( notification_code == view_close )
+  {
+    TWidget *cc = va_arg(va, TWidget *);
+    graph_info_t *gi = graph_info_t::find((graph_viewer_t *) cc);
+    if ( gi != NULL )
+      graph_info_t::destroy(gi);
+  }
+  return 0;
+}
+
 //--------------------------------------------------------------------------
 int idaapi init(void)
 {
   // GUI version?
-  if ( callui(ui_get_hwnd).vptr == NULL && !is_idaq() )
+  if ( !is_idaq() )
     return PLUGIN_SKIP;
 
   static const action_desc_t desc = ACTION_DESC_LITERAL(
@@ -1497,7 +1521,14 @@ int idaapi init(void)
     return PLUGIN_SKIP;
   }
 
+  hook_to_notification_point(HT_VIEW, ui_hook);
   return PLUGIN_KEEP;
+}
+
+//--------------------------------------------------------------------------
+void idaapi term(void)
+{
+  unhook_from_notification_point(HT_VIEW, ui_hook);
 }
 
 //--------------------------------------------------------------------------
@@ -1511,7 +1542,7 @@ plugin_t PLUGIN =
   PLUGIN_HIDE,          // plugin flags
   init,                 // initialize
 
-  NULL,                 // terminate. this pointer may be NULL.
+  term,                 // terminate
 
   run,                  // invoke plugin
 

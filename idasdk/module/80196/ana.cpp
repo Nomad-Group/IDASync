@@ -105,95 +105,106 @@ static int NT_CDECL cmp(const void *x, const void *y)
 
 //----------------------------------------------------------------------
 // perform WSR/WSR1 mapping
-static ea_t map(ea_t v)
+static ea_t map(ea_t iea, ea_t v)
 {
-  if ( !extended ) return v;
-  if ( v < 0x40 ) return v;
-  sel_t wsr = get_segreg(cmd.ea, v < 0x80 ? WSR1 : WSR) & 0x7F;
-  if ( wsr < 0x10 ) return v;
+  if ( !extended )
+    return v;
+  if ( v < 0x40 )
+    return v;
+  sel_t wsr = get_sreg(iea, v < 0x80 ? WSR1 : WSR) & 0x7F;
+  if ( wsr < 0x10 )
+    return v;
 
   wsr_mapping_t key;
   key.wsr = (char)wsr;
   wsr_mapping_t *p = (wsr_mapping_t *)
                 bsearch(&key, mappings, qnumber(mappings), sizeof(key), cmp);
-  if ( p == NULL ) return v;
+  if ( p == NULL )
+    return v;
 
   int delta = v < 0x80 ? p->wsr1base : p->wsrbase;
-  if ( v < delta ) return v;
+  if ( v < delta )
+    return v;
   return v - delta + p->base;
 }
 
 //----------------------------------------------------------------------
-static void aop( uint code, op_t &op )
+static void aop(insn_t &insn, uint code, op_t &op)
 {
-  switch( code & 3 )
+  switch ( code & 3 )
   {
     case 0:   // direct
       op.type = o_mem;
-      op.addr = map(ua_next_byte());
+      op.addr = map(insn.ea, insn.get_next_byte());
       break;
 
     case 1:   // immediate
       op.type = o_imm;
-      if( (code & 0x10) == 0 && (code & 0xFC) != 0xAC ) // ldbze always baop
+      if ( (code & 0x10) == 0 && (code & 0xFC) != 0xAC ) // ldbze always baop
       {
-        op.dtyp  = dt_word;
-        op.value = ua_next_word();
+        op.dtype = dt_word;
+        op.value = insn.get_next_word();
       }
       else
-        op.value = ua_next_byte();
+      {
+        op.value = insn.get_next_byte();
+      }
       break;
 
     case 2:   // indirect
-      op.dtyp = dt_word;
-      op.addr = ua_next_byte();
+      op.dtype = dt_word;
+      op.addr = insn.get_next_byte();
       op.type = (op.addr & 1) ? o_indirect_inc : o_indirect;
-      op.addr = map(op.addr & ~1);
+      op.addr = map(insn.ea, op.addr & ~1);
       break;
 
     case 3:   // indexed
-      op.dtyp  = dt_word;
+      op.dtype = dt_word;
       op.type  = o_indexed;
-      op.value = ua_next_byte();   // short (reg file)
-      op.addr  = (op.value & 1) ? ua_next_word() : ua_next_byte();
-      op.value = map(op.value & ~1);
+      op.value = insn.get_next_byte();   // short (reg file)
+      op.addr  = (op.value & 1) ? insn.get_next_word() : insn.get_next_byte();
+      op.value = map(insn.ea, op.value & ~1);
   }
 }
 
 //----------------------------------------------------------------------
-static int ld_st(ushort itype, char dtyp, bool indirect, op_t &reg, op_t &mem)
+static int ld_st(insn_t &insn, ushort itype, char dtype, bool indirect, op_t &reg, op_t &mem)
 {
-  if ( !extended ) return 0;
-  cmd.itype = itype;
-  reg.dtyp  = dtyp;
-  mem.dtyp  = dtyp;
-  mem.addr  = ua_next_byte();
+  if ( !extended )
+    return 0;
+  insn.itype = itype;
+  reg.dtype  = dtype;
+  mem.dtype  = dtype;
+  mem.addr   = insn.get_next_byte();
   if ( indirect ) // indirect
   {
     mem.type = (mem.addr & 1) ? o_indirect_inc : o_indirect;
-    mem.addr = map(mem.addr & ~1);
+    mem.addr = map(insn.ea, mem.addr & ~1);
   }
   else
   {
     mem.type  = o_indexed;
-    mem.value = map(mem.addr);
-    mem.addr  = ua_next_word();
-    mem.addr |= ua_next_byte() << 16;
+    mem.value = map(insn.ea, mem.addr);
+    mem.addr  = insn.get_next_word();
+    mem.addr |= insn.get_next_byte() << 16;
   }
   reg.type = o_mem;
-  reg.addr = map(ua_next_byte());
-  return cmd.size;
+  reg.addr = map(insn.ea, insn.get_next_byte());
+  return insn.size;
 }
 
 //----------------------------------------------------------------------
-
-int idaapi ana( void )
+int idaapi ana(insn_t *_insn)
 {
-  cmd.Op1.dtyp = dt_byte;
-  cmd.Op2.dtyp = dt_byte;
-  cmd.Op3.dtyp = dt_byte;
+  if ( _insn == NULL )
+    return 0;
+  insn_t &insn = *_insn;
 
-  uint code = ua_next_byte();
+  insn.Op1.dtype = dt_byte;
+  insn.Op2.dtype = dt_byte;
+  insn.Op3.dtype = dt_byte;
+
+  uint code = insn.get_next_byte();
 
   uint nibble0 = (code & 0xF);
   uint nibble1 = (code >> 4);
@@ -202,7 +213,7 @@ int idaapi ana( void )
   int32 off;
   uint tmp;
 
-  if( nibble1 < 2 )   // 0,1
+  if ( nibble1 < 2 )   // 0,1
   {
     static const char cmd01[] =
     {
@@ -216,93 +227,100 @@ int idaapi ana( void )
       I196_est,  I196_est,  I196_estb,  I196_estb
     };
 
-    cmd.itype = cmd01[code & 0x1F];
+    insn.itype = cmd01[code & 0x1F];
 
-    if( cmd.itype == I196_null )    return 0;   // unknown command
+    if ( insn.itype == I196_null )
+      return 0;   // unknown instruction
 
-    switch( code )
+    switch ( code )
     {
       case 0x4: case 0x14:  //xch reg,aop        direct
       case 0xB: case 0x1B:  //xch reg,aop        indexed
-        if( (code & 0x10) == 0 )    cmd.Op2.dtyp = dt_word;
-        aop( code, cmd.Op2 );
-        cmd.Op1.addr = map(ua_next_byte());
-        cmd.Op1.type = o_mem;
+        if ( (code & 0x10) == 0 )
+          insn.Op2.dtype = dt_word;
+        aop(insn, code, insn.Op2);
+        insn.Op1.addr = map(insn.ea, insn.get_next_byte());
+        insn.Op1.type = o_mem;
         break;
 
       case 0xF:             //norml lreg,breg
-        cmd.Op2.addr = map(ua_next_byte());
-        cmd.Op2.type = o_mem;
-        cmd.Op1.addr = map(ua_next_byte());
-        cmd.Op1.type = o_mem;
+        insn.Op2.addr = map(insn.ea, insn.get_next_byte());
+        insn.Op2.type = o_mem;
+        insn.Op1.addr = map(insn.ea, insn.get_next_byte());
+        insn.Op1.type = o_mem;
         break;
 
       case 0x1C:                 // est.indirect
       case 0x1D:                 // est.indexed
-        return ld_st(I196_est, dt_word, code == 0x1C, cmd.Op1, cmd.Op2);
+        return ld_st(insn, I196_est, dt_word, code == 0x1C, insn.Op1, insn.Op2);
 
       case 0x1E:                 // estb.indirect
       case 0x1F:                 // estb.indexed
-        return ld_st(I196_estb, dt_byte, code == 0x1E, cmd.Op1, cmd.Op2);
+        return ld_st(insn, I196_estb, dt_byte, code == 0x1E, insn.Op1, insn.Op2);
 
       default:              // shifts
-        tmp = ua_next_byte();
-        if( tmp < 16 )
+        tmp = insn.get_next_byte();
+        if ( tmp < 16 )
         {
-          cmd.Op2.value = tmp;
-          cmd.Op2.type  = o_imm;
+          insn.Op2.value = tmp;
+          insn.Op2.type  = o_imm;
         }
         else
         {
-          cmd.Op2.addr  = map(tmp);
-          cmd.Op2.type  = o_mem;
+          insn.Op2.addr = map(insn.ea, tmp);
+          insn.Op2.type = o_mem;
         }
+        // fallthrough
 
       case 0x0:  case 0x1:  case 0x2:  case 0x3:
       case 0x5:  case 0x6:  case 0x7:  case 0x11:
       case 0x12: case 0x13: case 0x15: case 0x16: case 0x17:
-        cmd.Op1.addr  = map(ua_next_byte());
-        cmd.Op1.type  = o_mem;
+        insn.Op1.addr = map(insn.ea, insn.get_next_byte());
+        insn.Op1.type = o_mem;
     }
 
-    switch( code )
+    switch ( code )
     {
-      case 0x1:  case 0x2:  case 0x3:  case 0x4:  case 0x5:
-      case 0x7:  case 0x8:  case 0x9:  case 0xA:  case 0xB:  case 0x16:
-        cmd.Op1.dtyp  = dt_word;
+      case 0x1: case 0x2: case 0x3: case 0x4: case 0x5:
+      case 0x7: case 0x8: case 0x9: case 0xA: case 0xB: case 0x16:
+        insn.Op1.dtype = dt_word;
         break;
 
-      case 0x6:  case 0xC:  case 0xD:  case 0xE:  case 0xF:
-        cmd.Op1.dtyp  = dt_dword;
+      case 0x6: case 0xC: case 0xD: case 0xE: case 0xF:
+        insn.Op1.dtype = dt_dword;
+        break;
     }
   }
-  else if( nibble1 < 4 )    // 2,3
+  else if ( nibble1 < 4 )    // 2,3
   {
     static const char cmd23[] = { I196_sjmp, I196_scall, I196_jbc, I196_jbs };
 
-    cmd.itype = cmd23[ ((code - 0x20) >> 3) & 3 ];
+    insn.itype = cmd23[ ((code - 0x20) >> 3) & 3 ];
 
-    if( nibble1 == 2 )      // sjmp/scall
+    if ( nibble1 == 2 )      // sjmp/scall
     {
-      cmd.Op1.type = o_near;
-      off = ua_next_byte() + ((code & 7) << 8);
-      if( off & 0x400 ) off |= ~0x7FF;  else off &= 0x7FF;  // make signed
-      cmd.Op1.addr = truncate(cmd.ip + cmd.size + off);     // signed addition
-//      cmd.Op1.dtyp = dt_word;
+      insn.Op1.type = o_near;
+      off = insn.get_next_byte() + ((code & 7) << 8);
+      if ( off & 0x400 )
+        off |= ~0x7FF;
+      else
+        off &= 0x7FF;  // make signed
+      insn.Op1.addr = truncate(insn.ip + insn.size + off);     // signed addition
+//      insn.Op1.dtype = dt_word;
     }
     else                    // jbc/jbs
     {
-      cmd.Op2.type = o_bit;
-      cmd.Op2.reg  = code & 7;
-      cmd.Op1.addr = map(ua_next_byte());
-      cmd.Op1.type = o_mem;
-      cmd.Op3.type = o_near;
-      offc = ua_next_byte();
-      cmd.Op3.addr = truncate(cmd.ip + cmd.size + offc);      // signed addition
-//      cmd.Op3.dtyp = dt_word;
+      insn.Op2.type = o_bit;
+      insn.Op2.reg  = code & 7;
+      insn.Op1.addr = map(insn.ea, insn.get_next_byte());
+      insn.Op1.type = o_mem;
+      insn.Op3.type = o_near;
+      offc = insn.get_next_byte();
+      insn.Op3.addr = truncate(insn.ip + insn.size + offc);      // signed addition
+//      insn.Op3.dtype = dt_word;
     }
   }
-  else if( nibble1 < 6 )    // 4,5
+  else if ( nibble1 < 6 )    // 4,5
   {
     static const char cmd45[] =
     {
@@ -310,21 +328,21 @@ int idaapi ana( void )
       I196_andb3, I196_addb3, I196_subb3, I196_mulub3
     };
 
-    cmd.itype = cmd45[ ((code - 0x40) >> 2) & 7 ];
+    insn.itype = cmd45[ ((code - 0x40) >> 2) & 7 ];
 
-    if( (code & 0x10) == 0 )
-      cmd.Op1.dtyp = cmd.Op2.dtyp = cmd.Op3.dtyp = dt_word;
+    if ( (code & 0x10) == 0 )
+      insn.Op1.dtype = insn.Op2.dtype = insn.Op3.dtype = dt_word;
 
-    if( (code & 0xc) == 0xc )   // mulu/mulub
-      cmd.Op1.dtyp++;           // word->dword/byte->word
+    if ( (code & 0xc) == 0xc )   // mulu/mulub
+      insn.Op1.dtype++;           // word->dword/byte->word
 
-    aop( code, cmd.Op3 );
-    cmd.Op2.addr  = map(ua_next_byte());
-    cmd.Op2.type  = o_mem;
-    cmd.Op1.addr  = map(ua_next_byte());
-    cmd.Op1.type  = o_mem;
+    aop(insn, code, insn.Op3);
+    insn.Op2.addr  = map(insn.ea, insn.get_next_byte());
+    insn.Op2.type  = o_mem;
+    insn.Op1.addr  = map(insn.ea, insn.get_next_byte());
+    insn.Op1.type  = o_mem;
   }
-  else if( nibble1 < 0xD )    // 6,7,8,9,A,B,C
+  else if ( nibble1 < 0xD )    // 6,7,8,9,A,B,C
   {
     static const char cmd6c[] =
     {
@@ -338,67 +356,71 @@ int idaapi ana( void )
       I196_null,  I196_null,   I196_null,   I196_null,
     };
 
-    cmd.itype = cmd6c[ ((code - 0x60) >> 2) & 31 ];
+    insn.itype = cmd6c[ ((code - 0x60) >> 2) & 31 ];
 
-    switch( nibble1 )
+    switch ( nibble1 )
     {
       case 6:     // and/add/sub/mulu
       case 8:     // or/xor/cmp/duvu
-        cmd.Op1.dtyp = cmd.Op2.dtyp = dt_word;
-        if( (nibble0 & 0xC) == 0xC )  cmd.Op1.dtyp++;   //mulu/divu
+        insn.Op1.dtype = insn.Op2.dtype = dt_word;
+        if ( (nibble0 & 0xC) == 0xC )
+          insn.Op1.dtype++;   //mulu/divu
         break;
 
       case 0xA:   // ld/addc/subc/ldbze
-        cmd.Op1.dtyp = cmd.Op2.dtyp = dt_word;
-        if( (nibble0 & 0xC) == 0xC )  cmd.Op2.dtyp = dt_byte;   //ldbze
+        insn.Op1.dtype = insn.Op2.dtype = dt_word;
+        if ( (nibble0 & 0xC) == 0xC )
+          insn.Op2.dtype = dt_byte;   //ldbze
         break;
     }
 
-    switch( code & 0xFC )
+    switch ( code & 0xFC )
     {
       case 0xC0:    // st
-        cmd.Op2.dtyp = dt_word;
+        insn.Op2.dtype = dt_word;
 
       case 0x7C: case 0x9C: case 0xBC: case 0xC8: case 0xCC:
-        cmd.Op1.dtyp = dt_word;
+        insn.Op1.dtype = dt_word;
     }
 
-    switch( code )
+    switch ( code )
     {
       case 0xC1:
-        cmd.itype    = I196_bmov;
+        insn.itype = I196_bmov;
         goto cont1;
 
       case 0xC5:
-        cmd.itype    = I196_cmpl;
-        cmd.Op2.dtyp = dt_dword;
+        insn.itype     = I196_cmpl;
+        insn.Op2.dtype = dt_dword;
         goto cont2;
 
       case 0xCD:
-        cmd.itype    = I196_bmovi;
+        insn.itype = I196_bmovi;
 cont1:
-        cmd.Op2.dtyp = dt_word;
+        insn.Op2.dtype = dt_word;
 cont2:
-        cmd.Op2.addr = map(ua_next_byte());
-        cmd.Op2.type = o_mem;
-        cmd.Op1.dtyp = dt_dword;
-//        cmd.Op1.addr = ua_next_byte();
-//        cmd.Op1.type = o_mem;
+        insn.Op2.addr = map(insn.ea, insn.get_next_byte());
+        insn.Op2.type = o_mem;
+        insn.Op1.dtype = dt_dword;
+//        insn.Op1.addr = insn.get_next_byte();
+//        insn.Op1.type = o_mem;
         goto cont3;
 
       default:
-        if( code > 0xC7 )
-          aop( code, cmd.Op1 );
+        if ( code > 0xC7 )
+        {
+          aop(insn, code, insn.Op1);
+        }
         else
         {
-          aop( code, cmd.Op2 );
+          aop(insn, code, insn.Op2);
 cont3:
-          cmd.Op1.addr  = map(ua_next_byte());
-          cmd.Op1.type  = o_mem;
+          insn.Op1.addr  = map(insn.ea, insn.get_next_byte());
+          insn.Op1.type  = o_mem;
         }
     }
   }
-  else if( nibble1 == 0xD )     // jcc
+  else if ( nibble1 == 0xD )     // jcc
   {
     static const char cmdd[] =
     {
@@ -408,89 +430,92 @@ cont3:
       I196_jvt,  I196_jv,  I196_jlt, I196_je
     };
 
-    cmd.itype = cmdd[nibble0];
+    insn.itype = cmdd[nibble0];
 
-    cmd.Op1.type = o_near;
-    offc = ua_next_byte();
-    cmd.Op1.addr = truncate(cmd.ip + cmd.size + offc);      // signed addition
-//    cmd.Op1.dtyp = dt_word;
+    insn.Op1.type = o_near;
+    offc = insn.get_next_byte();
+    insn.Op1.addr = truncate(insn.ip + insn.size + offc);      // signed addition
+//    insn.Op1.dtype = dt_word;
   }
-  else if( nibble1 == 0xE )     // Ex
+  else if ( nibble1 == 0xE )     // Ex
   {
-    switch( nibble0 )
+    switch ( nibble0 )
     {
       case 0x0: case 0x1:       // djnz, djnzw
-        if( nibble0 & 1 )
+        if ( nibble0 & 1 )
         {
-          cmd.itype  = I196_djnzw;
-          cmd.Op1.dtyp = dt_word;
+          insn.itype = I196_djnzw;
+          insn.Op1.dtype = dt_word;
         }
         else
-          cmd.itype  = I196_djnz;
-
-        cmd.Op1.type = o_mem;
-        cmd.Op1.addr = map(ua_next_byte());
-        offc = ua_next_byte();
-        cmd.Op2.type = o_near;
-        cmd.Op2.addr = truncate(cmd.ip + cmd.size + offc);  // signed addition
+        {
+          insn.itype = I196_djnz;
+        }
+        insn.Op1.type = o_mem;
+        insn.Op1.addr = map(insn.ea, insn.get_next_byte());
+        offc = insn.get_next_byte();
+        insn.Op2.type = o_near;
+        insn.Op2.addr = truncate(insn.ip + insn.size + offc);  // signed addition
         break;
 
       case 0x2:                 // tijmp
-        cmd.itype     = I196_tijmp;
-        cmd.Op1.dtyp  = cmd.Op2.dtyp = dt_word;
-        cmd.Op2.type  = o_indirect;
-        cmd.Op2.addr  = map(ua_next_byte());
-        cmd.Op3.type  = o_imm;
-        cmd.Op3.value = ua_next_byte();
-        cmd.Op1.type  = o_mem;
-        cmd.Op1.addr  = map(ua_next_byte());
+        insn.itype     = I196_tijmp;
+        insn.Op1.dtype = insn.Op2.dtype = dt_word;
+        insn.Op2.type  = o_indirect;
+        insn.Op2.addr  = map(insn.ea, insn.get_next_byte());
+        insn.Op3.type  = o_imm;
+        insn.Op3.value = insn.get_next_byte();
+        insn.Op1.type  = o_mem;
+        insn.Op1.addr  = map(insn.ea, insn.get_next_byte());
         break;
 
       case 0x3:                 // br
-        cmd.itype     = extended ? I196_ebr : I196_br;
-        aop(2, cmd.Op1);
+        insn.itype = extended ? I196_ebr : I196_br;
+        aop(insn, 2, insn.Op1);
         break;
 
       case 0x4:                 // ebmovi
-        if ( !extended ) return 0;
-        cmd.itype = I196_ebmovi;
-        cmd.Op1.type = o_mem;
-        cmd.Op1.addr = map(ua_next_byte());
-        cmd.Op2.type = o_mem;
-        cmd.Op2.addr = map(ua_next_byte());
+        if ( !extended )
+          return 0;
+        insn.itype = I196_ebmovi;
+        insn.Op1.type = o_mem;
+        insn.Op1.addr = map(insn.ea, insn.get_next_byte());
+        insn.Op2.type = o_mem;
+        insn.Op2.addr = map(insn.ea, insn.get_next_byte());
         break;
 
       case 0x6:                 // ejmp
-        if ( !extended ) return 0;
-        cmd.itype    = I196_ejmp;
-        cmd.Op1.type = o_near;
-        off = ua_next_word();
-        off |= int32(ua_next_byte()) << 16;
-        cmd.Op1.addr = truncate(cmd.ip + cmd.size + off);   // signed addition
+        if ( !extended )
+          return 0;
+        insn.itype    = I196_ejmp;
+        insn.Op1.type = o_near;
+        off = insn.get_next_word();
+        off |= int32(insn.get_next_byte()) << 16;
+        insn.Op1.addr = truncate(insn.ip + insn.size + off);   // signed addition
         break;
 
       case 0x8:                 // eld.indirect
       case 0x9:                 // eld.indexed
-        return ld_st(I196_eld, dt_word, nibble0 == 0x8, cmd.Op1, cmd.Op2);
+        return ld_st(insn, I196_eld, dt_word, nibble0 == 0x8, insn.Op1, insn.Op2);
 
       case 0xA:                 // eldb.indirect
       case 0xB:                 // eldb.indexed
-        return ld_st(I196_eldb, dt_byte, nibble0 == 0xA, cmd.Op1, cmd.Op2);
+        return ld_st(insn, I196_eldb, dt_byte, nibble0 == 0xA, insn.Op1, insn.Op2);
 
       case 0xC:                 // dpts
-        cmd.itype = I196_dpts;
+        insn.itype = I196_dpts;
         break;
 
       case 0xD:                 // epts
-        cmd.itype = I196_epts;
+        insn.itype = I196_epts;
         break;
 
       case 0x7: case 0xF:       // ljmp, lcall
-        cmd.itype    = (nibble0 & 8) ? I196_lcall : I196_ljmp;
-        cmd.Op1.type = o_near;
-        off = short(ua_next_word());
-        cmd.Op1.addr = truncate(cmd.ip + cmd.size + off);   // signed addition
-        cmd.Op1.dtyp = dt_word;
+        insn.itype    = (nibble0 & 8) ? I196_lcall : I196_ljmp;
+        insn.Op1.type = o_near;
+        off = short(insn.get_next_word());
+        insn.Op1.addr = truncate(insn.ip + insn.size + off);   // signed addition
+        insn.Op1.dtype = dt_word;
         break;
 
       default:
@@ -507,62 +532,65 @@ cont3:
       I196_clrvt, I196_nop,  I196_null,  I196_rst
     };
 
-    cmd.itype = cmdf[nibble0];
+    insn.itype = cmdf[nibble0];
     if ( nibble0 == 1 ) // ecall
     {
-      if( !extended ) return 0;
-      off = ua_next_word();
-      off |= int32(ua_next_byte()) << 16;
-      cmd.Op1.type = o_near;
-      cmd.Op1.addr = truncate(cmd.ip + cmd.size + off);
+      if ( !extended )
+        return 0;
+      off = insn.get_next_word();
+      off |= int32(insn.get_next_byte()) << 16;
+      insn.Op1.type = o_near;
+      insn.Op1.addr = truncate(insn.ip + insn.size + off);
     }
-    else if( nibble0 == 6 )        // idlpd
+    else if ( nibble0 == 6 )        // idlpd
     {
-      cmd.Op1.type  = o_imm;
-      cmd.Op1.value = ua_next_byte();
+      insn.Op1.type  = o_imm;
+      insn.Op1.value = insn.get_next_byte();
     }
-    else if( nibble0 == 0xE ) // prefix
+    else if ( nibble0 == 0xE ) // prefix
     {
-      code = ua_next_byte();
+      code = insn.get_next_byte();
 
-      switch( code & 0xFC )
+      switch ( code & 0xFC )
       {
         case 0x4C: case 0x5C:
-          if( code & 0x10 )
+          if ( code & 0x10 )
           {
-            cmd.itype = I196_mulb3;
-            cmd.Op1.dtyp = dt_word;
+            insn.itype = I196_mulb3;
+            insn.Op1.dtype = dt_word;
           }
           else
           {
-            cmd.itype = I196_mul3;
-            cmd.Op3.dtyp = cmd.Op2.dtyp = dt_word;
-            cmd.Op1.dtyp = dt_dword;
+            insn.itype = I196_mul3;
+            insn.Op3.dtype = insn.Op2.dtype = dt_word;
+            insn.Op1.dtype = dt_dword;
           }
 
-          aop( code, cmd.Op3 );
-          cmd.Op2.addr = map(ua_next_byte());
-          cmd.Op2.type = o_mem;
-          cmd.Op1.addr = map(ua_next_byte());
-          cmd.Op1.type = o_mem;
+          aop(insn, code, insn.Op3);
+          insn.Op2.addr = map(insn.ea, insn.get_next_byte());
+          insn.Op2.type = o_mem;
+          insn.Op1.addr = map(insn.ea, insn.get_next_byte());
+          insn.Op1.type = o_mem;
           break;
 
         case 0x6C: case 0x7C: case 0x8C: case 0x9C:
-          cmd.itype = (code & 0x80) ?
-            (code & 0x10) ? I196_divb  : I196_div :
-            (code & 0x10) ? I196_mulb2 : I196_mul2;
+          insn.itype = (code & 0x80)
+                    ? (code & 0x10) ? I196_divb  : I196_div
+                    : (code & 0x10) ? I196_mulb2 : I196_mul2;
 
-          if( code & 0x10 )
-            cmd.Op1.dtyp = dt_word;
+          if ( code & 0x10 )
+          {
+            insn.Op1.dtype = dt_word;
+          }
           else
           {
-            cmd.Op1.dtyp = dt_dword;
-            cmd.Op2.dtyp = dt_word;
+            insn.Op1.dtype = dt_dword;
+            insn.Op2.dtype = dt_word;
           }
 
-          aop( code, cmd.Op2 );
-          cmd.Op1.addr = map(ua_next_byte());
-          cmd.Op1.type = o_mem;
+          aop(insn, code, insn.Op2);
+          insn.Op1.addr = map(insn.ea, insn.get_next_byte());
+          insn.Op1.type = o_mem;
           break;
 
         default:
@@ -571,5 +599,5 @@ cont3:
     }
   }
 
-  return cmd.size;
+  return insn.size;
 }

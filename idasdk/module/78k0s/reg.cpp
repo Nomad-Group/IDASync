@@ -8,7 +8,7 @@
  */
 
 #include "78k_0s.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <diskio.hpp>
 
 //----------------------------------------------------------------------
@@ -26,15 +26,14 @@ static const asm_t nec78k0s =
   UAS_NOSPA,
   "NEC _78K_0S Assembler",
   0,
-  NULL,     //header
-  NULL,
+  NULL,     // header
   ".org",
   ".end",
 
-  ";",        // comment string
-  '"',        // string delimiter
-  '\'',       // char delimiter
-  "'\"",      // special symbols in char and string constants
+  ";",      // comment string
+  '"',      // string delimiter
+  '\'',     // char delimiter
+  "'\"",    // special symbols in char and string constants
 
   ".db",    // ascii string directive
   ".db",    // byte directive
@@ -50,31 +49,27 @@ static const asm_t nec78k0s =
                     // #d - size of array
                     // #v - value of array elements
                     // #s - size specifier
-  ".rs %s",    // uninited data (reserve space)
+  ".rs %s", // uninited data (reserve space)
   ".equ",
-  NULL,         // seg prefix
-  NULL,         // preline for checkarg
-  NULL,      // checkarg_atomprefix
-  NULL,   // checkarg operations
-  NULL,   // XlatAsciiOutput
-  "*",    // a_curip
-  NULL,         // returns function header line
-  NULL,         // returns function footer line
-  NULL,         // public
-  NULL,         // weak
-  NULL,         // extrn
-  NULL,         // comm
-  NULL,         // get_type_name
-  NULL,         // align
-  '(', ')',     // lbrace, rbrace
-  NULL,    // mod
-  NULL,    // and
-  NULL,    // or
-  NULL,    // xor
-  NULL,    // not
-  NULL,    // shl
-  NULL,    // shr
-  NULL,    // sizeof
+  NULL,     // seg prefix
+  "*",      // a_curip
+  NULL,     // returns function header line
+  NULL,     // returns function footer line
+  NULL,     // public
+  NULL,     // weak
+  NULL,     // extrn
+  NULL,     // comm
+  NULL,     // get_type_name
+  NULL,     // align
+  '(', ')', // lbrace, rbrace
+  NULL,     // mod
+  NULL,     // and
+  NULL,     // or
+  NULL,     // xor
+  NULL,     // not
+  NULL,     // shl
+  NULL,     // shr
+  NULL,     // sizeof
 };
 //----------------------------------------------------------------------
 #define FAMILY "NEC series:"
@@ -107,87 +102,120 @@ static const bytes_t retcodes[] =
 
 //----------------------------------------------------------------------
 static netnode helper;
-char device[MAXSTR] = "";
-static size_t numports = 0;
-static ioport_t *ports = NULL;
+qstring device;
+static ioports_t ports;
 
 #include "../iocommon.cpp"
 
 //------------------------------------------------------------------
-bool nec_find_ioport_bit(int port, int bit)
+bool nec_find_ioport_bit(outctx_t &ctx, int port, int bit)
 {
-//поиск бита из регистра в списке портов
-  const ioport_bit_t *b = find_ioport_bit(ports, numports, port, bit);
-  if ( b != NULL && b->name != NULL )
+  // find bit register in the ports list
+  const ioport_bit_t *b = find_ioport_bit(ports, port, bit);
+  if ( b != NULL && !b->name.empty() )
   {
-    //выводим имя бита из регистра
-    out_line(b->name, COLOR_IMPNAME);
+    // output bit register name
+    ctx.out_line(b->name.c_str(), COLOR_IMPNAME);
     return true;
   }
   return false;
 }
 
 //----------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-  // A well behaving processor module should call invoke_callbacks()
-  // in his notify() function. If this function returns 0, then
-  // the processor module should process the notification itself
-  // Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code )
-    return code;
-
   switch ( msgid )
   {
-    case processor_t::init:
-      inf.mf = 0;
+    case processor_t::ev_init:
+      inf.set_be(false);
       helper.create("$ 78k0s");
-    default:
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
+    case processor_t::ev_term:
+      ports.clear();
       break;
 
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       {
       //функция "выбирает" из указанного файла *.cfg все записи(процессора)
       //и отображает их в диалоговом окне, в котором пользователь может выбрать
       //нужный ему процессор. После выбора имя процессора заносится в переменную device
       //Поумолчанию в DLG выделен процессор который указан в переменной .default
       //которая распологается в начале файла *.cfg
-      inf.s_genflags |= INFFL_LZERO;
+      inf.set_gen_lzero(true);
       char cfgfile[QMAXFILE];
       get_cfg_filename(cfgfile, sizeof(cfgfile));
-      if ( choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0) )
+      if ( choose_ioport_device(&device, cfgfile, parse_area_line0) )
         //Устанавливает в ядре иды имя выбранного процессора
         //Вычитывает все "записи"(порты)  относящиеся к этому процессору
         //И подписывает в файле все байты вычитанные из *.cfg файла
-        set_device_name(device, IORESP_ALL);
+        set_device_name(device.c_str(), IORESP_ALL);
       } break;
 
-    case processor_t::newprc:
-      {
-      char buf[MAXSTR];
-      if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-        set_device_name(buf, IORESP_PORT);
-      } break;
+    case processor_t::ev_newprc:
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_PORT);
+      break;
 
-    case processor_t::newseg:    // new segment
+    case processor_t::ev_creating_segm:    // new segment
       {
       segment_t *s = va_arg(va, segment_t *);
       // Set default value of DS register for all segments
       set_default_dataseg(s->sel);
       } break;
 
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        nec78k0s_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        nec78k0s_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        nec78k0s_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    default:
+      break;
   }
-  va_end(va);
-  return 1;
+  return 0;
 }
 
 //-----------------------------------------------------------------------
@@ -195,11 +223,15 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,
-  PLFM_NEC_78K0S,            // id
-  PRN_HEX|PR_SEGTRANS,
-  8,                    // 8 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_NEC_78K0S,         // id
+                          // flag
+    PRN_HEX
+  | PR_SEGTRANS,
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -208,31 +240,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  std_gen_segm_footer,
-
-  NULL,
-
-  ana,
-  emu,
-
-  out,
-  outop,
-  intel_data,
-  NULL,         //  cmp_opnd,  // 0 if not cmp 1 if eq
-  NULL,         //  can_have_type,  //&op    // 1 -yes 0-no    //reg
-
-  qnumber(RegNames),            // Number of registers
   RegNames,                     // Regsiter names
-  NULL,                         // get abstract register
-
-  0,                            // Number of register files
-  NULL,                         // Register file names
-  NULL,                         // Register descriptions
-  NULL,                         // Pointer to CPU registers
+  qnumber(RegNames),            // Number of registers
 
   Rcs,Rds,
   0,                            // size of a segment register
@@ -243,5 +252,5 @@ processor_t LPH =
 
   0,
   NEC_78K_0S_last,
-  Instructions,
+  Instructions,                 // instruc
 };

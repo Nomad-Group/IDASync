@@ -15,11 +15,11 @@
 #define ACTION2_NAME "ht_view:Act2"
 
 //---------------------------------------------------------------------------
-void desc_notification(const char *notification_name, TCustomControl *view)
+void desc_notification(const char *notification_name, TWidget *view)
 {
-  char buffer[MAXSTR];
-  get_viewer_name(view, buffer, sizeof(buffer));
-  msg("Received notification from view %s: \"%s\"\n", buffer, notification_name);
+  qstring buffer;
+  get_widget_title(&buffer, view);
+  msg("Received notification from view %s: \"%s\"\n", buffer.c_str(), notification_name);
 }
 
 //-------------------------------------------------------------------------
@@ -46,25 +46,21 @@ void desc_mouse_event(const view_mouse_event_t *event)
 
 //---------------------------------------------------------------------------
 // Callback for ui notifications
-static int idaapi ui_callback(void * /*ud*/, int notification_code, va_list va)
+static ssize_t idaapi ui_callback(void * /*ud*/, int notification_code, va_list va)
 {
   switch ( notification_code )
   {
     // called when IDA is preparing a context menu for a view
     // Here dynamic context-depending user menu items can be added.
-    case ui_populating_tform_popup:
+    case ui_populating_widget_popup:
       {
-        TForm *f = va_arg(va, TForm *);
-        if ( get_tform_type(f) == BWN_DISASM )
+        TWidget *view = va_arg(va, TWidget *);
+        if ( get_widget_type(view) == BWN_DISASM )
         {
           TPopupMenu *p = va_arg(va, TPopupMenu *);
-          TCustomControl *view = get_tform_idaview(f);
-          if ( view != NULL )
-          {
-            desc_notification("view_popup", view);
-            attach_action_to_popup(f, p, ACTION1_NAME);
-            attach_action_to_popup(f, p, ACTION2_NAME);
-          }
+          desc_notification("view_popup", view);
+          attach_action_to_popup(view, p, ACTION1_NAME);
+          attach_action_to_popup(view, p, ACTION2_NAME);
         }
       }
       break;
@@ -74,9 +70,9 @@ static int idaapi ui_callback(void * /*ud*/, int notification_code, va_list va)
 
 //---------------------------------------------------------------------------
 // Callback for view notifications
-static int idaapi view_callback(void * /*ud*/, int notification_code, va_list va)
+static ssize_t idaapi view_callback(void * /*ud*/, int notification_code, va_list va)
 {
-  TCustomControl *view = va_arg(va, TCustomControl *);
+  TWidget *view = va_arg(va, TWidget *);
   switch ( notification_code )
   {
     case view_activated:
@@ -109,7 +105,7 @@ static int idaapi view_callback(void * /*ud*/, int notification_code, va_list va
         if ( is_idaview(view) )
         {
           char buf[MAXSTR];
-          ea2str(get_screen_ea(), buf, sizeof(buf));
+          ea2str(buf, sizeof(buf), get_screen_ea());
           msg("New address: %s\n", buf);
         }
       }
@@ -162,19 +158,19 @@ int idaapi init(void)
 //--------------------------------------------------------------------------
 void idaapi term(void)
 {
-  unhook_from_notification_point(HT_VIEW, view_callback, NULL);
-  unhook_from_notification_point(HT_UI, ui_callback, NULL);
+  unhook_from_notification_point(HT_VIEW, view_callback);
+  unhook_from_notification_point(HT_UI, ui_callback);
 }
 
 bool hooked = false;
 //--------------------------------------------------------------------------
-void idaapi run(int)
+bool idaapi run(size_t)
 {
   /* set callback for view notifications */
   if ( !hooked )
   {
-    hook_to_notification_point(HT_UI, ui_callback, NULL);
-    hook_to_notification_point(HT_VIEW, view_callback, NULL);
+    hook_to_notification_point(HT_UI, ui_callback);
+    hook_to_notification_point(HT_VIEW, view_callback);
     hooked = true;
     msg("HT_VIEW: installed view notification hook.\n");
   }
@@ -182,6 +178,7 @@ void idaapi run(int)
   // Register actions
   for ( size_t i = 0, n = qnumber(actions); i < n; ++i )
     register_action(actions[i]);
+  return true;
 }
 
 static const char wanted_name[] = "HT_VIEW notification handling example";

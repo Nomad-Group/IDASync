@@ -7,7 +7,7 @@ static int g_nb_insn;
 static const int g_max_insn = 20;
 
 //--------------------------------------------------------------------------
-static int idaapi callback(void * /*user_data*/, int notification_code, va_list va)
+static ssize_t idaapi callback(void * /*user_data*/, int notification_code, va_list va)
 {
   switch ( notification_code )
   {
@@ -30,7 +30,7 @@ static int idaapi callback(void * /*user_data*/, int notification_code, va_list 
     case dbg_trace:
       {
         /*thid_t tid =*/ va_arg(va, thid_t);
-        ea_t ip   = va_arg(va, ea_t);
+        ea_t ip = va_arg(va, ea_t);
         msg("[%d] tracing over: %a\n", g_nb_insn, ip);
         if ( g_nb_insn == g_max_insn )
         {
@@ -47,29 +47,29 @@ static int idaapi callback(void * /*user_data*/, int notification_code, va_list 
       break;
 
     case dbg_process_exit:
-      unhook_from_notification_point(HT_DBG, callback, NULL);
+      unhook_from_notification_point(HT_DBG, callback);
       break;
   }
   return 0;
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int)
+bool idaapi run(size_t)
 {
-  if ( !hook_to_notification_point(HT_DBG, callback, NULL) )
+  if ( !hook_to_notification_point(HT_DBG, callback) )
   {
-    warning("Could not hook to notification point\n");
-    return;
+    warning("Could not hook to notification point");
+    return true;
   }
 
   if ( dbg == NULL )
     load_debugger("win32", false);
 
   // Let's start the debugger
-  if ( !run_to(inf.beginEA) )
-  {
-    unhook_from_notification_point(HT_DBG, callback, NULL);
-  }
+  if ( !run_to(inf.start_ea) )
+    unhook_from_notification_point(HT_DBG, callback);
+
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -85,7 +85,7 @@ int idaapi init(void)
 void idaapi term(void)
 {
   // just to be safe
-  unhook_from_notification_point(HT_DBG, callback, NULL);
+  unhook_from_notification_point(HT_DBG, callback);
 }
 
 //--------------------------------------------------------------------------

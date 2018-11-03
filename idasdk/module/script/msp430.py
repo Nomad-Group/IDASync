@@ -14,9 +14,21 @@
 # Please send fixes or improvements to support@hex-rays.com
 
 import sys
-import idaapi
 import copy
-from idaapi import *
+from ida_bytes import *
+from ida_ua import *
+from ida_idp import *
+from ida_auto import *
+from ida_nalt import *
+import ida_frame
+from ida_funcs import *
+from ida_lines import *
+from ida_problems import *
+from ida_offset import *
+from ida_segment import *
+from ida_name import *
+from ida_netnode import *
+from ida_xref import *
 
 # extract bitfield occupying bits high..low from val (inclusive, start from 0)
 def BITS(val, high, low):
@@ -41,15 +53,15 @@ FL_AUTOINC  = 2  # auto-increment: @Rn+
 FL_ABSOLUTE = 1  # absolute: &addr
 FL_SYMBOLIC = 2  # symbolic: addr
 
-# values for cmd.auxpref
+# values for insn_t.auxpref
 AUX_SIZEMASK = 0x0F
 AUX_NOSUF   = 0x00  # no suffix (e.g. SWPB)
 AUX_WORD    = 0x01  # word transfer, .W suffix
 AUX_BYTE    = 0x02  # byte transfer, .B suffix
 AUX_A       = 0x03  # 20-bit transfer, .A suffix
 AUX_AX      = 0x04  # 20-bit immediate/address, no suffix
-AUX_REPIMM  = 0x10  # immediate repeat count present (in cmd.segpref)
-AUX_REPREG  = 0x20  # register repeat count (reg no in in cmd.segpref)
+AUX_REPIMM  = 0x10  # immediate repeat count present (in insn_t.segpref)
+AUX_REPREG  = 0x20  # register repeat count (reg no in in insn_t.segpref)
 AUX_ZC      = 0x40  # zero carry flag is set
 
 # addressing mode field in the opcode
@@ -86,7 +98,7 @@ def same_op(op1, op2):
            op1.addr  == op2.addr  and \
            op1.flags == op2.flags and \
            op1.specval == op2.specval and \
-           op1.dtyp == op2.dtyp
+           op1.dtype == op2.dtype
 
 # is operand auto-increment register reg?
 def is_autoinc(op, reg):
@@ -97,13 +109,13 @@ def is_fixed_spd(ea):
     return (get_aflags(ea) & AFL_FIXEDSPD) != 0
 
 # ----------------------------------------------------------------------
-class msp430_processor_t(idaapi.processor_t):
+class msp430_processor_t(processor_t):
     """
-    Processor module classes must derive from idaapi.processor_t
+    Processor module classes must derive from processor_t
     """
 
     # IDP id ( Numbers above 0x8000 are reserved for the third-party modules)
-    id = idaapi.PLFM_MSP430
+    id = PLFM_MSP430
 
     # Processor features
     flag = PR_SEGS | PRN_HEX | PR_RNAMESOK | PR_NO_SEGMOVE | PR_WORD_INS \
@@ -292,9 +304,6 @@ class msp430_processor_t(idaapi.processor_t):
         # array of automatically generated header lines they appear at the start of disassembled text (optional)
         'header': [".msp430"],
 
-        # array of unsupported instructions (array of cmd.itype) (optional)
-        #'badworks': [],
-
         # org directive
         'origin': ".org",
 
@@ -400,7 +409,7 @@ class msp430_processor_t(idaapi.processor_t):
     # The following callbacks are optional
     #
 
-    #def notify_newprc(self, nproc):
+    #def notify_newprc(self, nproc, keep_cfg):
     #    """
     #    Before changing proccesor type
     #    nproc - processor number in the array of processor names
@@ -423,7 +432,7 @@ class msp430_processor_t(idaapi.processor_t):
     #    """
     #    pass
 
-    def get_frame_retsize(self, func_ea):
+    def notify_get_frame_retsize(self, func_ea):
         """
         Get size of function return address in bytes
         If this function is absent, the kernel will assume
@@ -432,16 +441,16 @@ class msp430_processor_t(idaapi.processor_t):
         """
         return 2
 
-    def notify_get_autocmt(self):
+    def notify_get_autocmt(self, insn):
         """
-        Get instruction comment. 'cmd' describes the instruction in question
+        Get instruction comment. 'insn' describes the instruction in question
         @return: None or the comment string
         """
-        if 'cmt' in self.instruc[self.cmd.itype]:
-          return self.instruc[self.cmd.itype]['cmt']
+        if 'cmt' in self.instruc[insn.itype]:
+          return self.instruc[insn.itype]['cmt']
 
     # ----------------------------------------------------------------------
-    def notify_is_sane_insn(self, no_crefs):
+    def notify_is_sane_insn(self, insn, no_crefs):
         """
         is the instruction sane for the current file type?
         args: no_crefs
@@ -452,132 +461,132 @@ class msp430_processor_t(idaapi.processor_t):
         0: the instruction is created because
            of some coderef, user request or another
            weighty reason.
-        The instruction is in 'cmd'
-        returns: 1-ok, <=0-no, the instruction isn't
+        The instruction is in 'insn'
+        returns: 1-ok, <0-no, the instruction isn't
         likely to appear in the program
         """
-        w = Word(self.cmd.ea)
+        w = get_wide_word(insn.ea)
         if w == 0 or w == 0xFFFF:
-          return 0
+          return -1
         return 1
 
     # ----------------------------------------------------------------------
-    def is_movpc(self):
+    def is_movpc(self, insn):
         # mov xxx, PC
-        return self.cmd.itype == self.itype_mov and self.cmd.Op2.is_reg(self.ireg_PC) and self.cmd.auxpref == AUX_WORD
+        return insn.itype == self.itype_mov and insn.Op2.is_reg(self.ireg_PC) and insn.auxpref == AUX_WORD
 
     # ----------------------------------------------------------------------
-    def changes_pc(self):
-        Feature = self.cmd.get_canon_feature()
-        if (Feature & CF_CHG2) and self.cmd.Op2.is_reg(self.ireg_PC):
+    def changes_pc(self, insn):
+        Feature = insn.get_canon_feature()
+        if (Feature & CF_CHG2) and insn.Op2.is_reg(self.ireg_PC):
           return True
-        if (Feature & CF_CHG1) and self.cmd.Op1.is_reg(self.ireg_PC):
+        if (Feature & CF_CHG1) and insn.Op1.is_reg(self.ireg_PC):
           return True
         return False
 
     # ----------------------------------------------------------------------
-    def handle_operand(self, op, isRead):
-        uFlag     = self.get_uFlag()
-        is_offs   = isOff(uFlag, op.n)
+    def handle_operand(self, insn, op, isRead):
+        flags     = get_flags(insn.ea)
+        is_offs   = is_off(flags, op.n)
         dref_flag = dr_R if isRead else dr_W
-        def_arg   = isDefArg(uFlag, op.n)
+        def_arg   = is_defarg(flags, op.n)
         optype    = op.type
 
-        itype = self.cmd.itype
+        itype = insn.itype
         # create code xrefs
         if optype == o_imm:
             makeoff = False
             if itype in [self.itype_call, self.itype_calla]:
                 # call #func
-                ua_add_cref(op.offb, op.value, fl_CN)
+                insn.add_cref(op.value, op.offb, fl_CN)
                 makeoff = True
-            elif self.is_movpc() or self.cmd.itype in [self.itype_br, self.itype_bra]:
+            elif self.is_movpc(insn) or insn.itype in [self.itype_br, self.itype_bra]:
                 # mov #addr, PC
-                ua_add_cref(op.offb, op.value, fl_JN)
+                insn.add_cref(op.value, op.offb, fl_JN)
                 makeoff = True
             if makeoff and not def_arg:
-                set_offset(self.cmd.ea, op.n, self.cmd.cs)
+                op_plain_offset(insn.ea, op.n, insn.cs)
                 is_offs = True
             if is_offs:
-                ua_add_off_drefs(op, dr_O)
+                insn.add_off_drefs(op, dr_O, 0)
         # create data xrefs
         elif optype == o_displ:
             # delta(reg)
             if is_offs:
-                ua_add_off_drefs(op, dref_flag)
+                insn.add_off_drefs(op, dref_flag, OOF_ADDR)
             elif may_create_stkvars() and not def_arg and op.reg == self.ireg_SP:
                 # var_x(SP)
-                pfn = get_func(self.cmd.ea)
-                if pfn and ua_stkvar2(op, op.addr, STKVAR_VALID_SIZE):
-                    op_stkvar(self.cmd.ea, op.n)
+                pfn = get_func(insn.ea)
+                if pfn and insn.create_stkvar(op, op.addr, STKVAR_VALID_SIZE):
+                    op_stkvar(insn.ea, op.n)
         elif optype == o_mem:
-            ua_dodata2(op.offb, op.addr, op.dtyp)
-            ua_add_dref(op.offb, op.addr, dref_flag)
+            insn.create_op_data(op.addr, op)
+            insn.add_dref(op.addr, op.offb, dref_flag)
         elif optype == o_near:
-            ua_add_cref(op.offb, op.addr, fl_JN)
+            insn.add_cref(op.addr, op.offb, fl_JN)
 
     # ----------------------------------------------------------------------
-    def add_stkpnt(self, pfn, v):
+    def add_stkpnt(self, pfn, insn, v):
         if pfn:
-            end = self.cmd.ea + self.cmd.size
+            end = insn.ea + insn.size
             if not is_fixed_spd(end):
-                add_auto_stkpnt2(pfn, end, v)
+                ida_frame.add_auto_stkpnt(pfn, end, v)
 
     # ----------------------------------------------------------------------
-    def trace_sp(self):
+    def trace_sp(self, insn):
         """
         Trace the value of the SP and create an SP change point if the current
         instruction modifies the SP.
         """
-        pfn = get_func(self.cmd.ea)
+        pfn = get_func(insn.ea)
         if not pfn:
             return
         spofs = 0
-        if self.cmd.itype in [self.itype_add, self.itype_addx, self.itype_adda, self.itype_addc, self.itype_addcx,
+        if insn.itype in [self.itype_add, self.itype_addx, self.itype_adda, self.itype_addc, self.itype_addcx,
            self.itype_sub, self.itype_subx, self.itype_suba, self.itype_subc, self.itype_subcx] and \
-           self.cmd.Op2.is_reg(self.ireg_SP) and self.cmd.auxpref in [AUX_WORD, AUX_A, AUX_AX] and \
-           self.cmd.Op1.type == o_imm:
+           insn.Op2.is_reg(self.ireg_SP) and insn.auxpref in [AUX_WORD, AUX_A, AUX_AX] and \
+           insn.Op1.type == o_imm:
             # add.w  #xxx, SP
             # subc.w #xxx, SP
-            if self.cmd.auxpref == AUX_WORD:
-              spofs = SIGNEXT(self.cmd.Op1.value, 16)
+            if insn.auxpref == AUX_WORD:
+              spofs = SIGNEXT(insn.Op1.value, 16)
             else:
-              spofs = SIGNEXT(self.cmd.Op1.value, 20)
-            if self.cmd.itype in [self.itype_sub, self.itype_subc, self.itype_subx, self.itype_subcx]:
+              spofs = SIGNEXT(insn.Op1.value, 20)
+            if insn.itype in [self.itype_sub, self.itype_subc, self.itype_subx, self.itype_subcx]:
                 spofs = -spofs
-        elif self.cmd.itype in [self.itype_incd, self.itype_decd, self.itype_incdx,
+        elif insn.itype in [self.itype_incd, self.itype_decd, self.itype_incdx,
              self.itype_decdx, self.itype_incda, self.itype_decda] and \
-             self.cmd.Op1.is_reg(self.ireg_SP) and self.cmd.auxpref in [AUX_WORD, AUX_A, AUX_AX]:
-              spofs = 2 if self.cmd.itype in [self.itype_incd, self.itype_incdx] else -2
-              self.add_stkpnt(pfn, spofs)
-        elif self.cmd.itype == self.itype_push:
+             insn.Op1.is_reg(self.ireg_SP) and insn.auxpref in [AUX_WORD, AUX_A, AUX_AX]:
+              spofs = 2 if insn.itype in [self.itype_incd, self.itype_incdx] else -2
+              self.add_stkpnt(pfn, insn, spofs)
+        elif insn.itype == self.itype_push:
             spofs = -2
-        elif self.cmd.itype in [self.itype_popm, self.itype_pushm, self.itype_popx, self.itype_pushx]:
+        elif insn.itype in [self.itype_popm, self.itype_pushm, self.itype_popx, self.itype_pushx]:
             # popm.a #n, reg -> +n*4
             # popm.w #n, reg -> +n*2
             # popx.a reg     -> +4
             # popx.w reg     -> +2
-            if self.cmd.itype in [self.itype_popm, self.itype_pushm]:
-              count = self.cmd.Op1.value
+            if insn.itype in [self.itype_popm, self.itype_pushm]:
+              count = insn.Op1.value
             else:
               count = 1
-            spofs = 1 if self.cmd.itype == self.itype_popm else -1
-            if self.cmd.auxpref == AUX_A:
+            spofs = 1 if insn.itype == self.itype_popm else -1
+            if insn.auxpref == AUX_A:
               spofs *= count * 4
             else:
               spofs *= count * 2
-        elif self.cmd.itype == self.itype_pop or is_autoinc(self.cmd.Op1, self.ireg_SP):
+        elif insn.itype == self.itype_pop or is_autoinc(insn.Op1, self.ireg_SP):
             # pop R7 or mov.w @SP+, R7
-            if self.cmd.auxpref in [AUX_A, AUX_AX]:
+            if insn.auxpref in [AUX_A, AUX_AX]:
               spofs = 4
             else:
               spofs = 2
 
         if spofs != 0:
-          self.add_stkpnt(pfn, spofs)
+          self.add_stkpnt(pfn, insn, spofs)
 
     # ----------------------------------------------------------------------
-    def check_switch(self):
+    def check_switch(self, insn):
         # detect switches and set switch info
         #
         #       cmp.w   #nn, Rx
@@ -586,127 +595,125 @@ class msp430_processor_t(idaapi.processor_t):
         #       rla.w   Ry, Ry
         #       br      jtbl(Ry)
         # jtbl  .short case0, .short case1
-        if get_switch_info_ex(self.cmd.ea):
+        if get_switch_info(insn.ea):
             return
         ok = False
-        si = switch_info_ex_t()
-        saved_cmd = self.cmd.copy()
+        si = switch_info_t()
 
         # mov.w   jtbl(Ry), PC
-        if (self.is_movpc() or self.cmd.itype in [self.itype_br, self.itype_bra]) and self.cmd.Op1.type == o_displ:
-            si.jumps = self.cmd.Op1.addr # jump table address
-            Ry = self.cmd.Op1.reg
+        if (self.is_movpc(insn) or insn.itype in [self.itype_br, self.itype_bra]) and insn.Op1.type == o_displ:
+            si.jumps = insn.Op1.addr # jump table address
+            Ry = insn.Op1.reg
             ok = True
             # add.w   Ry, Ry  | rla.w Ry
-            if decode_prev_insn(self.cmd.ea) != BADADDR and self.cmd.auxpref == AUX_WORD:
-               ok = self.cmd.itype == self.itype_add and self.cmd.Op1.is_reg(Ry) and self.cmd.Op2.is_reg(Ry) or \
-                    self.cmd.itype == self.itype_rla and self.cmd.Op1.is_reg(Ry)
+            prev = insn_t()
+            if decode_prev_insn(prev, insn.ea) != BADADDR and prev.auxpref == AUX_WORD:
+                ok = prev.itype == self.itype_add and prev.Op1.is_reg(Ry) and prev.Op2.is_reg(Ry) or \
+                     prev.itype == self.itype_rla and prev.Op1.is_reg(Ry)
             else:
                 ok = False
-            if ok and decode_prev_insn(self.cmd.ea) != BADADDR:
+            if ok and decode_prev_insn(prev, prev.ea) != BADADDR:
                # mov.w   Rx, Ry
-               if self.cmd.itype == self.itype_mov and \
-                  self.cmd.Op2.is_reg(Ry) and \
-                  cmd.Op1.type == o_reg and \
-                  self.cmd.auxpref == AUX_WORD:
-                   Rx = cmd.Op1.reg
-                   ok = decode_prev_insn(self.cmd.ea) != BADADDR
+               if prev.itype == self.itype_mov and \
+                  prev.Op2.is_reg(Ry) and \
+                  prev.Op1.type == o_reg and \
+                  prev.auxpref == AUX_WORD:
+                   Rx = prev.Op1.reg
+                   ok = decode_prev_insn(prev, prev.ea) != BADADDR
                else:
                    Rx = Ry
             else:
                 ok = False
 
             # jc default
-            if ok and self.cmd.itype == self.itype_jc:
-                si.defjump = self.cmd.Op1.addr
+            if ok and prev.itype == self.itype_jc:
+                si.defjump = prev.Op1.addr
             else:
                 ok = False
 
             # cmp.w   #nn, Rx
-            if ok and decode_prev_insn(self.cmd.ea) == BADADDR or \
-               self.cmd.itype != self.itype_cmp or \
-               self.cmd.Op1.type != o_imm or \
-               not self.cmd.Op2.is_reg(Rx) or \
-               self.cmd.auxpref != AUX_WORD:
+            if ok and decode_prev_insn(prev, prev.ea) == BADADDR or \
+               prev.itype != self.itype_cmp or \
+               prev.Op1.type != o_imm or \
+               not prev.Op2.is_reg(Rx) or \
+               prev.auxpref != AUX_WORD:
                 ok = False
             else:
                 si.flags |= SWI_DEFAULT
-                si.ncases = cmd.Op1.value
+                si.ncases = prev.Op1.value
                 si.lowcase = 0
-                si.startea = self.cmd.ea
+                si.startea = prev.ea
                 si.set_expr(Rx, dt_word)
 
-        self.cmd.assign(saved_cmd)
         if ok:
             # make offset to the jump table
-            set_offset(self.cmd.ea, 0, self.cmd.cs)
-            set_switch_info_ex(self.cmd.ea, si)
-            create_switch_table(self.cmd.ea, si)
+            op_plain_offset(insn.ea, 0, insn.cs)
+            set_switch_info(insn.ea, si)
+            create_switch_table(insn.ea, si)
 
     # ----------------------------------------------------------------------
     # The following callbacks are mandatory
     #
-    def emu(self):
+    def notify_emu(self, insn):
         """
         Emulate instruction, create cross-references, plan to analyze
         subsequent instructions, modify flags etc. Upon entrance to this function
-        all information about the instruction is in 'cmd' structure.
+        all information about the instruction is in 'insn' structure.
         If zero is returned, the kernel will delete the instruction.
         """
-        aux = self.get_auxpref()
-        Feature = self.cmd.get_canon_feature()
+        aux = self.get_auxpref(insn)
+        Feature = insn.get_canon_feature()
 
         if Feature & CF_USE1:
-            self.handle_operand(self.cmd.Op1, 1)
+            self.handle_operand(insn, insn.Op1, 1)
         if Feature & CF_CHG1:
-            self.handle_operand(self.cmd.Op1, 0)
+            self.handle_operand(insn, insn.Op1, 0)
         if Feature & CF_USE2:
-            self.handle_operand(self.cmd.Op2, 1)
+            self.handle_operand(insn, insn.Op2, 1)
         if Feature & CF_CHG2:
-            self.handle_operand(self.cmd.Op2, 0)
+            self.handle_operand(insn, insn.Op2, 0)
         if Feature & CF_JUMP:
-            QueueSet(Q_jumps, self.cmd.ea)
+            remember_problem(PR_JUMP, insn.ea)
 
         # is it an unconditional jump?
-        uncond_jmp = self.cmd.itype in [self.itype_jmp, self.itype_br, self.itype_bra] or self.changes_pc()
+        uncond_jmp = insn.itype in [self.itype_jmp, self.itype_br, self.itype_bra] or self.changes_pc(insn)
 
         # add flow
         flow = (Feature & CF_STOP == 0) and not uncond_jmp
         if flow:
-            ua_add_cref(0, self.cmd.ea + self.cmd.size, fl_F)
+            add_cref(insn.ea, insn.ea + insn.size, fl_F)
         else:
-            self.check_switch()
+            self.check_switch(insn)
 
         # trace the stack pointer if:
         #   - it is the second analysis pass
         #   - the stack pointer tracing is allowed
         if may_trace_sp():
             if flow:
-                self.trace_sp()         # trace modification of SP register
+                self.trace_sp(insn)     # trace modification of SP register
             else:
-                recalc_spd(self.cmd.ea) # recalculate SP register for the next insn
+                recalc_spd(insn.ea) # recalculate SP register for the next insn
 
         return 1
 
     # ----------------------------------------------------------------------
-    def outop(self, op):
+    def notify_out_operand(self, ctx, op):
         """
         Generate text representation of an instructon operand.
         This function shouldn't change the database, flags or anything else.
         All these actions should be performed only by the emu() function.
-        The output text is placed in the output buffer initialized with init_output_buffer()
         This function uses out_...() functions from ua.hpp to generate the operand text
         Returns: 1-ok, 0-operand is hidden.
         """
         optype = op.type
         fl     = op.specval
         signed = 0
-        sz = self.cmd.auxpref & AUX_SIZEMASK
+        sz = ctx.insn.auxpref & AUX_SIZEMASK
 
         if optype == o_reg:
-            out_register(self.regNames[op.reg])
+            ctx.out_register(self.reg_names[op.reg])
         elif optype == o_imm:
-            out_symbol('#')
+            ctx.out_symbol('#')
             op2 = copy.copy(op)
             if sz == AUX_BYTE:
                 op2.value &= 0xFF
@@ -714,76 +721,45 @@ class msp430_processor_t(idaapi.processor_t):
                 op2.value &= 0xFFFF
             else:
                 op2.value &= 0xFFFFF
-            OutValue(op2, OOFW_IMM | signed )
+            ctx.out_value(op2, OOFW_IMM | signed )
         elif optype in [o_near, o_mem]:
             if optype == o_mem and fl == FL_ABSOLUTE:
-                out_symbol('&')
-            r = out_name_expr(op, op.addr, BADADDR)
+                ctx.out_symbol('&')
+            r = ctx.out_name_expr(op, op.addr, BADADDR)
             if not r:
-                out_tagon(COLOR_ERROR)
-                OutLong(op.addr, 16)
-                out_tagoff(COLOR_ERROR)
-                QueueSet(Q_noName, self.cmd.ea)
+                ctx.out_tagon(COLOR_ERROR)
+                ctx.out_btoa(op.addr, 16)
+                ctx.out_tagoff(COLOR_ERROR)
+                remember_problem(PR_NONAME, ctx.insn.ea)
         elif optype == o_displ:
             # 16-bit index is signed
             width = OOFW_16
             sign = OOF_SIGNED
-            if sz in [AUX_A, AUX_AX]:
+            if sz in [AUX_A, AUX_AX] or op.dtype == dt_dword:
                 # 20-bit index is not signed
                 width = OOFW_24
                 sign = 0
-            OutValue(op, OOF_ADDR | signed | width )
-            out_symbol('(')
-            out_register(self.regNames[op.reg])
-            out_symbol(')')
+            ctx.out_value(op, OOF_ADDR | signed | width )
+            ctx.out_symbol('(')
+            ctx.out_register(self.reg_names[op.reg])
+            ctx.out_symbol(')')
         elif optype == o_phrase:
-            out_symbol('@')
-            out_register(self.regNames[op.reg])
+            ctx.out_symbol('@')
+            ctx.out_register(self.reg_names[op.reg])
             if fl == FL_AUTOINC:
-              out_symbol('+')
+              ctx.out_symbol('+')
         else:
             return False
 
         return True
 
     # ----------------------------------------------------------------------
-    def out(self):
-        """
-        Generate text representation of an instruction in 'cmd' structure.
-        This function shouldn't change the database, flags or anything else.
-        All these actions should be performed only by emu() function.
-        Returns: nothing
-        """
-        # Init output buffer
-        buf = idaapi.init_output_buffer(1024)
-
-        # do we need to print a modifier line first?
-        if self.cmd.auxpref & (AUX_REPREG | AUX_REPIMM | AUX_ZC):
-          if self.cmd.auxpref & AUX_ZC:
-            out_line("zc", COLOR_INSN)
-            term_output_buffer()
-            MakeLine(buf)
-            buf = idaapi.init_output_buffer(1024)
-          if self.cmd.auxpref & AUX_REPREG:
-            out_line("rpt", COLOR_INSN)
-            OutChar(' ')
-            out_register(self.regNames[self.cmd.segpref])
-            term_output_buffer()
-            MakeLine(buf)
-            buf = idaapi.init_output_buffer(1024)
-          if self.cmd.auxpref & AUX_REPIMM:
-            out_line("rpt", COLOR_INSN)
-            OutChar(' ')
-            out_symbol('#')
-            out_long(self.cmd.segpref, 10)
-            term_output_buffer()
-            MakeLine(buf)
-            buf = idaapi.init_output_buffer(1024)
+    def out_mnem(self, ctx):
 
         postfix = ""
 
         # add postfix if necessary
-        sz = self.cmd.auxpref & AUX_SIZEMASK
+        sz = ctx.insn.auxpref & AUX_SIZEMASK
         if sz == AUX_BYTE:
             postfix = ".b"
         elif sz == AUX_WORD:
@@ -792,24 +768,50 @@ class msp430_processor_t(idaapi.processor_t):
             postfix = ".a"
 
         # first argument (8) is the width of the mnemonic field
-        OutMnem(8, postfix)
+        ctx.out_mnem(8, postfix)
+
+    # ----------------------------------------------------------------------
+    def notify_out_insn(self, ctx):
+        """
+        Generate text representation of an instruction in 'ctx.insn' structure.
+        This function shouldn't change the database, flags or anything else.
+        All these actions should be performed only by emu() function.
+        Returns: nothing
+        """
+        # do we need to print a modifier line first?
+        if ctx.insn.auxpref & (AUX_REPREG | AUX_REPIMM | AUX_ZC):
+          if ctx.insn.auxpref & AUX_ZC:
+            ctx.out_line("zc", COLOR_INSN)
+            ctx.flush_outbuf()
+          if ctx.insn.auxpref & AUX_REPREG:
+            ctx.out_line("rpt", COLOR_INSN)
+            ctx.out_char(' ')
+            ctx.out_register(self.reg_names[ctx.insn.segpref])
+            ctx.flush_outbuf()
+          if ctx.insn.auxpref & AUX_REPIMM:
+            ctx.out_line("rpt", COLOR_INSN)
+            ctx.out_char(' ')
+            ctx.out_symbol('#')
+            ctx.out_long(ctx.insn.segpref, 10)
+            ctx.flush_outbuf()
+
+        ctx.out_mnemonic()
 
         # output first operand
-        # kernel will call outop()
-        if self.cmd.Op1.type != o_void:
-            out_one_operand(0)
+        # kernel will call out_operand()
+        if ctx.insn.Op1.type != o_void:
+            ctx.out_one_operand(0)
 
         # output the rest of operands separated by commas
         for i in xrange(1, 3):
-            if self.cmd[i].type == o_void:
+            if ctx.insn[i].type == o_void:
                 break
-            out_symbol(',')
-            OutChar(' ')
-            out_one_operand(i)
+            ctx.out_symbol(',')
+            ctx.out_char(' ')
+            ctx.out_one_operand(i)
 
-        term_output_buffer()
-        cvar.gl_comm = 1 # generate comment at the next call to MakeLine()
-        MakeLine(buf)
+        ctx.set_gen_cmt() # generate comment at the next call to MakeLine()
+        ctx.flush_outbuf()
 
     # ----------------------------------------------------------------------
     # fill operand fields from decoded instruction parts
@@ -821,7 +823,7 @@ class msp430_processor_t(idaapi.processor_t):
     # is_source: True if filling source operand
     # is_cg: can use constant generator
     # extw: 20-bit extension word
-    def fill_op(self, op, reg, A, BW, is_source, is_cg = False, extw = None):
+    def fill_op(self, insn, op, reg, A, BW, is_source, is_cg = False, extw = None):
         op.reg = reg
         topaddr = 0  # top 4 bits of an address value
         if extw:
@@ -833,12 +835,12 @@ class msp430_processor_t(idaapi.processor_t):
           else:
             topaddr = BITS(extw,  3, 0)
         if BW == DLEN_WORD:
-          op.dtyp = dt_word
+          op.dtype = dt_word
         elif BW == DLEN_BYTE:
-          op.dtyp = dt_byte
+          op.dtype = dt_byte
         else:
           # 20-bit
-          op.dtyp = dt_dword
+          op.dtype = dt_dword
         if is_cg:
             # check for constant generators
             if reg == self.ireg_SR and A >= 2 and A <= 3:
@@ -852,21 +854,21 @@ class msp430_processor_t(idaapi.processor_t):
         if A == AM_REGISTER:
             # register mode
             op.type = o_reg
-            op.dtyp = dt_word
+            op.dtype = dt_word
         elif A == AM_INDEXED:
             # indexed mode
             if reg == self.ireg_SR:
                 # absolute address mode
                 op.type = o_mem
                 op.specval = FL_ABSOLUTE
-                op.offb = self.cmd.size
-                op.addr = ua_next_word() | (topaddr << 16)
+                op.offb = insn.size
+                op.addr = insn.get_next_word() | (topaddr << 16)
             else:
                 # map it to IDA's displacement
                 op.type = o_displ
-                op.offb = self.cmd.size
-                pcval   = self.cmd.ip + self.cmd.size
-                op.addr = ua_next_word() | (topaddr << 16)
+                op.offb = insn.size
+                pcval   = insn.ip + insn.size
+                op.addr = insn.get_next_word() | (topaddr << 16)
                 if reg == self.ireg_PC:
                   # symbolic addressing mode: address = PC + simm16
                   # 1) if PC is below 64K, the result is wrapped to be below 64K
@@ -881,6 +883,10 @@ class msp430_processor_t(idaapi.processor_t):
                         op.addr &= 0xFFFF
                   op.type = o_mem
                   op.specval = FL_SYMBOLIC
+            # slau208p.pdf: All addresses, indexes, and immediate numbers have
+            #               20-bit values when preceded by the extension word.
+            if extw:
+                op.dtype = dt_dword
         elif A == AM_INDIRECT:
             # Indirect register mode
             # map it to o_phrase
@@ -891,18 +897,18 @@ class msp430_processor_t(idaapi.processor_t):
             # map it to o_phrase
             if reg == self.ireg_PC:
                 #this is actually immediate mode
-                op.dtyp = dt_dword if extw else dt_word
+                op.dtype = dt_dword if extw else dt_word
                 op.type = o_imm
-                op.offb = self.cmd.size
-                op.value = ua_next_word() | (topaddr << 16)
+                op.offb = insn.size
+                op.value = insn.get_next_word() | (topaddr << 16)
             else:
                 op.type = o_phrase
                 op.specval = FL_AUTOINC
         elif A in [AM_IMM20, AM_ABS20, AM_SYM20]:
             # reg is the high 4 bits, low 16 bits follow
-            val = (reg << 16) | ua_next_word()
+            val = (reg << 16) | insn.get_next_word()
             if A == AM_IMM20:
-              op.dtyp = dt_dword
+              op.dtype = dt_dword
               op.value = val
               op.type = o_imm
             else:
@@ -912,7 +918,7 @@ class msp430_processor_t(idaapi.processor_t):
               if A == AM_SYM20:
                 # symbolic addressing mode: address = PC + imm20
                 # no sign-extension or wrapping is done
-                pcval = cmd.ip + cmd.size
+                pcval = insn.ip + insn.size
                 op.addr += pcval
                 op.specval = FL_SYMBOLIC
               else:
@@ -921,7 +927,7 @@ class msp430_processor_t(idaapi.processor_t):
             warning("bad A(%d) in fill_op" % A)
 
     # ----------------------------------------------------------------------
-    def handle_reg_extw(self, extw):
+    def handle_reg_extw(self, insn, extw):
         #  Register Mode Extension Word
         #   15 ... 12 11  10 9   8   7    6   5    4   3  0
         #  +---------+--------+----+---+-----+---+---+------+
@@ -932,19 +938,19 @@ class msp430_processor_t(idaapi.processor_t):
         rep = BITS(extw, 3, 0)
         if rep:
           if repreg:
-            self.cmd.auxpref |= AUX_REPREG
-            self.cmd.segpref = rep
+            insn.auxpref |= AUX_REPREG
+            insn.segpref = rep
           else:
-            self.cmd.auxpref |= AUX_REPIMM
-            self.cmd.segpref = rep + 1
+            insn.auxpref |= AUX_REPIMM
+            insn.segpref = rep + 1
         if ZC:
-          if self.cmd.itype == self.itype_rrcx:
-            self.cmd.itype = self.itype_rrux
+          if insn.itype == self.itype_rrcx:
+            insn.itype = self.itype_rrux
           else:
-            self.cmd.auxpref |= AUX_ZC
+            insn.auxpref |= AUX_ZC
 
     # ----------------------------------------------------------------------
-    def decode_format_I(self, w, extw):
+    def decode_format_I(self, insn, w, extw):
         #  Double-Operand (Format I) Instructions
         #
         #   15 ... 12 11 ... 8   7    6   5  4 3    0
@@ -963,23 +969,23 @@ class msp430_processor_t(idaapi.processor_t):
         BW   = BIT(w, 6)
         if opc < 4:
             # something went wrong
-            self.cmd.size = 0
+            insn.size = 0
         else:
             if extw:
               AL = BIT(extw, 6)
               if AL == 0 and BW == 1:
                 BW = DLEN_AWORD
-              self.cmd.itype = self.itype_movx + (opc-4)
+              insn.itype = self.itype_movx + (opc-4)
             else:
-              self.cmd.itype = self.itype_mov + (opc-4)
-        self.fill_op(self.cmd.Op1, Rsrc, As, BW, True,  True,  extw)
-        self.fill_op(self.cmd.Op2, Rdst, Ad, BW, False, False, extw)
-        self.cmd.auxpref = BW + AUX_WORD
+              insn.itype = self.itype_mov + (opc-4)
+        self.fill_op(insn, insn.Op1, Rsrc, As, BW, True,  True,  extw)
+        self.fill_op(insn, insn.Op2, Rdst, Ad, BW, False, False, extw)
+        insn.auxpref = BW + AUX_WORD
         if extw and As == AM_REGISTER and Ad == AM_REGISTER:
-          self.handle_reg_extw(extw)
+          self.handle_reg_extw(insn, extw)
 
     # ----------------------------------------------------------------------
-    def decode_format_II(self, w, extw):
+    def decode_format_II(self, insn, w, extw):
         #  Single-Operand (Format II) Instructions
         #
         #   15         10 9       7   6   5  4 3    0
@@ -995,35 +1001,35 @@ class msp430_processor_t(idaapi.processor_t):
         if opc in [6, 7]:
           if extw:
             return 0
-          return self.decode_430x_calla(w)
+          return self.decode_430x_calla(insn, w)
         if extw:
           AL = BIT(extw, 6)
           if AL == 0 and BW == 1:
             BW = DLEN_AWORD
-          self.cmd.itype = self.itype_rrcx + opc
+          insn.itype = self.itype_rrcx + opc
         else:
-          self.cmd.itype = self.itype_rrc + opc
-        self.fill_op(self.cmd.Op1, Rdst, Ad, BW, False, True, extw)
-        self.cmd.auxpref = BW + AUX_WORD
-        if self.cmd.itype in [self.itype_swpb, self.itype_sxt, self.itype_call, self.itype_reti]:
+          insn.itype = self.itype_rrc + opc
+        self.fill_op(insn, insn.Op1, Rdst, Ad, BW, False, True, extw)
+        insn.auxpref = BW + AUX_WORD
+        if insn.itype in [self.itype_swpb, self.itype_sxt, self.itype_call, self.itype_reti]:
             # these commands have no suffix and should have BW set to 0
             if BW == 0:
-                self.cmd.auxpref = AUX_NOSUF
-                if self.cmd.itype == self.itype_reti:
+                insn.auxpref = AUX_NOSUF
+                if insn.itype == self.itype_reti:
                     # Ad and Rdst should be 0
                     if Ad == 0 and Rdst == 0:
-                        self.cmd.Op1.type = o_void
+                        insn.Op1.type = o_void
                     else:
                         # bad instruction
-                        self.cmd.itype = self.itype_null
+                        insn.itype = self.itype_null
             else:
                 # bad instruction
-                self.cmd.itype = self.itype_null
+                insn.itype = self.itype_null
         if extw and Ad == AM_REGISTER:
-          self.handle_reg_extw(extw)
+          self.handle_reg_extw(insn, extw)
 
     # ----------------------------------------------------------------------
-    def decode_jump(self, w):
+    def decode_jump(self, insn, w):
         #  Jump Instructions
         #
         #   15     13 12   10 9                    0
@@ -1033,12 +1039,12 @@ class msp430_processor_t(idaapi.processor_t):
         C    = BITS(w, 12, 10)
         offs = BITS(w,  9,  0)
         offs = SIGNEXT(offs, 10)
-        self.cmd.Op1.type = o_near
-        self.cmd.Op1.addr = self.cmd.ea + 2 + offs*2
-        self.cmd.itype = self.itype_jnz + C
+        insn.Op1.type = o_near
+        insn.Op1.addr = insn.ea + 2 + offs*2
+        insn.itype = self.itype_jnz + C
 
     # ----------------------------------------------------------------------
-    def decode_430x_mova(self, w):
+    def decode_430x_mova(self, insn, w):
         #  MSP430X Address Instructions
         # 15    12  11 8  7     4  3 0
         #  0 0 0 0  src   0 0 0 0  dst  MOVA @Rsrc,Rdst
@@ -1093,27 +1099,27 @@ class msp430_processor_t(idaapi.processor_t):
         ]
         row = tbl[opc]
         if row[0] != -1:
-          self.cmd.itype = row[0]
-          self.fill_op(self.cmd.Op1, Rsrc, row[1], 2, True,  Rdst != 0)
-          self.fill_op(self.cmd.Op2, Rdst, row[2], 2, False, False)
-          self.cmd.auxpref = AUX_AX
+          insn.itype = row[0]
+          self.fill_op(insn, insn.Op1, Rsrc, row[1], 2, True,  Rdst != 0)
+          self.fill_op(insn, insn.Op2, Rdst, row[2], 2, False, False)
+          insn.auxpref = AUX_AX
         else:
           # src[3:2] == n-1
           # src[1:0] == insn id
-          self.cmd.itype = self.itype_rrcm + (Rsrc & 0b11)
-          self.cmd.Op1.type = o_imm
-          self.cmd.Op1.dtyp = dt_byte
-          self.cmd.Op1.value = (Rsrc>>2) + 1
+          insn.itype = self.itype_rrcm + (Rsrc & 0b11)
+          insn.Op1.type = o_imm
+          insn.Op1.dtype = dt_byte
+          insn.Op1.value = (Rsrc>>2) + 1
           # opc[0]: 0=.A, 1=.W
           BW = 0 if (opc & 1) else 2
-          self.fill_op(self.cmd.Op2, Rdst, AM_REGISTER, BW, False, False)
+          self.fill_op(insn, insn.Op2, Rdst, AM_REGISTER, BW, False, False)
           if opc & 1:
-            self.cmd.auxpref = AUX_A
+            insn.auxpref = AUX_A
           else:
-            self.cmd.auxpref = AUX_WORD
+            insn.auxpref = AUX_WORD
 
     # ----------------------------------------------------------------------
-    def decode_430x_calla(self, w):
+    def decode_430x_calla(self, insn, w):
         #  MSP430X CALLA Instruction
         opc  = BITS(w, 7, 4)
         Rdst = BITS(w, 3, 0)
@@ -1138,13 +1144,13 @@ class msp430_processor_t(idaapi.processor_t):
           [self.itype_null,  -1         ], # 1111 ----
         ]
         row = tbl[opc]
-        self.cmd.itype = row[0]
+        insn.itype = row[0]
         if row[1] != -1:
-          self.fill_op(self.cmd.Op1, Rdst, row[1], DLEN_AWORD, True, False)
-          self.cmd.auxpref = AUX_AX
+          self.fill_op(insn, insn.Op1, Rdst, row[1], DLEN_AWORD, True, False)
+          insn.auxpref = AUX_AX
 
     # ----------------------------------------------------------------------
-    def decode_430x_pushm(self, w):
+    def decode_430x_pushm(self, insn, w):
         #  MSP430X PUSHM/POPM Instructions
         #  15  10 98 7 4 3 0
         #  000101 00 n-1 dst      PUSHM.A #n,Rdst
@@ -1155,18 +1161,18 @@ class msp430_processor_t(idaapi.processor_t):
         Rdst = BITS(w, 3, 0)
 
         ispop = BIT(w, 9)
-        self.cmd.itype   = [self.itype_pushm, self.itype_popm] [ispop]
+        insn.itype   = [self.itype_pushm, self.itype_popm] [ispop]
         n    = BITS(w, 7, 4) + 1
         Rdst = BITS(w, 3, 0)
         if ispop:
           Rdst += n - 1
-        self.cmd.Op1.type = o_imm
-        self.cmd.Op1.dtyp = dt_byte
-        self.cmd.Op1.value = n
+        insn.Op1.type = o_imm
+        insn.Op1.dtype = dt_byte
+        insn.Op1.value = n
         isw = BIT(w, 8)
         BW = 0 if isw else 2
-        self.fill_op(self.cmd.Op2, Rdst, AM_REGISTER, BW, False, False)
-        self.cmd.auxpref = [AUX_A, AUX_WORD] [isw]
+        self.fill_op(insn, insn.Op2, Rdst, AM_REGISTER, BW, False, False)
+        insn.auxpref = [AUX_A, AUX_WORD] [isw]
 
     # ----------------------------------------------------------------------
     # does operand match tuple m? (type, value)
@@ -1184,139 +1190,141 @@ class msp430_processor_t(idaapi.processor_t):
 
     # ----------------------------------------------------------------------
     # replace some instructions by simplified mnemonics ("emulated" in TI terms)
-    def simplify(self):
+    def simplify(self, insn):
         # source mnemonic mapped to a list of matches:
         #   match function, new mnemonic, new operand
         maptbl = {
             self.itype_addc: [
                 # addc #0, dst -> adc dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_adc, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_adc, 2 ],
                 # addc dst, dst -> rlc dst
-                [ lambda: same_op(self.cmd.Op1, self.cmd.Op2), self.itype_rlc, 1 ],
+                [ lambda: same_op(insn.Op1, insn.Op2), self.itype_rlc, 1 ],
             ],
             self.itype_addcx: [
                 # addcx #0, dst -> adcx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_adcx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_adcx, 2 ],
                 # addcx dst, dst -> rlcx dst
-                [ lambda: same_op(self.cmd.Op1, self.cmd.Op2), self.itype_rlcx, 1 ],
+                [ lambda: same_op(insn.Op1, insn.Op2), self.itype_rlcx, 1 ],
             ],
             self.itype_mov: [
                 # mov #0, R3 -> nop
-                [ lambda: is_imm_op(self.cmd.Op1, 0) and self.cmd.Op2.is_reg(self.ireg_R3), self.itype_nop, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 0) and insn.Op2.is_reg(self.ireg_R3), self.itype_nop, 0 ],
                 # mov #0, dst -> clr dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_clr, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_clr, 2 ],
                 # mov @SP+, PC -> ret
-                [ lambda: is_autoinc(self.cmd.Op1, self.ireg_SP) and self.cmd.Op2.is_reg(self.ireg_PC), self.itype_ret, 0 ],
+                [ lambda: is_autoinc(insn.Op1, self.ireg_SP) and insn.Op2.is_reg(self.ireg_PC), self.itype_ret, 0 ],
                 # mov @SP+, dst -> pop dst
-                [ lambda: is_autoinc(self.cmd.Op1, self.ireg_SP), self.itype_pop, 2 ],
+                [ lambda: is_autoinc(insn.Op1, self.ireg_SP), self.itype_pop, 2 ],
                 # mov dst, PC -> br dst
-                [ lambda: self.is_movpc(), self.itype_br, 1 ],
+                [ lambda: self.is_movpc(insn), self.itype_br, 1 ],
             ],
             self.itype_movx: [
                 # movx #0, dst -> clrx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_clrx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_clrx, 2 ],
+                # movx @SP+, dst -> popx dst
+                [ lambda: is_autoinc(insn.Op1, self.ireg_SP), self.itype_popx, 2 ],
             ],
             self.itype_mova: [
                 # mova #0, dst -> clra dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_clra, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_clra, 2 ],
                 # mova @SP+, PC -> reta
-                [ lambda: is_autoinc(self.cmd.Op1, self.ireg_SP) and self.cmd.Op2.is_reg(self.ireg_PC), self.itype_reta, 0 ],
+                [ lambda: is_autoinc(insn.Op1, self.ireg_SP) and insn.Op2.is_reg(self.ireg_PC), self.itype_reta, 0 ],
                 # mova @SP+, dst -> popa dst
-                [ lambda: is_autoinc(self.cmd.Op1, self.ireg_SP), self.itype_popa, 2 ],
+                [ lambda: is_autoinc(insn.Op1, self.ireg_SP), self.itype_popa, 2 ],
                 # mova dst, PC -> bra dst
-                [ lambda: self.cmd.Op2.is_reg(self.ireg_PC), self.itype_bra, 1 ],
+                [ lambda: insn.Op2.is_reg(self.ireg_PC), self.itype_bra, 1 ],
             ],
             self.itype_bic: [
                 # bic #1, SR -> clrc
-                [ lambda: is_imm_op(self.cmd.Op1, 1) and self.cmd.Op2.is_reg(self.ireg_SR), self.itype_clrc, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 1) and insn.Op2.is_reg(self.ireg_SR), self.itype_clrc, 0 ],
                 # bic #2, SR -> clrz
-                [ lambda: is_imm_op(self.cmd.Op1, 2) and self.cmd.Op2.is_reg(self.ireg_SR), self.itype_clrz, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 2) and insn.Op2.is_reg(self.ireg_SR), self.itype_clrz, 0 ],
                 # bic #4, SR -> clrn
-                [ lambda: is_imm_op(self.cmd.Op1, 4) and self.cmd.Op2.is_reg(self.ireg_SR), self.itype_clrn, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 4) and insn.Op2.is_reg(self.ireg_SR), self.itype_clrn, 0 ],
                 # bic #8, SR -> dint
-                [ lambda: is_imm_op(self.cmd.Op1, 8) and self.cmd.Op2.is_reg(self.ireg_SR), self.itype_dint, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 8) and insn.Op2.is_reg(self.ireg_SR), self.itype_dint, 0 ],
             ],
             self.itype_bis: [
                 # bis #1, SR -> setc
-                [ lambda: is_imm_op(self.cmd.Op1, 1) and self.cmd.Op2.is_reg(self.ireg_SR), self.itype_setc, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 1) and insn.Op2.is_reg(self.ireg_SR), self.itype_setc, 0 ],
                 # bis #2, SR -> setz
-                [ lambda: is_imm_op(self.cmd.Op1, 2) and self.cmd.Op2.is_reg(self.ireg_SR), self.itype_setz, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 2) and insn.Op2.is_reg(self.ireg_SR), self.itype_setz, 0 ],
                 # bis #4, SR -> setn
-                [ lambda: is_imm_op(self.cmd.Op1, 4) and self.cmd.Op2.is_reg(self.ireg_SR), self.itype_setn, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 4) and insn.Op2.is_reg(self.ireg_SR), self.itype_setn, 0 ],
                 # bis #8, SR -> eint
-                [ lambda: is_imm_op(self.cmd.Op1, 8) and self.cmd.Op2.is_reg(self.ireg_SR), self.itype_eint, 0 ],
+                [ lambda: is_imm_op(insn.Op1, 8) and insn.Op2.is_reg(self.ireg_SR), self.itype_eint, 0 ],
             ],
             self.itype_dadd: [
                 # dadd #0, dst -> dadc dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_dadc, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_dadc, 2 ],
             ],
             self.itype_daddx: [
                 # daddx #0, dst -> dadcx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_dadcx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_dadcx, 2 ],
             ],
             self.itype_sub: [
                 # sub #1, dst -> dec dst
-                [ lambda: is_imm_op(self.cmd.Op1, 1), self.itype_dec, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 1), self.itype_dec, 2 ],
                 # sub #2, dst -> decd dst
-                [ lambda: is_imm_op(self.cmd.Op1, 2), self.itype_decd, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 2), self.itype_decd, 2 ],
             ],
             self.itype_subx: [
                 # subx #1, dst -> decx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 1), self.itype_decx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 1), self.itype_decx, 2 ],
                 # subx #2, dst -> decdx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 2), self.itype_decdx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 2), self.itype_decdx, 2 ],
             ],
             self.itype_suba: [
                 # suba #2, dst -> decda dst
-                [ lambda: is_imm_op(self.cmd.Op1, 2), self.itype_decda, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 2), self.itype_decda, 2 ],
             ],
             self.itype_subc: [
                 # subc #0, dst -> sbc dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_sbc, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_sbc, 2 ],
             ],
             self.itype_subcx: [
                 # subcx #0, dst -> sbcx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_sbcx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_sbcx, 2 ],
             ],
             self.itype_add: [
                 # add #1, dst -> inc dst
-                [ lambda: is_imm_op(self.cmd.Op1, 1), self.itype_inc, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 1), self.itype_inc, 2 ],
                 # add #2, dst -> incd dst
-                [ lambda: is_imm_op(self.cmd.Op1, 2), self.itype_incd, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 2), self.itype_incd, 2 ],
                 # add dst, dst -> rla dst
-                [ lambda: same_op(self.cmd.Op1, self.cmd.Op2), self.itype_rla, 1 ],
+                [ lambda: same_op(insn.Op1, insn.Op2), self.itype_rla, 1 ],
             ],
             self.itype_adda: [
                 # adda #2, dst -> incda dst
-                [ lambda: is_imm_op(self.cmd.Op1, 2), self.itype_incda, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 2), self.itype_incda, 2 ],
             ],
             self.itype_addx: [
                 # addx #1, dst -> incx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 1), self.itype_incx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 1), self.itype_incx, 2 ],
                 # addx #2, dst -> incdx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 2), self.itype_incdx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 2), self.itype_incdx, 2 ],
                 # addx dst, dst -> rlax dst
-                [ lambda: same_op(self.cmd.Op1, self.cmd.Op2), self.itype_rlax, 1 ],
+                [ lambda: same_op(insn.Op1, insn.Op2), self.itype_rlax, 1 ],
             ],
             self.itype_xor: [
                 # xor #-1, dst -> inv dst
-                [ lambda: is_imm_op(self.cmd.Op1, -1), self.itype_inv, 2 ],
+                [ lambda: is_imm_op(insn.Op1, -1), self.itype_inv, 2 ],
             ],
             self.itype_xorx: [
                 # xorx #-1, dst -> invx dst
-                [ lambda: is_imm_op(self.cmd.Op1, -1), self.itype_invx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, -1), self.itype_invx, 2 ],
             ],
             self.itype_cmp: [
                 # cmp #0, dst -> tst dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_tst, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_tst, 2 ],
             ],
             self.itype_cmpx: [
                 # cmpx #0, dst -> tstx dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_tstx, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_tstx, 2 ],
             ],
             self.itype_cmpa: [
                 # cmpa #0, dst -> tsta dst
-                [ lambda: is_imm_op(self.cmd.Op1, 0), self.itype_tsta, 2 ],
+                [ lambda: is_imm_op(insn.Op1, 0), self.itype_tsta, 2 ],
             ],
         }
 
@@ -1326,55 +1334,55 @@ class msp430_processor_t(idaapi.processor_t):
                   self.itype_eint, self.itype_clrc, self.itype_nop, self.itype_pop,
                   self.itype_popa, self.itype_setc, self.itype_setn, self.itype_setz, ]
 
-        if self.cmd.itype in maptbl:
-            for m in maptbl[self.cmd.itype]:
+        if insn.itype in maptbl:
+            for m in maptbl[insn.itype]:
                 if m[0]():
                     # matched instruction; replace the itype
-                    self.cmd.itype = m[1]
+                    insn.itype = m[1]
                     if m[2] == 0:
                         # remove the operands
-                        self.cmd.Op1.type = o_void
+                        insn.Op1.type = o_void
                     elif m[2] == 2:
                         # replace first operand with the second
-                        self.cmd.Op1.assign(self.cmd.Op2)
+                        insn.Op1.assign(insn.Op2)
                     # remove the second operand, if any
-                    self.cmd.Op2.type = o_void
+                    insn.Op2.type = o_void
                     # remove suffix if necessary
-                    if self.cmd.itype in nosuff and self.cmd.auxpref == AUX_WORD:
-                        self.cmd.auxpref = 0
+                    if insn.itype in nosuff and insn.auxpref == AUX_WORD:
+                        insn.auxpref = 0
                     break
 
     # ----------------------------------------------------------------------
-    def ana(self):
+    def notify_ana(self, insn):
         """
-        Decodes an instruction into self.cmd.
-        Returns: self.cmd.size (=the size of the decoded instruction) or zero
+        Decodes an instruction into 'insn'.
+        Returns: insn.size (=the size of the decoded instruction) or zero
         """
-        if (self.cmd.ea & 1) != 0:
+        if (insn.ea & 1) != 0:
             return 0
-        w = ua_next_word()
+        w = insn.get_next_word()
         extw = None
         if BITS(w, 15, 11) == 0b00011:
             # operand extension word
             extw = w
-            w = ua_next_word()
+            w = insn.get_next_word()
         if BITS(w, 15, 10) == 0b000100:
-            self.decode_format_II(w, extw)
+            self.decode_format_II(insn, w, extw)
         elif BITS(w, 15, 10) == 0b000101:
             if extw: return 0
-            self.decode_430x_pushm(w)
+            self.decode_430x_pushm(insn, w)
         elif BITS(w, 15, 13) == 1: # 001
             if extw: return 0
-            self.decode_jump(w)
+            self.decode_jump(insn, w)
         elif BITS(w, 15, 12) == 0:
             if extw: return 0
-            self.decode_430x_mova(w)
+            self.decode_430x_mova(insn, w)
         else:
-            self.decode_format_I(w, extw)
+            self.decode_format_I(insn, w, extw)
 
-        self.simplify()
+        self.simplify(insn)
         # Return decoded instruction size or zero
-        return self.cmd.size if self.cmd.itype != self.itype_null else 0
+        return insn.size if insn.itype != self.itype_null else 0
 
     # ----------------------------------------------------------------------
     def init_instructions(self):
@@ -1399,7 +1407,7 @@ class msp430_processor_t(idaapi.processor_t):
         """This function parses the register table and creates corresponding ireg_XXX constants"""
 
         # Registers definition
-        self.regNames = [
+        self.reg_names = [
             # General purpose registers
             "PC", # R0
             "SP", # R1
@@ -1423,28 +1431,28 @@ class msp430_processor_t(idaapi.processor_t):
         ]
 
         # Create the ireg_XXXX constants
-        for i in xrange(len(self.regNames)):
-            setattr(self, 'ireg_' + self.regNames[i], i)
+        for i in xrange(len(self.reg_names)):
+            setattr(self, 'ireg_' + self.reg_names[i], i)
 
         # Segment register information (use virtual CS and DS registers if your
         # processor doesn't have segment registers):
-        self.regFirstSreg = self.ireg_CS
-        self.regLastSreg  = self.ireg_DS
+        self.reg_first_sreg = self.ireg_CS
+        self.reg_last_sreg  = self.ireg_DS
 
         # number of CS register
-        self.regCodeSreg = self.ireg_CS
+        self.reg_code_sreg = self.ireg_CS
 
         # number of DS register
-        self.regDataSreg = self.ireg_DS
+        self.reg_data_sreg = self.ireg_DS
 
     # ----------------------------------------------------------------------
     def __init__(self):
-        idaapi.processor_t.__init__(self)
+        processor_t.__init__(self)
         self.init_instructions()
         self.init_registers()
 
 # ----------------------------------------------------------------------
 # Every processor module script must provide this function.
-# It should return a new instance of a class derived from idaapi.processor_t
+# It should return a new instance of a class derived from processor_t
 def PROCESSOR_ENTRY():
     return msp430_processor_t()

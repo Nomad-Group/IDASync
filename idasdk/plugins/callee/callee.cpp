@@ -11,7 +11,7 @@
 #include <kernwin.hpp>
 #include <bytes.hpp>
 #include <auto.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #define T 20
 
 //--------------------------------------------------------------------------
@@ -43,7 +43,7 @@ static const char *const form =
   "\n"
   "\n";
 
-void idaapi run(int)
+bool idaapi run(size_t)
 {
   static const char * nname;
   if ( ph.id == PLFM_MIPS )
@@ -54,32 +54,36 @@ void idaapi run(int)
     nname = "$ vmm functions";
   netnode n(nname);
   ea_t ea = get_screen_ea();    // get current address
-  if ( !isCode(get_flags_novalue(ea)) ) return; // not an instruction
-  ea_t callee = n.altval(ea)-1;         // get the callee address from the database
+  if ( !is_code(get_flags(ea)) )
+    return false; // not an instruction
+  // get the callee address from the database
+  ea_t callee = node2ea(n.altval_ea(ea)-1);
   // remove thumb bit for arm
   if ( ph.id == PLFM_ARM )
     callee &= ~1;
   char buf[MAXSTR];
   qsnprintf(buf, sizeof(buf), form, help);
-  if ( AskUsingForm_c(buf, &callee) )
+  if ( ask_form(buf, &callee) )
   {
     if ( callee == BADADDR )
     {
-      n.altdel(ea);
+      n.altdel_ea(ea);
     }
     else
     {
       if ( ph.id == PLFM_ARM && (callee & 1) == 0 )
       {
         // if we're calling a thumb function, set bit 0
-        sel_t tbit = get_segreg(callee, T);
+        sel_t tbit = get_sreg(callee, T);
         if ( tbit != 0 && tbit != BADSEL )
           callee |= 1;
       }
-      n.altset(ea, callee+1);     // save the new address
+      // save the new address
+      n.altset_ea(ea, ea2node(callee)+1);
     }
-    noUsed(ea);                 // reanalyze the current instruction
+    plan_ea(ea);                 // reanalyze the current instruction
   }
+  return true;
 }
 
 //--------------------------------------------------------------------------

@@ -11,14 +11,8 @@
 #include "m65.hpp"
 
 static bool flow;
-//------------------------------------------------------------------------
-static void doImmdValue(void)
-{
-  doImmd(cmd.ea);
-}
-
 //----------------------------------------------------------------------
-static void TouchArg(op_t &x,int isload)
+static void handle_operand(const op_t &x,int isload, const insn_t &insn)
 {
   ea_t ea;
   dref_t xreftype;
@@ -27,58 +21,60 @@ static void TouchArg(op_t &x,int isload)
     case o_reg:
       break;
     case o_imm:
-      if ( !isload ) goto badTouch;
+      if ( !isload )
+        goto badTouch;
       xreftype = dr_O;
       goto MAKE_IMMD;
     case o_displ:
       xreftype = isload ? dr_R : dr_W;
 MAKE_IMMD:
-      doImmdValue();
-      if ( op_adds_xrefs(uFlag,x.n) )
-        ua_add_off_drefs(x, xreftype);
+      set_immd(insn.ea);
+      if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
+        insn.add_off_drefs(x, xreftype, x.type == o_imm ? 0 : OOF_ADDR);
       break;
     case o_mem:
-      ea = toEA(dataSeg_op(x.n),x.addr);
-      ua_dodata2(x.offb, ea, x.dtyp);
-      if ( ! isload )
-        doVar(ea);
-      ua_add_dref(x.offb,ea,isload ? dr_R : dr_W);
+      ea = map_data_ea(insn, x);
+      insn.create_op_data(ea, x);
+      insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
       break;
     case o_near:
       {
-        ea_t segbase = codeSeg(x.addr,x.n);
-        ea = toEA(segbase,x.addr);
-        ea_t thisseg = cmd.cs;
-        int iscall = InstrIsSet(cmd.itype, CF_CALL);
-        ua_add_cref(x.offb,
-                    ea,
-                    iscall ? ((segbase == thisseg) ? fl_CN : fl_CF)
-                           : ((segbase == thisseg) ? fl_JN : fl_JF));
+        ea = map_code_ea(insn, x);
+        ea_t segbase = (ea - x.addr) >> 4;
+        ea_t thisseg = insn.cs;
+        int iscall = has_insn_feature(insn.itype, CF_CALL);
+        insn.add_cref(
+                ea,
+                x.offb,
+                iscall ? (segbase == thisseg ? fl_CN : fl_CF)
+                       : (segbase == thisseg ? fl_JN : fl_JF));
         if ( flow && iscall )
           flow = func_does_return(ea);
       }
       break;
     default:
 badTouch:
-      warning("%a: %s,%d: bad optype %d", cmd.ea, cmd.get_canon_mnem(), x.n, x.type);
+      warning("%a: %s,%d: bad optype %d", insn.ea, insn.get_canon_mnem(), x.n, x.type);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+
+int idaapi emu(const insn_t &insn)
 {
-  uint32 Feature = cmd.get_canon_feature();
+  uint32 Feature = insn.get_canon_feature();
   flow = ((Feature & CF_STOP) == 0);
 
-  if ( Feature & CF_USE1 ) TouchArg(cmd.Op1, 1);
-  if ( Feature & CF_USE2 ) TouchArg(cmd.Op2, 1);
-  if ( Feature & CF_CHG1 ) TouchArg(cmd.Op1, 0);
-  if ( Feature & CF_CHG2 ) TouchArg(cmd.Op2, 0);
-  if ( Feature & CF_JUMP ) QueueSet(Q_jumps,cmd.ea);
+  if ( Feature & CF_USE1 ) handle_operand(insn.Op1, 1, insn);
+  if ( Feature & CF_USE2 ) handle_operand(insn.Op2, 1, insn);
+  if ( Feature & CF_CHG1 ) handle_operand(insn.Op1, 0, insn);
+  if ( Feature & CF_CHG2 ) handle_operand(insn.Op2, 0, insn);
+  if ( Feature & CF_JUMP )
+    remember_problem(PR_JUMP, insn.ea);
 
   if ( flow )
-    ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+    add_cref(insn.ea, insn.ea + insn.size, fl_F);
 
   return 1;
 }

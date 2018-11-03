@@ -112,8 +112,9 @@ static const data_format_t pascal_string_format =
 
 //---------------------------------------------------------------------------
 // Plugin is hidden, normally it won't be called
-void idaapi run(int)
+bool idaapi run(size_t)
 {
+  return false;
 }
 
 //--------------------------------------------------------------------------
@@ -124,22 +125,23 @@ int idaapi init(void)
   // Register custom data type
   psid = register_custom_data_type(&pascal_string_type);
   // Register custom data format for it
-  psfid = register_custom_data_format(psid, &pascal_string_format);
+  psfid = register_custom_data_format(&pascal_string_format);
+  attach_custom_data_format(psid, psfid);
   return PLUGIN_KEEP;
 }
 
 //--------------------------------------------------------------------------
 void idaapi term(void)
 {
-  if ( psid != 0 )
+  // unregister data type
+  if ( psid > 0 )
   {
-    // First unregister data format
-    unregister_custom_data_format(psid, psfid);
-    // and then unregister data type
-    // If the data format is used only by us, we could unregister only the data type.
-    // IDA would unregister the data format automatically.
+    // IDA would detach the data format automatically.
     unregister_custom_data_type(psid);
   }
+  // unregister data format
+  if ( psfid > 0 )
+    unregister_custom_data_format(psfid);
 }
 
 //--------------------------------------------------------------------------

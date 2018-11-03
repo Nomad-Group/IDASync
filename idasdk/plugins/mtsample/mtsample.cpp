@@ -32,8 +32,7 @@ static void say_hello(size_t id, qthread_t tid, int cnt)
     int cnt;
     int idaapi execute(void)
     {
-      uint64 now = 0;
-      get_nsec_stamp(&now);
+      uint64 now = get_nsec_stamp();
       int64 delay = now - nsecs;
       msg("Hello %d from thread %" FMT_Z ". tid=%p. current tid=%p (delay=%" FMT_64 "d)\n",
           cnt, id, tid, qthread_self(), delay);
@@ -41,7 +40,7 @@ static void say_hello(size_t id, qthread_t tid, int cnt)
     }
     hello_t(size_t _id, qthread_t _tid, int _cnt) : id(_id), tid(_tid), cnt(_cnt)
     {
-      get_nsec_stamp(&nsecs);
+      nsecs = get_nsec_stamp();
     }
   };
   hello_t hi(id, tid, cnt);
@@ -99,13 +98,13 @@ void idaapi term(void)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int)
+bool idaapi run(size_t)
 {
   if ( nchilds == 0 )
   {
-    children[nchilds] = qthread_create(thread_func, (void *)nchilds); nchilds++;
-    children[nchilds] = qthread_create(thread_func, (void *)nchilds); nchilds++;
-    children[nchilds] = qthread_create(thread_func, (void *)nchilds); nchilds++;
+    children[nchilds] = qthread_create(thread_func, (void *)(ssize_t)nchilds); nchilds++;
+    children[nchilds] = qthread_create(thread_func, (void *)(ssize_t)nchilds); nchilds++;
+    children[nchilds] = qthread_create(thread_func, (void *)(ssize_t)nchilds); nchilds++;
     msg("Three new threads have been created. Main thread id %p\n", qthread_self());
     for ( int i=0; i < 5; i++ )
       say_hello(-1, 0, 0);
@@ -114,6 +113,7 @@ void idaapi run(int)
   {
     term();
   }
+  return true;
 }
 
 //--------------------------------------------------------------------------

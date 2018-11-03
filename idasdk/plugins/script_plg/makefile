@@ -11,3 +11,5 @@ $(PLGDIR)/idcplugin.idc: idcplugin.idc
 $(PLGDIR)/pyplugin.py: pyplugin.py
 	$(CP) $? $@
 
+clean::
+	rm -f $(PLGDIR)/idcplugin.idc $(PLGDIR)/pyplugin.py

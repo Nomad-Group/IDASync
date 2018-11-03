@@ -49,7 +49,8 @@ struct chunk_entry_t
 };
 
 //-------------------------------------------------------------------------
-struct aof_header_t {
+struct aof_header_t
+{
   uint32 obj_file_type; // the value 0xC5E2D080 marks the file as being in
                         // relocatable object format (the usual output of
                         // compilers and assemblers and the usual input to
@@ -77,7 +78,8 @@ struct aof_header_t {
 };
 
 //-------------------------------------------------------------------------
-struct area_header_t {
+struct area_header_t
+{
   uint32 name;          // Area name (offset into string table)
   uint32 flags;         // Attributes + Alignment
                         // The least significant eight bits of this word
@@ -164,17 +166,18 @@ inline void set_arm_segm_flags(ea_t ea, ushort flags)
 {
   netnode n;
   n.create(SEGFL_NETNODE_NAME);
-  n.altset(ea, flags);
+  n.altset_ea(ea, flags);
 }
 
 inline ushort get_arm_segm_flags(ea_t ea)
 {
-  return (ushort)netnode(SEGFL_NETNODE_NAME).altval(ea);
+  return (ushort)netnode(SEGFL_NETNODE_NAME).altval_ea(ea);
 }
 #endif
 
 //-------------------------------------------------------------------------
-struct reloc_t {
+struct reloc_t
+{
   uint32 offset;
   uint32 type;                  // Low 24bits are SID
   size_t sid(void) { return size_t(type & 0x00FFFFFFL); }
@@ -202,7 +205,8 @@ struct reloc_t {
 };
 
 //-------------------------------------------------------------------------
-struct sym_t {
+struct sym_t
+{
   uint32 name;          // Offset in the string table (in chunk OBJ_STRT) of
                         // the character string name of the symbol.
   uint32 flags;         // Attributes.

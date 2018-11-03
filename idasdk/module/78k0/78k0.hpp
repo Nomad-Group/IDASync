@@ -42,23 +42,18 @@ enum N78K_registers { rX, rA, rC, rB, rE, rD, rL, rH, rAX, rBC, rDE, rHL,
 
 //------------------------------------------------------------------------
 
-#if IDP_INTERFACE_VERSION > 37
-extern char deviceparams[];
-extern char device[];
-bool nec_find_ioport_bit(int port, int bit);
-#endif
+extern qstring deviceparams;
+extern qstring device;
+bool nec_find_ioport_bit(outctx_t &ctx, int port, int bit);
 
 //------------------------------------------------------------------------
-void    idaapi N78K_header(void);
-void    idaapi N78K_footer(void);
+void idaapi N78K_header(outctx_t &ctx);
+void idaapi N78K_footer(outctx_t &ctx);
 
-void    idaapi N78K_segstart(ea_t ea);
+void idaapi N78K_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi N78K_ana(void);
-int     idaapi N78K_emu(void);
-void    idaapi N78K_out(void);
-bool    idaapi N78K_outop(op_t &op);
-void    idaapi N78K_data(ea_t ea);
+int  idaapi N78K_ana(insn_t *_insn);
+int  idaapi N78K_emu(const insn_t &insn);
 
 #endif
 

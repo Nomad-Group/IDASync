@@ -17,7 +17,7 @@ static int32 first_text_subspace_fpos = -1;
 static char *dl_strings = NULL;
 static size_t dl_ssize = 0;
 static ea_t data_start = 0;
-static int32 fsize = 0;
+static int64 fsize = 0;
 //--------------------------------------------------------------------------
 static void complain_fixup(void)
 {
@@ -32,10 +32,12 @@ static void complain_fixup(void)
 }
 
 //--------------------------------------------------------------------------
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
-  if ( n )
-    return 0;
   header h;
   qlseek(li, 0);
   if ( qlread(li, &h, sizeof(h)) != sizeof(h) )
@@ -56,7 +58,8 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
     case RELLIB_MAGIC  : type = "Relocatable Library";                  break;
     default:             return 0;
   }
-  qsnprintf(fileformatname, MAX_FILE_FORMAT_NAME, "HP-UX SOM (%s)", type);
+  fileformatname->sprnt("HP-UX SOM (%s)", type);
+  *processor = "hppa";
 
   return 1;
 }
@@ -67,7 +70,7 @@ static void load_aux_headers(linput_t *li, int32 fpos, size_t size)
   if ( size == 0 )
     return;
 
-  int32 rest = fsize - fpos;
+  size_t rest = fsize - fpos;
   if ( rest <= size )
     loader_failure("Wrong header::aux_header_size");
   qlseek(li, fpos);
@@ -93,7 +96,7 @@ static void load_aux_headers(linput_t *li, int32 fpos, size_t size)
           som_exec_auxhdr *p = (som_exec_auxhdr*)buf;
           p->swap();
           inf.start_cs = 0;
-          inf.startIP  = p->exec_entry;
+          inf.start_ip = p->exec_entry;
           data_start   = p->exec_dmem;
         }
         break;
@@ -115,7 +118,7 @@ static char *get_name(linput_t *li, int32 tableoff, size_t tablesize, int32 nidx
   }
   else
   {
-    int32 fpos = qltell(li);
+    qoff64_t fpos = qltell(li);
     qlseek(li, tableoff+nidx-4);
     uint32 len;
     lread(li, &len, sizeof(len));
@@ -171,7 +174,7 @@ static void load_spaces(linput_t *li, const header &h, int32 fpos, int n)
 }
 
 //--------------------------------------------------------------------------
-static void load_subspaces(linput_t *li, const header &h, int32 fpos, int n)
+static void load_subspaces(linput_t *li, const header &h, qoff64_t fpos, int n)
 {
   if ( n == 0 )
     return;
@@ -189,7 +192,7 @@ static void load_subspaces(linput_t *li, const header &h, int32 fpos, int n)
       complain_fixup();
     ea_t start = sr.subspace_start;
     ea_t end = start + sr.initialization_length;
-    uint32 fpos2 = sr.file_loc_init_value;
+    qoff64_t fpos2 = sr.file_loc_init_value;
     if ( end < start || fpos2 > fsize || fsize-fpos2 < end-start )
       loader_failure("Wrong segment size %a..%a", start, end);
     file2base(li, fpos2, start, end, FILEREG_PATCHABLE);
@@ -199,14 +202,14 @@ static void load_subspaces(linput_t *li, const header &h, int32 fpos, int n)
     const char *sclass = strstr(name, "CODE") != NULL ? CLASS_CODE : CLASS_DATA;
 
     segment_t s;
-    s.sel    = setup_selector(i);
-    s.startEA= start;
-    s.endEA  = start + sr.subspace_length;
-    s.align  = saRelByte;
-    s.comb   = scPub;
+    s.sel     = setup_selector(i);
+    s.start_ea = start;
+    s.end_ea   = start + sr.subspace_length;
+    s.align   = saRelByte;
+    s.comb    = scPub;
     s.bitness = (uchar)ph.get_segm_bitness();
     if ( !add_segm_ex(&s, name, sclass, ADDSEG_NOSREG|ADDSEG_SPARSE) )
-      loader_failure("Failed to create segment %a..%a", s.startEA, s.endEA);
+      loader_failure("Failed to create segment %a..%a", s.start_ea, s.end_ea);
 
     if ( i == first_text_subspace_idx )
       first_text_subspace_fpos = sr.file_loc_init_value;
@@ -233,29 +236,30 @@ static void load_symbols(linput_t *li, const header &h, int32 fpos, int n)
     ea_t ea = sr.symbol_value & ~3;
     switch ( sr.symbol_type() )
     {
-      case ST_NULL     :
-      case ST_ABSOLUTE :
+      case ST_NULL:
+      case ST_ABSOLUTE:
         break;
-      case ST_DATA     :
-        do_name_anyway(ea, name);
+      case ST_DATA:
+        force_name(ea, name, SN_IDBENC);
         break;
-      case ST_STUB     :
+      case ST_STUB:
         append_cmt(ea, "STUB", false);
-      case ST_CODE     :
-      case ST_ENTRY    :
+        // fallthrough
+      case ST_CODE:
+      case ST_ENTRY:
       case ST_MILLICODE:
       case ST_MILLI_EXT:
-        add_entry(ea, ea, name, true);
-        add_entry(ea, ea, name, true);
+        add_entry(ea, ea, name, true, AEF_IDBENC);
+        add_entry(ea, ea, name, true, AEF_IDBENC);
         break;
-      case ST_PRI_PROG :
-      case ST_STORAGE  :
-      case ST_MODULE   :
-      case ST_SYM_EXT  :
-      case ST_ARG_EXT  :
-      case ST_PLABEL   :
-      case ST_OCT_DIS  :
-      case ST_TSTORAGE :
+      case ST_PRI_PROG:
+      case ST_STORAGE:
+      case ST_MODULE:
+      case ST_SYM_EXT:
+      case ST_ARG_EXT:
+      case ST_PLABEL:
+      case ST_OCT_DIS:
+      case ST_TSTORAGE:
         break;
     }
   }
@@ -293,20 +297,20 @@ static void load_imports(linput_t *li, const dl_header &dl)
     char buf[MAXSTR];
     buf[0] = '.';
     get_text_name(ie.name, &buf[1], sizeof(buf)-1);
-    do_name_anyway(ea, buf);
-    doDwrd(ea, 4);
-    set_offset(ea, 0, 0);
+    force_name(ea, buf, SN_IDBENC);
+    create_dword(ea, 4);
+    op_plain_offset(ea, 0, 0);
     if ( n > 0 )
     {
       ea += 4;
     }
     else
     {
-      ea_t ea2 = get_long(ea);
-      do_name_anyway(ea2, &buf[1]);
-      add_func(ea2, BADADDR);
+      ea_t ea2 = get_dword(ea);
+      force_name(ea2, &buf[1], SN_IDBENC);
+      add_func(ea2);
       set_func_cmt(get_func(ea2), "THUNK", false);
-      doDwrd(ea+4, 4);
+      create_dword(ea+4, 4);
       ea += 8;
     }
   }
@@ -326,7 +330,7 @@ static void load_exports(linput_t *li, const dl_header &dl)
     ee.swap();
     char buf[MAXSTR];
     const char *name = get_text_name(ee.name, buf, sizeof(buf));
-    add_entry(ee.value, ee.value, name, ee.type == ST_CODE);
+    add_entry(ee.value, ee.value, name, ee.type == ST_CODE, AEF_IDBENC);
   }
 }
 
@@ -342,7 +346,7 @@ static void load_dl_header(linput_t *li)
   switch ( dl.hdr_version )
   {
     case OLD_HDR_VERSION: break;
-    case HDR_VERSION    : break;
+    case HDR_VERSION:     break;
     default:
       msg("Unknown DL header version, skipping...\n");
   }
@@ -369,12 +373,12 @@ static void load_dl_header(linput_t *li)
 //--------------------------------------------------------------------------
 void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformatname*/)
 {
+  set_processor_type("hppa", SETPROC_LOADER);
+
   header h;
   qlseek(li, 0);
   lread(li, &h, sizeof(h));
   h.swap();
-  if ( ph.id != PLFM_HPPA )
-    set_processor_type("hppa", SETPROC_ALL|SETPROC_FATAL);
   inf.baseaddr = 0;
 
   fsize = qlsize(li);
@@ -390,22 +394,21 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   {
 //  23 61 28 00   ldil            ...., %dp
 //  37 7B 01 60   ldo             0xB0(%dp), %dp
-    if ( decode_insn(inf.startIP) && cmd.Op1.type == o_imm && cmd.Op2.type == o_reg )
+    insn_t insn;
+    if ( decode_insn(&insn, inf.start_ip) > 0
+      && insn.Op1.type == o_imm
+      && insn.Op2.type == o_reg )
     {
-      uval_t v = cmd.Op1.value;
-      if ( decode_insn(cmd.ea+4) && cmd.Op1.type == o_displ )
-        dp = size_t(v + cmd.Op1.addr);
+      uval_t v = insn.Op1.value;
+      if ( decode_insn(&insn, insn.ea+4) && insn.Op1.type == o_displ )
+        dp = size_t(v + insn.Op1.addr);
     }
   }
 
   if ( dp != 0 )
-  {
-    netnode n;
-    n.create("$ got");
-    n.altset(0, dp+1);
-  }
+    set_gotea(dp);
 
-  add_til2("hpux", ADDTIL_DEFAULT);
+  add_til("hpux", ADDTIL_DEFAULT);
 
 }
 
@@ -430,5 +433,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

@@ -22,12 +22,12 @@ rpc_debmod_t::rpc_debmod_t(const char *default_platform)
 }
 
 //--------------------------------------------------------------------------
-int idaapi rpc_debmod_t::handle_ioctl(
-  int fn,
-  const void *buf,
-  size_t size,
-  void **poutbuf,
-  ssize_t *poutsize)
+int idaapi rpc_debmod_t::handle_ioctl(    //-V524 equivalent to 'send_ioctl'
+        int fn,
+        const void *buf,
+        size_t size,
+        void **poutbuf,
+        ssize_t *poutsize)
 {
   return rpc_engine_t::send_ioctl(fn, buf, size, poutbuf, poutsize);
 }
@@ -45,10 +45,10 @@ inline int get_expected_addrsize(void)
 }
 
 //--------------------------------------------------------------------------
-bool rpc_debmod_t::open_remote(
-    const char *hostname,
-    int port_number,
-    const char *password)
+bool idaapi rpc_debmod_t::open_remote(
+        const char *hostname,
+        int port_number,
+        const char *password)
 {
   rpc_packet_t *rp = NULL;
   network_error_code = 0;
@@ -89,7 +89,7 @@ FAILURE:
     send_request(req);
     warning("ICON ERROR\nAUTOHIDE NONE\n"
             "Incompatible debugging server:\n"
-            "%s\n", errstr.c_str());
+            "%s", errstr.c_str());
     goto FAILURE;
   }
   qfree(rp);
@@ -231,7 +231,7 @@ int idaapi rpc_debmod_t::dbg_update_bpts(update_bpt_info_t *ubpts, int nadd, int
 }
 
 //--------------------------------------------------------------------------
-int idaapi rpc_debmod_t::dbg_thread_get_sreg_base(thid_t tid, int sreg_value, ea_t *ea)
+int idaapi rpc_debmod_t::dbg_thread_get_sreg_base(ea_t *ea, thid_t tid, int sreg_value)
 {
   bytevec_t req = prepare_rpc_packet(RPC_GET_SREG_BASE);
   append_dd(req, tid);
@@ -264,7 +264,7 @@ void idaapi rpc_debmod_t::dbg_set_exception_info(const exception_info_t *table, 
 }
 
 //--------------------------------------------------------------------------
-int idaapi rpc_debmod_t::dbg_open_file(const char *file, uint32 *fsize, bool readonly)
+int idaapi rpc_debmod_t::dbg_open_file(const char *file, uint64 *fsize, bool readonly)
 {
   bytevec_t req = prepare_rpc_packet(RPC_OPEN_FILE);
   append_str(req, file);
@@ -281,7 +281,7 @@ int idaapi rpc_debmod_t::dbg_open_file(const char *file, uint32 *fsize, bool rea
   if ( fn != -1 )
   {
     if ( fsize != NULL && readonly )
-      *fsize = extract_long(&answer, end);
+      *fsize = extract_uint64(&answer, end);
   }
   else
   {
@@ -301,11 +301,11 @@ void idaapi rpc_debmod_t::dbg_close_file(int fn)
 }
 
 //--------------------------------------------------------------------------
-ssize_t idaapi rpc_debmod_t::dbg_read_file(int fn, uint32 off, void *buf, size_t size)
+ssize_t idaapi rpc_debmod_t::dbg_read_file(int fn, qoff64_t off, void *buf, size_t size)
 {
   bytevec_t req = prepare_rpc_packet(RPC_READ_FILE);
   append_dd(req, fn);
-  append_dd(req, off);
+  append_dq(req, off);
   append_dd(req, (uint32)size);
 
   rpc_packet_t *rp = process_request(req);
@@ -329,11 +329,11 @@ ssize_t idaapi rpc_debmod_t::dbg_read_file(int fn, uint32 off, void *buf, size_t
 }
 
 //--------------------------------------------------------------------------
-ssize_t idaapi rpc_debmod_t::dbg_write_file(int fn, uint32 off, const void *buf, size_t size)
+ssize_t idaapi rpc_debmod_t::dbg_write_file(int fn, qoff64_t off, const void *buf, size_t size)
 {
   bytevec_t req = prepare_rpc_packet(RPC_WRITE_FILE);
   append_dd(req, fn);
-  append_dd(req, off);
+  append_dq(req, off);
   append_dd(req, (uint32)size);
   append_memory(req, buf, size);
 
@@ -373,14 +373,20 @@ int rpc_debmod_t::getint2(uchar code, int x)
 }
 
 //--------------------------------------------------------------------------
-int idaapi rpc_debmod_t::dbg_init(bool _debug_debugger)
+void idaapi rpc_debmod_t::dbg_set_debugging(bool _debug_debugger)
+{
+  debug_debugger = _debug_debugger;
+}
+
+//--------------------------------------------------------------------------
+int idaapi rpc_debmod_t::dbg_init(void)
 {
   has_pending_event = false;
   poll_debug_events = false;
 
   bytevec_t req = prepare_rpc_packet(RPC_INIT);
   append_dd(req, debugger.flags);
-  append_dd(req, _debug_debugger);
+  append_dd(req, debug_debugger);
 
   return process_long(req);
 }
@@ -394,13 +400,9 @@ void idaapi rpc_debmod_t::dbg_term(void)
 }
 
 //--------------------------------------------------------------------------
-// input is valid only if n==0
-int idaapi rpc_debmod_t::dbg_process_get_info(int n, const char *input, process_info_t *procinf)
+int idaapi rpc_debmod_t::dbg_get_processes(procinfo_vec_t *procs)
 {
-  bytevec_t req = prepare_rpc_packet(RPC_GET_PROCESS_INFO);
-  append_dd(req, n);
-  if ( n == 0 )
-    append_str(req, input);
+  bytevec_t req = prepare_rpc_packet(RPC_GET_PROCESSES);
 
   rpc_packet_t *rp = process_request(req);
   if ( rp == NULL )
@@ -408,9 +410,10 @@ int idaapi rpc_debmod_t::dbg_process_get_info(int n, const char *input, process_
   const uchar *answer = (uchar *)(rp+1);
   const uchar *end = answer + rp->length;
 
+  procs->qclear();
   bool result = extract_long(&answer, end) != 0;
   if ( result )
-    extract_process_info(&answer, end, procinf);
+    extract_process_info_vec(&answer, end, procs);
 
   qfree(rp);
   return result;
@@ -431,6 +434,8 @@ int idaapi rpc_debmod_t::dbg_start_process(
         const char *input_path,
         uint32 input_file_crc32)
 {
+  if ( (inf.s_cmtflg & SW_TESTMODE) != 0 )
+    flags |= DBG_HIDE_WINDOW;
   bytevec_t req = prepare_rpc_packet(RPC_START_PROCESS);
   append_str(req, path);
   append_str(req, args);
@@ -460,12 +465,12 @@ gdecode_t idaapi rpc_debmod_t::dbg_get_debug_event(debug_event_t *event, int tim
     // do we have something waiting?
     if ( irs_ready(irs, timeout_ms) != 0 )
     {
-      verbev(("get_debug_event => remote has an event for us\n"));
-      // get the packet - it should be RPC_EVENT (nothing else can be)
+      verbev(("get_debug_event => remote has a packet for us\n"));
+      // get the packet - it can RPC_EVENT or RPC_MSG/RPC_WARNING/RPC_ERROR
       bytevec_t empty;
-      rpc_packet_t *rp = process_request(empty);
+      rpc_packet_t *rp = process_request(empty, PREQ_GET_EVENT);
       verbev(("get_debug_event => processed remote event, has=%d\n", has_pending_event));
-      if ( rp != NULL || !has_pending_event )
+      if ( rp != NULL )
       {
         warning("rpc: event protocol error (rp=%p has_event=%d)", rp, has_pending_event);
         return GDE_ERROR;
@@ -496,11 +501,12 @@ gdecode_t idaapi rpc_debmod_t::dbg_get_debug_event(debug_event_t *event, int tim
 }
 
 //--------------------------------------------------------------------------
-int idaapi rpc_debmod_t::dbg_attach_process(pid_t _pid, int event_id)
+int idaapi rpc_debmod_t::dbg_attach_process(pid_t _pid, int event_id, int flags)
 {
   bytevec_t req = prepare_rpc_packet(RPC_ATTACH_PROCESS);
   append_dd(req, _pid);
   append_dd(req, event_id);
+  append_dd(req, flags);
   return process_start_or_attach(req);
 }
 
@@ -625,6 +631,73 @@ int idaapi rpc_debmod_t::dbg_get_memory_info(meminfo_vec_t &areas)
     for ( int i=0; i < n; i++ )
       extract_memory_info(&answer, end, &areas[i]);
   }
+  qfree(rp);
+  return result;
+}
+
+//--------------------------------------------------------------------------
+int idaapi rpc_debmod_t::dbg_get_scattered_image(scattered_image_t &si, ea_t base)
+{
+  bytevec_t req = prepare_rpc_packet(RPC_GET_SCATTERED_IMAGE);
+  append_ea64(req, base);
+
+  rpc_packet_t *rp = process_request(req);
+  if ( rp == NULL )
+    return false;
+
+  const uchar *answer = (uchar *)(rp+1);
+  const uchar *end = answer + rp->length;
+
+  int result = extract_long(&answer, end) - 2;
+  if ( result > 0 )
+  {
+    int n = extract_long(&answer, end);
+    si.resize(n);
+    for ( int i=0; i < n; i++ )
+      extract_scattered_segm(&answer, end, &si[i]);
+  }
+  qfree(rp);
+  return result;
+}
+
+//--------------------------------------------------------------------------
+bool idaapi rpc_debmod_t::dbg_get_image_uuid(bytevec_t *uuid, ea_t base)
+{
+  bytevec_t req = prepare_rpc_packet(RPC_GET_IMAGE_UUID);
+  append_ea64(req, base);
+
+  rpc_packet_t *rp = process_request(req);
+  if ( rp == NULL )
+    return false;
+
+  const uchar *answer = (uchar *)(rp+1);
+  const uchar *end = answer + rp->length;
+
+  bool result = extract_long(&answer, end) != 0;
+  if ( result )
+  {
+    int n = extract_long(&answer, end);
+    uuid->append(answer, n);
+  }
+  qfree(rp);
+  return result;
+}
+
+//--------------------------------------------------------------------------
+ea_t idaapi rpc_debmod_t::dbg_get_segm_start(ea_t base, const qstring &segname)
+{
+  bytevec_t req = prepare_rpc_packet(RPC_GET_SEGM_START);
+  append_ea64(req, base);
+  append_str(req, segname.c_str());
+
+  rpc_packet_t *rp = process_request(req);
+  if ( rp == NULL )
+    return false;
+
+  const uchar *answer = (uchar *)(rp+1);
+  const uchar *end = answer + rp->length;
+
+  ea_t result = extract_ea64(&answer, end);
   qfree(rp);
   return result;
 }

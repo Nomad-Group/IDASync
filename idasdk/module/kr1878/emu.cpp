@@ -1,19 +1,19 @@
 
 #include "kr1878.hpp"
 #include <frame.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 static bool flow;
 //----------------------------------------------------------------------
-ea_t calc_mem(op_t &x)
+ea_t calc_mem(const insn_t &insn, const op_t &x)
 {
-  return toEA(cmd.cs, x.addr);
+  return to_ea(insn.cs, x.addr);
 }
 
 //------------------------------------------------------------------------
-ea_t calc_data_mem(op_t &x, ushort segreg)
+ea_t calc_data_mem(const insn_t &insn, const op_t &x, ushort segreg)
 {
-    sel_t dpage = get_segreg(cmd.ea, segreg);
+    sel_t dpage = get_sreg(insn.ea, segreg);
     if ( dpage == BADSEL )
       return BADSEL;
     return xmem + (((dpage & 0xFF) << 3) | (x.value));
@@ -26,17 +26,18 @@ inline bool is_stkreg(int r)
 }
 
 //------------------------------------------------------------------------
-int idaapi is_sp_based(const op_t &x)
+int idaapi is_sp_based(const insn_t &, const op_t &x)
 {
   return OP_SP_ADD | (x.phrase == DSP ? OP_SP_BASED : OP_FP_BASED);
 }
 
 //------------------------------------------------------------------------
-static void process_immediate_number(int n)
+static void process_immediate_number(const insn_t &insn, int n)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag,n) ) return;
-  switch ( cmd.itype )
+  set_immd(insn.ea);
+  if ( is_defarg(get_flags(insn.ea),n) )
+    return;
+  switch ( insn.itype )
   {
 
     case KR1878_movl:
@@ -51,26 +52,26 @@ static void process_immediate_number(int n)
     case KR1878_sst:
     case KR1878_cst:
 
-      op_num(cmd.ea, n);
+      op_num(insn.ea, n);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-static void add_near_ref(op_t &x, ea_t ea)
+static void add_near_ref(const insn_t &insn, const op_t &x, ea_t ea)
 {
   cref_t ftype = fl_JN;
-  if ( InstrIsSet(cmd.itype, CF_CALL) )
+  if ( has_insn_feature(insn.itype, CF_CALL) )
   {
     if ( !func_does_return(ea) )
       flow = false;
     ftype = fl_CN;
   }
-  ua_add_cref(x.offb, ea, ftype);
+  insn.add_cref(ea, x.offb, ftype);
 }
 
 //----------------------------------------------------------------------
-static void process_operand(op_t &x, bool isAlt, bool isload)
+static void handle_operand(const insn_t &insn, const op_t &x, bool isAlt, bool isload)
 {
   switch ( x.type )
   {
@@ -80,19 +81,18 @@ static void process_operand(op_t &x, bool isAlt, bool isload)
 //      interr("emu");
       break;
     case o_imm:
-      if ( !isload ) interr("emu2");
-      process_immediate_number(x.n);
-      if ( op_adds_xrefs(uFlag, x.n) )
-        ua_add_off_drefs2(x, dr_O, OOFS_IFSIGN);
+      if ( !isload )
+        interr(insn, "emu2");
+      process_immediate_number(insn, x.n);
+      if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
+        insn.add_off_drefs(x, dr_O, OOFS_IFSIGN);
       break;
    case o_mem:
       if ( !isAlt )
       {
-        ea_t ea = calc_mem(x);
-        ua_add_dref(x.offb, ea, isload ? dr_R : dr_W);
-        ua_dodata2(x.offb, ea, x.dtyp);
-        if ( !isload )
-          doVar(ea);
+        ea_t ea = calc_mem(insn, x);
+        insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+        insn.create_op_data(ea, x);
       }
       break;
     case o_phrase:
@@ -100,72 +100,69 @@ static void process_operand(op_t &x, bool isAlt, bool isload)
       {
        if ( x.reg != SR3 || x.value < 6 )
         {
-           ea_t ea = calc_data_mem(x, as + x.reg);
-           ua_add_dref(x.offb, ea, isload ? dr_R : dr_W);
-           ua_dodata2(x.offb, ea, x.dtyp);
-           if ( !isload )
-             doVar(ea);
+           ea_t ea = calc_data_mem(insn, x, as + x.reg);
+           insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+           insn.create_op_data(ea, x);
         }
       }
       break;
     case o_near:
       if ( !isAlt )
-        add_near_ref(x, calc_mem(x));
+        add_near_ref(insn, x, calc_mem(insn, x));
       break;
   }
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+int idaapi emu(const insn_t &insn)
 {
-  if ( segtype(cmd.ea) == SEG_XTRN ) return 1;
+  if ( segtype(insn.ea) == SEG_XTRN )
+    return 1;
 
-  uint32 Feature = cmd.get_canon_feature();
-  bool flag1 = is_forced_operand(cmd.ea, 0);
-  bool flag2 = is_forced_operand(cmd.ea, 1);
-  bool flag3 = is_forced_operand(cmd.ea, 2);
+  uint32 Feature = insn.get_canon_feature();
+  bool flag1 = is_forced_operand(insn.ea, 0);
+  bool flag2 = is_forced_operand(insn.ea, 1);
+  bool flag3 = is_forced_operand(insn.ea, 2);
 
   flow = ((Feature & CF_STOP) == 0);
 
-  if ( Feature & CF_USE1 ) process_operand(cmd.Op1, flag1, true);
-  if ( Feature & CF_USE2 ) process_operand(cmd.Op2, flag2, true);
-  if ( Feature & CF_USE3 ) process_operand(cmd.Op3, flag3, true);
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, flag1, true);
+  if ( Feature & CF_USE2 ) handle_operand(insn, insn.Op2, flag2, true);
+  if ( Feature & CF_USE3 ) handle_operand(insn, insn.Op3, flag3, true);
 
-  if ( Feature & CF_CHG1 ) process_operand(cmd.Op1, flag1, false);
-  if ( Feature & CF_CHG2 ) process_operand(cmd.Op2, flag2, false);
-  if ( Feature & CF_CHG3 ) process_operand(cmd.Op3, flag3, false);
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, flag1, false);
+  if ( Feature & CF_CHG2 ) handle_operand(insn, insn.Op2, flag2, false);
+  if ( Feature & CF_CHG3 ) handle_operand(insn, insn.Op3, flag3, false);
 
 // check for Segment changes
-  if ( cmd.itype == KR1878_ldr
-    && cmd.Op1.type == o_reg
-    && cmd.Op1.reg < SR4 )
+  if ( insn.itype == KR1878_ldr
+    && insn.Op1.type == o_reg
+    && insn.Op1.reg < SR4 )
   {
-    split_srarea(get_item_end(cmd.ea), as + cmd.Op1.reg, cmd.Op2.value & 0xFF, SR_auto);
+    split_sreg_range(get_item_end(insn.ea), as + insn.Op1.reg, insn.Op2.value & 0xFF, SR_auto);
   }
 //
 //      Determine if the next instruction should be executed
 //
-  if ( Feature & CF_STOP ) flow = false;
-  if ( flow ) ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+  if ( Feature & CF_STOP )
+    flow = false;
+  if ( flow )
+    add_cref(insn.ea, insn.ea+insn.size, fl_F);
 
   return 1;
 }
 
 //----------------------------------------------------------------------
-int may_be_func(void)           // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
-                                // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
+int may_be_func(const insn_t &)           // can a function start here?
 {
   return 0;
 }
 
 //----------------------------------------------------------------------
-int is_sane_insn(int /*nocrefs*/)
+int is_sane_insn(const insn_t &insn, int /*nocrefs*/)
 {
   // disallow jumps to nowhere
-  if ( cmd.Op1.type == o_near && !isEnabled(calc_mem(cmd.Op1)) )
+  if ( insn.Op1.type == o_near && !is_mapped(calc_mem(insn, insn.Op1)) )
     return 0;
   return 1;
 }
@@ -173,14 +170,16 @@ int is_sane_insn(int /*nocrefs*/)
 //----------------------------------------------------------------------
 int idaapi is_align_insn(ea_t ea)
 {
-  if ( !decode_insn(ea) ) return 0;
-  switch ( cmd.itype )
+  insn_t insn;
+  if ( decode_insn(&insn, ea) < 1 )
+    return 0;
+  switch ( insn.itype )
   {
     case KR1878_nop:
       break;
     default:
       return 0;
   }
-  return cmd.size;
+  return insn.size;
 }
 

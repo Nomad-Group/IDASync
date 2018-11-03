@@ -17,49 +17,49 @@ static process_segments()
 {
   auto ea,segname,prefix;
 
-  for ( ea=FirstSeg(); ea != BADADDR; ea=NextSeg(ea) )
+  for ( ea=get_first_seg(); ea != BADADDR; ea=get_next_seg(ea) )
   {
-    segname = SegName(ea);
+    segname = get_segm_name(ea);
     prefix = substr(segname,0,4);
     if ( segname == "data0000" )
     {
-      if ( Dword(ea) == 0xFFFFFFFF )
+      if ( get_wide_dword(ea) == 0xFFFFFFFF )
       {
-        MakeDword(ea);
-        MakeComm(ea,"Loader stores SysAppInfoPtr here");
+        create_dword(ea);
+        set_cmt(ea,"Loader stores SysAppInfoPtr here", 0);
       }
       continue;
     }
     if ( prefix == "TRAP" )
     {
-      MakeWord(ea);
-      OpHex(ea,0);
-      MakeComm(ea,"System trap function code");
+      create_word(ea);
+      op_hex(ea,0);
+      set_cmt(ea,"System trap function code", 0);
       continue;
     }
     if ( prefix == "tSTR" )
     {
-      MakeStr(ea,SegEnd(ea));
-      MakeComm(ea,"String resource");
+      create_strlit(ea,get_segm_end(ea));
+      set_cmt(ea,"String resource", 0);
       continue;
     }
     if ( prefix == "tver" )
     {
-      MakeStr(ea,SegEnd(ea));
-      MakeComm(ea,"Version number string");
+      create_strlit(ea,get_segm_end(ea));
+      set_cmt(ea,"Version number string", 0);
       continue;
     }
     if ( prefix == "tAIN" )
     {
-      MakeStr(ea,SegEnd(ea));
-      MakeComm(ea,"Application icon name");
+      create_strlit(ea,get_segm_end(ea));
+      set_cmt(ea,"Application icon name", 0);
       continue;
     }
     if ( prefix == "pref" )
     {
       auto flags,cmt;
-      flags = Word(ea);
-      MakeWord(ea); OpHex(ea,0); MakeName(ea,"flags");
+      flags = get_wide_word(ea);
+      create_word(ea); op_hex(ea,0); set_name(ea,"flags");
 #define sysAppLaunchFlagNewThread  0x0001
 #define sysAppLaunchFlagNewStack   0x0002
 #define sysAppLaunchFlagNewGlobals 0x0004
@@ -71,11 +71,11 @@ static process_segments()
       if ( flags & sysAppLaunchFlagNewGlobals) cmt = cmt + "sysAppLaunchFlagNewGlobals\n";
       if ( flags & sysAppLaunchFlagUIApp     ) cmt = cmt + "sysAppLaunchFlagUIApp\n";
       if ( flags & sysAppLaunchFlagSubCall   ) cmt = cmt + "sysAppLaunchFlagSubCall";
-      MakeComm(ea,cmt);
+      set_cmt(ea,cmt, 0);
       ea = ea + 2;
-      MakeDword(ea); OpHex(ea,0); MakeName(ea,"stack_size");
+      create_dword(ea); op_hex(ea,0); set_name(ea,"stack_size");
       ea = ea + 4;
-      MakeDword(ea); OpHex(ea,0); MakeName(ea,"heap_size");
+      create_dword(ea); op_hex(ea,0); set_name(ea,"heap_size");
     }
   }
 }
@@ -87,10 +87,10 @@ static process_segments()
 static make_actions()
 {
   auto id;
-  id = AddEnum(-1,"SysAppLaunchCmd",FF_0NUMD);
+  id = add_enum(-1,"SysAppLaunchCmd",FF_0NUMD);
   if ( id != -1 )
   {
-    SetEnumCmt(id,"Action codes",0);
+    set_enum_cmt(id,"Action codes",0);
     AddConst(id,"sysAppLaunchCmdNormalLaunch"	,0 );
     AddConst(id,"sysAppLaunchCmdFind"		,1 );
     AddConst(id,"sysAppLaunchCmdGoTo"		,2 );
@@ -104,27 +104,27 @@ static make_actions()
     AddConst(id,"sysAppLaunchCmdSaveData"	,10);
     AddConst(id,"sysAppLaunchCmdInitDatabase"	,11);
     AddConst(id,"sysAppLaunchCmdSyncCallApplication",12);
-    SetConstCmt(GetConst(id,0,-1),"Normal Launch",1);
-    SetConstCmt(GetConst(id,1,-1),"Find string",1);
-    SetConstCmt(GetConst(id,2,-1),"Launch and go to a particular record",1);
-    SetConstCmt(GetConst(id,3,-1),"Sent to apps whose databases changed\n"
+    set_enum_member_cmt(GetConst(id,0,-1),"Normal Launch",1);
+    set_enum_member_cmt(GetConst(id,1,-1),"Find string",1);
+    set_enum_member_cmt(GetConst(id,2,-1),"Launch and go to a particular record",1);
+    set_enum_member_cmt(GetConst(id,3,-1),"Sent to apps whose databases changed\n"
     			       "during HotSync after the sync has\n"
     			       "been completed",1);
-    SetConstCmt(GetConst(id,4,-1),"The system time has changed",1);
-    SetConstCmt(GetConst(id,5,-1),"Sent after System hard resets",1);
-    SetConstCmt(GetConst(id,6,-1),"Schedule next alarm",1);
-    SetConstCmt(GetConst(id,7,-1),"Display given alarm dialog",1);
-    SetConstCmt(GetConst(id,8,-1),"The country has changed",1);
-    SetConstCmt(GetConst(id,9,-1),"The \"HotSync\" button was pressed",1);
-    SetConstCmt(GetConst(id,10,-1),"Sent to running app before\n"
+    set_enum_member_cmt(GetConst(id,4,-1),"The system time has changed",1);
+    set_enum_member_cmt(GetConst(id,5,-1),"Sent after System hard resets",1);
+    set_enum_member_cmt(GetConst(id,6,-1),"Schedule next alarm",1);
+    set_enum_member_cmt(GetConst(id,7,-1),"Display given alarm dialog",1);
+    set_enum_member_cmt(GetConst(id,8,-1),"The country has changed",1);
+    set_enum_member_cmt(GetConst(id,9,-1),"The \"HotSync\" button was pressed",1);
+    set_enum_member_cmt(GetConst(id,10,-1),"Sent to running app before\n"
     				"sysAppLaunchCmdFind or other\n"
     				"action codes that will cause data\n"
     				"searches or manipulation",1);
-    SetConstCmt(GetConst(id,11,-1),"Initialize a database; sent by\n"
+    set_enum_member_cmt(GetConst(id,11,-1),"Initialize a database; sent by\n"
     				"DesktopLink server to the app whose\n"
     				"creator ID matches that of the database\n"
     				"created in response to the \"create db\" request",1);
-    SetConstCmt(GetConst(id,12,-1),"Used by DesktopLink Server command\n"
+    set_enum_member_cmt(GetConst(id,12,-1),"Used by DesktopLink Server command\n"
     				"\"call application\"",1);
   }
 }
@@ -136,10 +136,10 @@ static make_actions()
 static make_events()
 {
   auto id;
-  id = AddEnum(-1,"events",FF_0NUMD);
+  id = add_enum(-1,"events",FF_0NUMD);
   if ( id != -1 )
   {
-    SetEnumCmt(id,"Event codes",0);
+    set_enum_cmt(id,"Event codes",0);
     AddConst(id,"nilEvent",              0);
     AddConst(id,"penDownEvent",          1);
     AddConst(id,"penUpEvent",            2);
@@ -200,13 +200,13 @@ static setup_pilot()
   auto h0,h1;
   h0 = "Alt-1";
   h1 = "Alt-2";
-  AddHotkey(h0,"a5offset0");
-  AddHotkey(h1,"a5offset1");
-  Message("Use %s to convert the first operand to an offset from A5\n",h0);
-  Message("Use %s to convert the second operand to an offset from A5\n",h1);
+  add_idc_hotkey(h0,"a5offset0");
+  add_idc_hotkey(h1,"a5offset1");
+  msg("Use %s to convert the first operand to an offset from A5\n",h0);
+  msg("Use %s to convert the second operand to an offset from A5\n",h1);
 }
 
-static a5offset0(void) { OpOff(ScreenEA(),0,LocByName("A5BASE")); }
-static a5offset1(void) { OpOff(ScreenEA(),1,LocByName("A5BASE")); }
+static a5offset0(void) { op_plain_offset(get_screen_ea(),0,get_name_ea_simple("A5BASE")); }
+static a5offset1(void) { op_plain_offset(get_screen_ea(),1,get_name_ea_simple("A5BASE")); }
 
 #endif // 0

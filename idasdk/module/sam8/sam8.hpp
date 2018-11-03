@@ -7,13 +7,13 @@
 #include "../idaidp.hpp"
 #include "ins.hpp"
 
-// special cmd definitions
+// special insn definitions
 #define fl_workingReg specflag1
 #define fl_regPair specflag2
 #define v_bit specval
 #define v_phrase_reg specval_shorts.low
 #define v_phrase_idxreg specval_shorts.high
-#define c_condition auxpref_chars.low
+#define c_condition auxpref_u8[0]
 #define o_cmem o_mem
 #define o_cmem_ind o_idpspec1    // @code address in first 256 bytes
 #define o_emem o_idpspec2
@@ -37,7 +37,8 @@ extern const char *const ccNames[];
 /************************************************************************/
 /* Registers (we'll be handling these with custom code )                */
 /************************************************************************/
-enum sam8_registers {
+enum sam8_registers
+{
   rVcs, rVds           // these 2 registers are required by the IDA kernel
 };
 
@@ -45,7 +46,8 @@ enum sam8_registers {
 /************************************************************************/
 /* Indirect addressing modes without a displacement                     */
 /************************************************************************/
-enum sam8_phrases {
+enum sam8_phrases
+{
   fIndReg,                 // @register
   fIdxReg,                 // #reg[Rn]
   fIdxEAddr,               // #addr[rr] (DATA)
@@ -56,7 +58,8 @@ enum sam8_phrases {
 /************************************************************************/
 /* Condition codes                                                      */
 /************************************************************************/
-enum sam8_cc {
+enum sam8_cc
+{
   ccNone = 0xff,
   ccF = 0,
   ccLT,
@@ -81,13 +84,11 @@ enum sam8_cc {
 /************************************************************************/
 /* Common functions                                                     */
 /************************************************************************/
-void idaapi header(void);
-void idaapi footer(void);
-void idaapi segstart(ea_t ea);
-int idaapi ana(void);
-int idaapi emu(void);
-void idaapi out(void);
-bool idaapi outop(op_t &op);
-void idaapi out_data(ea_t ea);
+void idaapi sam8_header(outctx_t &ctx);
+void idaapi sam8_footer(outctx_t &ctx);
+void idaapi sam8_segstart(outctx_t &ctx, segment_t *seg);
+int idaapi ana(insn_t *_insn);
+int idaapi emu(const insn_t &insn);
+void idaapi sam8_out_data(outctx_t &ctx, bool analyze_only);
 
 #endif

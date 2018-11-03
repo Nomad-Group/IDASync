@@ -16,38 +16,33 @@
 #include <allins.hpp>
 
 //--------------------------------------------------------------------------
-// This callback is called by the kernel when processor related events happen
-static int idaapi idp_callback(void * /*user_data*/, int event_id, va_list va)
+// This callback is called by the kernel when database related events happen
+static ssize_t idaapi idb_callback(void * /*user_data*/, int event_id, va_list va)
 {
   switch ( event_id )
   {
-    case processor_t::make_code:// An instruction is being created
-                                // args: ea_t ea, asize_t size
+    case idb_event::make_code:  // An instruction is being created
+                                // args: insn_t *
                                 // returns: 1-ok, <=0-the kernel should stop
-     ea_t ea = va_arg(va, ea_t);
-     // we are interested in the branch instructions
-     // fill the 'cmd' structure
-     if ( decode_insn(ea) > 0 )
-     {
-       if ( cmd.itype >= NN_ja && cmd.itype <= NN_jmpshort )
-       {
-         // the first operand contains the jump target
-         ea_t target = toEA(cmd.cs, cmd.Op1.addr);
-
-         if ( !isEnabled(target) )
-           return -1;
-       }
-     }
+      insn_t *insn = va_arg(va, insn_t *);
+      // we are interested in the branch instructions
+      if ( insn->itype >= NN_ja && insn->itype <= NN_jmpshort )
+      {
+        // the first operand contains the jump target
+        ea_t target = to_ea(insn->cs, insn->Op1.addr);
+        if ( !is_mapped(target) )
+          return -1;
+      }
   }
   return 0; // event not processed
-            // let other plugins or the processor module handle it
+            // let other plugins handle it
 }
 
 //--------------------------------------------------------------------------
 int idaapi init(void)
 {
   // hook events about database modifications
-  hook_to_notification_point(HT_IDP, idp_callback, NULL);
+  hook_to_notification_point(HT_IDB, idb_callback);
   return PLUGIN_KEEP;
 }
 
@@ -55,14 +50,15 @@ int idaapi init(void)
 void idaapi term(void)
 {
   // hook events about database modifications
-  unhook_from_notification_point(HT_IDP, idp_callback, NULL);
+  unhook_from_notification_point(HT_IDB, idb_callback);
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int)
+bool idaapi run(size_t)
 {
   // since the plugin is fully automatic, there is nothing to do
   warning("Branch checker is fully automatic");
+  return true;
 }
 
 //--------------------------------------------------------------------------

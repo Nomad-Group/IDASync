@@ -66,8 +66,8 @@ enum funit_t ENUM8BIT
 
 //------------------------------------------------------------------
 #define funit           segpref            // Functional unit for insn
-#define cond            auxpref_chars.low  // The condition code of instruction
-#define cflags          auxpref_chars.high // Various bit definitions:
+#define cond            auxpref_u8[0]      // The condition code of instruction
+#define cflags          auxpref_u8[1]      // Various bit definitions:
 #  define aux_para      0x0001  // parallel execution with the next insn
 #  define aux_src2      0x0002  // src2 register for immediate form of
                                 // field instructions is present at "Op1.src2"
@@ -124,70 +124,69 @@ enum funit_t ENUM8BIT
 #define BIT31   0x80000000L
 
 //------------------------------------------------------------------
-enum RegNo ENUM8BIT {
- rA0, rA1,  rA2,  rA3,  rA4,  rA5,  rA6,  rA7,
- rA8, rA9, rA10, rA11, rA12, rA13, rA14, rA15,
- rA16, rA17, rA18, rA19, rA20, rA21, rA22, rA23,
- rA24, rA25, rA26, rA27, rA28, rA29, rA30, rA31,
- rB0, rB1,  rB2,  rB3,  rB4,  rB5,  rB6,  rB7,
- rB8, rB9, rB10, rB11, rB12, rB13, rB14, rB15,
- rB16, rB17, rB18, rB19, rB20, rB21, rB22, rB23,
- rB24, rB25, rB26, rB27, rB28, rB29, rB30, rB31,
- rAMR,
- rCSR,
- rIFR,
- rISR,
- rICR,
- rIER,
- rISTP,
- rIRP,
- rNRP,
- rACR,
- rADR,
- rPCE1,
- rFADCR,
- rFAUCR,
- rFMCR,
- rTSCL,
- rTSCH,
- rILC,
- rRILC,
- rREP,
- rDNUM,
- rSSR,
- rGPLYA,
- rGPLYB,
- rGFPGFR,
- rTSR,
- rITSR,
- rNTSR,
- rECR,
- rEFR,
- rIERR,
- rVcs, rVds,            // virtual registers for code and data segments
+enum RegNo ENUM8BIT
+{
+  rA0, rA1,  rA2, rA3,  rA4,  rA5,  rA6,  rA7,
+  rA8, rA9, rA10, rA11, rA12, rA13, rA14, rA15,
+  rA16, rA17, rA18, rA19, rA20, rA21, rA22, rA23,
+  rA24, rA25, rA26, rA27, rA28, rA29, rA30, rA31,
+  rB0, rB1, rB2,  rB3,  rB4,  rB5,  rB6,  rB7,
+  rB8, rB9, rB10, rB11, rB12, rB13, rB14, rB15,
+  rB16, rB17, rB18, rB19, rB20, rB21, rB22, rB23,
+  rB24, rB25, rB26, rB27, rB28, rB29, rB30, rB31,
+  rAMR,
+  rCSR,
+  rIFR,
+  rISR,
+  rICR,
+  rIER,
+  rISTP,
+  rIRP,
+  rNRP,
+  rACR,
+  rADR,
+  rPCE1,
+  rFADCR,
+  rFAUCR,
+  rFMCR,
+  rTSCL,
+  rTSCH,
+  rILC,
+  rRILC,
+  rREP,
+  rDNUM,
+  rSSR,
+  rGPLYA,
+  rGPLYB,
+  rGFPGFR,
+  rTSR,
+  rITSR,
+  rNTSR,
+  rECR,
+  rEFR,
+  rIERR,
+  rVcs, rVds,            // virtual registers for code and data segments
 };
 
 //------------------------------------------------------------------
 // XXX this assumes the non-compact encoding
 inline bool is_mvk_scst16_form(ea_t ea)
 {
-  return ((get_long(ea) >> 2) & 0x1F) == 0xA;
+  return ((get_dword(ea) >> 2) & 0x1F) == 0xA;
 }
 
 //------------------------------------------------------------------
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi header(outctx_t &ctx);
+void idaapi footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
+void idaapi segstart(outctx_t &ctx, segment_t *seg);
+void idaapi segend(outctx_t &ctx, segment_t *seg);
 
-void idaapi out(void);
-bool idaapi outspec(ea_t ea, uchar segtype);
-void idaapi data(ea_t ea);
+bool idaapi outspec(outctx_t &ctx, uchar segtype);
+void idaapi data(outctx_t &ctx, bool analyze_only);
 
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
+int  idaapi ana(insn_t *insn);
+int  idaapi emu(const insn_t &insn);
 
 int  idaapi is_align_insn(ea_t ea);
 

@@ -3,20 +3,18 @@
 
 #include "debmod.h"
 
-#ifdef __arm__
-#include "debmod.h"
-#include "deb_arm.hpp"
-#  define BASE_DEBUGGER_MODULE arm_debmod_t
-#else
 #include "pc_debmod.h"
-#  define BASE_DEBUGGER_MODULE pc_debmod_t
-#endif
+#define BASE_DEBUGGER_MODULE pc_debmod_t
+
 #ifndef __LINUX__       // linux gcc can not compile macho-o headers
 #include "symmacho.hpp"
 #endif
 
+// avoid conflicts with audit.h:
+#define token_t __mac_token_t
 #include <sys/sysctl.h>
 #include <mach-o/fat.h>
+#undef token_t
 
 class macbase_debmod_t: public BASE_DEBUGGER_MODULE
 {

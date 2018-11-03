@@ -1,11 +1,10 @@
-
 #include "oakdsp.hpp"
 
 #define FUNCS_COUNT 5
 
 struct funcdesc_t
 {
-  bool (*func)(int, int);
+  bool (*func)(insn_t &, int, int);
   uint32 mask;
   uint32 param;
   uint32 shift;
@@ -24,13 +23,12 @@ struct opcode_t
 static op_t *op;       // current operand
 
 //----------------------------------------------------------------------
-static uint32 ua_32bits(void)
+static uint32 ua_32bits(const insn_t &insn)
 {
-  return ((get_full_byte(cmd.ea)   <<  0) & 0x0000FFFF)
-       | ((get_full_byte(cmd.ea+1) << 16) & 0xFFFF0000);
+  return ((get_wide_byte(insn.ea)   <<  0) & 0x0000FFFF)
+       | ((get_wide_byte(insn.ea+1) << 16) & 0xFFFF0000);
 
 }
-
 
 //----------------------------------------------------------------------
 inline void opreg(int reg)
@@ -40,11 +38,11 @@ inline void opreg(int reg)
 }
 
 //----------------------------------------------------------------------
-static void make_o_mem(void)
+static void make_o_mem(const insn_t &insn)
 {
   if ( !(op->amode & amode_x) )
   {
-    switch ( cmd.itype )
+    switch ( insn.itype )
     {
 
       case OAK_Dsp_callr:
@@ -55,7 +53,7 @@ static void make_o_mem(void)
       case OAK_Dsp_brr:
       case OAK_Dsp_bkrep:
         op->type = o_near;
-        op->dtyp = dt_code;
+        op->dtype = dt_code;
         return;
     }
   }
@@ -63,7 +61,7 @@ static void make_o_mem(void)
 }
 
 //----------------------------------------------------------------------
-static bool rrrrr(int value, int param)
+static bool rrrrr(insn_t &, int value, int param)
 {
   uint idx;
   if ( param & mix_mode )
@@ -81,51 +79,52 @@ static bool rrrrr(int value, int param)
 }
 
 //----------------------------------------------------------------------
-static bool sdirect(int value, int)
+//lint -e{1764} 'insn' could be declared const ref
+static bool sdirect(insn_t &insn, int value, int)
 {
   op->amode = amode_short;
   op->addr = value & 0x00ff;
   op->amode |= amode_x;
 
-  make_o_mem();
+  make_o_mem(insn);
   op++;
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool ldirect(int value,int)
+static bool ldirect(insn_t &insn, int value,int)
 {
   op->amode = amode_long;
   op->addr = value & 0xffff;
-  cmd.size++;
+  insn.size++;
   op->amode |= amode_x;
 
-  make_o_mem();
+  make_o_mem(insn);
   op++;
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool A(int value,int)
+static bool A(insn_t &insn, int value,int)
 {
-  return( rrrrr(value & 0x01, A0 + mix_mode) );
+  return rrrrr(insn, value & 0x01, A0 + mix_mode);
 }
 
 //----------------------------------------------------------------------
-static bool B(int value,int)
+static bool B(insn_t &insn, int value,int)
 {
-  return( rrrrr(value & 0x01, B0 + mix_mode) );
+  return rrrrr(insn, value & 0x01, B0 + mix_mode);
 }
 
 //----------------------------------------------------------------------
-static bool mmnnn(int value,int)
+static bool mmnnn(insn_t &, int value,int)
 {
   if ( (value & 0x07) > 0x05 )
     return false;
 
-  op->type   = o_phrase;
+  op->type = o_phrase;
   op->reg = value & 0x07;
   op->phtype = (value & 0x0018) >> 3;
   op++;
@@ -134,54 +133,55 @@ static bool mmnnn(int value,int)
 }
 
 //----------------------------------------------------------------------
-static bool nnn(int value,int)
+static bool nnn(insn_t &insn, int value, int)
 {
-  return( rrrrr(value & 0x07, R0 + mix_mode ) );
+  return rrrrr(insn, value & 0x07, R0 + mix_mode );
 }
 //----------------------------------------------------------------------
-static bool ALU_ALM(int value, int param)
+static bool ALU_ALM(insn_t &insn, int value, int param)
 {
   if ( param && (value == 0x04 || value == 0x05) )
     return false;
 
-  cmd.itype = OAK_Dsp_or + (value & (param ? 0x07 : 0x0f));
+  insn.itype = OAK_Dsp_or + (value & (param ? 0x07 : 0x0f));
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool ALB(int value, int)
+static bool ALB(insn_t &insn, int value, int)
 {
-  cmd.itype = OAK_Dsp_set + (value & 0x07);
+  insn.itype = OAK_Dsp_set + (value & 0x07);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool MUL(int value, int param)
+static bool MUL(insn_t &insn, int value, int param)
 {
   if ( param && (value > 0x03) )
     return false;
 
-  cmd.itype = OAK_Dsp_mpy + ((value & (param ? 0x03 : 0x07)) << (param ? 0x01 : 0x00));
+  insn.itype = OAK_Dsp_mpy + ((value & (param ? 0x03 : 0x07)) << (param ? 0x01 : 0x00));
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool MODA_B(int value, int param)
+static bool MODA_B(insn_t &insn, int value, int param)
 {
   if ( value == 0x07 )
     return false;
 
-  cmd.itype = OAK_Dsp_shr + (value & (param ? 0x07 : 0x0f));
+  insn.itype = OAK_Dsp_shr + (value & (param ? 0x07 : 0x0f));
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool s_Imm(int value, int)
+//lint -e{1764} 'insn' could be declared const ref
+static bool s_Imm(insn_t &insn, int value, int)
 {
   op->type  = o_imm;
   op->value = value;
 
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case OAK_Dsp_mpyi:
       op->amode |= amode_signed;
@@ -193,7 +193,7 @@ static bool s_Imm(int value, int)
 }
 
 //----------------------------------------------------------------------
-static bool s_ImmS(int value, int param)
+static bool s_ImmS(insn_t &, int value, int param)
 {
   uint mask1 = 1 << ( param - 1 );
   uint mask2 = 0;
@@ -212,13 +212,13 @@ static bool s_ImmS(int value, int param)
 }
 
 //----------------------------------------------------------------------
-static bool l_Imm(int value, int)
+static bool l_Imm(insn_t &insn, int value, int)
 {
   op->type  = o_imm;
   op->value = value & 0xffff;
-  cmd.size++;
+  insn.size++;
 
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case OAK_Dsp_maa:
     case OAK_Dsp_mac:
@@ -234,7 +234,7 @@ static bool l_Imm(int value, int)
 }
 
 //----------------------------------------------------------------------
-static bool rb_rel_short(int value, int)
+static bool rb_rel_short(insn_t &, int value, int)
 {
   op->type   = o_local;
   op->phtype = 0; // "rb + #displ"
@@ -254,11 +254,11 @@ static bool rb_rel_short(int value, int)
 }
 
 //----------------------------------------------------------------------
-static bool rb_rel_long(int value, int)
+static bool rb_rel_long(insn_t &insn, int value, int)
 {
   int16 tmp;
 
-  cmd.size++;
+  insn.size++;
   op->type   = o_local;
   op->phtype = 0; // "rb + #displ"
   op->amode |= amode_signed;
@@ -272,32 +272,32 @@ static bool rb_rel_long(int value, int)
 }
 
 //----------------------------------------------------------------------
-static bool Cond(int value, int param)
+static bool Cond(insn_t &insn, int value, int param)
 {
-  cmd.auxpref |= value & 0x0f;
+  insn.auxpref |= value & 0x0f;
 
   if ( (!param) && ((value & 0x0f) > 0x00) )
-    cmd.auxpref |= aux_comma_cc;
+    insn.auxpref |= aux_comma_cc;
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool xe_xt(int value, int param)
+static bool xe_xt(insn_t &insn, int value, int param)
 {
   static const uchar regs[] = { cc_ge, cc_gt, cc_le, cc_lt };
 
-  cmd.auxpref |= regs[(value & 0x01) + (param ? 2 : 0)];
-  cmd.auxpref |= aux_comma_cc;
+  insn.auxpref |= regs[(value & 0x01) + (param ? 2 : 0)];
+  insn.auxpref |= aux_comma_cc;
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool lim_xx(int value, int)
+static bool lim_xx(insn_t &, int value, int)
 {
-  static const uchar regs1[] = {A0, A0, A1, A1};
-  static const uchar regs2[] = {uchar(-1), A1, A0, uchar(-1)};
+  static const uchar regs1[] = { A0, A0, A1, A1 };
+  static const uchar regs2[] = { uchar(-1), A1, A0, uchar(-1) };
 
   opreg(regs1[value & 0x03]);
 
@@ -311,7 +311,7 @@ static bool lim_xx(int value, int)
 }
 
 //----------------------------------------------------------------------
-static bool rJ_rI(int value,int param)
+static bool rJ_rI(insn_t &, int value,int param)
 {
   //jjiiwqq
 
@@ -329,11 +329,11 @@ static bool rJ_rI(int value,int param)
 }
 
 //----------------------------------------------------------------------
-static bool rI(int value,int)
+static bool rI(insn_t &, int value,int)
 {
   //iiqq
 
-  op->type   = o_phrase;
+  op->type = o_phrase;
   op->reg = (value & 0x03);
   op->phtype = (value & 0x0c) >> 2;
   op++;
@@ -342,9 +342,9 @@ static bool rI(int value,int)
 }
 
 //----------------------------------------------------------------------
-static bool AB(int value,int)
+static bool AB(insn_t &, int value,int)
 {
-  static const uchar regs[] = {B0, B1, A0, A1};
+  static const uchar regs[] = { B0, B1, A0, A1 };
 
   opreg(regs[value & 0x03]);
   op++;
@@ -353,9 +353,9 @@ static bool AB(int value,int)
 }
 
 //----------------------------------------------------------------------
-static bool ABLH(int value,int)
+static bool ABLH(insn_t &, int value,int)
 {
-  static const uchar regs[] = {B0L, B0H, B1L, B1H, A0L, A0H, A1L, A1H};
+  static const uchar regs[] = { B0L, B0H, B1L, B1H, A0L, A0H, A1L, A1H };
 
   opreg(regs[value & 0x07]);
   op++;
@@ -364,9 +364,9 @@ static bool ABLH(int value,int)
 }
 
 //----------------------------------------------------------------------
-static bool indir_reg(int value,int param)
+static bool indir_reg(insn_t &, int value,int param)
 {
-  op->type   = o_phrase;
+  op->type = o_phrase;
   op->reg = uint16(param + value);
   op->phtype = 4;
   op++;
@@ -375,20 +375,21 @@ static bool indir_reg(int value,int param)
 }
 
 //----------------------------------------------------------------------
-static bool laddr_pgm(int value,int)
+static bool laddr_pgm(insn_t &insn, int value,int)
 {
   op->amode |= amode_p;
   op->addr = value & 0xffff;
-  cmd.size++;
+  insn.size++;
 
-  make_o_mem();
+  make_o_mem(insn);
   op++;
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool addr_rel_pgm(int value, int)
+//lint -e{1764} 'insn' could be declared const ref
+static bool addr_rel_pgm(insn_t &insn, int value, int)
 {
   value = (value & 0x7f);
   op->amode |= amode_p;
@@ -396,32 +397,32 @@ static bool addr_rel_pgm(int value, int)
   if ( value & 0x40 )
   {
     value = (value^0x7f) + 1;
-    op->addr = cmd.ea + 1 - value;
+    op->addr = insn.ea + 1 - value;
   }
   else
   {
-    op->addr = cmd.ea + 1 + value;
+    op->addr = insn.ea + 1 + value;
   }
 
-  make_o_mem();
+  make_o_mem(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool ext_XX(int value, int)
+static bool ext_XX(insn_t &insn, int value, int)
 {
-  return( rrrrr( (value & 0x01) + ((value & 0x04) >> 1), EXT0 + mix_mode) );
+  return rrrrr(insn, (value & 0x01) + ((value & 0x04) >> 1), EXT0 + mix_mode);
 }
 
 //----------------------------------------------------------------------
-static bool context(int value,int)
+static bool context(insn_t &insn, int value,int)
 {
   if ( value )
-    cmd.auxpref |= aux_iret_context;
+    insn.auxpref |= aux_iret_context;
   return true;
 }
 //----------------------------------------------------------------------
-static bool swap(int value,int)
+static bool swap(insn_t &, int value,int)
 {
   op->type   = o_textphrase;
   op->phrase = value & 0x0f;
@@ -430,7 +431,7 @@ static bool swap(int value,int)
 }
 
 //----------------------------------------------------------------------
-static bool banke(int value,int)
+static bool banke(insn_t &, int value,int)
 {
   op->type   = o_textphrase;
   op->phrase = value & 0x0f;
@@ -438,7 +439,7 @@ static bool banke(int value,int)
   return true;
 }
 //----------------------------------------------------------------------
-static bool cntx(int value,int)
+static bool cntx(insn_t &, int value,int)
 {
   op->type   = o_textphrase;
   op->phrase = (uint16)value;
@@ -447,7 +448,7 @@ static bool cntx(int value,int)
 }
 
 //----------------------------------------------------------------------
-static bool dmod(int value,int)
+static bool dmod(insn_t &, int value,int)
 {
   op->type   = o_textphrase;
   op->phrase = (uint16)value;
@@ -456,7 +457,7 @@ static bool dmod(int value,int)
 }
 
 //----------------------------------------------------------------------
-static bool eu(int,int)
+static bool eu(insn_t &, int,int)
 {
   op->type   = o_textphrase;
   op->phtype = text_eu;
@@ -635,71 +636,72 @@ void init_analyzer(void)
 
 
 //----------------------------------------------------------------------
-static bool use_table(opcode_t *tbl, uint code, int entry, int start, int end)
+static bool use_table(insn_t &insn, opcode_t *tbl, uint code, int entry, int start, int end)
 {
   opcode_t &ptr = tbl[entry];
-  for(int j = start; j <= end; j++)
+  for ( int j = start; j <= end; j++ )
   {
     if ( !ptr.funcs[j].func )
       break;
     int value = (code & ptr.funcs[j].mask) >> ptr.funcs[j].shift;
-    if ( !ptr.funcs[j].func(value, ptr.funcs[j].param) )
+    if ( !ptr.funcs[j].func(insn, value, ptr.funcs[j].param) )
       return false;
   }
   return true;
 }
 
 //----------------------------------------------------------------------
-static void reset_ops(void)
+static void reset_ops(insn_t &insn)
 {
-  op = &cmd.Op1;
+  op = &insn.Op1;
   for ( int i=0; i < UA_MAXOP; i++ )
-    cmd.Operands[i].type = o_void;
+    insn.ops[i].type = o_void;
 }
 
 //----------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
-  uint code = ua_32bits();
+  insn_t &insn = *_insn;
+  uint code = ua_32bits(insn);
   uint prev_inst_code;
-  op = &cmd.Op1;
+  op = &insn.Op1;
   int move_rb_to_reg = 0;
 
   for ( int i = 0; i < qnumber(table); i++ )
   {
     if ( (code & table[i].mask) == table[i].value )
     {
-      cmd.itype = table[i].itype;
-      cmd.cmd_cycles = table[i].cycles;
-      cmd.size = 1;
+      insn.itype = table[i].itype;
+      insn.cmd_cycles = table[i].cycles;
+      insn.size = 1;
 
-      if ( !use_table(table, code, i, 0, FUNCS_COUNT - 1) )
+      if ( !use_table(insn, table, code, i, 0, FUNCS_COUNT - 1) )
       {
-        reset_ops();
+        reset_ops(insn);
         continue;
       }
 
 
 
       // mov #imm, pc --> near jump
-      if ( cmd.itype == OAK_Dsp_mov
-        && cmd.Op1.type == o_imm
-        && cmd.Op2.type == o_reg
-        && cmd.Op2.reg == PC )
+      if ( insn.itype == OAK_Dsp_mov
+        && insn.Op1.type == o_imm
+        && insn.Op2.type == o_reg
+        && insn.Op2.reg == PC )
       {
-        cmd.Op1.type = o_near;
-        cmd.Op1.dtyp = dt_code;
-        cmd.Op1.addr = cmd.Op1.value;
-        cmd.Op1.amode = amode_p;
+        insn.Op1.type = o_near;
+        insn.Op1.dtype = dt_code;
+        insn.Op1.addr = insn.Op1.value;
+        insn.Op1.amode = amode_p;
       }
 
 
       // add(sub) #imm, reg  after  mov rb, reg instruction
       // #imm --> local var
 
-      if ( cmd.ea != 0 )
+      if ( insn.ea != 0 )
       {
-        prev_inst_code = get_full_byte(cmd.ea - 1);
+        prev_inst_code = get_wide_byte(insn.ea - 1);
 
         if ( ((prev_inst_code & 0xfc1f) == 0x5806)
           || ((prev_inst_code & 0xffdf) == 0x5ec6) )
@@ -709,16 +711,16 @@ int idaapi ana(void)
           else if ( (prev_inst_code & 0xffdf) == 0x5ec6 )       // mov reg, bx
             move_rb_to_reg =  B0 + ((prev_inst_code >> 5) & 0x01);
 
-          if ( cmd.Op1.type == o_imm
-            && (cmd.Op2.reg == move_rb_to_reg
-             || (cmd.Op2.reg == A0L && move_rb_to_reg == A0)
-             || (cmd.Op2.reg == A1L && move_rb_to_reg == A1)
-             || (cmd.Op2.reg == B0L && move_rb_to_reg == B0)
-             || (cmd.Op2.reg == B1L && move_rb_to_reg == B1)) )
+          if ( insn.Op1.type == o_imm
+            && (insn.Op2.reg == move_rb_to_reg
+             || (insn.Op2.reg == A0L && move_rb_to_reg == A0)
+             || (insn.Op2.reg == A1L && move_rb_to_reg == A1)
+             || (insn.Op2.reg == B0L && move_rb_to_reg == B0)
+             || (insn.Op2.reg == B1L && move_rb_to_reg == B1)) )
           {
-            int16 tmp = cmd.Op1.value;
+            int16 tmp = insn.Op1.value;
 
-            switch ( cmd.itype )
+            switch ( insn.itype )
             {
               case OAK_Dsp_sub:
               case OAK_Dsp_subv:
@@ -726,11 +728,11 @@ int idaapi ana(void)
                 //no break
               case OAK_Dsp_add:
               case OAK_Dsp_addv:
-                cmd.Op1.addr   = tmp;
-                cmd.Op1.type   = o_local;
-                cmd.Op1.phtype = 1; // "#"
-                cmd.Op1.amode |= amode_signed;
-                cmd.Op1.amode |= amode_x;
+                insn.Op1.addr   = tmp;
+                insn.Op1.type   = o_local;
+                insn.Op1.phtype = 1; // "#"
+                insn.Op1.amode |= amode_signed;
+                insn.Op1.amode |= amode_x;
                 break;
             }
           }
@@ -741,31 +743,29 @@ int idaapi ana(void)
       // add(sub) #imm, SP
       // #imm --> signed imm
 
-      if ( cmd.Op1.type == o_imm && cmd.Op2.type == o_reg && cmd.Op2.reg == SP )
+      if ( insn.Op1.type == o_imm && insn.Op2.type == o_reg && insn.Op2.reg == SP )
       {
-        switch ( cmd.itype )
+        switch ( insn.itype )
         {
           case OAK_Dsp_add:
           case OAK_Dsp_addv:
           case OAK_Dsp_sub:
           case OAK_Dsp_subv:
-            cmd.Op1.amode |= amode_signed;
+            insn.Op1.amode |= amode_signed;
             break;
         }
       }
-      return cmd.size;
+      return insn.size;
     }
   }
   return 0;
 }
 
 //--------------------------------------------------------------------------
-void interr(const char *module)
+void interr(const insn_t &insn, const char *module)
 {
   const char *name = NULL;
-  if ( cmd.itype < OAK_Dsp_last )
-    name = Instructions[cmd.itype].name;
-  else
-    cmd.itype = OAK_Dsp_null;
-  warning("%a(%s): internal error in %s", cmd.ea, name, module);
+  if ( insn.itype < OAK_Dsp_last )
+    name = Instructions[insn.itype].name;
+  warning("%a(%s): internal error in %s", insn.ea, name, module);
 }

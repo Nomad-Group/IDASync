@@ -6,7 +6,6 @@
 
 #pragma pack(push, 8)
 #include "cvconst.h"
-#undef __specstrings // VS 2005 chokes in dbghelp.h otherwise
 #include "dbghelp.h"
 #pragma pack(pop)
 
@@ -50,7 +49,7 @@ static bool setup_pointers(bool *must_free)
   {
     // nope, load it
     // use search_path to avoid dll current directory attacks
-    if ( !search_path("dbghelp.dll", dll, sizeof(dll), false) )
+    if ( !search_path(dll, sizeof(dll), "dbghelp.dll", false) )
       return false;
     dbghelp = LoadLibrary(dll);
     *must_free = true;

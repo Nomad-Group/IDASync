@@ -6,7 +6,7 @@
 
 #ifndef __MYCOR_H
 #define __MYCOR_H
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
+#pragma pack(push, 1)
 
 
 #ifdef _PE_H_
@@ -80,28 +80,30 @@ typedef DOUBLE DATE;
 
 class IUnknown;
 
-struct OSINFO {
+struct OSINFO
+{
   DWORD   dwOSPlatformId;
   DWORD   dwOSMajorVersion;
   DWORD   dwOSMinorVersion;
 };
 
-struct ASSEMBLYMETADATA {
+struct ASSEMBLYMETADATA
+{
   USHORT  usMajorVersion;
   USHORT  usMinorVersion;
   USHORT  usBuildNumber;
   USHORT  usRevisionNumber;
   LPWSTR  szLocale;
   ULONG   cbLocale;
-  DWORD*  rdwProcessor;
+  DWORD   *rdwProcessor;
   ULONG   ulProcessor;
-  OSINFO* rOS;
+  OSINFO  *rOS;
   ULONG   ulOS;
 };
 
 struct GUID
 {
-  uint32  Data1;
+  uint32 Data1;
   ushort Data2;
   ushort Data3;
   uchar  Data4[8];
@@ -114,18 +116,23 @@ struct IMAGE_DATA_DIRECTORY
 };
 
 // http://msdn.microsoft.com/en-us/library/windows/desktop/ms221061(v=vs.85).aspx
-typedef struct tagDEC {
+typedef struct tagDEC
+{
   USHORT wReserved;
-  union {
-    struct {
+  union
+  {
+    struct
+    {
       BYTE scale;
       BYTE sign;
     };
     USHORT signscale;
   };
-  ULONG  Hi32;
-  union {
-    struct {
+  ULONG Hi32;
+  union
+  {
+    struct
+    {
       ULONG Lo32;
       ULONG Mid32;
     };
@@ -135,8 +142,10 @@ typedef struct tagDEC {
 
 
 // http://msdn.microsoft.com/en-us/library/windows/desktop/ms221223(v=vs.85).aspx
-typedef union tagCY {
-  struct {
+typedef union tagCY
+{
+  struct
+  {
     unsigned long Lo;
     long          Hi;
   };
@@ -144,14 +153,16 @@ typedef union tagCY {
 } CY, CURRENCY;
 
 
-typedef struct tagSAFEARRAYBOUND {
+typedef struct tagSAFEARRAYBOUND
+{
   ULONG cElements;
   LONG  lLbound;
 } SAFEARRAYBOUND, *LPSAFEARRAYBOUND;
 
 
 // http://msdn.microsoft.com/en-us/library/9ec8025b-4763-4526-ab45-390c5d8b3b1e(VS.85)
-typedef struct tagSAFEARRAY {
+typedef struct tagSAFEARRAY
+{
   USHORT         cDims;
   USHORT         fFeatures;
   ULONG          cbElements;
@@ -166,14 +177,18 @@ typedef unsigned short VARTYPE;
 typedef uint16 VARIANT_BOOL;
 typedef uint16 _VARIANT_BOOL;
 struct IRecordInfo;
-typedef struct tagVARIANT {
-  union {
-    struct {
+typedef struct tagVARIANT
+{
+  union
+  {
+    struct
+    {
       VARTYPE vt;
       WORD    wReserved1;
       WORD    wReserved2;
       WORD    wReserved3;
-      union {
+      union
+      {
         LONGLONG            llVal;
         LONG                lVal;
         BYTE                bVal;
@@ -219,13 +234,14 @@ typedef struct tagVARIANT {
         ULONGLONG           *pullVal;
         INT                 *pintVal;
         UINT                *puintVal;
-        struct /*__tagBRECORD*/ {
+        struct /*__tagBRECORD*/
+        {
           PVOID       pvRecord;
           IRecordInfo *pRecInfo;
-        }/* __VARIANT_NAME_4*/;
-      }/* __VARIANT_NAME_3*/;
-    }/* __VARIANT_NAME_2*/;
-    DECIMAL             decVal;
+        } /* __VARIANT_NAME_4*/;
+      } /* __VARIANT_NAME_3*/;
+    } /* __VARIANT_NAME_2*/;
+    DECIMAL decVal;
   };
 } VARIANT, *LPVARIANT, VARIANTARG, *LPVARIANTARG;
 
@@ -269,35 +285,6 @@ typedef struct tagVARIANT {
 
 
 #define VariantInit(v_ptr) (v_ptr)->vt = VT_EMPTY
-inline HRESULT VariantChangeType(VARIANTARG *pvargDest,
-                                 VARIANTARG *pvarSrc,
-                                 unsigned short /*wFlags*/,
-                                 VARTYPE vt)
-{
-  memcpy(pvargDest, pvarSrc, sizeof(VARIANT));
-  pvargDest->vt = vt;
-  return S_OK;
-}
-
-/* inline int VariantType(VARIANTARG *pVar) */
-/* { */
-/*   return pVar->__VARIANT_NAME_2.vt; */
-/* } */
-
-/* inline void VariantSetType(VARIANTARG *pVar, int type) */
-/* { */
-/*   pVar->__VARIANT_NAME_2.vt = type; */
-/* } */
-
-/* inline void* VariantGetPtr(VARIANTARG *pVar) */
-/* { */
-/*   return pVar->__VARIANT_NAME_2.__VARIANT_NAME_3.bstrVal; */
-/* } */
-
-/* inline void VariantSetPtr(VARIANTARG *pVar, void *ptr) */
-/* { */
-/*   pVar->__VARIANT_NAME_2.__VARIANT_NAME_3.bstrVal = ptr; */
-/* } */
 
 inline HRESULT VariantClear(VARIANTARG *pVar)
 {
@@ -485,7 +472,7 @@ struct assemblyref_info_t   // +name +orig +hash
 
 struct file_info_t         // +name +hash
 {
-  DWORD  flags;
+  DWORD flags;
 };
 
 struct comtype_info_t      // +name +descr

@@ -1,63 +1,74 @@
 
 #include <ctype.h>
 #include "kr1878.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 
 //----------------------------------------------------------------------
-static bool out_port_address(ea_t addr)
+class out_kr1878_t : public outctx_t
 {
-  const char *name = find_port(addr);
-  if ( name != NULL )
+  out_kr1878_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(int r) { out_register(ph.reg_names[r]); }
+  bool out_port_address(ea_t addr);
+  void out_bad_address(ea_t addr);
+  void out_address(ea_t ea, const op_t &x);
+  void out_ip_rel(int displ);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_kr1878_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_kr1878_t)
+
+//----------------------------------------------------------------------
+bool out_kr1878_t::out_port_address(ea_t addr)
+{
+  const ioport_t *port = find_port(addr);
+  if ( port != NULL && !port->name.empty() )
   {
-    out_line(name, COLOR_IMPNAME);
+    out_line(port->name.c_str(), COLOR_IMPNAME);
     return true;
   }
   return false;
 }
 
 //----------------------------------------------------------------------
-static void out_bad_address(ea_t addr)
+void out_kr1878_t::out_bad_address(ea_t addr)
 {
   if ( !out_port_address(addr) )
   {
     out_tagon(COLOR_ERROR);
-    OutLong(addr, 16);
+    out_btoa(addr, 16);
     out_tagoff(COLOR_ERROR);
-    QueueSet(Q_noName, cmd.ea);
+    remember_problem(PR_NONAME, insn.ea);
   }
 }
 
-
 //----------------------------------------------------------------------
-static void out_address(ea_t ea, op_t &x)
+void out_kr1878_t::out_address(ea_t ea, const op_t &x)
 {
   segment_t *s = getseg(ea);
   ea_t value = s != NULL ? ea - get_segm_base(s) : ea;
   if ( !out_name_expr(x, ea, value) )
   {
     out_tagon(COLOR_ERROR);
-    out_snprintf("%a", ea);
+    out_printf("%a", ea);
     out_tagoff(COLOR_ERROR);
-    QueueSet(Q_noName, cmd.ea);
+    remember_problem(PR_NONAME, insn.ea);
   }
 }
 
 //----------------------------------------------------------------------
-inline void outreg(int r)
+void out_kr1878_t::out_ip_rel(int displ)
 {
-  out_register(ph.regNames[r]);
-}
-
-//----------------------------------------------------------------------
-inline void out_ip_rel(int displ)
-{
-  out_snprintf(COLSTR("%s+", SCOLOR_SYMBOL) COLSTR("%d", SCOLOR_NUMBER),
+  out_printf(COLSTR("%s+", SCOLOR_SYMBOL) COLSTR("%d", SCOLOR_NUMBER),
                ash.a_curip, displ);
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_kr1878_t::out_operand(const op_t & x)
 {
   ea_t ea;
   if ( x.type == o_imm )
@@ -70,7 +81,7 @@ bool idaapi outop(op_t &x)
       return 0;
 
     case o_imm:
-      OutValue(x, OOFS_IFSIGN|OOFW_IMM);
+      out_value(x, OOFS_IFSIGN|OOFW_IMM);
       break;
 
     case o_reg:
@@ -82,9 +93,9 @@ bool idaapi outop(op_t &x)
       // no break;
     case o_near:
       {
-        ea = calc_mem(x);
-        if ( ea == cmd.ea+cmd.size )
-          out_ip_rel(cmd.size);
+        ea = calc_mem(insn, x);
+        if ( ea == insn.ea+insn.size )
+          out_ip_rel(insn.size);
         else if ( !out_name_expr(x, ea, x.addr) )
           out_bad_address(x.addr);
       }
@@ -94,7 +105,7 @@ bool idaapi outop(op_t &x)
       {
        qsnprintf(buf, sizeof(buf), "%%%c%" FMT_EA "x", 'a' + x.reg, x.value);
 
-       ea = calc_data_mem(x, as + x.reg);
+       ea = calc_data_mem(insn, x, as + x.reg);
        if ( ( ea != BADADDR ) && ( ( x.reg != SR3 ) || ( x.value < 6 ) ) )
        {
            out_line(buf, COLOR_AUTOCMT);
@@ -108,139 +119,126 @@ bool idaapi outop(op_t &x)
       break;
 
     default:
-      interr("out");
+      interr(insn, "out");
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_kr1878_t::out_insn(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  // output instruction mnemonics
-  char postfix[4];
-  postfix[0] = '\0';
-
-  OutMnem(8, postfix);
+  out_mnemonic();
 
   bool comma = out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
-    if ( comma ) out_symbol(',');
+    if ( comma )
+      out_symbol(',');
     out_one_operand(1);
   }
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
     out_one_operand(2);
   }
 
-
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea, uFlag, 3) ) OutImmChar(cmd.Op3);
-
-  term_output_buffer();
-
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-static void print_segment_register(int reg, sel_t value)
+static void print_segment_register(outctx_t &ctx, int reg, sel_t value)
 {
-  if ( reg == ph.regDataSreg ) return;
+  if ( reg == ph.reg_data_sreg )
+    return;
   if ( value != BADADDR )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), value);
-    gen_cmt_line("assume %s = %s", ph.regNames[reg], buf);
+    ctx.gen_cmt_line("assume %s = %s", ph.reg_names[reg], buf);
   }
   else
   {
-    gen_cmt_line("drop %s", ph.regNames[reg]);
+    ctx.gen_cmt_line("drop %s", ph.reg_names[reg]);
   }
 }
 
 //--------------------------------------------------------------------------
 // function to produce assume directives
-void idaapi assumes(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+void idaapi kr1878_assumes(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( seg == NULL || !inf.s_assume )
+  if ( seg == NULL || (inf.outflags & OFLG_GEN_ASSUME) == 0 )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
-  for ( int i = ph.regFirstSreg; i <= ph.regLastSreg; ++i )
+  for ( int i = ph.reg_first_sreg; i <= ph.reg_last_sreg; ++i )
   {
-    if ( i == ph.regCodeSreg )
+    if ( i == ph.reg_code_sreg )
       continue;
-    segreg_area_t sra;
-    if ( !get_srarea2(&sra, ea, i) )
+    sreg_range_t sra;
+    if ( !get_sreg_range(&sra, ea, i) )
       continue;
-    sel_t now  = get_segreg(ea, i);
-    if ( seg_started || sra.startEA == ea )
+    sel_t now = get_sreg(ea, i);
+    if ( seg_started || sra.start_ea == ea )
     {
-      segreg_area_t prev_sra;
-      bool prev_exists = get_srarea2(&prev_sra, ea - 1, i);
-      if ( seg_started || (prev_exists && get_segreg(prev_sra.startEA, i) != now) )
-        print_segment_register(i, now);
+      sreg_range_t prev_sra;
+      bool prev_exists = get_sreg_range(&prev_sra, ea - 1, i);
+      if ( seg_started || (prev_exists && get_sreg(prev_sra.start_ea, i) != now) )
+        print_segment_register(ctx, i, now);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Srange) could be made const
+void idaapi kr1878_segstart(outctx_t &ctx, segment_t *Srange)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(Srange->type) )
+    return;
 
-  char sclas[MAXNAMELEN];
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sclas;
+  get_segm_class(&sclas, Srange);
 
-  if ( strcmp(sclas,"CODE") == 0 )
-    printf_line(inf.indent, COLSTR(".text", SCOLOR_ASMDIR));
-  else if ( strcmp(sclas,"DATA") == 0 )
-    printf_line(inf.indent, COLSTR(".data", SCOLOR_ASMDIR));
+  if ( sclas == "CODE" )
+    ctx.gen_printf(inf.indent, COLSTR(".text", SCOLOR_ASMDIR));
+  else if ( sclas == "DATA" )
+    ctx.gen_printf(inf.indent, COLSTR(".data", SCOLOR_ASMDIR));
 
-  if ( Sarea->orgbase != 0 )
+  if ( Srange->orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
-    btoa(buf, sizeof(buf), Sarea->orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    btoa(buf, sizeof(buf), Srange->orgbase);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t)
+void idaapi kr1878_segend(outctx_t &, segment_t *)
 {
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi kr1878_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL);
+  ctx.gen_header(GH_PRINT_ALL);
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi kr1878_footer(outctx_t &ctx)
 {
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
   const char *end = ash.end;
   if ( end == NULL )
-    printf_line(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
+    ctx.gen_printf(inf.indent, COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
   else
-    printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR)
-                  " "
-                  COLSTR("%s %s",SCOLOR_AUTOCMT), ash.end, ash.cmnt, name);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                   ash.end, ash.cmnt, name);
 }
 
-//--------------------------------------------------------------------------
-void idaapi kr1878_data(ea_t ea)
-{
-  intel_data(ea);
-}

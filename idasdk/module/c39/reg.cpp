@@ -6,7 +6,7 @@
 
 #include "c39.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //--------------------------------------------------------------------------
 // список регистров
@@ -21,77 +21,110 @@ static const char *const RegNames[] =
 };
 
 static netnode helper;
-char device[MAXSTR] = "";
-static size_t numports = 0;
-static ioport_t *ports = NULL;
+qstring device;
+static ioports_t ports;
 
 #include "../iocommon.cpp"
 
 //----------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-  // A well behaving processor module should call invoke_callbacks()
-  // in his notify() function. If this function returns 0, then
-  // the processor module should process the notification itself
-  // Otherwise the code should be returned to the caller:
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code != 0 )
-    return code;
-
   switch ( msgid )
   {
-    case processor_t::init:
-      inf.mf = 0;
-      inf.s_genflags |= INFFL_LZERO;
+    case processor_t::ev_init:
+      inf.set_gen_lzero(true);
       helper.create("$ C39");
-    default:
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
+    case processor_t::ev_term:
+      ports.clear();
       break;
 
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       //Выводит длг. окно процессоров, и позволяет выбрать нужный, считывает для выбраного
       //процессора информацию из cfg. По считаной информации подписывает порты и регстры
       {
         char cfgfile[QMAXFILE];
         get_cfg_filename(cfgfile, sizeof(cfgfile));
-        if ( choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0) )
-          set_device_name(device, IORESP_ALL);
+        if ( choose_ioport_device(&device, cfgfile, parse_area_line0) )
+          set_device_name(device.c_str(), IORESP_ALL);
       }
       break;
 
-    case processor_t::newprc:
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_PORT);
-      }
+    case processor_t::ev_newprc:
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_PORT);
       break;
 
-    case processor_t::newseg:
+    case processor_t::ev_creating_segm:
       {
         segment_t *s = va_arg(va, segment_t *);
         // Set default value of DS register for all segments
         set_default_dataseg(s->sel);
       }
       break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        C39_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        C39_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        C39_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return C39_ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return C39_emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_data:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        bool analyze_only = va_argi(va, bool);
+        C39_data(*ctx, analyze_only);
+        return 1;
+      }
+
+    default:
+      break;
   }
-  va_end(va);
-  return(1);
+  return 0;
 }
-//-----------------------------------------------------------------------
-//      Checkarg data. Common for all assemblers. Not good.
-//-----------------------------------------------------------------------
-static const char *operdim[15] = // ВСЕГДА И СТРОГО 15
-{
-  "(", ")", "!", "-", "+", "%",
-  "\\", "/", "*", "&", "|", "^", "<<", ">>", NULL
-};
 
 //-----------------------------------------------------------------------
 //      PseudoSam
@@ -104,7 +137,6 @@ static const asm_t pseudosam =
   "Generic C39 assembler",              // название ассемблера
   0,                                    // номер в help'e
   NULL,                                 // автозаголовок
-  NULL,                                 // массив не испоьзующихся инструкций
   "org",                                // Директива ORG
   "end",                                // Директива end
 
@@ -118,9 +150,7 @@ static const asm_t pseudosam =
   ".DATA.W",                             // word directive
   ".DATA.L",                             // dword  (4 bytes)
   NULL,                                 // qword  (8 bytes)
-#if IDP_INTERFACE_VERSION > 37
   NULL,     // oword  (16 bytes)
-#endif
   NULL,                                 // float  (4 bytes)
   NULL,                                 // double (8 bytes)
   NULL,                                 // tbyte  (10/12 bytes)
@@ -129,10 +159,6 @@ static const asm_t pseudosam =
   "db ?",                               // uninited arrays
   ".equ",                               // equ
   NULL,                                 // seg prefix
-  NULL,                              // контроль
-  NULL,                                 // atomprefix
-  operdim,                              // массив операций
-  NULL,                                 // перекодировка в ASCII
   "$",                                  // Текущий IP
   NULL,                                 // Заголовок функции
   NULL,                                 // Конец функции
@@ -141,9 +167,8 @@ static const asm_t pseudosam =
   NULL,                                 // директива extrn
   NULL,                                 // директива comm
   NULL,                                 // получить имя типа
-  ".ALIGN"                              // ключ align
-#if IDP_INTERFACE_VERSION > 37
-  ,'(', ')',     // lbrace, rbrace
+  ".ALIGN",                             // ключ align
+  '(', ')',     // lbrace, rbrace
   NULL,    // mod
   NULL,    // and
   NULL,    // or
@@ -152,7 +177,6 @@ static const asm_t pseudosam =
   NULL,    // shl
   NULL,    // shr
   NULL,    // sizeof
-#endif
 };
 
 // Список ассемблеров
@@ -176,15 +200,16 @@ static const bytes_t retcodes[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_C39,                     // id процессора
-#if IDP_INTERFACE_VERSION > 37
-  PR_USE32|PR_BINMEM|PR_SEGTRANS,      // can use register names for byte names
-  8,                                                    // 8 bits in a byte for code segments
-#else
-  PR_USE32,         // can use register names for byte names
-#endif
-  8,                            // 8 bits in a byte
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_C39,               // id процессора
+                          // flag
+    PR_USE32
+  | PR_BINMEM
+  | PR_SEGTRANS,
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte
 
   shnames,                      // короткие имена процессоров (до 9 символов)
   lnames,                       // длинные имена процессоров
@@ -193,66 +218,18 @@ processor_t LPH =
 
   notify,                       // функция оповещения
 
-  C39_header,                   // создание заголовка текста
-  C39_footer,                   // создание конца текста
-
-  C39_segstart,                 // начало сегмента
-  std_gen_segm_footer,          // конец сегмента - стандартный, без завершения
-
-  NULL,                         // директивы смены сегмента - не используются
-
-  C39_ana,                      // канализатор
-  C39_emu,                      // эмулятор инструкций
-
-  C39_out,                      // текстогенератор
-  C39_outop,                    // тектогенератор операндов
-  C39_data,                     // генератор описания данных
-  NULL,                         // сравнивалка операндов
-  NULL,                         // can have type
-
-  qnumber(RegNames),            // Number of registers
   RegNames,                     // Regsiter names
-  NULL,                         // получить значение регистра
+  qnumber(RegNames),            // Number of registers
 
-  0,                            // число регистровых файлов
-  NULL,                         // имена регистровых файлов
-  NULL,                         // описание регистров
-  NULL,                         // Pointer to CPU registers
   rVcs,rVds,
-#if IDP_INTERFACE_VERSION > 37
   2,                            // size of a segment register
-#endif
   rVcs,rVds,
   NULL,                         // типичные коды начала кодов
   retcodes,                     // коды return'ov
-#if IDP_INTERFACE_VERSION <= 37
-  NULL,                         // возвращает вероятность кодовой последовательности
-#endif
   0,C39_last,                   // первая и последняя инструкции
-  Instructions,                 // массив названия инструкций
-  NULL,                         // проверка на инструкцию дальнего перехода
-#if IDP_INTERFACE_VERSION <= 37
-  NULL,                         // встроенный загрузчик
-#endif
-  NULL,                         // транслятор смещений
+  Instructions,                 // instruc
   3,                            // размер tbyte - 24 бита
-  NULL,                         // преобразователь плавающей точки
   {0,0,0,0},                    // длины данных с плавающей точкой
-  NULL,                         // поиск switch
-  NULL,                         // генератор MAP-файла
-  NULL,                         // строка -> адрес
-  NULL,                         // проверка на смещение в стеке
-  NULL,                         // создание фрейма функции
-#if IDP_INTERFACE_VERSION > 37
-  NULL,                                                 // Get size of function return address in bytes (2/4 by default)
-#endif
-  NULL,                         // создание строки описания стековой переменной
-  NULL,                         // генератор текста для ....
   0,                            // Icode для команды возврата
-  NULL,                         // передача опций в IDP
-  NULL,                                                 // Is the instruction created only for alignment purposes?
-  NULL                          // micro virtual mashine
-#if IDP_INTERFACE_VERSION > 37
-  ,0                                                    // fixup bit's
-#endif
+  NULL,                         // micro virtual mashine
 };

@@ -11,6 +11,7 @@
 //#define DEBUG
 #include "aout.h"
 #include "common.cpp"
+#include "../../module/sparc/notify_codes.hpp"
 
 class aout_t
 {
@@ -31,7 +32,7 @@ public:
   uint32 symoff;
   uint32 stroff;
 
-  bool  msb;
+  bool msb;
 
   aout_t(void)
   {
@@ -47,17 +48,44 @@ public:
 };
 
 //--------------------------------------------------------------------------
+static const char *guess_processor(const exec &ex)
+{
+  if ( N_MACHTYPE(ex) )
+  {
+    switch ( N_MACHTYPE(ex) )
+    {
+      case M_386:
+      case M_386_NETBSD:
+        return "metapc";
+
+      case M_ARM:
+      case M_ARM6_NETBSD:
+        return "arm";
+
+      case M_SPARC:
+        return "sparcb";
+
+      default:
+        break;
+    }
+  }
+  return NULL;
+}
+
+//--------------------------------------------------------------------------
 //
 //      check input file format. if recognized, then return 1
 //      and fill 'fileformatname'.
 //      otherwise return 0
 //
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
-  if ( n > 0 )
-    return(0);
-
-  int i = get_aout_file_format_index(li);
+  exec ex;
+  int i = get_aout_file_format_index(li, &ex);
 #ifdef DEBUG
   msg("getfmtindex=%d\n", i);
 #endif
@@ -74,9 +102,10 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
     "pure executable",                             //n
     "OpenBSD demand-paged executable",             //zo
   };
-  qsnprintf(fileformatname, MAX_FILE_FORMAT_NAME, "a.out (%s)", ff[i-1]);
+  fileformatname->sprnt("a.out (%s)", ff[i-1]);
+  *processor = guess_processor(ex);
 #ifdef DEBUG
-  msg("%s\n", fileformatname);
+  msg("%s\n", fileformatname.c_str());
 #endif
   return f_AOUT;
 }
@@ -84,22 +113,23 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
 //--------------------------------------------------------------------------
 static void create32(
         ushort sel,
-        ea_t startEA,
-        ea_t endEA,
+        ea_t start_ea,
+        ea_t end_ea,
         const char *name,
         const char *classname)
 {
   set_selector(sel, 0);
-  if ( !add_segm(sel, startEA, endEA, name, classname) )
+  if ( !add_segm(sel, start_ea, end_ea, name, classname) )
     loader_failure();
   if ( ph.id == PLFM_386 )
-    set_segm_addressing(getseg(startEA), 1);
+    set_segm_addressing(getseg(start_ea), 1);
 }
 
 //--------------------------------------------------------------------------
-bool ana_hdr(linput_t *li, exec &ex)
+bool ana_hdr(linput_t *li, exec *_ex)
 {
   bool msb = false;
+  exec &ex = *_ex;
   lread(li, &ex, sizeof(ex));
 
   if ( N_BADMAG(ex) )
@@ -108,47 +138,52 @@ bool ana_hdr(linput_t *li, exec &ex)
     msb = true;
     msg("Assuming big-endian...\n");
   }
-  if ( N_MACHTYPE(ex) )
+  const char *proc = guess_processor(ex);
+  if ( proc != NULL )
   {
-    switch ( N_MACHTYPE(ex) )
-    {
-      case M_386:
-      case M_386_NETBSD:
-        if ( ph.id != PLFM_386 )
-          set_processor_type("80386r", SETPROC_ALL|SETPROC_FATAL);
-        break;
-
-      case M_ARM:
-      case M_ARM6_NETBSD:
-        if ( ph.id != PLFM_ARM )
-          set_processor_type("arm", SETPROC_ALL|SETPROC_FATAL);
-        break;
-
-      case M_SPARC:
-        if ( ph.id != PLFM_SPARC )
-          set_processor_type("sparcb", SETPROC_ALL|SETPROC_FATAL);
-        // set SPARC_V8 parameter
-        ph.notify(processor_t::idp_notify(processor_t::loader+1), true);
-        break;
-
-      default:
-        loader_failure("Unsupported or unknown machine type");
-    }
+    set_processor_type(proc, SETPROC_LOADER);
+    if ( N_MACHTYPE(ex) == M_SPARC )
+      sparc_module_t::set_v8(true); // set SPARC_V8 parameter
   }
-  else if ( ph.id != PLFM_386 )
+  else
   {
-    warning("Missing machine type. Continue?");
+    if ( ask_yn(ASKBTN_YES,
+                "HIDECANCEL\n"
+                "AUTOHIDE REGISTRY\n"
+                "Missing machine type. Continue?") <= ASKBTN_NO )
+    {
+      loader_failure();
+    }
+    if ( ph.id == -1 )
+      set_processor_type(inf.procname, SETPROC_LOADER);
   }
   return msb;
 }
 
 //--------------------------------------------------------------------------
-void do_fixup(uint32 where, uint32 delta, uint32 target, int type, int external)
+inline fixup_type_t get_hi22_reltype()
 {
-  fixup_data_t fd;
-  fd.type = (uchar)type;
+  static fixup_type_t hi22_reltype = FIXUP_CUSTOM;
+  if ( hi22_reltype == FIXUP_CUSTOM )
+    hi22_reltype = find_custom_fixup("HI22");
+  return hi22_reltype;
+}
+
+//--------------------------------------------------------------------------
+inline fixup_type_t get_lo10_reltype()
+{
+  static fixup_type_t lo10_reltype = FIXUP_CUSTOM;
+  if ( lo10_reltype == FIXUP_CUSTOM )
+    lo10_reltype = find_custom_fixup("LO10");
+  return lo10_reltype;
+}
+
+//--------------------------------------------------------------------------
+static void do_fixup(uint32 where, uint32 delta, uint32 target, fixup_type_t type, int external)
+{
+  fixup_data_t fd(type);
   if ( external )
-    fd.type |= FIXUP_EXTDEF;
+    fd.set_extdef();
 
   fd.displacement = delta;
   if ( external )
@@ -157,15 +192,14 @@ void do_fixup(uint32 where, uint32 delta, uint32 target, int type, int external)
   segment_t *s = getseg(target);
   if ( s != NULL )
   {
-    fd.sel = (ushort)s->sel;
+    fd.sel = s->sel;
     fd.off = target - get_segm_base(s);
   }
   else
   {
-    fd.sel = 0;
     fd.off = target;
   }
-  set_fixup(where, &fd);
+  fd.set(where);
 }
 
 #define S_MASK(x) ((1 << (x)) - 1)
@@ -206,7 +240,7 @@ static void do_relocation_sparc(linput_t *li, const aout_t &ctx, uint32 off, uin
 #ifdef DEBUG
     if ( rel->r_address >= 0x80C8 && rel->r_address <= 0x8200 )
     msg("%08X: index=0x%06X extern=%d type=%02X addend=0x%08X\n",
-        rel->r_address, rel->r_index, rel->r_extern, rel->r_type, rel->r_addend, ph.high_fixup_bits);
+        rel->r_address, rel->r_index, rel->r_extern, rel->r_type, rel->r_addend);
 #endif
   }
 
@@ -215,8 +249,8 @@ static void do_relocation_sparc(linput_t *li, const aout_t &ctx, uint32 off, uin
   for ( reloc_info_sparc *rel = reltab; rel < reltab + relcount; rel++ )
   {
     uint32 where = base + rel->r_address;
-    uint32 instr = get_long(where);
-    int type = FIXUP_OFF32;
+    uint32 instr = get_dword(where);
+    fixup_type_t type = FIXUP_OFF32;
     uint32 target = where;
     uint32 value;
     uint32 merged;
@@ -285,13 +319,13 @@ static void do_relocation_sparc(linput_t *li, const aout_t &ctx, uint32 off, uin
         target += value;
         merged = (instr & ~S_MASK(22)) | ((target >> 10) & S_MASK(22));
         delta = 0; //-(target & S_MASK(10));
-        type = FIXUP_VHIGH;
+        type = get_hi22_reltype();
         break;
       case SPARC_RELOC_LO10:
         value = (instr & S_MASK(10));
         target += value;
         merged = (instr & ~S_MASK(10)) | ((target) & S_MASK(10));
-        type = FIXUP_VLOW;
+        type = get_lo10_reltype();
         break;
       default:
         msg("Unsupported sparc relocation type 0x%02X, ignored\n", rel->r_type);
@@ -303,7 +337,7 @@ static void do_relocation_sparc(linput_t *li, const aout_t &ctx, uint32 off, uin
 //    msg("%08X: %08X -> %08X (%08X -> %08X)\n", where, instr, merged, value, target);
 #endif
 
-    put_long(where, merged);
+    put_dword(where, merged);
     do_fixup(where, rel->r_extern ? rel->r_addend : delta, target, type, rel->r_extern);
   }
 
@@ -392,7 +426,7 @@ void load_syms(linput_t *li, aout_t &ctx)
     {
       sym->n_value = extern_base + (i_extern * 4);
       if ( getseg(sym->n_value) )
-        put_long(sym->n_value, 0);
+        put_dword(sym->n_value, 0);
       i_extern++;
     }
 
@@ -401,7 +435,7 @@ void load_syms(linput_t *li, aout_t &ctx)
       if ( sym->n_un.n_strx < tabsize )
       {
          set_name(sym->n_value, strtab + sym->n_un.n_strx,
-                  (sym->n_type & N_EXT ? SN_PUBLIC : SN_NON_PUBLIC)|SN_NOWARN);
+                  (sym->n_type & N_EXT ? SN_PUBLIC : SN_NON_PUBLIC)|SN_NOCHECK|SN_NOWARN|SN_IDBENC);
       }
       else
       {
@@ -450,7 +484,7 @@ static void handle_ld_info(linput_t *li, int diroff, int base)
     char name[MAXSTR];
     qlgetz(li, ldinfo.strings + sym.nameoff - base, name, sizeof(name));
 
-    set_name(sym.addr, name);
+    set_name(sym.addr, name, SN_IDBENC);
     if ( (sym.flags & (AOUT_LD_FUNC|AOUT_LD_DEF)) == AOUT_LD_FUNC )
     { // imported function
       put_byte(sym.addr, 0xC3); // return
@@ -468,7 +502,7 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
 {
   aout_t ctx;
   exec &ex = ctx.ex;
-  ctx.msb = ana_hdr(li, ex);
+  ctx.msb = ana_hdr(li, &ex);
   ctx.symtab = NULL;
   ctx.symcount = 0;
   ctx.strtab = NULL;
@@ -482,48 +516,50 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
 
   switch ( ph.id )
   {
-  case PLFM_SPARC:
-    txtoff = N_TXTOFF_SPARC(ex);
-    txtadr = N_TXTADDR_SPARC(ex);
-    ctx.treloff = N_TRELOFF_SPARC(ex);
-    ctx.dreloff = N_DRELOFF_SPARC(ex);
-    ctx.symoff  = N_SYMOFF_SPARC(ex);
-    ctx.stroff  = N_STROFF_SPARC(ex);
-    break;
+    case PLFM_SPARC:
+      txtoff = N_TXTOFF_SPARC(ex);
+      txtadr = N_TXTADDR_SPARC(ex);
+      ctx.treloff = N_TRELOFF_SPARC(ex);
+      ctx.dreloff = N_DRELOFF_SPARC(ex);
+      ctx.symoff  = N_SYMOFF_SPARC(ex);
+      ctx.stroff  = N_STROFF_SPARC(ex);
+      break;
 
-  case PLFM_ARM:
-    txtadr = N_TXTADDR_ARM(ex);
-    break;
+    case PLFM_ARM:
+      txtadr = N_TXTADDR_ARM(ex);
+      break;
 
-  default:
-    txtadr = N_TXTADDR(ex);
-
-    switch ( N_MAGIC(ex) ) {
-//    case NMAGIC:
-//    case CMAGIC:
-      default:
-        loader_failure("This image type is not supported yet");
-        break;
-
-    case ZMAGIC:
-      if ( qlsize(li) < ex.a_text + ex.a_data + N_SYMSIZE(ex) + txtoff )
+    default:
+      txtadr = N_TXTADDR(ex);
+      switch ( N_MAGIC(ex) )
       {
-        txtoff = 0;
-        txtadr = 0x1000;
-      }
-      else
-        if ( txtoff < 512)
-          loader_failure("Size of demand page < size of block");
-    case QMAGIC:
-      if ( ex.a_text & 0xFFF || ex.a_data & 0xFFF )
-                                  loader_failure("Executable is not page aligned");
-      break;
+//      case NMAGIC:
+//      case CMAGIC:
+        default:
+          loader_failure("This image type is not supported yet");
+          break;
 
-    case OMAGIC:
-      txtoff = sizeof(ex);
+        case ZMAGIC:
+          if ( qlsize(li) < ex.a_text + ex.a_data + N_SYMSIZE(ex) + txtoff )
+          {
+            txtoff = 0;
+            txtadr = 0x1000;
+          }
+          else if ( txtoff < 512 )
+          {
+            loader_failure("Size of demand page < size of block");
+          }
+          // fallthrough
+        case QMAGIC:
+          if ( ex.a_text & 0xFFF || ex.a_data & 0xFFF )
+            loader_failure("Executable is not page aligned");
+          break;
+
+        case OMAGIC:
+          txtoff = sizeof(ex);
+          break;
+      }
       break;
-    }
-    break;
   }
 
   inf.baseaddr = 0;
@@ -539,7 +575,7 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
     {
       create32(1, base, top, NAME_CODE, CLASS_CODE);
       inf.start_cs = 1;
-      inf.startIP  = ex.a_entry;
+      inf.start_ip = ex.a_entry;
       ctx.text = base;
     }
     if ( ex.a_data )
@@ -606,5 +642,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

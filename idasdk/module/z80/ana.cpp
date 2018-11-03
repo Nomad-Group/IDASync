@@ -10,10 +10,10 @@
 #include "i5.hpp"
 
 //----------------------------------------------------------------------
-inline void GetImm(op_t &x)
+inline void GetImm(insn_t &insn, op_t &x)
 {
   x.type = o_imm;
-  x.value = ua_next_byte();
+  x.value = insn.get_next_byte();
 }
 
 //------------------------------------------------------------------------
@@ -24,30 +24,30 @@ inline void op_c(op_t &x)
 }
 
 //------------------------------------------------------------------------
-static void op_ad(op_t &x)
+static void op_ad(insn_t &insn, op_t &x)
 {
   x.type = o_near;
-  x.addr = ua_next_word();
+  x.addr = insn.get_next_word();
 }
 
 static void op_ss(op_t &x);
 static void op_dd(op_t &x);
 static void op_a(op_t &x);
-static void op_e(op_t &x);
-static void op_nn(op_t &x);
-static void op_ad(op_t &x);
-static void op_n(op_t &x);
-static void op_mm(op_t &x);
+static void op_e(insn_t &insn, op_t &x);
+static void op_nn(insn_t &insn, op_t &x);
+static void op_ad(insn_t &insn, op_t &x);
+static void op_n(insn_t &insn, op_t &x);
+static void op_mm(insn_t &insn, op_t &x);
 static void op_r2(op_t &x);
 static void op_r1(op_t &x);
-static void z80_ixcommands(bool _isx);
-static void z80_misc(void);
-static bool z380_ED(void);
+static void z80_ixcommands(insn_t &insn, bool _isx);
+static void z80_misc(insn_t &insn);
+static bool z380_ED(insn_t &insn);
 
 static int code;
 
-static const uint16 W [] =    { I5_add,I5_adc,I5_sub,I5_sbb,I5_ana,I5_xra,I5_ora,I5_cmp };
-static const uint16 Wi[] =    { I5_adi,I5_aci,I5_sui,I5_sbi,I5_ani,I5_xri,I5_ori,I5_cpi };
+static const uint16 W    [] = { I5_add,I5_adc,I5_sub,I5_sbb,I5_ana,I5_xra,I5_ora,I5_cmp };
+static const uint16 Wi   [] = { I5_adi,I5_aci,I5_sui,I5_sbi,I5_ani,I5_xri,I5_ori,I5_cpi };
 static const uint16 calls[] = { I5_cnz,I5_cz, I5_cnc,I5_cc, I5_cpo,I5_cpe,I5_cp, I5_cm  };
 static const uint16 jumps[] = { I5_jnz,I5_jz, I5_jnc,I5_jc, I5_jpo,I5_jpe,I5_jp, I5_jm  };
 static const uint16 rets [] = { I5_rnz,I5_rz, I5_rnc,I5_rc, I5_rpo,I5_rpe,I5_rp, I5_rm  };
@@ -56,281 +56,296 @@ static const uint16 CBrols[]= { Z80_rlc,Z80_rrc,Z80_rl,Z80_rr,Z80_sla,Z80_sra,Z8
 static const uint16 Zrols[] = { Z80_rlca,Z80_rrca,Z80_rla,Z80_rra,I5_daa,Z80_cpl,Z80_scf,Z80_ccf };
 
 //----------------------------------------------------------------------
-static void ConvertToFunny(void)
+static void ConvertToFunny(insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case I5_mov:
-      cmd.Op1.set_shown();
-      cmd.Op2.set_shown();
-      if ( cmd.Op1.type == o_reg && cmd.Op2.type == o_mem )
+      insn.Op1.set_shown();
+      insn.Op2.set_shown();
+      if ( insn.Op1.type == o_reg && insn.Op2.type == o_mem )
       {
-        switch ( cmd.Op1.reg )
+        switch ( insn.Op1.reg )
         {
           case R_bc:
-            cmd.itype = A80_lbcd;
-            cmd.Op1.clr_shown();
+            insn.itype = A80_lbcd;
+            insn.Op1.clr_shown();
             break;
           case R_de:
-            cmd.itype = A80_lded;
-            cmd.Op1.clr_shown();
+            insn.itype = A80_lded;
+            insn.Op1.clr_shown();
             break;
           case R_sp:
-            cmd.itype = A80_lspd;
-            cmd.Op1.clr_shown();
+            insn.itype = A80_lspd;
+            insn.Op1.clr_shown();
             break;
           case R_ix:
-            cmd.itype = A80_lixd;
-            cmd.Op1.clr_shown();
+            insn.itype = A80_lixd;
+            insn.Op1.clr_shown();
             break;
           case R_iy:
-            cmd.itype = A80_liyd;
-            cmd.Op1.clr_shown();
+            insn.itype = A80_liyd;
+            insn.Op1.clr_shown();
             break;
         }
       }
-      if ( cmd.Op1.type == o_mem && cmd.Op2.type == o_reg )
+      if ( insn.Op1.type == o_mem && insn.Op2.type == o_reg )
       {
-        switch ( cmd.Op2.reg )
+        switch ( insn.Op2.reg )
         {
           case R_bc:
-            cmd.itype = A80_sbcd;
-            cmd.Op2.clr_shown();
+            insn.itype = A80_sbcd;
+            insn.Op2.clr_shown();
             break;
           case R_de:
-            cmd.itype = A80_sded;
-            cmd.Op2.clr_shown();
+            insn.itype = A80_sded;
+            insn.Op2.clr_shown();
             break;
           case R_sp:
-            cmd.itype = A80_sspd;
-            cmd.Op2.clr_shown();
+            insn.itype = A80_sspd;
+            insn.Op2.clr_shown();
             break;
           case R_ix:
-            cmd.itype = A80_sixd;
-            cmd.Op2.clr_shown();
+            insn.itype = A80_sixd;
+            insn.Op2.clr_shown();
             break;
           case R_iy:
-            cmd.itype = A80_siyd;
-            cmd.Op2.clr_shown();
+            insn.itype = A80_siyd;
+            insn.Op2.clr_shown();
             break;
         }
       }
-      if ( cmd.Op1.type == o_reg && cmd.Op2.type == o_reg )
+      if ( insn.Op1.type == o_reg && insn.Op2.type == o_reg )
       {
-        switch ( cmd.Op1.reg )
+        switch ( insn.Op1.reg )
         {
           case R_sp:
-            if ( cmd.Op2.reg == R_ix )
+            if ( insn.Op2.reg == R_ix )
             {
-              cmd.Op1.clr_shown();
-              cmd.Op2.clr_shown();
-              cmd.itype = A80_spix;
+              insn.Op1.clr_shown();
+              insn.Op2.clr_shown();
+              insn.itype = A80_spix;
             }
-            if ( cmd.Op2.reg == R_iy )
+            if ( insn.Op2.reg == R_iy )
             {
-              cmd.Op1.clr_shown();
-              cmd.Op2.clr_shown();
-              cmd.itype = A80_spiy;
+              insn.Op1.clr_shown();
+              insn.Op2.clr_shown();
+              insn.itype = A80_spiy;
             }
             break;
           case R_r:
-            cmd.itype = A80_mvra;
-            cmd.Op1.clr_shown();
-            cmd.Op2.clr_shown();
+            insn.itype = A80_mvra;
+            insn.Op1.clr_shown();
+            insn.Op2.clr_shown();
             break;
           case R_i:
-            cmd.itype = A80_mvia;
-            cmd.Op1.clr_shown();
-            cmd.Op2.clr_shown();
+            insn.itype = A80_mvia;
+            insn.Op1.clr_shown();
+            insn.Op2.clr_shown();
             break;
           case R_a:
-            if ( cmd.Op2.reg == R_r )
+            if ( insn.Op2.reg == R_r )
             {
-              cmd.itype = A80_mvar;
-              cmd.Op1.clr_shown();
-              cmd.Op2.clr_shown();
+              insn.itype = A80_mvar;
+              insn.Op1.clr_shown();
+              insn.Op2.clr_shown();
             }
-            if ( cmd.Op2.reg == R_i )
+            if ( insn.Op2.reg == R_i )
             {
-              cmd.itype = A80_mvai;
-              cmd.Op1.clr_shown();
-              cmd.Op2.clr_shown();
+              insn.itype = A80_mvai;
+              insn.Op1.clr_shown();
+              insn.Op2.clr_shown();
             }
             break;
         }
       }
       break;    /* mov */
     case Z80_jp:
-      if ( cmd.Op2.type == o_phrase && cmd.Op2.phrase == R_ix )
+      if ( insn.Op2.type == o_phrase && insn.Op2.phrase == R_ix )
       {
-        cmd.itype = A80_pcix;
-        cmd.Op2.clr_shown();
+        insn.itype = A80_pcix;
+        insn.Op2.clr_shown();
         break;
       }
-      if ( cmd.Op2.type == o_phrase && cmd.Op2.phrase == R_iy )
+      if ( insn.Op2.type == o_phrase && insn.Op2.phrase == R_iy )
       {
-        cmd.itype = A80_pciy;
-        cmd.Op2.clr_shown();
+        insn.itype = A80_pciy;
+        insn.Op2.clr_shown();
         break;
       }
       break;    /* jp */
     case Z80_ex:
-      cmd.Op1.clr_shown();
-      cmd.Op2.clr_shown();
-      if ( cmd.Op2.reg == R_ix )
-        cmd.itype = A80_xtix;
-      if ( cmd.Op2.reg == R_iy )
-        cmd.itype = A80_xtiy;
+      insn.Op1.clr_shown();
+      insn.Op2.clr_shown();
+      if ( insn.Op2.reg == R_ix )
+        insn.itype = A80_xtix;
+      if ( insn.Op2.reg == R_iy )
+        insn.itype = A80_xtiy;
       break;    /* ex */
     case I5_in:
-      if ( cmd.Op2.type == o_phrase && cmd.Op2.reg == R_c )
+      if ( insn.Op2.type == o_phrase && insn.Op2.reg == R_c )
       {
-        cmd.itype = Z80_inp;
-        cmd.Op2.clr_shown();
+        insn.itype = Z80_inp;
+        insn.Op2.clr_shown();
       }
       break;
     case I5_out:
-      if ( cmd.Op1.type == o_phrase && cmd.Op1.reg == R_c )
+      if ( insn.Op1.type == o_phrase && insn.Op1.reg == R_c )
       {
-        cmd.itype = Z80_outp;
-        cmd.Op1.clr_shown();
+        insn.itype = Z80_outp;
+        insn.Op1.clr_shown();
       }
       break;
     case Z80_cpl:
-      cmd.itype = I5_cma;
+      insn.itype = I5_cma;
       break;
     case Z80_scf:
-      cmd.itype = I5_stc;
+      insn.itype = I5_stc;
       break;
     case Z80_ccf:
-      cmd.itype = I5_cmc;
+      insn.itype = I5_cmc;
       break;
     case I5_add:
-      if ( cmd.Op1.type == o_reg && cmd.Op1.reg == R_ix )
+      if ( insn.Op1.type == o_reg && insn.Op1.reg == R_ix )
       {
-        cmd.itype = A80_addix;
-        cmd.Op1.clr_shown();
-        if ( cmd.Op2.type == o_reg && cmd.Op2.reg == R_ix )
-          cmd.Op2.reg = R_hl;
+        insn.itype = A80_addix;
+        insn.Op1.clr_shown();
+        if ( insn.Op2.type == o_reg && insn.Op2.reg == R_ix )
+          insn.Op2.reg = R_hl;
         break;
       }
-      if ( cmd.Op1.type == o_reg && cmd.Op1.reg == R_iy )
+      if ( insn.Op1.type == o_reg && insn.Op1.reg == R_iy )
       {
-        cmd.itype = A80_addiy;
-        cmd.Op1.clr_shown();
-        if ( cmd.Op2.type == o_reg && cmd.Op2.reg == R_iy )
-          cmd.Op2.reg = R_hl;
+        insn.itype = A80_addiy;
+        insn.Op1.clr_shown();
+        if ( insn.Op2.type == o_reg && insn.Op2.reg == R_iy )
+          insn.Op2.reg = R_hl;
         break;
       }
       break;
     case I5_adc:
-      if ( cmd.Op1.dtyp == dt_word && cmd.Op1.type == o_reg )
+      if ( insn.Op1.dtype == dt_word && insn.Op1.type == o_reg )
       {
-        cmd.itype = A80_addc;
-        cmd.Op1.clr_shown();
-        if ( cmd.Op1.reg == R_ix )
-          cmd.itype = A80_addcix;
-        if ( cmd.Op1.reg == R_iy )
-          cmd.itype = A80_addciy;
-        if ( cmd.Op2.type == o_reg && cmd.Op1.reg == cmd.Op2.reg )
-          cmd.Op2.reg = R_hl;
+        insn.itype = A80_addc;
+        insn.Op1.clr_shown();
+        if ( insn.Op1.reg == R_ix )
+          insn.itype = A80_addcix;
+        if ( insn.Op1.reg == R_iy )
+          insn.itype = A80_addciy;
+        if ( insn.Op2.type == o_reg && insn.Op1.reg == insn.Op2.reg )
+          insn.Op2.reg = R_hl;
       }
       break;
     case Z80_sbc:
-      if ( cmd.Op1.dtyp == dt_word && cmd.Op1.type == o_reg )
+      if ( insn.Op1.dtype == dt_word && insn.Op1.type == o_reg )
       {
-        cmd.itype = A80_subc;
-        cmd.Op1.clr_shown();
-        if ( cmd.Op1.reg == R_ix )
-          cmd.itype = A80_subcix;
-        if ( cmd.Op1.reg == R_iy )
-          cmd.itype = A80_subciy;
-        if ( cmd.Op2.type == o_reg && cmd.Op1.reg == cmd.Op2.reg )
-          cmd.Op2.reg = R_hl;
+        insn.itype = A80_subc;
+        insn.Op1.clr_shown();
+        if ( insn.Op1.reg == R_ix )
+          insn.itype = A80_subcix;
+        if ( insn.Op1.reg == R_iy )
+          insn.itype = A80_subciy;
+        if ( insn.Op2.type == o_reg && insn.Op1.reg == insn.Op2.reg )
+          insn.Op2.reg = R_hl;
       }
       break;
     case Z80_jr:
-      cmd.Op1.clr_shown();
-      switch ( cmd.Op1.Cond )
+      insn.Op1.clr_shown();
+      switch ( insn.Op1.Cond )
       {
-        case oc_c:      cmd.itype = A80_jrc;    break;
-        case oc_nc:     cmd.itype = A80_jrnc;   break;
-        case oc_z:      cmd.itype = A80_jrz;    break;
-        case oc_nz:     cmd.itype = A80_jrnz;   break;
+        case oc_c:      insn.itype = A80_jrc;    break;
+        case oc_nc:     insn.itype = A80_jrnc;   break;
+        case oc_z:      insn.itype = A80_jrz;    break;
+        case oc_nz:     insn.itype = A80_jrnz;   break;
       }
       break;
-    case Z80_rrca:      cmd.itype = I5_rrc;     break;
-    case Z80_rlca:      cmd.itype = I5_rlc;     break;
-    case Z80_rla:       cmd.itype = I5_ral;     break;
-    case Z80_rl:        cmd.itype = I5_ral;     break;
-    case Z80_rra:       cmd.itype = I5_rar;     break;
-    case Z80_rr:        cmd.itype = I5_rar;     break;
-    case Z80_cpi:       cmd.itype = A80_cmpi;   break;
-    case Z80_cpd:       cmd.itype = A80_cmpd;   break;
-    case Z80_outi:      cmd.itype = A80_oti;    break;
-    case Z80_outd:      cmd.itype = A80_otd;    break;
-    case Z80_inc:       cmd.itype = I5_inr;     break;
-    case Z80_dec:       cmd.itype = I5_dcr;     break;
+    case Z80_rrca:      insn.itype = I5_rrc;     break;
+    case Z80_rlca:      insn.itype = I5_rlc;     break;
+    case Z80_rla:       insn.itype = I5_ral;     break;
+    case Z80_rl:        insn.itype = I5_ral;     break;
+    case Z80_rra:       insn.itype = I5_rar;     break;
+    case Z80_rr:        insn.itype = I5_rar;     break;
+    case Z80_cpi:       insn.itype = A80_cmpi;   break;
+    case Z80_cpd:       insn.itype = A80_cmpd;   break;
+    case Z80_outi:      insn.itype = A80_oti;    break;
+    case Z80_outd:      insn.itype = A80_otd;    break;
+    case Z80_inc:       insn.itype = I5_inr;     break;
+    case Z80_dec:       insn.itype = I5_dcr;     break;
     case Z80_im:
-      if ( cmd.Op1.value == 0 )
-        cmd.itype = A80_im0;
-      else if ( cmd.Op1.value == 1 )
-        cmd.itype = A80_im1;
+      if ( insn.Op1.value == 0 )
+        insn.itype = A80_im0;
+      else if ( insn.Op1.value == 1 )
+        insn.itype = A80_im1;
       else
-        cmd.itype = A80_im2;
-      cmd.Op1.clr_shown();
+        insn.itype = A80_im2;
+      insn.Op1.clr_shown();
       break;
   }
 }
 
 //----------------------------------------------------------------------
-static void ConvertToZ80(void)
+static void ConvertToZ80(insn_t &insn)
 {
   uint16 cc;
-  if ( cmd.itype < Z80_and )
+  if ( insn.itype < Z80_and )
   {
-    cmd.Op1.set_shown();
-    cmd.Op2.set_shown();
+    insn.Op1.set_shown();
+    insn.Op2.set_shown();
   }
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
-    case I5_aci:        cmd.itype = I5_adc;     break;
+    case I5_aci:
+      insn.itype = I5_adc;
+      break;
     case I5_adi:
-    case I5_dad:        cmd.itype = I5_add;     break;
+    case I5_dad:
+      insn.itype = I5_add;
+      break;
     case I5_cmp:
     case I5_cpi:
-      cmd.itype = Z80_cp;
-      if ( !isZ380() ) cmd.Op1.clr_shown();
+      insn.itype = Z80_cp;
+      if ( !isZ380() )
+        insn.Op1.clr_shown();
       break;
     case I5_ana:
     case I5_ani:
-      cmd.itype = Z80_and;
-      if ( !isZ380() ) cmd.Op1.clr_shown();
+      insn.itype = Z80_and;
+      if ( !isZ380() )
+        insn.Op1.clr_shown();
       break;
     case I5_ora:
     case I5_ori:
-      cmd.itype = Z80_or;
-      if ( !isZ380() ) cmd.Op1.clr_shown();
+      insn.itype = Z80_or;
+      if ( !isZ380() )
+        insn.Op1.clr_shown();
       break;
     case I5_xra:
     case I5_xri:
-      cmd.itype = Z80_xor;
-      if ( !isZ380() ) cmd.Op1.clr_shown();
+      insn.itype = Z80_xor;
+      if ( !isZ380() )
+        insn.Op1.clr_shown();
       break;
     case I5_sbi:
     case I5_sbb:
-      cmd.itype = Z80_sbc;
+      insn.itype = Z80_sbc;
       break;
     case I5_sui:
     case I5_sub:
-      cmd.itype = I5_sub;
-      if ( !isZ380() ) cmd.Op1.clr_shown();
+      insn.itype = I5_sub;
+      if ( !isZ380() )
+        insn.Op1.clr_shown();
       break;
     case I5_dcr:
-    case I5_dcx:        cmd.itype = Z80_dec;    break;
+    case I5_dcx:
+      insn.itype = Z80_dec;
+      break;
     case I5_inr:
-    case I5_inx:        cmd.itype = Z80_inc;    break;
-    case I5_halt:       cmd.itype = Z80_halt;   break;
+    case I5_inx:
+      insn.itype = Z80_inc;
+      break;
+    case I5_halt:
+     insn.itype = Z80_halt;
+     break;
     case I5_sphl:
     case I5_mov:
     case I5_mvi:
@@ -340,12 +355,16 @@ static void ConvertToZ80(void)
     case I5_shld:
     case I5_sta:
     case I5_stax:
-    case I5_lda:        cmd.itype = Z80_ld;     break;
+    case I5_lda:
+      insn.itype = Z80_ld;
+      break;
     case I5_xchg:
-    case I5_xthl:       cmd.itype = Z80_ex;     break;
+    case I5_xthl:
+      insn.itype = Z80_ex;
+      break;
     case I5_pchl:
-      cmd.Op1.type = o_phrase;
-      cmd.Op1.reg = R_hl;
+      insn.Op1.type = o_phrase;
+      insn.Op1.reg = R_hl;
       cc = oc_not;
       goto zjump;
 
@@ -378,28 +397,28 @@ static void ConvertToZ80(void)
     case I5_rm:         cc = oc_m;  goto zret;
 
 zret:
-      cmd.itype = Z80_ret;
+      insn.itype = Z80_ret;
       goto zcc;
 zjump:
-      cmd.itype = Z80_jp;
+      insn.itype = Z80_jp;
       goto zcc;
 zcall:
-      cmd.itype = Z80_call;
+      insn.itype = Z80_call;
       goto zcc;
 zcc:
-      cmd.Op2 = cmd.Op1;
-      cmd.Op2.n = 1;
-      cmd.Op1.type = o_cond;
-      cmd.Op1.Cond = cc;
+      insn.Op2 = insn.Op1;
+      insn.Op2.n = 1;
+      insn.Op1.type = o_cond;
+      insn.Op1.Cond = cc;
       break;
 
   }
 }
 
 //----------------------------------------------------------------------
-static bool is_gameboy_insn(void)
+static bool is_gameboy_insn(const insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case Z80_adc:
     case Z80_add:
@@ -455,21 +474,23 @@ static bool is_gameboy_insn(void)
 }
 
 //----------------------------------------------------------------------
-static void swap_operands(void)
+static void swap_operands(insn_t &insn)
 {
-  op_t op = cmd.Op1;
-  cmd.Op1 = cmd.Op2;
-  cmd.Op2 = op;
+  op_t op = insn.Op1;
+  insn.Op1 = insn.Op2;
+  insn.Op2 = op;
 }
 
 //----------------------------------------------------------------------
-int idaapi i5_ana(void)
+int idaapi i5_ana(insn_t *_insn)
 {
-  cmd.Op1.dtyp = dt_byte;
-  cmd.Op2.dtyp = dt_byte;
-  cmd.itype = I5_null;
+  insn_t &insn = *_insn;
 
-  code = ua_next_byte();
+  insn.Op1.dtype = dt_byte;
+  insn.Op2.dtype = dt_byte;
+  insn.itype = I5_null;
+
+  code = insn.get_next_byte();
 
   switch ( code & 0xC0 )
   {
@@ -483,44 +504,45 @@ int idaapi i5_ana(void)
             switch ( sub )
             {
               case 0:
-                cmd.itype = I5_nop;
+                insn.itype = I5_nop;
                 break;
               case 1:                   // 08
                 if ( isGB() )           // 08 bb aa LD ($aabb),SP
                 {
-                  cmd.itype = Z80_ld;
-                  op_mm(cmd.Op1);
-                  cmd.Op1.dtyp = dt_word;
-                  cmd.Op2.type = o_reg;
-                  cmd.Op2.reg = R_sp;
+                  insn.itype = Z80_ld;
+                  op_mm(insn, insn.Op1);
+                  insn.Op1.dtype = dt_word;
+                  insn.Op2.type = o_reg;
+                  insn.Op2.reg = R_sp;
                 }
                 else if ( isZ80() )
                 {
-                  cmd.itype = Z80_ex;
-                  cmd.Op1.type  = o_reg;
-                  cmd.Op1.reg = R_af;
-                  cmd.Op2.type  = o_reg;
-                  cmd.Op2.reg = R_af2;
+                  insn.itype = Z80_ex;
+                  insn.Op1.type = o_reg;
+                  insn.Op1.reg  = R_af;
+                  insn.Op2.type = o_reg;
+                  insn.Op2.reg  = R_af2;
                 }
                 else
                 {
-                  cmd.itype = I5_dsub;  // undoc
+                  insn.itype = I5_dsub;  // undoc
                 }
                 break;
               case 2:                   // 10
                 if ( isGB() )           // 10 00 STOP
                 {
-                  if ( ua_next_byte() ) return 0;
-                  cmd.itype = GB_stop;
+                  if ( insn.get_next_byte() )
+                    return 0;
+                  insn.itype = GB_stop;
                 }
                 else if ( isZ80() )
                 {
-                  cmd.itype = Z80_djnz;
-                  op_e(cmd.Op1);
+                  insn.itype = Z80_djnz;
+                  op_e(insn, insn.Op1);
                 }
                 else
                 {
-                  cmd.itype = I5_arhl;  // undoc
+                  insn.itype = I5_arhl;  // undoc
                 }
                 break;
               case 3:                   // 18
@@ -528,167 +550,171 @@ int idaapi i5_ana(void)
                 {
 Z80_COMMON:
                   static const uint16 conds[] = { 0,1,2,oc_not,oc_nz,oc_z,oc_nc,oc_c };
-                  cmd.Op1.Cond = conds[sub];
-                  cmd.itype = Z80_jr;
-                  cmd.Op1.type = o_cond;
-                  op_e(cmd.Op2);
+                  insn.Op1.Cond = conds[sub];
+                  insn.itype = Z80_jr;
+                  insn.Op1.type = o_cond;
+                  op_e(insn, insn.Op2);
                   break;
                 }
-                cmd.itype = I5_rdel;  // undoc
+                insn.itype = I5_rdel;  // undoc
                 break;
               case 4:                   // 20
-                if ( isZ80() ) goto Z80_COMMON;
-                cmd.itype = I5_rim;
+                if ( isZ80() )
+                  goto Z80_COMMON;
+                insn.itype = I5_rim;
                 break;
               case 5:                   // 28
-                if ( isZ80() ) goto Z80_COMMON;
-                cmd.itype = I5_ldhi;  // undoc
-                GetImm(cmd.Op1);
+                if ( isZ80() )
+                  goto Z80_COMMON;
+                insn.itype = I5_ldhi;  // undoc
+                GetImm(insn, insn.Op1);
                 break;
               case 6:                   // 30
-                if ( isZ80() ) goto Z80_COMMON;
-                cmd.itype = I5_sim;
+                if ( isZ80() )
+                  goto Z80_COMMON;
+                insn.itype = I5_sim;
                 break;
               case 7:                   // 38
-                if ( isZ80() ) goto Z80_COMMON;
-                cmd.itype = I5_ldsi;
-                GetImm(cmd.Op1);
+                if ( isZ80() )
+                  goto Z80_COMMON;
+                insn.itype = I5_ldsi;
+                GetImm(insn, insn.Op1);
                 break;
             }
           }
           break;
         case 1:
-          cmd.itype = I5_lxi;
-          op_ss(cmd.Op1);
-          op_nn(cmd.Op2);
+          insn.itype = I5_lxi;
+          op_ss(insn.Op1);
+          op_nn(insn, insn.Op2);
           break;
 
         case 9:
-          cmd.itype = I5_dad;
-          cmd.Op1.reg = R_hl;
-          cmd.Op1.dtyp = dt_word;
-          cmd.Op1.type = o_reg;
-          cmd.Op1.clr_shown();
-          op_ss(cmd.Op2);
+          insn.itype = I5_dad;
+          insn.Op1.reg = R_hl;
+          insn.Op1.dtype = dt_word;
+          insn.Op1.type = o_reg;
+          insn.Op1.clr_shown();
+          op_ss(insn.Op2);
           break;
         case 0xA:
           if ( (code & 0x20) == 0 )
           {
-            cmd.itype = I5_ldax;
-            cmd.Op2.type = o_phrase;
-            cmd.Op2.phrase = R_bc + ((code >> 4) & 1);
-            op_a(cmd.Op1);
+            insn.itype = I5_ldax;
+            insn.Op2.type = o_phrase;
+            insn.Op2.phrase = R_bc + ((code >> 4) & 1);
+            op_a(insn.Op1);
           }
           else
           {
             if ( isGB() )
             {
-              cmd.itype = (code & 0x10) ? Z80_ldd : Z80_ldi;
-              cmd.Op1.type = o_reg;
-              cmd.Op1.reg = R_a;
-              cmd.Op2.type = o_phrase;
-              cmd.Op2.phrase = R_hl;
+              insn.itype = (code & 0x10) ? Z80_ldd : Z80_ldi;
+              insn.Op1.type = o_reg;
+              insn.Op1.reg = R_a;
+              insn.Op2.type = o_phrase;
+              insn.Op2.phrase = R_hl;
               break;
             }
-            cmd.Op1.type = o_reg;
+            insn.Op1.type = o_reg;
             if ( (code & 0x10) == 0 )
             {
-              cmd.itype = I5_lhld;
-              cmd.Op1.dtyp = dt_word;
-              cmd.Op2.dtyp = dt_word;
-              cmd.Op1.reg = R_hl;
+              insn.itype = I5_lhld;
+              insn.Op1.dtype = dt_word;
+              insn.Op2.dtype = dt_word;
+              insn.Op1.reg = R_hl;
             }
             else
             {
-              cmd.itype = I5_lda;
-              cmd.Op1.reg = R_a;
+              insn.itype = I5_lda;
+              insn.Op1.reg = R_a;
             }
-            op_mm(cmd.Op2);
+            op_mm(insn, insn.Op2);
           }
-          cmd.Op1.clr_shown();
+          insn.Op1.clr_shown();
           break;
         case 2:
           if ( (code & 0x20) == 0 )
           {
-            cmd.itype = I5_stax;
-            cmd.Op1.type = o_phrase;
-            cmd.Op1.phrase = R_bc + ((code >> 4) & 1);
-            op_a(cmd.Op2);
+            insn.itype = I5_stax;
+            insn.Op1.type = o_phrase;
+            insn.Op1.phrase = R_bc + ((code >> 4) & 1);
+            op_a(insn.Op2);
           }
           else
           {
             if ( isGB() )
             {
-              cmd.itype = (code & 0x10) ? Z80_ldd : Z80_ldi;
-              cmd.Op1.type = o_phrase;
-              cmd.Op1.phrase = R_hl;
-              cmd.Op2.type = o_reg;
-              cmd.Op2.reg = R_a;
+              insn.itype = (code & 0x10) ? Z80_ldd : Z80_ldi;
+              insn.Op1.type = o_phrase;
+              insn.Op1.phrase = R_hl;
+              insn.Op2.type = o_reg;
+              insn.Op2.reg = R_a;
               break;
             }
-            cmd.Op2.type = o_reg;
+            insn.Op2.type = o_reg;
             if ( (code & 0x10) == 0 )
             {
-              cmd.itype = I5_shld;
-              cmd.Op1.dtyp = dt_word;
-              cmd.Op2.dtyp = dt_word;
-              cmd.Op2.reg = R_hl;
+              insn.itype = I5_shld;
+              insn.Op1.dtype = dt_word;
+              insn.Op2.dtype = dt_word;
+              insn.Op2.reg = R_hl;
             }
             else
             {
-              cmd.itype = I5_sta;
-              cmd.Op2.reg = R_a;
+              insn.itype = I5_sta;
+              insn.Op2.reg = R_a;
             }
-            op_mm(cmd.Op1);
+            op_mm(insn, insn.Op1);
           }
-          cmd.Op2.clr_shown();
+          insn.Op2.clr_shown();
           break;
         case 3:
-          cmd.itype = I5_inx;
-          op_ss(cmd.Op1);
+          insn.itype = I5_inx;
+          op_ss(insn.Op1);
           break;
         case 0xB:
-          cmd.itype = I5_dcx;
-          op_ss(cmd.Op1);
+          insn.itype = I5_dcx;
+          op_ss(insn.Op1);
           break;
         case 4:
         case 0xC:
-          cmd.itype = I5_inr;
-          op_r1(cmd.Op1);
+          insn.itype = I5_inr;
+          op_r1(insn.Op1);
           break;
         case 5:
         case 0xD:
-          cmd.itype = I5_dcr;
-          op_r1(cmd.Op1);
+          insn.itype = I5_dcr;
+          op_r1(insn.Op1);
           break;
         case 6:
         case 0xE:
-          cmd.itype = I5_mvi;
-          op_r1(cmd.Op1);
-          op_n (cmd.Op2);
+          insn.itype = I5_mvi;
+          op_r1(insn.Op1);
+          op_n (insn, insn.Op2);
           break;
         case 7:
         case 0xF:
-          cmd.itype = (isZ80() ? Zrols : rols) [ (code >> 3) & 7 ];
+          insn.itype = (isZ80() ? Zrols : rols)[ (code >> 3) & 7 ];
           break;
       }
       break;
     case 0x40:
-      cmd.itype = I5_halt;
+      insn.itype = I5_halt;
       if ( code != 0x76 )
       {
-        cmd.itype = I5_mov;
-        op_r1(cmd.Op1);
-        op_r2(cmd.Op2);
+        insn.itype = I5_mov;
+        op_r1(insn.Op1);
+        op_r2(insn.Op2);
       }
       break;
     case 0x80:
-      op_r2(cmd.Op2);
+      op_r2(insn.Op2);
 common:
-      cmd.Op1.type  = o_reg;
-      cmd.Op1.reg = R_a;
-      cmd.itype = (cmd.Op2.type == o_imm ? Wi : W) [ (code >> 3) & 7 ];
-      cmd.Op1.clr_shown();
+      insn.Op1.type = o_reg;
+      insn.Op1.reg = R_a;
+      insn.itype = (insn.Op2.type == o_imm ? Wi : W)[ (code >> 3) & 7 ];
+      insn.Op1.clr_shown();
       break;
     case 0xC0:                          /* 11?????? */
       switch ( code & 0xF )
@@ -701,29 +727,29 @@ common:
             {
               case 0xE0:
               case 0xF0:
-                cmd.itype = Z80_ld;
-                cmd.Op1.type = o_mem;
-                cmd.Op1.addr = 0xFF00 + ua_next_byte();
-                cmd.Op2.type = o_reg;
-                cmd.Op2.reg = R_a;
+                insn.itype = Z80_ld;
+                insn.Op1.type = o_mem;
+                insn.Op1.addr = 0xFF00 + insn.get_next_byte();
+                insn.Op2.type = o_reg;
+                insn.Op2.reg = R_a;
                 if ( code & 0x10 )
-                  swap_operands();
+                  swap_operands(insn);
                 break;
               case 0xE8:
-                cmd.itype = Z80_add;
-                cmd.Op1.type = o_reg;
-                cmd.Op1.reg  = R_sp;
-                GetImm(cmd.Op2);
+                insn.itype = Z80_add;
+                insn.Op1.type = o_reg;
+                insn.Op1.reg  = R_sp;
+                GetImm(insn, insn.Op2);
                 break;
               case 0xF8:  // docs say this is "ld hl, sp"
                           // Daniel Filner <danf@codefrog.cx> says
                           // this is "ld hl, sp+immbyte"
-                cmd.itype = Z80_ld;
-                cmd.Op1.type = o_reg;
-                cmd.Op1.reg  = R_hl;
-                cmd.Op2.type = o_displ;
-                cmd.Op2.phrase = R_sp;
-                cmd.Op2.addr = ua_next_byte();
+                insn.itype = Z80_ld;
+                insn.Op1.type = o_reg;
+                insn.Op1.reg  = R_hl;
+                insn.Op2.type = o_displ;
+                insn.Op2.phrase = R_sp;
+                insn.Op2.addr = insn.get_next_byte();
                 break;
               default:
                 goto RETS;
@@ -731,7 +757,7 @@ common:
             break;
           }
 RETS:
-          cmd.itype = rets[ (code >> 3) & 7 ];
+          insn.itype = rets[ (code >> 3) & 7 ];
           break;
         case 0x2:
         case 0xA:                     /* 11???010 */
@@ -741,22 +767,22 @@ RETS:
             {
               case 0xE2:
               case 0xF2:
-                cmd.itype = Z80_ld;
-                cmd.auxpref |= aux_off16;
-                op_c(cmd.Op1);
-                cmd.Op2.type = o_reg;
-                cmd.Op2.reg = R_a;
+                insn.itype = Z80_ld;
+                insn.auxpref |= aux_off16;
+                op_c(insn.Op1);
+                insn.Op2.type = o_reg;
+                insn.Op2.reg = R_a;
                 if ( code & 0x10 )
-                  swap_operands();
+                  swap_operands(insn);
                 break;
               case 0xEA:
               case 0xFA:
-                cmd.itype = Z80_ld;
-                op_mm(cmd.Op1);
-                cmd.Op2.type = o_reg;
-                cmd.Op2.reg = R_a;
+                insn.itype = Z80_ld;
+                op_mm(insn, insn.Op1);
+                insn.Op2.type = o_reg;
+                insn.Op2.reg = R_a;
                 if ( code & 0x10 )
-                  swap_operands();
+                  swap_operands(insn);
                 break;
               default:
                 goto JUMPS;
@@ -764,141 +790,141 @@ RETS:
             break;
           }
 JUMPS:
-          cmd.itype = jumps[ (code >> 3) & 7 ];
-          op_ad(cmd.Op1);
+          insn.itype = jumps[ (code >> 3) & 7 ];
+          op_ad(insn, insn.Op1);
           break;
         case 0x3:
         case 0xB:                     /* 11???011 */
           switch ( ( code >> 3 ) & 7 )
           {
             case 0:                   /* 11000011=C3 */
-              cmd.itype = I5_jmp;
-              op_ad(cmd.Op1);
+              insn.itype = I5_jmp;
+              op_ad(insn, insn.Op1);
               break;
             case 1:                   // 11001011=CB - Z80 extensions
               if ( isZ80() )
               {
-                code = ua_next_byte();
+                code = insn.get_next_byte();
                 int fn = (code>>6);
                 if ( fn == 0 )
                 {
-                  op_r2(cmd.Op1);
-                  cmd.itype = CBrols[ (code>>3) & 7 ];
-                  if ( cmd.itype == Z80_srr )
+                  op_r2(insn.Op1);
+                  insn.itype = CBrols[ (code>>3) & 7 ];
+                  if ( insn.itype == Z80_srr )
                   {
                     if ( isZ380() )
                     {
-                      cmd.itype = Z80_ex;
-                      op_r2(cmd.Op2);
-                      cmd.Op2.reg += R_b2;
+                      insn.itype = Z80_ex;
+                      op_r2(insn.Op2);
+                      insn.Op2.reg += R_b2;
                     }
                     else if ( isGB() )
                     {
-                      cmd.itype = Z80_swap;
+                      insn.itype = Z80_swap;
                     }
                   }
                 }
                 else
                 {
                   static const uint16 brs[] = { 0, Z80_bit,Z80_res,Z80_set };
-                  cmd.itype = brs[fn];
-                  cmd.Op1.type = o_imm;
-                  cmd.Op1.value = (code>>3) & 7;
-                  op_r2(cmd.Op2);
+                  insn.itype = brs[fn];
+                  insn.Op1.type = o_imm;
+                  insn.Op1.value = (code>>3) & 7;
+                  op_r2(insn.Op2);
                 }
               }
               else
               {
-                cmd.itype = I5_rstv;  // undoc
+                insn.itype = I5_rstv;  // undoc
               }
               break;
             case 2:                   /* 11010011=D3 */
-              cmd.itype = I5_out;
-              op_a(cmd.Op2);
-              op_n(cmd.Op1);
+              insn.itype = I5_out;
+              op_a(insn.Op2);
+              op_n(insn, insn.Op1);
               break;
             case 3:                   // DB
-              cmd.itype = I5_in;
-              op_a(cmd.Op1);
-              op_n(cmd.Op2);
+              insn.itype = I5_in;
+              op_a(insn.Op1);
+              op_n(insn, insn.Op2);
               break;
             case 4:                   // E3
-              cmd.itype = I5_xthl;
-              cmd.Op1.type = o_phrase;
-              cmd.Op1.reg = R_sp;
-              cmd.Op1.clr_shown();
-              cmd.Op2.type = o_reg;
-              cmd.Op2.reg = R_hl;
-              cmd.Op2.clr_shown();
+              insn.itype = I5_xthl;
+              insn.Op1.type = o_phrase;
+              insn.Op1.reg = R_sp;
+              insn.Op1.clr_shown();
+              insn.Op2.type = o_reg;
+              insn.Op2.reg = R_hl;
+              insn.Op2.clr_shown();
               break;
             case 5:                   // EB
-              cmd.itype = I5_xchg;
-              cmd.Op1.type = o_reg;
-              cmd.Op1.reg = R_de;
-              cmd.Op1.clr_shown();
-              cmd.Op2.type = o_reg;
-              cmd.Op2.reg = R_hl;
-              cmd.Op2.clr_shown();
+              insn.itype = I5_xchg;
+              insn.Op1.type = o_reg;
+              insn.Op1.reg = R_de;
+              insn.Op1.clr_shown();
+              insn.Op2.type = o_reg;
+              insn.Op2.reg = R_hl;
+              insn.Op2.clr_shown();
               break;
             case 6:                   // F3
-              cmd.itype = I5_di;
+              insn.itype = I5_di;
               break;
             case 7:                   // FB
-              cmd.itype = I5_ei;
+              insn.itype = I5_ei;
               break;
           }
           break;
         case 0x4:
         case 0xC:                     /* 11???100 */
-          cmd.itype = calls[ (code >> 3) & 7 ];
-          op_ad(cmd.Op1);
+          insn.itype = calls[ (code >> 3) & 7 ];
+          op_ad(insn, insn.Op1);
           break;
         case 0x1:
         case 0x5:                     // 11????01
-          cmd.itype = (code & 4) ? I5_push : I5_pop;
-          op_dd(cmd.Op1);
+          insn.itype = (code & 4) ? I5_push : I5_pop;
+          op_dd(insn.Op1);
           break;
         case 0x6:
         case 0xE:                     // 11???110
-          op_n(cmd.Op2);
+          op_n(insn, insn.Op2);
           goto common;
         case 0x7:
         case 0xF:                     // 11???111
-          cmd.itype = I5_rst;
-          cmd.Op1.type = o_imm;
-          cmd.Op1.value = (code >> 3) & 7;
+          insn.itype = I5_rst;
+          insn.Op1.type = o_imm;
+          insn.Op1.value = (code >> 3) & 7;
           if ( isZ80() )
           { // workaround for bcb6 bug:
-            uval_t x = cmd.Op1.value;
+            uval_t x = insn.Op1.value;
             x <<= 3;
-            cmd.Op1.value = x;
+            insn.Op1.value = x;
           }
           break;
         case 0x9:
           switch ( (code >> 4) & 3 )
           {
             case 0:
-              cmd.itype = I5_ret;     // 11001001 = C9
+              insn.itype = I5_ret;     // 11001001 = C9
               break;
             case 1:                   // 11011001 = D9
               if ( isGB() )
-                cmd.itype = Z80_reti;
+                insn.itype = Z80_reti;
               else if ( isZ80() )
-                cmd.itype = Z80_exx;
+                insn.itype = Z80_exx;
               else
-                cmd.itype = I5_shlx;  // undoc
+                insn.itype = I5_shlx;  // undoc
               break;
             case 2:
-              cmd.itype = I5_pchl;
+              insn.itype = I5_pchl;
               break;
             case 3:
-              cmd.itype = I5_sphl;
-              cmd.Op1.type = o_reg;
-              cmd.Op1.reg = R_sp;
-              cmd.Op1.clr_shown();
-              cmd.Op2.type = o_reg;
-              cmd.Op2.reg = R_hl;
-              cmd.Op2.clr_shown();
+              insn.itype = I5_sphl;
+              insn.Op1.type = o_reg;
+              insn.Op1.reg = R_sp;
+              insn.Op1.clr_shown();
+              insn.Op2.type = o_reg;
+              insn.Op2.reg = R_hl;
+              insn.Op2.clr_shown();
               break;
           }
           break;
@@ -906,39 +932,39 @@ JUMPS:
           switch ( (code >> 4) & 3 )
           {
             case 0:
-              cmd.itype = I5_call;
-              op_ad(cmd.Op1);
+              insn.itype = I5_call;
+              op_ad(insn, insn.Op1);
               break;
             case 1:           // 11011101 = DD - Z80 extensions
               if ( is8085() )
               {
-                cmd.itype = I5_jnx5;   // undoc
-                op_ad(cmd.Op1);
+                insn.itype = I5_jnx5;   // undoc
+                op_ad(insn, insn.Op1);
               }
               else
               {
-                z80_ixcommands(true);
+                z80_ixcommands(insn, true);
               }
               break;
             case 2:           // 11101101 = ED - Z80 extensions
               if ( isGB() )
                 return 0;
               else if ( isZ380() )
-                z380_ED();
+                z380_ED(insn);
               else if ( is8085() )
-                cmd.itype = I5_lhlx;  // undoc
+                insn.itype = I5_lhlx;  // undoc
               else
-                z80_misc();
+                z80_misc(insn);
               break;
             case 3:           // 11111101 = FD - Z80 extensions
               if ( is8085() )
               {
-                cmd.itype = I5_jx5;   // undoc
-                op_ad(cmd.Op1);
+                insn.itype = I5_jx5;   // undoc
+                op_ad(insn, insn.Op1);
               }
               else
               {
-                z80_ixcommands(false);
+                z80_ixcommands(insn, false);
               }
               break;
           }
@@ -947,20 +973,20 @@ JUMPS:
       break;
   }
 
-  if ( cmd.itype == I5_null )
+  if ( insn.itype == I5_null )
     return 0;
 
   if ( isZ80() )
   {
     if ( ash.uflag & UAS_FUNNY )
-      ConvertToFunny();
+      ConvertToFunny(insn);
     else
-      ConvertToZ80();
-    if ( isGB() && !is_gameboy_insn() )
+      ConvertToZ80(insn);
+    if ( isGB() && !is_gameboy_insn(insn) )
       return 0;
   }
 
-  return cmd.size;
+  return insn.size;
 
 }
 
@@ -1001,9 +1027,10 @@ static void op_ss(op_t &x)
 {
   uint16 ss = (code >> 4) & 3;
   x.type = o_reg;
-  x.dtyp = dt_word;
+  x.dtype = dt_word;
   x.reg = ss + R_bc;
-  if ( ss == 3 ) x.reg = R_sp;
+  if ( ss == 3 )
+    x.reg = R_sp;
 }
 
 //------------------------------------------------------------------------
@@ -1011,31 +1038,31 @@ static void op_dd(op_t &x)
 {
   uint16 ss = (code >> 4) & 3;
   x.type = o_reg;
-  x.dtyp = dt_word;
+  x.dtype = dt_word;
   x.reg = ss + R_bc;
 }
 
 //------------------------------------------------------------------------
-static void op_nn(op_t &x)
+static void op_nn(insn_t &insn, op_t &x)
 {
   x.type = o_imm;
-  x.dtyp = dt_word;
-  x.value = ua_next_word();
+  x.dtype = dt_word;
+  x.value = insn.get_next_word();
 }
 
 //------------------------------------------------------------------------
-static void op_n(op_t &x)
+static void op_n(insn_t &insn, op_t &x)
 {
   x.type = o_imm;
-  x.value = ua_next_byte();
+  x.value = insn.get_next_byte();
 }
 
 //------------------------------------------------------------------------
-static void op_e(op_t &x)
+static void op_e(insn_t &insn, op_t &x)
 {
   x.type = o_near;
-  sval_t rel = char(ua_next_byte());
-  x.addr = ushort(cmd.ip + cmd.size + rel);
+  sval_t rel = char(insn.get_next_byte());
+  x.addr = ushort(insn.ip + insn.size + rel);
 }
 
 //------------------------------------------------------------------------
@@ -1047,19 +1074,19 @@ static void op_a(op_t &x)
 }
 
 //------------------------------------------------------------------------
-static void op_mm(op_t &x)
+static void op_mm(insn_t &insn, op_t &x)
 {
   x.type = o_mem;
-  x.addr = ua_next_word();
+  x.addr = insn.get_next_word();
 }
 
 static bool isx;
 //------------------------------------------------------------------------
-static void op_xdispl(op_t &x)
+static void op_xdispl(insn_t &insn, op_t &x)
 {
   x.type = o_displ;
   x.phrase = isx ? R_ix : R_iy;
-  x.addr = ua_next_byte();
+  x.addr = insn.get_next_byte();
 }
 
 //------------------------------------------------------------------------
@@ -1067,15 +1094,15 @@ static void op_ix(op_t &x)
 {
   x.type = o_reg;
   x.reg = isx ? R_ix : R_iy;
-  x.dtyp = dt_word;
+  x.dtype = dt_word;
 }
 
 //------------------------------------------------------------------------
 static void op_f(op_t &x)
 {
-  x.type = o_reg;
-  x.dtyp = dt_byte;
-  x.reg  = R_f;
+  x.type  = o_reg;
+  x.dtype = dt_byte;
+  x.reg   = R_f;
 }
 
 //------------------------------------------------------------------------
@@ -1937,7 +1964,7 @@ static const insndesc_t cmdsEDCB[] =
 //------------------------------------------------------------------------
 static uchar saved_value;
 
-static void load_z80_operand(op_t &x, uchar op)
+static void load_z80_operand(insn_t &insn, op_t &x, uchar op)
 {
   if ( op == 0 )
     return;
@@ -1967,7 +1994,8 @@ static void load_z80_operand(op_t &x, uchar op)
     case rIW:
     case rXM:
     case rLCK:
-      x.dtyp = dt_word;
+      x.dtype = dt_word;
+      // fallthrough
     case rA:
     case rB:
     case rC:
@@ -2013,52 +2041,52 @@ static void load_z80_operand(op_t &x, uchar op)
 
     case rip8:
       {
-        sval_t disp = char(ua_next_byte());
+        sval_t disp = char(insn.get_next_byte());
         x.type = o_near;
-        x.addr = cmd.ip + cmd.size + disp;
+        x.addr = insn.ip + insn.size + disp;
       }
       break;
     case rip16:
       {
-        sval_t disp = short(ua_next_word());
+        sval_t disp = short(insn.get_next_word());
         x.type = o_near;
-        x.addr = cmd.ip + cmd.size + disp;
+        x.addr = insn.ip + insn.size + disp;
       }
       break;
     case rip24:
       {
-        sval_t disp = ua_next_word();
-        disp |= (sval_t((char)(ua_next_byte())) << 16);
+        sval_t disp = insn.get_next_word();
+        disp |= (sval_t((char)(insn.get_next_byte())) << 16);
         x.type = o_near;
-        x.addr = cmd.ip + cmd.size + disp;
+        x.addr = insn.ip + insn.size + disp;
       }
       break;
 
     case imm8:
       x.type = o_imm;
-      x.value = ua_next_byte();
+      x.value = insn.get_next_byte();
       break;
 
     case imm16:
       x.type = o_imm;
-      x.dtyp = dt_word;
-      x.value = ua_next_word();
+      x.dtype = dt_word;
+      x.value = insn.get_next_word();
       break;
 
     case mem16:
       x.type = o_mem;
-      x.addr = ua_next_word();
+      x.addr = insn.get_next_word();
       break;
 
     case ix8:
       x.type = o_displ;
       x.phrase = R_ix;
-      x.addr = ua_next_byte();
+      x.addr = insn.get_next_byte();
       break;
     case iy8:
       x.type = o_displ;
       x.phrase = R_iy;
-      x.addr = ua_next_byte();
+      x.addr = insn.get_next_byte();
       break;
     case ixs:
       x.type = o_displ;
@@ -2101,12 +2129,12 @@ static void load_z80_operand(op_t &x, uchar op)
       break;
 
     default:
-      warning("%a: interr in z380, code=%x", cmd.ea, code);
+      warning("%a: interr in z380, code=%x", insn.ea, code);
   }
 }
 
 //------------------------------------------------------------------------
-static bool search_map(const insndesc_t *map, uchar _code)
+static bool search_map(insn_t &insn, const insndesc_t *map, uchar _code)
 {
   for ( int i=0; map[i].itype; i++ )
   {
@@ -2114,9 +2142,9 @@ static bool search_map(const insndesc_t *map, uchar _code)
       break;
     if ( map[i].code == _code )
     {
-      cmd.itype = map[i].itype;
-      load_z80_operand(cmd.Op1, map[i].op1);
-      load_z80_operand(cmd.Op2, map[i].op2);
+      insn.itype = map[i].itype;
+      load_z80_operand(insn, insn.Op1, map[i].op1);
+      load_z80_operand(insn, insn.Op2, map[i].op2);
       return true;
     }
   }
@@ -2124,101 +2152,101 @@ static bool search_map(const insndesc_t *map, uchar _code)
 }
 
 //------------------------------------------------------------------------
-static bool z380_insns(const insndesc_t *map, const insndesc_t *cb)
+static bool z380_insns(insn_t &insn, const insndesc_t *map, const insndesc_t *cb)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   if ( code == 0xCB )
   {
     map = cb;
-    saved_value = ua_next_byte();
-    code = ua_next_byte();
+    saved_value = insn.get_next_byte();
+    code = insn.get_next_byte();
   }
-  return search_map(map, (uchar)code);
+  return search_map(insn, map, (uchar)code);
 }
 
 //------------------------------------------------------------------------
-static bool z380_ED(void)
+static bool z380_ED(insn_t &insn)
 {
   const insndesc_t *map = cmdsED;
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   if ( code == 0xCB )
   {
     map = cmdsEDCB;
-    code = ua_next_byte();
+    code = insn.get_next_byte();
   }
-  return search_map(map, (uchar)code);
+  return search_map(insn, map, (uchar)code);
 }
 
 //------------------------------------------------------------------------
-static void z80_ixcommands(bool _isx)
+static void z80_ixcommands(insn_t &insn, bool _isx)
 {
   if ( isGB() )
     return;
   if ( isZ380() )
   {
     if ( _isx )
-      z380_insns(cmdsDD, cmdsDDCB);
+      z380_insns(insn, cmdsDD, cmdsDDCB);
     else
-      z380_insns(cmdsFD, cmdsFDCB);
+      z380_insns(insn, cmdsFD, cmdsFDCB);
     return;
   }
 
   isx = _isx;
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   switch ( (code>>4) & 0xF )
   {
     case 0:                             /* 0000???? */
     case 1:                             /* 0001???? */
       if ( (code & 0xF) == 9 )
       {
-        cmd.itype = I5_add;
-        op_ix(cmd.Op1);
-        op_ss(cmd.Op2);
-        cmd.Op1.dtyp = dt_word;
-        cmd.Op2.dtyp = dt_word;
+        insn.itype = I5_add;
+        op_ix(insn.Op1);
+        op_ss(insn.Op2);
+        insn.Op1.dtype = dt_word;
+        insn.Op2.dtype = dt_word;
       }
       break;
     case 2:                             /* 0010???? */
-      cmd.Op1.dtyp = dt_word;
-      cmd.Op2.dtyp = dt_word;
-      (code & 4) ? op_ibyte(cmd.Op1,code & 8) : op_ix(cmd.Op1);
+      insn.Op1.dtype = dt_word;
+      insn.Op2.dtype = dt_word;
+      (code & 4) ? op_ibyte(insn.Op1,code & 8) : op_ix(insn.Op1);
       switch ( code & 0xF )
       {
         case 1:
-          cmd.itype = I5_lxi;
-          op_nn(cmd.Op2);
+          insn.itype = I5_lxi;
+          op_nn(insn, insn.Op2);
           break;
         case 2:
-          cmd.itype = I5_mov;
-          op_mm(cmd.Op1);
-          op_ix(cmd.Op2);
+          insn.itype = I5_mov;
+          op_mm(insn, insn.Op1);
+          op_ix(insn.Op2);
           break;
         case 3:
-          cmd.itype = I5_inx;
+          insn.itype = I5_inx;
           break;
         case 4:
         case 0xC:
-          cmd.itype = I5_inr;
+          insn.itype = I5_inr;
           break;
         case 5:
         case 0xD:
-          cmd.itype = I5_dcr;
+          insn.itype = I5_dcr;
           break;
         case 6:
         case 0xE:
-          cmd.itype = I5_mvi;
-          op_n(cmd.Op2);
+          insn.itype = I5_mvi;
+          op_n(insn, insn.Op2);
           break;
         case 9:
-          cmd.itype = I5_add;
-          op_ix(cmd.Op2);
+          insn.itype = I5_add;
+          op_ix(insn.Op2);
           break;
         case 0xA:
-          cmd.itype = I5_mov;
-          op_mm(cmd.Op2);
+          insn.itype = I5_mov;
+          op_mm(insn, insn.Op2);
           break;
         case 0xB:
-          cmd.itype = I5_dcx;
+          insn.itype = I5_dcx;
           break;
       }
       break;
@@ -2226,24 +2254,24 @@ static void z80_ixcommands(bool _isx)
       switch ( code & 0xF )
       {
         case 4:
-          cmd.itype = I5_inr;
-          op_xdispl(cmd.Op1);
+          insn.itype = I5_inr;
+          op_xdispl(insn, insn.Op1);
           break;
         case 5:
-          cmd.itype = I5_dcr;
-          op_xdispl(cmd.Op1);
+          insn.itype = I5_dcr;
+          op_xdispl(insn, insn.Op1);
           break;
         case 6:
-          cmd.itype = I5_mvi;
-          op_xdispl(cmd.Op1);
-          op_n(cmd.Op2);
+          insn.itype = I5_mvi;
+          op_xdispl(insn, insn.Op1);
+          op_n(insn, insn.Op2);
           break;
         case 9:
-          cmd.itype = I5_add;
-          op_ix(cmd.Op1);
-          op_ss(cmd.Op2);
-          cmd.Op1.dtyp = dt_word;
-          cmd.Op2.dtyp = dt_word;
+          insn.itype = I5_add;
+          op_ix(insn.Op1);
+          op_ss(insn.Op2);
+          insn.Op1.dtype = dt_word;
+          insn.Op2.dtype = dt_word;
           break;
       }
       break;
@@ -2251,9 +2279,9 @@ static void z80_ixcommands(bool _isx)
     case 5:
       if ( (code & 6) == 4 )
       {
-        cmd.itype = I5_mov;
-        op_xr1(cmd.Op1);
-        op_ibyte(cmd.Op2,code & 1);
+        insn.itype = I5_mov;
+        op_xr1(insn.Op1);
+        op_ibyte(insn.Op2,code & 1);
         break;
       }
       /* no break */
@@ -2262,45 +2290,45 @@ static void z80_ixcommands(bool _isx)
         break;
       if ( (code & 7) == 6 )
       {
-        if ( op_xr1(cmd.Op1) )
+        if ( op_xr1(insn.Op1) )
           break;   // mem,mem not allowed
         if ( code == 0x66 )
-          cmd.Op1.reg = R_h;
+          insn.Op1.reg = R_h;
         if ( code == 0x6E )
-          cmd.Op1.reg = R_l;
-        op_xdispl(cmd.Op2);
-        cmd.itype = I5_mov;
+          insn.Op1.reg = R_l;
+        op_xdispl(insn, insn.Op2);
+        insn.itype = I5_mov;
         break;
       }
       if ( (code & 0xF0) == 0x60 )
       {
-        op_ibyte(cmd.Op1,code & 8);
-        op_xr2(cmd.Op2);
-        cmd.itype = I5_mov;
+        op_ibyte(insn.Op1,code & 8);
+        op_xr2(insn.Op2);
+        insn.itype = I5_mov;
       }
       break;
     case 7:
       switch ( code & 0xF )
       {
         case 0: case 1: case 2: case 3: case 4: case 5: case 7:
-          op_xdispl(cmd.Op1);
-          if ( !op_xr2(cmd.Op2) )
-            cmd.itype = I5_mov;
+          op_xdispl(insn, insn.Op1);
+          if ( !op_xr2(insn.Op2) )
+            insn.itype = I5_mov;
           if ( code == 0x74 )
-            cmd.Op2.reg = R_h;
+            insn.Op2.reg = R_h;
           if ( code == 0x75 )
-            cmd.Op2.reg = R_l;
+            insn.Op2.reg = R_l;
           break;
         case 0xE:
-          op_xdispl(cmd.Op2);
-          op_a(cmd.Op1);
-          cmd.itype = I5_mov;           // to show all regs
+          op_xdispl(insn, insn.Op2);
+          op_a(insn.Op1);
+          insn.itype = I5_mov;           // to show all regs
           break;
         case 0xC:
         case 0xD:
-          op_ibyte(cmd.Op2,code & 1);
-          op_a(cmd.Op1);
-          cmd.itype = I5_mov;           // to show all regs
+          op_ibyte(insn.Op2,code & 1);
+          op_a(insn.Op1);
+          insn.itype = I5_mov;           // to show all regs
           break;
       }
       break;
@@ -2311,32 +2339,32 @@ static void z80_ixcommands(bool _isx)
       if ( (code & 4) == 4 && (code & 7) != 7 )
       {
         int type = (code >> 3) & 7;
-        cmd.itype = W [ type ];
-        op_a(cmd.Op1);
-        ((code & 7) == 6) ? op_xdispl(cmd.Op2)
-                          : op_ibyte(cmd.Op2,code & 1);
-//      if ( type == 0 || type == 1 || type == 3 ) cmd.Op1.clr_show();
+        insn.itype = W[type];
+        op_a(insn.Op1);
+        ((code & 7) == 6) ? op_xdispl(insn, insn.Op2)
+                          : op_ibyte(insn.Op2,code & 1);
+//      if ( type == 0 || type == 1 || type == 3 ) insn.Op1.clr_show();
       }
       break;
     case 0xC:
       if ( code == 0xCB )
       {
-        op_xdispl(cmd.Op2);
-        code = ua_next_byte();
+        op_xdispl(insn, insn.Op2);
+        code = insn.get_next_byte();
         if ( (code & 7) == 6 )
         {
           int type = (code>>6) & 3;
           if ( type == 0 )
           {
-            cmd.itype = CBrols[ (code >> 3) & 7 ];
-            op_a(cmd.Op1);
+            insn.itype = CBrols[ (code >> 3) & 7 ];
+            op_a(insn.Op1);
           }
           else
           {
             static const uint16 brs[] = { I5_null, Z80_bit, Z80_res, Z80_set };
-            cmd.itype = brs [ type ];
-            cmd.Op1.type = o_imm;
-            cmd.Op1.value = (code >> 3) & 7;
+            insn.itype = brs[type];
+            insn.Op1.type = o_imm;
+            insn.Op1.value = (code >> 3) & 7;
           }
         }
       }
@@ -2345,30 +2373,30 @@ static void z80_ixcommands(bool _isx)
       switch ( code & 0xF )
       {
         case 1:
-          cmd.itype = I5_pop;
-          op_ix(cmd.Op1);
+          insn.itype = I5_pop;
+          op_ix(insn.Op1);
           break;
         case 3:
-          cmd.itype = Z80_ex;
-          cmd.Op1.type   = o_phrase;
-          cmd.Op1.phrase = R_sp;
-          cmd.Op1.dtyp   = dt_word;
-          op_ix(cmd.Op2);
+          insn.itype = Z80_ex;
+          insn.Op1.type   = o_phrase;
+          insn.Op1.phrase = R_sp;
+          insn.Op1.dtype  = dt_word;
+          op_ix(insn.Op2);
           break;
         case 5:
-          cmd.itype = I5_push;
-          op_ix(cmd.Op1);
+          insn.itype = I5_push;
+          op_ix(insn.Op1);
           break;
         case 9:
-          cmd.itype = Z80_jp;
-          cmd.Op1.type = o_cond;
-          cmd.Op1.Cond = oc_not;
-          cmd.Op2.type   = o_phrase;
-          cmd.Op2.phrase = isx ? R_ix : R_iy;
-          cmd.Op2.dtyp   = dt_code;
+          insn.itype = Z80_jp;
+          insn.Op1.type = o_cond;
+          insn.Op1.Cond = oc_not;
+          insn.Op2.type   = o_phrase;
+          insn.Op2.phrase = isx ? R_ix : R_iy;
+          insn.Op2.dtype  = dt_code;
           break;
         case 0xD:
-          code = ua_next_byte();
+          code = insn.get_next_byte();
           switch ( code )
           {
             case 0x42:
@@ -2379,35 +2407,36 @@ static void z80_ixcommands(bool _isx)
             case 0x6A:
             case 0x72:
             case 0x7A:
-              cmd.itype = (code & 8) ? I5_adc : Z80_sbc;
-              op_ix(cmd.Op1);
-              op_ss(cmd.Op2);
-              if ( cmd.Op2.reg == R_hl )
-                op_ix(cmd.Op2);
+              insn.itype = (code & 8) ? I5_adc : Z80_sbc;
+              op_ix(insn.Op1);
+              op_ss(insn.Op2);
+              if ( insn.Op2.reg == R_hl )
+                op_ix(insn.Op2);
               break;
             case 0x60:
             case 0x68:
-              cmd.itype = I5_in;
-              op_ibyte(cmd.Op1,code & 8);
-              op_c(cmd.Op2);
+              insn.itype = I5_in;
+              op_ibyte(insn.Op1,code & 8);
+              op_c(insn.Op2);
               break;
             case 0x61:
             case 0x69:
-              cmd.itype = I5_out;
-              op_c(cmd.Op1);
-              op_ibyte(cmd.Op2,code & 8);
+              insn.itype = I5_out;
+              op_c(insn.Op1);
+              op_ibyte(insn.Op2,code & 8);
               break;
           }
           break;
       }
+      // fallthrough
     case 0xF:
       if ( code == 0xF9 )
       {
-        cmd.itype = I5_mov;
-        cmd.Op1.type   = o_reg;
-        cmd.Op1.phrase = R_sp;
-        cmd.Op1.dtyp   = dt_word;
-        op_ix(cmd.Op2);
+        insn.itype = I5_mov;
+        insn.Op1.type   = o_reg;
+        insn.Op1.phrase = R_sp;
+        insn.Op1.dtype  = dt_word;
+        op_ix(insn.Op2);
       }
       break;
   }
@@ -2415,9 +2444,9 @@ static void z80_ixcommands(bool _isx)
 
 
 //------------------------------------------------------------------------
-static void z80_misc(void)
+static void z80_misc(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   switch ( code )
   {
     case 0x40:
@@ -2427,9 +2456,9 @@ static void z80_misc(void)
     case 0x60:
     case 0x68:
     case 0x78:
-      cmd.itype = I5_in;
-      op_r1(cmd.Op1);
-      op_c(cmd.Op2);
+      insn.itype = I5_in;
+      op_r1(insn.Op1);
+      op_c(insn.Op2);
       break;
     case 0x41:
     case 0x49:
@@ -2438,9 +2467,9 @@ static void z80_misc(void)
     case 0x61:
     case 0x69:
     case 0x79:
-      cmd.itype = I5_out;
-      op_c(cmd.Op1);
-      op_r1(cmd.Op2);
+      insn.itype = I5_out;
+      op_c(insn.Op1);
+      op_r1(insn.Op2);
       break;
     case 0x42:
     case 0x4A:
@@ -2450,119 +2479,121 @@ static void z80_misc(void)
     case 0x6A:
     case 0x72:
     case 0x7A:
-      cmd.itype = (code & 8) ? I5_adc : Z80_sbc;
-      cmd.Op1.type  = o_reg;
-      cmd.Op1.reg = R_hl;
-      cmd.Op1.dtyp  = dt_word;
-      op_ss(cmd.Op2);
+      insn.itype = (code & 8) ? I5_adc : Z80_sbc;
+      insn.Op1.type  = o_reg;
+      insn.Op1.reg   = R_hl;
+      insn.Op1.dtype = dt_word;
+      op_ss(insn.Op2);
       break;
     case 0x43:
     case 0x53:
     case 0x73:
-      cmd.itype = I5_mov;
-      op_mm(cmd.Op1);
-      op_ss(cmd.Op2);
-      cmd.Op1.dtyp  = dt_word;
-      cmd.Op2.dtyp  = dt_word;
+      insn.itype = I5_mov;
+      op_mm(insn, insn.Op1);
+      op_ss(insn.Op2);
+      insn.Op1.dtype  = dt_word;
+      insn.Op2.dtype  = dt_word;
       break;
-    case 0x44:  cmd.itype = Z80_neg;    break;
-    case 0x45:  cmd.itype = Z80_retn;   break;
+    case 0x44:  insn.itype = Z80_neg;    break;
+    case 0x45:  insn.itype = Z80_retn;   break;
     case 0x46:
-      cmd.itype = Z80_im;
-      cmd.Op1.type = o_imm;
-      cmd.Op1.value = 0;
+      insn.itype = Z80_im;
+      insn.Op1.type = o_imm;
+      insn.Op1.value = 0;
       break;
     case 0x47:
-      cmd.itype = I5_mov;               // to show all regs
-      cmd.Op1.type = o_reg;
-      cmd.Op1.reg = R_i;
-      op_a(cmd.Op2);
+      insn.itype = I5_mov;               // to show all regs
+      insn.Op1.type = o_reg;
+      insn.Op1.reg = R_i;
+      op_a(insn.Op2);
       break;
     case 0x4B:
     case 0x5B:
     case 0x7B:
-      cmd.itype = I5_mov;
-      op_ss(cmd.Op1);
-      op_mm(cmd.Op2);
-      cmd.Op1.dtyp  = dt_word;
-      cmd.Op2.dtyp  = dt_word;
+      insn.itype = I5_mov;
+      op_ss(insn.Op1);
+      op_mm(insn, insn.Op2);
+      insn.Op1.dtype  = dt_word;
+      insn.Op2.dtype  = dt_word;
       break;
-    case 0x4D:  cmd.itype = Z80_reti;   break;
+    case 0x4D:
+      insn.itype = Z80_reti;
+      break;
     case 0x4F:
-      cmd.itype = I5_mov;               // to show all regs
-      cmd.Op1.type = o_reg;
-      cmd.Op1.reg = R_r;
-      op_a(cmd.Op2);
+      insn.itype = I5_mov;               // to show all regs
+      insn.Op1.type = o_reg;
+      insn.Op1.reg = R_r;
+      op_a(insn.Op2);
       break;
     case 0x56:
-      cmd.itype = Z80_im;
-      cmd.Op1.type = o_imm;
-      cmd.Op1.value = 1;
+      insn.itype = Z80_im;
+      insn.Op1.type = o_imm;
+      insn.Op1.value = 1;
       break;
     case 0x5E:
-      cmd.itype = Z80_im;
-      cmd.Op1.type = o_imm;
-      cmd.Op1.value = 2;
+      insn.itype = Z80_im;
+      insn.Op1.type = o_imm;
+      insn.Op1.value = 2;
       break;
     case 0x57:
-      cmd.itype = I5_mov;               // to show all regs
-      op_a(cmd.Op1);
-      cmd.Op2.type = o_reg;
-      cmd.Op2.reg = R_i;
+      insn.itype = I5_mov;               // to show all regs
+      op_a(insn.Op1);
+      insn.Op2.type = o_reg;
+      insn.Op2.reg = R_i;
       break;
     case 0x5F:
-      cmd.itype = I5_mov;               // to show all regs
-      op_a(cmd.Op1);
-      cmd.Op2.type = o_reg;
-      cmd.Op2.reg = R_r;
+      insn.itype = I5_mov;               // to show all regs
+      op_a(insn.Op1);
+      insn.Op2.type = o_reg;
+      insn.Op2.reg = R_r;
       break;
-    case 0x67:  cmd.itype = Z80_rrd;    break;
-    case 0x6F:  cmd.itype = Z80_rld;    break;
+    case 0x67:  insn.itype = Z80_rrd;    break;
+    case 0x6F:  insn.itype = Z80_rld;    break;
 
-    case 0xA0:  cmd.itype = Z80_ldi;    break;
-    case 0xA1:  cmd.itype = Z80_cpi;    break;
-    case 0xA2:  cmd.itype = Z80_ini;    break;
-    case 0xA3:  cmd.itype = Z80_outi;   break;
-    case 0xA8:  cmd.itype = Z80_ldd;    break;
-    case 0xA9:  cmd.itype = Z80_cpd;    break;
-    case 0xAA:  cmd.itype = Z80_ind;    break;
-    case 0xAB:  cmd.itype = Z80_outd;   break;
-    case 0xB0:  cmd.itype = Z80_ldir;   break;
-    case 0xB1:  cmd.itype = Z80_cpir;   break;
-    case 0xB2:  cmd.itype = Z80_inir;   break;
-    case 0xB3:  cmd.itype = Z80_otir;   break;
-    case 0xB8:  cmd.itype = Z80_lddr;   break;
-    case 0xB9:  cmd.itype = Z80_cpdr;   break;
-    case 0xBA:  cmd.itype = Z80_indr;   break;
-    case 0xBB:  cmd.itype = Z80_otdr;   break;
+    case 0xA0:  insn.itype = Z80_ldi;    break;
+    case 0xA1:  insn.itype = Z80_cpi;    break;
+    case 0xA2:  insn.itype = Z80_ini;    break;
+    case 0xA3:  insn.itype = Z80_outi;   break;
+    case 0xA8:  insn.itype = Z80_ldd;    break;
+    case 0xA9:  insn.itype = Z80_cpd;    break;
+    case 0xAA:  insn.itype = Z80_ind;    break;
+    case 0xAB:  insn.itype = Z80_outd;   break;
+    case 0xB0:  insn.itype = Z80_ldir;   break;
+    case 0xB1:  insn.itype = Z80_cpir;   break;
+    case 0xB2:  insn.itype = Z80_inir;   break;
+    case 0xB3:  insn.itype = Z80_otir;   break;
+    case 0xB8:  insn.itype = Z80_lddr;   break;
+    case 0xB9:  insn.itype = Z80_cpdr;   break;
+    case 0xBA:  insn.itype = Z80_indr;   break;
+    case 0xBB:  insn.itype = Z80_otdr;   break;
 //
 //      HD64180 extensions
 //
-    case 0x76:  if ( is64180() ) cmd.itype = HD_slp;    break;
-    case 0x83:  if ( is64180() ) cmd.itype = HD_otim;   break;
-    case 0x93:  if ( is64180() ) cmd.itype = HD_otimr;  break;
-    case 0x8B:  if ( is64180() ) cmd.itype = HD_otdm;   break;
-    case 0x9B:  if ( is64180() ) cmd.itype = HD_otdmr;  break;
+    case 0x76:  if ( is64180() ) insn.itype = HD_slp;    break;
+    case 0x83:  if ( is64180() ) insn.itype = HD_otim;   break;
+    case 0x93:  if ( is64180() ) insn.itype = HD_otimr;  break;
+    case 0x8B:  if ( is64180() ) insn.itype = HD_otdm;   break;
+    case 0x9B:  if ( is64180() ) insn.itype = HD_otdmr;  break;
     case 0x64:
       if ( is64180() )
       {
-        cmd.itype = HD_tst;
-        op_n(cmd.Op1);
+        insn.itype = HD_tst;
+        op_n(insn, insn.Op1);
       }
       break;
     case 0x74:
       if ( is64180() )
       {
-        cmd.itype = HD_tstio;
-        op_n(cmd.Op1);
+        insn.itype = HD_tstio;
+        op_n(insn, insn.Op1);
       }
       break;
     default:
 // I did not find an assembler that understands this...
 //      if ( (code & 0xC0) == 0x40 && (code & 6) == 0 )        // undocumented
 //      {
-//        cmd.itype = (code & 1) ? I5_out : I5_in;
-//        op_r1(cmd.Op1);
+//        insn.itype = (code & 1) ? I5_out : I5_in;
+//        op_r1(insn.Op1);
 //        break;
 //      }
 //--------
@@ -2574,35 +2605,35 @@ static void z80_misc(void)
             switch ( code & 7 )
             {
               case 0:
-                cmd.itype = HD_in0;
-                op_r1(cmd.Op1);
-                op_n(cmd.Op2);
-                if ( cmd.Op1.type == o_phrase )
-                  op_f(cmd.Op1);
+                insn.itype = HD_in0;
+                op_r1(insn.Op1);
+                op_n(insn, insn.Op2);
+                if ( insn.Op1.type == o_phrase )
+                  op_f(insn.Op1);
                 break;
               case 1:
-                cmd.itype = HD_out0;
-                op_n(cmd.Op1);
-                op_r1(cmd.Op2);
+                insn.itype = HD_out0;
+                op_n(insn, insn.Op1);
+                op_r1(insn.Op2);
                 break;
               case 4:
-                cmd.itype = HD_tst;
-                op_r1(cmd.Op1);
+                insn.itype = HD_tst;
+                op_r1(insn.Op1);
                 break;
             }
             break;
           case 0x40:
             if ( code == 0x70 )
             {
-              cmd.itype = I5_in;
-              op_f(cmd.Op1);
-              op_c(cmd.Op2);
+              insn.itype = I5_in;
+              op_f(insn.Op1);
+              op_c(insn.Op2);
               break;
             }
             if ( (code & 0xF) == 0xC )
             {
-              cmd.itype = HD_mlt;
-              op_ss(cmd.Op1);
+              insn.itype = HD_mlt;
+              op_ss(insn.Op1);
             }
             break;
         }

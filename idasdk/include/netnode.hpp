@@ -7,7 +7,6 @@
 
 #ifndef _NETNODE_HPP
 #define _NETNODE_HPP
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
 
 /*! \file netnode.hpp
 
@@ -118,76 +117,94 @@ typedef uint32 nodeidx_t;
 /// Tags internally used in netnodes. You should not use them
 /// for your tagged alt/sup/char/hash arrays.
 //@{
-const char atag = 'A';                  ///< Array of altvals
-const char stag = 'S';                  ///< Array of supvals
-const char htag = 'H';                  ///< Array of hashvals
-const char vtag = 'V';                  ///< Value of netnode
-const char ntag = 'N';                  ///< Name of netnode
-const char ltag = 'L';                  ///< Links between netnodes
+const uchar atag = 'A';                 ///< Array of altvals
+const uchar stag = 'S';                 ///< Array of supvals
+const uchar htag = 'H';                 ///< Array of hashvals
+const uchar vtag = 'V';                 ///< Value of netnode
+const uchar ntag = 'N';                 ///< Name of netnode
+const uchar ltag = 'L';                 ///< Links between netnodes
 //@}
 
+// Internal bit used to request ea2node() mapping of alt and sup indexes
+const int NETMAP_IDX = 0x100;
+// Internal bit used to request ea2node() mapping of alt values.
+// Such values are stored after being incremented by one.
+const int NETMAP_VAL = 0x200;
+// Internal bit used to make sure a string obtained with getblob() is
+// null-terminated.
+const int NETMAP_STR = 0x400;
 
 /// \name Helper functions
 /// They should not be called directly! See ::netnode
 //@{
 class netnode;
 class linput_t;
-idaman bool  ida_export netnode_check           (netnode *, const char *name, size_t namlen, bool create);
-idaman void  ida_export netnode_kill            (netnode *);
-idaman bool  ida_export netnode_start           (netnode *);
-idaman bool  ida_export netnode_end             (netnode *);
-idaman bool  ida_export netnode_next            (netnode *);
-idaman bool  ida_export netnode_prev            (netnode *);
-idaman ssize_t ida_export netnode_name          (nodeidx_t num, char *buf, size_t bufsize);
-idaman ssize_t ida_export netnode_get_name      (nodeidx_t num, qstring *out);
-idaman bool  ida_export netnode_rename          (nodeidx_t num, const char *newname, size_t namlen);
-idaman ssize_t ida_export netnode_valobj        (nodeidx_t num, void *buf, size_t bufsize);
-idaman ssize_t ida_export netnode_valstr        (nodeidx_t num, char *buf, size_t bufsize);
-idaman bool  ida_export netnode_set             (nodeidx_t num, const void *value, size_t length);
-idaman bool  ida_export netnode_delvalue        (nodeidx_t num);
-idaman nodeidx_t ida_export netnode_altval      (nodeidx_t num, nodeidx_t alt, char tag);
-idaman uchar ida_export netnode_charval         (nodeidx_t num, nodeidx_t alt, char tag);
-idaman nodeidx_t ida_export netnode_altval_idx8 (nodeidx_t num, uchar alt, char tag);
-idaman uchar ida_export netnode_charval_idx8    (nodeidx_t num, uchar alt, char tag);
-idaman ssize_t ida_export netnode_supval        (nodeidx_t num, nodeidx_t alt, void *buf, size_t bufsize, char tag);
-idaman ssize_t ida_export netnode_supstr        (nodeidx_t num, nodeidx_t alt, char *buf, size_t bufsize, char tag);
-idaman bool  ida_export netnode_supset          (nodeidx_t num, nodeidx_t alt, const void *value, size_t length, char tag);
-idaman bool  ida_export netnode_supdel          (nodeidx_t num, nodeidx_t alt, char tag);
-idaman nodeidx_t ida_export netnode_sup1st      (nodeidx_t num, char tag);
-idaman nodeidx_t ida_export netnode_supnxt      (nodeidx_t num, nodeidx_t cur, char tag);
-idaman nodeidx_t ida_export netnode_suplast     (nodeidx_t num, char tag);
-idaman nodeidx_t ida_export netnode_supprev     (nodeidx_t num, nodeidx_t cur, char tag);
-idaman ssize_t ida_export netnode_supval_idx8   (nodeidx_t num, uchar alt, void *buf, size_t bufsize, char tag);
-idaman ssize_t ida_export netnode_supstr_idx8   (nodeidx_t num, uchar alt, char *buf, size_t bufsize, char tag);
-idaman bool  ida_export netnode_supset_idx8     (nodeidx_t num, uchar alt, const void *value, size_t length, char tag);
-idaman bool  ida_export netnode_supdel_idx8     (nodeidx_t num, uchar alt, char tag);
-idaman nodeidx_t ida_export netnode_sup1st_idx8 (nodeidx_t num, char tag);
-idaman nodeidx_t ida_export netnode_supnxt_idx8 (nodeidx_t num, uchar alt, char tag);
-idaman nodeidx_t ida_export netnode_suplast_idx8(nodeidx_t num, char tag);
-idaman nodeidx_t ida_export netnode_supprev_idx8(nodeidx_t num, uchar alt, char tag);
-idaman bool  ida_export netnode_supdel_all      (nodeidx_t num, char tag);
-idaman int ida_export netnode_supdel_range      (nodeidx_t num, nodeidx_t idx1, nodeidx_t idx2, char tag);
-idaman int ida_export netnode_supdel_range_idx8 (nodeidx_t num, nodeidx_t idx1, nodeidx_t idx2, char tag);
-idaman ssize_t ida_export netnode_hashval       (nodeidx_t num, const char *idx, void *buf, size_t bufsize, char tag);
-idaman ssize_t ida_export netnode_hashstr       (nodeidx_t num, const char *idx, char *buf, size_t bufsize, char tag);
-idaman nodeidx_t ida_export netnode_hashval_long(nodeidx_t num, const char *idx, char tag);
-idaman bool  ida_export netnode_hashset         (nodeidx_t num, const char *idx, const void *value, size_t length, char tag);
-idaman bool  ida_export netnode_hashdel         (nodeidx_t num, const char *idx, char tag);
-idaman ssize_t ida_export netnode_hash1st       (nodeidx_t num, char *buf, size_t bufsize, char tag);
-idaman ssize_t ida_export netnode_hashnxt       (nodeidx_t num, const char *idx, char *buf, size_t bufsize, char tag);
-idaman ssize_t ida_export netnode_hashlast      (nodeidx_t num, char *buf, size_t bufsize, char tag);
-idaman ssize_t ida_export netnode_hashprev      (nodeidx_t num, const char *idx, char *buf, size_t bufsize, char tag);
-idaman size_t ida_export netnode_blobsize       (nodeidx_t num, nodeidx_t start, char tag);
-idaman void *ida_export netnode_getblob         (nodeidx_t num, void *buf, size_t *bufsize, nodeidx_t start, char tag);
-idaman bool  ida_export netnode_setblob         (nodeidx_t num, const void *buf, size_t size, nodeidx_t start, char tag);
-idaman int   ida_export netnode_delblob         (nodeidx_t num, nodeidx_t start, char tag);
-idaman bool  ida_export netnode_inited          (void);
-idaman size_t ida_export netnode_copy           (nodeidx_t num, nodeidx_t count, nodeidx_t target, bool move);
-idaman size_t ida_export netnode_altshift       (nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag);
-idaman size_t ida_export netnode_charshift      (nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag);
-idaman size_t ida_export netnode_supshift       (nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag);
-idaman void  ida_export netnode_altadjust       (nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, bool (idaapi *should_skip)(nodeidx_t ea));
-idaman bool  ida_export netnode_exist           (const netnode &n);
+idaman bool ida_export netnode_check(netnode *, const char *name, size_t namlen, bool create);
+idaman void ida_export netnode_kill(netnode *);
+idaman bool ida_export netnode_start(netnode *);
+idaman bool ida_export netnode_end(netnode *);
+idaman bool ida_export netnode_next(netnode *);
+idaman bool ida_export netnode_prev(netnode *);
+idaman ssize_t ida_export netnode_get_name(nodeidx_t num, qstring *out);
+idaman bool ida_export netnode_rename(nodeidx_t num, const char *newname, size_t namlen);
+idaman ssize_t ida_export netnode_valobj(nodeidx_t num, void *buf, size_t bufsize);
+idaman ssize_t ida_export netnode_valstr(nodeidx_t num, char *buf, size_t bufsize);
+idaman ssize_t ida_export netnode_qvalstr(nodeidx_t num, qstring *buf);
+idaman bool ida_export netnode_set(nodeidx_t num, const void *value, size_t length);
+idaman bool ida_export netnode_delvalue(nodeidx_t num);
+idaman nodeidx_t ida_export netnode_altval(nodeidx_t num, nodeidx_t alt, int tag);
+idaman uchar ida_export netnode_charval(nodeidx_t num, nodeidx_t alt, int tag);
+idaman nodeidx_t ida_export netnode_altval_idx8(nodeidx_t num, uchar alt, int tag);
+idaman uchar ida_export netnode_charval_idx8(nodeidx_t num, uchar alt, int tag);
+idaman ssize_t ida_export netnode_supval(nodeidx_t num, nodeidx_t alt, void *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_supstr(nodeidx_t num, nodeidx_t alt, char *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_qsupstr(nodeidx_t num, qstring *buf, nodeidx_t alt, int tag);
+idaman bool ida_export netnode_supset(nodeidx_t num, nodeidx_t alt, const void *value, size_t length, int tag);
+idaman bool ida_export netnode_supdel(nodeidx_t num, nodeidx_t alt, int tag);
+idaman nodeidx_t ida_export netnode_lower_bound(nodeidx_t num, nodeidx_t cur, int tag);
+idaman nodeidx_t ida_export netnode_supfirst(nodeidx_t num, int tag);
+idaman nodeidx_t ida_export netnode_supnext(nodeidx_t num, nodeidx_t cur, int tag);
+idaman nodeidx_t ida_export netnode_suplast(nodeidx_t num, int tag);
+idaman nodeidx_t ida_export netnode_supprev(nodeidx_t num, nodeidx_t cur, int tag);
+idaman ssize_t ida_export netnode_supval_idx8(nodeidx_t num, uchar alt, void *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_supstr_idx8(nodeidx_t num, uchar alt, char *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_qsupstr_idx8(nodeidx_t num, qstring *buf, uchar alt, int tag);
+idaman bool ida_export netnode_supset_idx8(nodeidx_t num, uchar alt, const void *value, size_t length, int tag);
+idaman bool ida_export netnode_supdel_idx8(nodeidx_t num, uchar alt, int tag);
+idaman nodeidx_t ida_export netnode_lower_bound_idx8(nodeidx_t num, uchar alt, int tag);
+idaman nodeidx_t ida_export netnode_supfirst_idx8(nodeidx_t num, int tag);
+idaman nodeidx_t ida_export netnode_supnext_idx8(nodeidx_t num, uchar alt, int tag);
+idaman nodeidx_t ida_export netnode_suplast_idx8(nodeidx_t num, int tag);
+idaman nodeidx_t ida_export netnode_supprev_idx8(nodeidx_t num, uchar alt, int tag);
+idaman bool ida_export netnode_supdel_all(nodeidx_t num, int tag);
+idaman int ida_export netnode_supdel_range(nodeidx_t num, nodeidx_t idx1, nodeidx_t idx2, int tag);
+idaman int ida_export netnode_supdel_range_idx8(nodeidx_t num, nodeidx_t idx1, nodeidx_t idx2, int tag);
+idaman ssize_t ida_export netnode_hashval(nodeidx_t num, const char *idx, void *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_hashstr(nodeidx_t num, const char *idx, char *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_qhashstr(nodeidx_t num, qstring *buf, const char *idx, int tag);
+idaman nodeidx_t ida_export netnode_hashval_long(nodeidx_t num, const char *idx, int tag);
+idaman bool ida_export netnode_hashset(nodeidx_t num, const char *idx, const void *value, size_t length, int tag);
+idaman bool ida_export netnode_hashdel(nodeidx_t num, const char *idx, int tag);
+idaman ssize_t ida_export netnode_hashfirst(nodeidx_t num, char *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_qhashfirst(nodeidx_t num, qstring *buf, int tag);
+idaman ssize_t ida_export netnode_hashnext(nodeidx_t num, const char *idx, char *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_qhashnext(nodeidx_t num, qstring *buf, const char *idx, int tag);
+idaman ssize_t ida_export netnode_hashlast(nodeidx_t num, char *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_qhashlast(nodeidx_t num, qstring *buf, int tag);
+idaman ssize_t ida_export netnode_hashprev(nodeidx_t num, const char *idx, char *buf, size_t bufsize, int tag);
+idaman ssize_t ida_export netnode_qhashprev(nodeidx_t num, qstring *buf, const char *idx, int tag);
+idaman size_t ida_export netnode_blobsize(nodeidx_t num, nodeidx_t start, int tag);
+idaman void *ida_export netnode_getblob(nodeidx_t num, void *buf, size_t *bufsize, nodeidx_t start, int tag);
+idaman ssize_t ida_export netnode_qgetblob(nodeidx_t num, bytevec_t *buf, size_t elsize, nodeidx_t start, int tag);
+idaman bool ida_export netnode_setblob(nodeidx_t num, const void *buf, size_t size, nodeidx_t start, int tag);
+idaman int ida_export netnode_delblob(nodeidx_t num, nodeidx_t start, int tag);
+idaman bool ida_export netnode_inited(void);
+idaman size_t ida_export netnode_copy(nodeidx_t num, nodeidx_t count, nodeidx_t target, bool move);
+idaman size_t ida_export netnode_altshift(nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, int tag);
+idaman size_t ida_export netnode_charshift(nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, int tag);
+idaman size_t ida_export netnode_supshift(nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, int tag);
+idaman void ida_export netnode_altadjust(nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, bool (idaapi *should_skip)(nodeidx_t ea));
+idaman bool ida_export netnode_exist(const netnode &n);
 //@}
 
 //--------------------------------------------------------------------------
@@ -209,9 +226,9 @@ class netnode
   friend bool ida_export netnode_end  (netnode *);
   friend bool ida_export netnode_next (netnode *);
   friend bool ida_export netnode_prev (netnode *);
-  friend size_t ida_export netnode_altshift (nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag);
-  friend size_t ida_export netnode_charshift(nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag);
-  friend size_t ida_export netnode_supshift (nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag);
+  friend size_t ida_export netnode_altshift (nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, int tag);
+  friend size_t ida_export netnode_charshift(nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, int tag);
+  friend size_t ida_export netnode_supshift (nodeidx_t num, nodeidx_t from, nodeidx_t to, nodeidx_t size, int tag);
   /// \endcond
 public:
 
@@ -289,12 +306,6 @@ public:
   {
     return netnode_get_name(*this, buf);
   }
-#ifndef NO_OBSOLETE_FUNCS
-  DEPRECATED ssize_t name(char *buf, size_t bufsize) const
-  {
-    return netnode_name(*this, buf, bufsize);
-  }
-#endif
 
   /// Rename a netnode.
   /// \param newname  new name of netnode. NULL or "" means to delete name.
@@ -328,6 +339,12 @@ public:
   /// See explanations for supstr() function about the differences between valobj()
   /// and valstr()
   /// \return length of value, -1 if no value present
+  ssize_t valstr(qstring *buf) const
+  {
+    return netnode_qvalstr(*this, buf);
+  }
+
+  /// \sa valstr(qstring *buf) const
   ssize_t valstr(char *buf, size_t bufsize) const
   {
     return netnode_valstr(*this, buf, bufsize);
@@ -375,9 +392,13 @@ public:
   /// \param tag  tag of array. may be omitted
   /// \return value of altval element. nonexistent altval members are returned
   ///          as zeroes
-  nodeidx_t altval(nodeidx_t alt, char tag=atag) const
+  nodeidx_t altval(nodeidx_t alt, uchar tag=atag) const
   {
     return netnode_altval(*this, alt, tag);
+  }
+  nodeidx_t altval_ea(ea_t ea, uchar tag=atag) const
+  {
+    return netnode_altval(*this, ea, tag|NETMAP_IDX);
   }
 
   /// Set value of altval array.
@@ -386,9 +407,13 @@ public:
   /// \param tag    tag of array
   /// \retval 1  ok
   /// \retval 0  failed, normally should not occur
-  bool altset(nodeidx_t alt, nodeidx_t value, char tag=atag)
+  bool altset(nodeidx_t alt, nodeidx_t value, uchar tag=atag)
   {
-    return supset(alt, &value, sizeof(value), tag);
+    return netnode_supset(*this, alt, &value, sizeof(value), tag);
+  }
+  bool altset_ea(ea_t ea, nodeidx_t value, uchar tag=atag)
+  {
+    return netnode_supset(*this, ea, &value, sizeof(value), tag|NETMAP_IDX);
   }
 
   /// Delete element of altval array.
@@ -396,18 +421,50 @@ public:
   /// \param tag  tag of array
   /// \retval 1  ok
   /// \retval 0  failed, element doesn't exist
-  bool altdel(nodeidx_t alt, char tag=atag)
+  bool altdel(nodeidx_t alt, uchar tag=atag)
   {
-    return supdel(alt, tag);
+    return netnode_supdel(*this, alt, tag);
+  }
+  bool altdel_ea(ea_t ea, uchar tag=atag)
+  {
+    return netnode_supdel(*this, ea, tag|NETMAP_IDX);
+  }
+
+  /// Store/retrieve/delete an address value in the netnode that corresponds
+  /// to an address.
+  bool easet(ea_t ea, ea_t addr, uchar tag)
+  {
+    return netnode_supset(*this, ea, &addr, sizeof(addr), tag|NETMAP_IDX|NETMAP_VAL);
+  }
+  ea_t eaget(ea_t ea, uchar tag) const
+  {
+    return netnode_altval(*this, ea, tag|NETMAP_IDX|NETMAP_VAL);
+  }
+  bool eadel(ea_t ea, uchar tag)
+  {
+    return netnode_supdel(*this, ea, tag|NETMAP_IDX);
+  }
+
+  bool easet_idx8(uchar idx, ea_t addr, uchar tag)
+  {
+    return netnode_supset_idx8(*this, idx, &addr, sizeof(addr), tag|NETMAP_VAL);
+  }
+  ea_t eaget_idx8(uchar idx, uchar tag) const
+  {
+    return netnode_altval_idx8(*this, idx, tag|NETMAP_VAL);
+  }
+  bool eadel_idx8(uchar idx, uchar tag)
+  {
+    return netnode_supdel_idx8(*this, idx, tag);
   }
 
   /// Get first existing element of altval array.
   /// \param tag  tag of array
   /// \return index of first existing element of altval array,
   ///          #BADNODE if altval array is empty
-  nodeidx_t alt1st(char tag=atag) const
+  nodeidx_t altfirst(uchar tag=atag) const
   {
-    return sup1st(tag);
+    return supfirst(tag);
   }
 
   /// Get next existing element of altval array.
@@ -415,16 +472,16 @@ public:
   /// \param tag  tag of array
   /// \return index of the next existing element of altval array,
   ///          #BADNODE if no more altval array elements exist
-  nodeidx_t altnxt(nodeidx_t cur, char tag=atag) const
+  nodeidx_t altnext(nodeidx_t cur, uchar tag=atag) const
   {
-    return supnxt(cur, tag);
+    return supnext(cur, tag);
   }
 
   /// Get last element of altval array.
   /// \param tag  tag of array
   /// \return index of last existing element of altval array,
   ///          #BADNODE if altval array is empty
-  nodeidx_t altlast(char tag=atag) const
+  nodeidx_t altlast(uchar tag=atag) const
   {
     return suplast(tag);
   }
@@ -434,7 +491,7 @@ public:
   /// \param tag  tag of array
   /// \return index of the previous existing element of altval array,
   ///          #BADNODE if no more altval array elements exist
-  nodeidx_t altprev(nodeidx_t cur, char tag=atag) const
+  nodeidx_t altprev(nodeidx_t cur, uchar tag=atag) const
   {
     return supprev(cur, tag);
   }
@@ -442,7 +499,7 @@ public:
   /// Shift the altval array elements.
   /// Moves the array elements at (from..from+size) to (to..to+size)
   /// \return number of shifted elements
-  size_t altshift(nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag=atag)
+  size_t altshift(nodeidx_t from, nodeidx_t to, nodeidx_t size, uchar tag=atag)
   {
     return netnode_altshift(*this, from, to, size, tag);
   }
@@ -464,14 +521,17 @@ public:
   ///   - index: 32 bits
   ///   - value: 8  bits
   //@{
-  uchar charval(nodeidx_t alt, char tag) const      { return netnode_charval(*this, alt, tag); }
-  bool charset(nodeidx_t alt, uchar val, char tag)  { return supset(alt, &val, sizeof(val), tag); }
-  bool chardel(nodeidx_t alt, char tag)             { return supdel(alt, tag); }
-  nodeidx_t char1st(char tag) const                 { return sup1st(tag); }
-  nodeidx_t charnxt(nodeidx_t cur, char tag) const  { return supnxt(cur, tag); }
-  nodeidx_t charlast(char tag) const                { return suplast(tag); }
-  nodeidx_t charprev(nodeidx_t cur, char tag) const { return supprev(cur, tag); }
-  size_t charshift(nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag)
+  uchar charval(nodeidx_t alt, uchar tag) const      { return netnode_charval(*this, alt, tag); }
+  bool charset(nodeidx_t alt, uchar val, uchar tag)  { return supset(alt, &val, sizeof(val), tag); }
+  bool chardel(nodeidx_t alt, uchar tag)             { return supdel(alt, tag); }
+  uchar charval_ea(ea_t ea, uchar tag) const         { return netnode_charval(*this, ea, tag|NETMAP_IDX); }
+  bool charset_ea(ea_t ea, uchar val, uchar tag)     { return netnode_supset(*this, ea, &val, sizeof(val), tag|NETMAP_IDX); }
+  bool chardel_ea(ea_t ea, uchar tag)                { return netnode_supdel(*this, ea, tag|NETMAP_IDX); }
+  nodeidx_t charfirst(uchar tag) const               { return supfirst(tag); }
+  nodeidx_t charnext(nodeidx_t cur, uchar tag) const { return supnext(cur, tag); }
+  nodeidx_t charlast(uchar tag) const                { return suplast(tag); }
+  nodeidx_t charprev(nodeidx_t cur, uchar tag) const { return supprev(cur, tag); }
+  size_t charshift(nodeidx_t from, nodeidx_t to, nodeidx_t size, uchar tag)
     { return netnode_charshift(*this, from, to, size, tag); }
   //@}
 
@@ -482,13 +542,13 @@ public:
   ///   - index: 8  bits
   ///   - value: 32 bits
   //@{
-  nodeidx_t altval_idx8(uchar alt, char tag) const   { return netnode_altval_idx8(*this, alt, tag); }
-  bool altset_idx8(uchar alt, nodeidx_t val, char tag){ return supset_idx8(alt, &val, sizeof(val), tag); }
-  bool altdel_idx8(uchar alt, char tag)              { return supdel_idx8(alt, tag); }
-  nodeidx_t alt1st_idx8(char tag) const              { return sup1st_idx8(tag); }
-  nodeidx_t altnxt_idx8(uchar cur, char tag) const   { return supnxt_idx8(cur, tag); }
-  nodeidx_t altlast_idx8(char tag) const             { return suplast_idx8(tag); }
-  nodeidx_t altprev_idx8(uchar cur, char tag) const  { return supprev_idx8(cur, tag); }
+  nodeidx_t altval_idx8(uchar alt, uchar tag) const   { return netnode_altval_idx8(*this, alt, tag); }
+  bool altset_idx8(uchar alt, nodeidx_t val, uchar tag) { return supset_idx8(alt, &val, sizeof(val), tag); }
+  bool altdel_idx8(uchar alt, uchar tag)              { return supdel_idx8(alt, tag); }
+  nodeidx_t altfirst_idx8(uchar tag) const            { return supfirst_idx8(tag); }
+  nodeidx_t altnext_idx8(uchar cur, uchar tag) const  { return supnext_idx8(cur, tag); }
+  nodeidx_t altlast_idx8(uchar tag) const             { return suplast_idx8(tag); }
+  nodeidx_t altprev_idx8(uchar cur, uchar tag) const  { return supprev_idx8(cur, tag); }
   //@}
 
   /// \name More altvals
@@ -496,13 +556,14 @@ public:
   ///   - index: 8 bits
   ///   - value: 8 bits
   //@{
-  uchar charval_idx8(uchar alt, char tag) const     { return netnode_charval_idx8(*this, alt, tag); }
-  bool charset_idx8(uchar alt, uchar val, char tag) { return supset_idx8(alt, &val, sizeof(val), tag); }
-  bool chardel_idx8(uchar alt, char tag)            { return supdel_idx8(alt, tag); }
-  nodeidx_t char1st_idx8(char tag) const            { return sup1st_idx8(tag); }
-  nodeidx_t charnxt_idx8(uchar cur, char tag) const { return supnxt_idx8(cur, tag); }
-  nodeidx_t charlast_idx8(char tag) const           { return suplast_idx8(tag); }
-  nodeidx_t charprev_idx8(uchar cur, char tag) const{ return supprev_idx8(cur, tag); }
+  uchar charval_idx8(uchar alt, uchar tag) const     { return netnode_charval_idx8(*this, alt, tag); }
+  bool charset_idx8(uchar alt, uchar val, uchar tag) { return supset_idx8(alt, &val, sizeof(val), tag); }
+  //-V::524 equivalent functions
+  bool chardel_idx8(uchar alt, uchar tag)            { return supdel_idx8(alt, tag); }
+  nodeidx_t charfirst_idx8(uchar tag) const          { return supfirst_idx8(tag); }
+  nodeidx_t charnext_idx8(uchar cur, uchar tag) const { return supnext_idx8(cur, tag); }
+  nodeidx_t charlast_idx8(uchar tag) const           { return suplast_idx8(tag); }
+  nodeidx_t charprev_idx8(uchar cur, uchar tag) const { return supprev_idx8(cur, tag); }
   //@}
 
   /// \name Delete altvals
@@ -523,7 +584,7 @@ public:
   /// This function deletes the whole altval array.
   /// \param tag  tag of array
   /// \return success
-  bool altdel_all(char tag)
+  bool altdel_all(uchar tag)
   {
     return supdel_all(tag);
   }
@@ -544,8 +605,10 @@ public:
   /// \param bufsize  size of output buffer
   /// \param tag      tag of array. Default: stag
   /// \return size of value, -1 if element doesn't exist
-  ssize_t supval(nodeidx_t alt, void *buf, size_t bufsize, char tag=stag) const
+  ssize_t supval(nodeidx_t alt, void *buf, size_t bufsize, uchar tag=stag) const
         { return netnode_supval(*this, alt, buf, bufsize, tag); }
+  ssize_t supval_ea(ea_t ea, void *buf, size_t bufsize, uchar tag=stag) const
+        { return netnode_supval(*this, ea, buf, bufsize, tag|NETMAP_IDX); }
 
   /// Get string value of the specified supval array element.
   /// The differences between supval() and supstr() are the following:
@@ -564,13 +627,20 @@ public:
   /// string and the string has been stored in the database with the terminating
   /// zero, then you can continue to use supval() instead of supstr().
   ///
-  /// \param alt      index into array of supvals
   /// \param buf      output buffer, may be NULL
-  /// \param bufsize  size of output buffer
+  /// \param alt      index into array of supvals
   /// \param tag      tag of array. Default: stag
   /// \return length of the output string, -1 if element doesn't exist
-  ssize_t supstr(nodeidx_t alt, char *buf, size_t bufsize, char tag=stag) const
+  ssize_t supstr(qstring *buf, nodeidx_t alt, uchar tag=stag) const
+        { return netnode_qsupstr(*this, buf, alt, tag); }
+  ssize_t supstr_ea(qstring *buf, ea_t ea, uchar tag=stag) const
+        { return netnode_qsupstr(*this, buf, ea, tag|NETMAP_IDX); }
+
+  /// \sa supstr(qstring *buf, nodeidx_t alt, uchar tag=stag) const
+  ssize_t supstr(nodeidx_t alt, char *buf, size_t bufsize, uchar tag=stag) const
         { return netnode_supstr(*this, alt, buf, bufsize, tag); }
+  ssize_t supstr_ea(ea_t ea, char *buf, size_t bufsize, uchar tag=stag) const
+        { return netnode_supstr(*this, ea, buf, bufsize, tag|NETMAP_IDX); }
 
   /// Set value of supval array element.
   /// \param alt     index into array of supvals
@@ -580,37 +650,51 @@ public:
   /// \param tag     tag of array
   /// \retval 1  ok
   /// \retval 0  should not occur - indicates internal error
-  bool supset(nodeidx_t alt, const void *value, size_t length=0, char tag=stag)
+  bool supset(nodeidx_t alt, const void *value, size_t length=0, uchar tag=stag)
         { return netnode_supset(*this, alt, value, length, tag); }
+  bool supset_ea(ea_t ea, const void *value, size_t length=0, uchar tag=stag)
+        { return netnode_supset(*this, ea, value, length, tag|NETMAP_IDX); }
 
   /// Delete supval element.
   /// \param alt  index into array of supvals
   /// \param tag  tag of array
   /// \retval true   deleted
   /// \retval false  element does not exist
-  bool supdel(nodeidx_t alt, char tag=stag)
+  bool supdel(nodeidx_t alt, uchar tag=stag)
         { return netnode_supdel(*this, alt, tag); }
+  bool supdel_ea(ea_t ea, uchar tag=stag)
+        { return netnode_supdel(*this, ea, tag|NETMAP_IDX); }
+
+  /// Get lower bound of existing elements of supval array.
+  /// \param cur  current index
+  /// \param tag  tag of array
+  /// \return index of first existing element of supval array >= cur
+  ///          #BADNODE if supval array is empty
+  nodeidx_t lower_bound(nodeidx_t cur, uchar tag=stag) const
+        { return netnode_lower_bound(*this, cur, tag); }
+  nodeidx_t lower_bound_ea(ea_t ea, uchar tag=stag) const
+        { return netnode_lower_bound(*this, ea, tag|NETMAP_IDX); }
 
   /// Get first existing element of supval array.
   /// \param tag  tag of array
   /// \return index of first existing element of supval array,
   ///          #BADNODE if supval array is empty
-  nodeidx_t sup1st(char tag=stag) const
-        { return netnode_sup1st(*this, tag); }
+  nodeidx_t supfirst(uchar tag=stag) const
+        { return netnode_supfirst(*this, tag); }
 
   /// Get next existing element of supval array.
   /// \param cur  current index
   /// \param tag  tag of array
   /// \return index of the next existing element of supval array,
   ///          #BADNODE if no more supval array elements exist
-  nodeidx_t supnxt(nodeidx_t cur, char tag=stag) const
-        { return netnode_supnxt(*this, cur, tag); }
+  nodeidx_t supnext(nodeidx_t cur, uchar tag=stag) const
+        { return netnode_supnext(*this, cur, tag); }
 
   /// Get last existing element of supval array.
   /// \param tag  tag of array
   /// \return index of last existing element of supval array,
   ///          #BADNODE if supval array is empty
-  nodeidx_t suplast(char tag=stag) const
+  nodeidx_t suplast(uchar tag=stag) const
         { return netnode_suplast(*this, tag); }
 
   /// Get previous existing element of supval array.
@@ -618,14 +702,14 @@ public:
   /// \param tag  tag of array
   /// \return index of the previous existing element of supval array
   ///          #BADNODE if no more supval array elements exist
-  nodeidx_t supprev(nodeidx_t cur, char tag=stag) const
+  nodeidx_t supprev(nodeidx_t cur, uchar tag=stag) const
         { return netnode_supprev(*this, cur, tag); }
 
 
   /// Shift the supval array elements.
   /// Moves the array elements at (from..from+size) to (to..to+size)
   /// \return number of shifted elements
-  size_t supshift(nodeidx_t from, nodeidx_t to, nodeidx_t size, char tag=stag)
+  size_t supshift(nodeidx_t from, nodeidx_t to, nodeidx_t size, uchar tag=stag)
     { return netnode_supshift(*this, from, to, size, tag); }
 
   //@}
@@ -635,14 +719,16 @@ public:
   /// described above. The only difference is that the array index is 8-bits
   /// and therefore the array may contains up to 256 elements only.
   //@{
-  ssize_t   supval_idx8(uchar alt, void *buf, size_t bufsize, char tag) const { return netnode_supval_idx8(*this, alt, buf, bufsize, tag); }
-  ssize_t   supstr_idx8(uchar alt, char *buf, size_t bufsize, char tag) const { return netnode_supstr_idx8(*this, alt, buf, bufsize, tag); }
-  bool      supset_idx8(uchar alt, const void *value, size_t length, char tag) { return netnode_supset_idx8(*this, alt, value, length, tag); }
-  bool      supdel_idx8(uchar alt, char tag)        { return netnode_supdel_idx8(*this, alt, tag); }
-  nodeidx_t sup1st_idx8(char tag) const             { return netnode_sup1st_idx8(*this, tag); }
-  nodeidx_t supnxt_idx8(uchar alt, char tag) const  { return netnode_supnxt_idx8(*this, alt, tag); }
-  nodeidx_t suplast_idx8(char tag) const            { return netnode_suplast_idx8(*this, tag); }
-  nodeidx_t supprev_idx8(uchar alt, char tag) const { return netnode_supprev_idx8(*this, alt, tag); }
+  ssize_t   supval_idx8(uchar alt, void *buf, size_t bufsize, uchar tag) const { return netnode_supval_idx8(*this, alt, buf, bufsize, tag); }
+  ssize_t   supstr_idx8(uchar alt, char *buf, size_t bufsize, uchar tag) const { return netnode_supstr_idx8(*this, alt, buf, bufsize, tag); }
+  ssize_t   supstr_idx8(qstring *buf, uchar alt, uchar tag) const { return netnode_qsupstr_idx8(*this, buf, alt, tag); }
+  bool     supset_idx8(uchar alt, const void *value, size_t length, uchar tag) { return netnode_supset_idx8(*this, alt, value, length, tag); }
+  bool     supdel_idx8(uchar alt, uchar tag)        { return netnode_supdel_idx8(*this, alt, tag); }
+  nodeidx_t lower_bound_idx8(uchar alt, uchar tag) const { return netnode_lower_bound_idx8(*this, alt, tag); }
+  nodeidx_t supfirst_idx8(uchar tag) const           { return netnode_supfirst_idx8(*this, tag); }
+  nodeidx_t supnext_idx8(uchar alt, uchar tag) const { return netnode_supnext_idx8(*this, alt, tag); }
+  nodeidx_t suplast_idx8(uchar tag) const            { return netnode_suplast_idx8(*this, tag); }
+  nodeidx_t supprev_idx8(uchar alt, uchar tag) const { return netnode_supprev_idx8(*this, alt, tag); }
   //@}
 
   /// \name Delete supvals
@@ -652,7 +738,7 @@ public:
   /// This function may be applied to 32-bit and 8-bit supval arrays.
   /// This function deletes the whole supval array.
   /// \return success
-  bool   supdel(void)
+  bool supdel(void)
   {
     return supdel_all(stag);
   }
@@ -661,7 +747,7 @@ public:
   /// This function may be applied to 32-bit and 8-bit supval arrays.
   /// This function deletes the whole supval array.
   /// \return success
-  bool supdel_all(char tag)
+  bool supdel_all(uchar tag)
   {
     return netnode_supdel_all(*this, tag);
   }
@@ -673,12 +759,12 @@ public:
   /// \param idx2  last element to delete + 1
   /// \param tag   tag of array
   /// \return number of deleted elements
-  int supdel_range(nodeidx_t idx1, nodeidx_t idx2, char tag)
+  int supdel_range(nodeidx_t idx1, nodeidx_t idx2, uchar tag)
   {
     return netnode_supdel_range(*this, idx1, idx2, tag);
   }
   /// Same as above, but accepts 8-bit indexes
-  int supdel_range_idx8(uchar idx1, uchar idx2, char tag)
+  int supdel_range_idx8(uchar idx1, uchar idx2, uchar tag)
   {
     return netnode_supdel_range_idx8(*this, idx1, idx2, tag);
   }
@@ -699,11 +785,15 @@ public:
   /// \param tag      tag of hash. Default: htag
   /// \return -1 if element doesn't exist or idx is NULL.
   ///          otherwise returns the value size in bytes
-  ssize_t hashval(const char *idx, void *buf, size_t bufsize, char tag=htag) const
+  ssize_t hashval(const char *idx, void *buf, size_t bufsize, uchar tag=htag) const
         { return netnode_hashval(*this, idx, buf, bufsize, tag); }
 
-  /// Similar to  supstr(), but accepts a hash index
-  ssize_t hashstr(const char *idx, char *buf, size_t bufsize, char tag=htag) const
+  /// Similar to supstr(), but accepts a hash index
+  ssize_t hashstr(qstring *buf, const char *idx, uchar tag=htag) const
+        { return netnode_qhashstr(*this, buf, idx, tag); }
+
+  /// \sa hashstr(qstring *buf, const char *idx, uchar tag=htag) const
+  ssize_t hashstr(const char *idx, char *buf, size_t bufsize, uchar tag=htag) const
         { return netnode_hashstr(*this, idx, buf, bufsize, tag); }
 
   /// Get value of the specified hash element.
@@ -711,7 +801,7 @@ public:
   /// \param tag  tag of hash. Default: htag
   /// \return value of hash element (it should be set using hashset(nodeidx_t)),
   ///          0 if the element does not exist
-  nodeidx_t hashval_long(const char *idx, char tag=htag) const
+  nodeidx_t hashval_long(const char *idx, uchar tag=htag) const
         { return netnode_hashval_long(*this, idx, tag); }
 
   /// Set value of hash element.
@@ -722,7 +812,7 @@ public:
   /// \param tag     tag of hash. Default: htag
   /// \retval 1  ok
   /// \retval 0  should not occur - indicates internal error
-  bool hashset(const char *idx, const void *value, size_t length=0, char tag=htag)
+  bool hashset(const char *idx, const void *value, size_t length=0, uchar tag=htag)
         { return netnode_hashset(*this, idx, value, length, tag); }
 
   /// Set value of hash element to long value.
@@ -731,7 +821,7 @@ public:
   /// \param tag    tag of hash. Default: htag
   /// \retval 1  ok
   /// \retval 0  should not occur - indicates internal error
-  bool hashset(const char *idx, nodeidx_t value, char tag=htag)
+  bool hashset(const char *idx, nodeidx_t value, uchar tag=htag)
         { return hashset(idx, &value, sizeof(value), tag); }
 
   /// Delete hash element.
@@ -739,56 +829,68 @@ public:
   /// \param tag  tag of hash. Default: htag
   /// \retval true   deleted
   /// \retval false  element does not exist
-  bool hashdel(const char *idx, char tag=htag)
+  bool hashdel(const char *idx, uchar tag=htag)
         { return netnode_hashdel(*this, idx, tag); }
 
   /// Get first existing element of hash.
   /// \note elements of hash are kept sorted in lexical order
   /// \param buf      output buffer, may be NULL
-  /// \param bufsize  output buffer size
   /// \param tag      tag of hash. Default: htag
   /// \return size of index of first existing element of hash,
   ///          -1 if hash is empty
-  ssize_t hash1st(char *buf, size_t bufsize, char tag=htag) const
-        { return netnode_hash1st(*this, buf, bufsize, tag); }
+  ssize_t hashfirst(qstring *buf, uchar tag=htag) const
+        { return netnode_qhashfirst(*this, buf, tag); }
+
+  /// \sa hashfirst(qstring *buf, uchar tag=htag) const
+  ssize_t hashfirst(char *buf, size_t bufsize, uchar tag=htag) const
+        { return netnode_hashfirst(*this, buf, bufsize, tag); }
 
   /// Get next existing element of hash.
   /// \note elements of hash are kept sorted in lexical order
-  /// \param idx      current index into hash
   /// \param buf      output buffer, may be NULL
-  /// \param bufsize  output buffer size
+  /// \param idx      current index into hash
   /// \param tag      tag of hash. Default: htag
   /// \return size of index of the next existing element of hash,
   ///          -1 if no more hash elements exist
-  ssize_t hashnxt(const char *idx, char *buf, size_t bufsize, char tag=htag) const
-        { return netnode_hashnxt(*this, idx, buf, bufsize, tag); }
+  ssize_t hashnext(qstring *buf, const char *idx, uchar tag=htag) const
+        { return netnode_qhashnext(*this, buf, idx, tag); }
+
+  /// \sa hashnext(qstring *buf, const char *idx, uchar tag=htag) const
+  ssize_t hashnext(const char *idx, char *buf, size_t bufsize, uchar tag=htag) const
+        { return netnode_hashnext(*this, idx, buf, bufsize, tag); }
 
   /// Get last existing element of hash.
   /// \note elements of hash are kept sorted in lexical order
   /// \param buf      output buffer, may be NULL
-  /// \param bufsize  output buffer size
   /// \param tag      tag of hash. Default: htag
   /// \return size of index of last existing element of hash,
   ///          -1 if hash is empty
-  ssize_t hashlast(char *buf, size_t bufsize, char tag=htag) const
+  ssize_t hashlast(qstring *buf, uchar tag=htag) const
+        { return netnode_qhashlast(*this, buf, tag); }
+
+  /// \sa hashlast(qstring *buf, uchar tag=htag) const
+  ssize_t hashlast(char *buf, size_t bufsize, uchar tag=htag) const
         { return netnode_hashlast(*this, buf, bufsize, tag); }
 
   /// Get previous existing element of supval array.
   /// \note elements of hash are kept sorted in lexical order
-  /// \param idx      current index into hash
   /// \param buf      output buffer, may be NULL
-  /// \param bufsize  output buffer size
+  /// \param idx      current index into hash
   /// \param tag      tag of hash. Default: htag
   /// \return size of index of the previous existing element of hash,
   ///          -1 if no more hash elements exist
-  ssize_t hashprev(const char *idx, char *buf, size_t bufsize, char tag=htag) const
+  ssize_t hashprev(qstring *buf, const char *idx, uchar tag=htag) const
+        { return netnode_qhashprev(*this, buf, idx, tag); }
+
+  /// \sa hashprev(qstring *buf, const char *idx, uchar tag=htag) const
+  ssize_t hashprev(const char *idx, char *buf, size_t bufsize, uchar tag=htag) const
         { return netnode_hashprev(*this, idx, buf, bufsize, tag); }
 
   /// Delete all elements of hash.
   /// This function deletes the whole hash.
   /// \param tag  tag of hash. Default: htag
   /// \return success
-  bool hashdel_all(char tag=htag)
+  bool hashdel_all(uchar tag=htag)
   {
     return supdel_all(tag);
   }
@@ -805,27 +907,77 @@ public:
   /// \param _start  index of the first supval element used to store blob
   /// \param tag     tag of supval array
   /// \return number of bytes required to store a blob
-  size_t blobsize(nodeidx_t _start, char tag)
+  size_t blobsize(nodeidx_t _start, uchar tag)
   {
     return netnode_blobsize(*this, _start, tag);
+  }
+  size_t blobsize_ea(ea_t ea, uchar tag)
+  {
+    return netnode_blobsize(*this, ea, tag|NETMAP_IDX);
   }
 
   /// Get blob from a netnode.
   /// \param buf              buffer to read into. if NULL, the buffer will be
   ///                         allocated using qalloc()
-  /// \param[in, out] bufsize  in:  size of 'buf' in bytes (if buf == NULL then meaningless).
+  /// \param[in, out] bufsize in:  size of 'buf' in bytes (if buf == NULL then meaningless).
   ///                         out: size of the blob if it exists.
   ///                         bufsize may be NULL
   /// \param _start           index of the first supval element used to store blob
   /// \param tag              tag of supval array
   /// \return NULL if blob doesn't exist,
   ///          otherwise returns pointer to blob
-  void *getblob(void *buf,
-                size_t *bufsize,
-                nodeidx_t _start,
-                char tag)
+  void *getblob(
+          void *buf,
+          size_t *bufsize,
+          nodeidx_t _start,
+          uchar tag)
   {
     return netnode_getblob(*this, buf, bufsize, _start, tag);
+  }
+  void *getblob_ea(
+          void *buf,
+          size_t *bufsize,
+          ea_t ea,
+          uchar tag)
+  {
+    return netnode_getblob(*this, buf, bufsize, ea, tag|NETMAP_IDX);
+  }
+
+  /// Get blob from a netnode.
+  /// \param blob   output ::qvector buffer
+  /// \param _start index of the first supval element used to store blob
+  /// \param tag    tag of supval array
+  /// \return -1 if blob doesn't exist, size of blob otherwise
+  template <class T>
+  ssize_t getblob(
+          qvector<T> *blob,
+          nodeidx_t _start,
+          uchar tag)
+  {
+    return netnode_qgetblob(*this, (bytevec_t *)blob, sizeof(T), _start, tag);
+  }
+  template <class T>
+  ssize_t getblob_ea(
+          qvector<T> *blob,
+          ea_t ea,
+          uchar tag)
+  {
+    return getblob(blob, nodeidx_t(ea), tag|NETMAP_IDX);
+  }
+
+  /// Get blob from a netnode into a qstring* and make sure the string is
+  /// null-terminated.
+  /// \param buf    output ::qstring buffer
+  /// \param _start index of the first supval element used to store blob
+  /// \param tag    tag of supval array
+  /// \return -1 if blob doesn't exist
+  ///         size of string (including terminating null) otherwise
+  ssize_t getblob(
+          qstring *buf,
+          nodeidx_t _start,
+          uchar tag)
+  {
+    return netnode_qgetblob(*this, (bytevec_t *)buf, 1, _start, tag|NETMAP_STR);
   }
 
   /// Store a blob in a netnode.
@@ -834,21 +986,34 @@ public:
   /// \param _start   index of the first supval element used to store blob
   /// \param tag      tag of supval array
   /// \return success
-  bool setblob(const void *buf,
-              size_t size,
-              nodeidx_t _start,
-              char tag)
+  bool setblob(
+          const void *buf,
+          size_t size,
+          nodeidx_t _start,
+          uchar tag)
   {
     return netnode_setblob(*this, buf, size, _start, tag);
+  }
+  bool setblob_ea(
+          const void *buf,
+          size_t size,
+          ea_t ea,
+          uchar tag)
+  {
+    return netnode_setblob(*this, buf, size, ea, tag|NETMAP_IDX);
   }
 
   /// Delete a blob.
   /// \param _start  index of the first supval element used to store blob
   /// \param tag     tag of supval array
   /// \return number of deleted supvals
-  int delblob(nodeidx_t _start, char tag)
+  int delblob(nodeidx_t _start, uchar tag)
   {
     return netnode_delblob(*this, _start, tag);
+  }
+  int delblob_ea(ea_t ea, uchar tag)
+  {
+    return netnode_delblob(*this, ea, tag|NETMAP_IDX);
   }
 
   //@}
@@ -867,12 +1032,12 @@ public:
   //      linktype - type of link to create
   //      linkspec - arbitrary text stored in the link
   // returns: 1 - ok
-  int   link(netnode to, netlink linktype, const char *linkspec);
+  int link(netnode to, netlink linktype, const char *linkspec);
 
   // Delete a link between two nodes
   //      to       - target netnode
   //      linktype - type of link to create
-  void  unlink(netnode to, netlink linktype);
+  void unlink(netnode to, netlink linktype);
 
   // Get text associated with the link
   //      to       - target netnode
@@ -946,50 +1111,9 @@ public:
   bool operator!=(nodeidx_t x) const { return netnodenumber != x; }
   //@}
 
-  //--------------------------------------------------------------------------
-  /// \name Internals
-  /// \warning The following netnode definitions are for the kernel only.
-  ///
-  /// Functions for global base manipulating.
-  //@{
-  static bool createbase(const char *fname, nodeidx_t initial_nodeid=0); // Create base
-  static int  checkbase(const char *fname);
-#define NNBASE_OK      0        // ok
-#define NNBASE_REPAIR  1        // repair database
-#define NNBASE_IOERR   2        // i/o error
-#define NNBASE_PAGE16  3        // 16-bit database
-  static void set_close_flag(bool closeflag);   // Set "closed" flag of database
-  static nodeidx_t reserve_nodes(nodeidx_t n);  // Reserve 'n' node numbers. Returns first reserved number
-  static int32 validate(const char *badbase, const char *newbase, void (*cb)(uint32)); // return: number of recovered keys
-  static void upgrade16(const char *oldbase, const char *newbase, void (*cb)(uint32));
-  static void upgrade(void (*cb)(uint32));
-  static void compress(const char *oldbase, const char *newbase, void (*cb)(uint32));
+
 
   static bool inited(void) { return netnode_inited(); }
-  static bool can_write();
-  static void init(const char *file, size_t cachesize, bool can_modify);
-  static void flush(void);
-  static linput_t *get_linput();                // must be closed by close_linput()
-  static void term(void);
-  static void killbase(nodeidx_t iniNumber=0);      // Clean up ALL base
-  static int  getdrive(void);                   // Get current drive
-  static int  getgraph(void)                    // Get current graph
-                                                // (for compatibility:
-               { return atag; }                 //   always returns 'A'
-  static int  registerbase(const char *filename, size_t cachesize, bool writeFlag=true);
-                                                // Register aux base file
-                                                // 0 - too many bases
-                                                // else - drive number
-  static bool setbase(int drive, int graph=atag);// Set current base
-                                                // Base -- got from setbasefile
-                                                // 'graph' parameter is not used.
-                                                // (must be equal to atag)
-                                                // (for compatibility)
-  static int32 validate_names(qstrvec_t *errmsgs);// check consistency of name
-                                                // records, return number of
-                                                // bad ones and error messages
-                                                // for them
-  //@}
 
   //--------------------------------------------------------------------------
   // Private definitions
@@ -1004,17 +1128,17 @@ private:
   bool check(const char *oldname, size_t namlen=0) // Check and access node type
         { return netnode_check(this, oldname, namlen, false); }
 
-  qstring qsupval(nodeidx_t ea, char tag) const;
-  void qsupset(nodeidx_t ea, const qstring &x, char tag);
+  qstring qsupval(nodeidx_t ea, uchar tag) const;
+  void qsupset(nodeidx_t ea, const qstring &x, uchar tag);
 };
 
 
 //-----------------------------------------------------------------------
 
 /// The root node is used by the kernel, do not use it directly in your modules.
-idaman netnode ida_export_data RootNode;             // name: "Root Node"
+/// Its name: "Root Node"
+idaman netnode ida_export_data root_node;
 
 
 
-#pragma pack(pop)
 #endif // _NETNODE_HPP

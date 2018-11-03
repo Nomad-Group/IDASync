@@ -9,8 +9,7 @@
 #define _OFFSET_HPP
 
 #include <nalt.hpp>
-
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
+#include <segment.hpp>
 
 /*! \file offset.hpp
 
@@ -31,25 +30,14 @@
 */
 
 
-/// Convert operand to offset - OBSOLETE FUNCTION, use op_offset() instead.
-/// To delete an offset, use noType() function.
-/// \param ea  linear address.
-///            if 'ea' has unexplored bytes, try to convert them to
-///              - no segment: fail
-///              - 16bit segment: to 16bit word data
-///              - 32bit segment: to dword
-/// \param n  number of operand (may be ORed with #OPND_OUTER)
-///             - 0: first
-///             - 1: second
-///             - #OPND_MASK: both operands
-/// \param base  base of offset (linear address)
-/// \return success
+/// Get default reference type depending on the segment.
+/// \return one of ::REF_OFF8,::REF_OFF16,::REF_OFF32
 
-idaman bool ida_export set_offset(ea_t ea, int n, ea_t base);
+idaman reftype_t ida_export get_default_reftype(ea_t ea);
 
 
 /// Convert operand to a reference.
-/// To delete an offset, use noType() function.
+/// To delete an offset, use clr_op_type() function.
 /// \param ea  linear address.
 ///            if 'ea' has unexplored bytes, try to convert them to
 ///              - no segment: fail
@@ -68,20 +56,36 @@ idaman int ida_export op_offset_ex(ea_t ea, int n, const refinfo_t *ri);
 
 /// See op_offset_ex()
 
-idaman int ida_export op_offset(ea_t ea, int n, reftype_t type, ea_t target=BADADDR,
-                        ea_t base=0, adiff_t tdelta=0);
+idaman int ida_export op_offset(
+        ea_t ea,
+        int n,
+        reftype_t type,
+        ea_t target=BADADDR,
+        ea_t base=0,
+        adiff_t tdelta=0);
 
 
-/// Get offset base value - OBSOLETE FUNCTION, use get_refinfo() instead
+/// Convert operand to a reference with the default reference type
+
+inline bool op_plain_offset(ea_t ea, int n, ea_t base)
+{
+  reftype_t reftype = get_default_reftype(ea);
+  return op_offset(ea, n, reftype, BADADDR, base) != 0;
+}
+
+
+/// Get offset base value
 /// \param ea  linear address
-/// \param n   number of operand (may be ORed with #OPND_OUTER)
-///              - 0: first
-///              - 1: second
-///              - #OPND_MASK: try to get base of the first operand,
-///                         get the second if the first doesn't exist
+/// \param n   number of operand
 /// \return offset base or #BADADDR
 
-idaman ea_t ida_export get_offbase(ea_t ea,int n);
+inline ea_t get_offbase(ea_t ea, int n)
+{
+  refinfo_t ri;
+  if ( !get_refinfo(&ri, ea, n) )
+    return BADADDR;
+  return ri.base;
+}
 
 
 /// Get offset expression (in the form "offset name+displ").
@@ -106,6 +110,7 @@ idaman ea_t ida_export get_offbase(ea_t ea,int n);
 /// }
 /// and the function will return a colored string:
 ///     \v{offset array}
+/// \param buf         output buffer to hold offset expression
 /// \param ea          start of instruction or data with the offset expression
 /// \param n           number of operand (may be ORed with #OPND_OUTER)
 ///                      - 0: first operand
@@ -116,8 +121,6 @@ idaman ea_t ida_export get_offbase(ea_t ea,int n);
 ///                    instruction.
 /// \param offset      value of operand or its part. The function will return
 ///                    text representation of this value as offset expression.
-/// \param buf         output buffer to hold offset expression
-/// \param bufsize     size of the output buffer
 /// \param getn_flags  combination of:
 ///                      - #GETN_APPZERO: meaningful only if the name refers to
 ///                                       a structure. appends the struct field name
@@ -132,26 +135,24 @@ idaman ea_t ida_export get_offbase(ea_t ea,int n);
 
 
 idaman int ida_export get_offset_expression(
-                          ea_t ea,
-                          int n,
-                          ea_t from,
-                          adiff_t offset,
-                          char *buf,
-                          size_t bufsize,
-                          int getn_flags=0);
+        qstring *buf,
+        ea_t ea,
+        int n,
+        ea_t from,
+        adiff_t offset,
+        int getn_flags=0);
 
 
 /// See get_offset_expression()
 
 idaman int ida_export get_offset_expr(
-                          ea_t ea,
-                          int n,
-                          refinfo_t &ri,
-                          ea_t from,
-                          adiff_t offset,
-                          char *buf,
-                          size_t bufsize,
-                          int getn_flags=0);
+        qstring *buf,
+        ea_t ea,
+        int n,
+        const refinfo_t &ri,
+        ea_t from,
+        adiff_t offset,
+        int getn_flags=0);
 
 
 /// Does the specified address contain a valid OFF32 value?.
@@ -162,6 +163,18 @@ idaman int ida_export get_offset_expr(
 idaman ea_t ida_export can_be_off32(ea_t ea);
 
 
+/// Try to calculate the offset base
+/// This function takes into account the fixup information,
+/// current ds and cs values.
+/// \param ea   the referencing instruction/data address
+/// \param n    operand number
+///             - 0: first operand
+///             - 1: other operand
+/// \return output base address or #BADADDR
+
+idaman ea_t ida_export calc_offset_base(ea_t ea, int n);
+
+
 /// Try to calculate the offset base.
 /// 2 bases are checked: current ds and cs.
 /// If fails, return #BADADDR
@@ -169,36 +182,48 @@ idaman ea_t ida_export can_be_off32(ea_t ea);
 idaman ea_t ida_export calc_probable_base_by_value(ea_t ea, uval_t off);
 
 
-/// Get default reference type depending on the segment.
-/// \return one of ::REF_OFF8,::REF_OFF16,::REF_OFF32
-
-idaman reftype_t ida_export get_default_reftype(ea_t ea);
-
-
-/// Calculate the target address of an offset expression.
-/// \note this function may change 'ri' structure.
-///
-/// If ri.base is #BADADDR, it calculates the offset base address
-/// from the referencing instruction/data address.
-/// \param ri     reference info block from the database
-/// \param opval  operand value (usually op_t::value or op_t::addr)
-/// \return the target address of the reference
-
-idaman ea_t ida_export calc_reference_target(ea_t from, refinfo_t &ri, adiff_t opval);
-
-
-/// Calculate the value of the reference base.
-/// The reference basevalue is used like this:  "offset target - reference_basevalue"
-/// Usually the basevalue is equal to 0.
-/// If it is not equal to 0, then ri.base contains the address of reference_basevalue
-/// (which is not equal to reference_basevalue for 16-bit programs!).
+/// Calculate the target and base addresses of an offset expression.
+/// The calculated target and base addresses are returned in the locations
+/// pointed by 'base' and 'target'. In addition, the 'ri' argument may be
+/// modified if ri.base is #BADADDR. In this case the function calculates
+/// the offset base address from the referencing instruction/data address
+/// and saves it in the 'ri' structure.
+/// The target address is copied from ri.target. If ri.target is #BADADDR
+/// then the target is calculated using the base address and 'opval'.
+/// This function also checks if 'opval' matches the full value of the
+/// reference and takes in account the memory-mapping.
+/// \param  target  output target address
+/// \param  base    output base address
 /// \param  from    the referencing instruction/data address
 /// \param  ri      reference info block from the database
 /// \param  opval   operand value (usually op_t::value or op_t::addr)
-/// \param  target  the reference target. If #BADADDR, it will be calculated automatically
-/// \return the reference basevalue
+/// \return success
+idaman bool ida_export calc_reference_data(
+        ea_t *target,
+        ea_t *base,
+        ea_t from,
+        const refinfo_t &ri,
+        adiff_t opval);
 
-idaman ea_t ida_export calc_reference_basevalue(ea_t from, refinfo_t &ri, adiff_t opval, ea_t target);
+
+/// Add xrefs for a reference from the given instruction (\insn_t{ea}).
+/// This function creates a cross references to the target and the base.
+/// insn_t::add_off_drefs() calls this function to create xrefs for
+/// 'offset' operand.
+/// \param  insn   the referencing instruction
+/// \param  from   the referencing instruction/data address
+/// \param  ri     reference info block from the database
+/// \param  opval  operand value (usually op_t::value or op_t::addr)
+/// \param  type   type of xref
+/// \param  opoff  offset of the operand from the start of instruction
+/// \return the target address of the reference
+idaman ea_t ida_export add_refinfo_dref(
+        const insn_t &insn,
+        ea_t from,
+        const refinfo_t &ri,
+        adiff_t opval,
+        dref_t type,
+        int opoff);
 
 
 /// Retrieves refinfo_t structure and calculates the target
@@ -206,12 +231,21 @@ idaman ea_t ida_export calc_reference_basevalue(ea_t from, refinfo_t &ri, adiff_
 inline ea_t calc_target(ea_t from, ea_t ea, int n, adiff_t opval)
 {
   refinfo_t ri;
-  if ( get_refinfo(ea, n, &ri) )
-    return calc_reference_target(from, ri, opval);
-  return BADADDR;
+  if ( !get_refinfo(&ri, ea, n) )
+    return BADADDR;
+  ea_t target;
+  if ( !calc_reference_data(&target, NULL, from, ri, opval) )
+    return BADADDR;
+  return target;
+}
+
+/// Calculate the value of the reference base.
+
+inline ea_t calc_basevalue(ea_t target, ea_t base)
+{
+  return base - get_segm_base(getseg(target));
 }
 
 
 
-#pragma pack(pop)
 #endif  // _OFFSET_HPP

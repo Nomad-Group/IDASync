@@ -8,60 +8,71 @@
  */
 
 #include "h8500.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //----------------------------------------------------------------------
-static void out_bad_address(ea_t addr)
+class out_h8500_t : public outctx_t
+{
+  out_h8500_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(int r) { out_register(ph.reg_names[r]); }
+  void out_bad_address(ea_t addr);
+  void out_sizer(const op_t &x);
+  void out_reglist(int reg, int cnt);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+};
+CASSERT(sizeof(out_h8500_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_h8500_t)
+
+//----------------------------------------------------------------------
+void out_h8500_t::out_bad_address(ea_t addr)
 {
   const char *name = find_sym((int)addr);
-  if ( name != NULL )
+  if ( name != NULL && name[0] != '\0' )
   {
     out_line(name, COLOR_IMPNAME);
   }
   else
   {
     out_tagon(COLOR_ERROR);
-    OutLong(addr, 16);
+    out_btoa(addr, 16);
     out_tagoff(COLOR_ERROR);
-    QueueSet(Q_noName, cmd.ea);
+    remember_problem(PR_NONAME, insn.ea);
   }
 }
 //----------------------------------------------------------------------
-inline void outreg(int r)
+static int calc_sizer(const insn_t &insn, const op_t &x)
 {
-  out_register(ph.regNames[r]);
-}
-
-//----------------------------------------------------------------------
-static int calc_sizer(op_t &x)
-{
-  if ( cmd.itype == H8500_mov_g && x.type == o_imm )
-    return cmd.auxpref & aux_mov16 ? 16 : 8;
+  if ( insn.itype == H8500_mov_g && x.type == o_imm )
+    return insn.auxpref & aux_mov16 ? 16 : 8;
   // special case: cmp:g.b #x:8, @(d:16,r)
   // special case: cmp:g.w #x:16, @(d:8,r)
-  else if ( cmd.itype == H8500_cmp_g && x.type == o_imm )
-    return cmd.auxpref & aux_word ? 16 : 8;
+  else if ( insn.itype == H8500_cmp_g && x.type == o_imm )
+    return insn.auxpref & aux_word ? 16 : 8;
   else
-    return (cmd.auxpref & aux_disp24) ? 24 :
-           (cmd.auxpref & aux_disp16) ? 16 : 8;
+    return (insn.auxpref & aux_disp24) ? 24 : (insn.auxpref & aux_disp16) ? 16 : 8;
 }
 
 //----------------------------------------------------------------------
-ea_t calc_mem(op_t &x)
+ea_t calc_mem(const insn_t &insn, const op_t &x)
 {
   if ( x.type == o_near )
-    return toEA(cmd.cs, x.addr);
+    return to_ea(insn.cs, x.addr);
 
-// Before this was simply toEA, now we do it like this:
+// Before this was simply to_ea, now we do it like this:
 // (if someone complains, both methods should be retained)
   ea_t ea = x.addr;
-  switch ( calc_sizer(x) )
+  switch ( calc_sizer(insn, x) )
   {
     case 8:
-      if ( cmd.auxpref & aux_page )
+      if ( insn.auxpref & aux_page )
       {
         ea &= 0xFF;
-        sel_t br = get_segreg(cmd.ea, BR);
+        sel_t br = get_sreg(insn.ea, BR);
         if ( br != BADSEL )
           ea |= br << 8;
         else
@@ -72,7 +83,7 @@ ea_t calc_mem(op_t &x)
       ea &= 0xFFFF;
       if ( x.type == o_mem )
       {
-        sel_t dp = get_segreg(cmd.ea, DP);
+        sel_t dp = get_sreg(insn.ea, DP);
         if ( dp != BADSEL )
           ea |= dp << 16;
         else
@@ -80,7 +91,7 @@ ea_t calc_mem(op_t &x)
       }
       else
       {
-        ea |= cmd.ea & ~0xFFFF;
+        ea |= insn.ea & ~0xFFFF;
       }
       break;
   }
@@ -88,13 +99,15 @@ ea_t calc_mem(op_t &x)
 }
 
 //----------------------------------------------------------------------
-static void out_sizer(op_t &x)
+void out_h8500_t::out_sizer(const op_t &x)
 {
   static char show_sizer = -1;
   if ( show_sizer == -1 )
     show_sizer = !qgetenv("H8_NOSIZER");
-  if ( !show_sizer ) return;
-  if ( (cmd.auxpref & (aux_disp8|aux_disp16|aux_disp24)) == 0 ) return;
+  if ( !show_sizer )
+    return;
+  if ( (insn.auxpref & (aux_disp8|aux_disp16|aux_disp24)) == 0 )
+    return;
   out_symbol(':');
   // 1D 00 11 07 00 01                 mov:g.w #1:16, @0x11:16
   // 1D 00 11 06 01                    mov:g.w #1:16, @0x11:16
@@ -104,12 +117,12 @@ static void out_sizer(op_t &x)
   // 1D 00 11 07 00 01                 mov:g.w #1:16, @0x11:16
   // 15 00 11 06 01                    mov:g.b #1:16, @0x11:16
   // 05 11 06 01                       mov:g.b #1:8, @0x11:8
-  int s = calc_sizer(x);
+  int s = calc_sizer(insn, x);
   out_long(s, 10);
 }
 
 //----------------------------------------------------------------------
-static void out_reglist(int reg, int cnt)
+void out_h8500_t::out_reglist(int reg, int cnt)
 {
   int bit = 1;
   int delayed = -1;
@@ -120,11 +133,13 @@ static void out_reglist(int reg, int cnt)
     {
       if ( delayed >= 0 )
       {
-        if ( !first ) out_symbol(',');
+        if ( !first )
+          out_symbol(',');
         if ( delayed == (i-1) )
         {
           outreg(delayed);
-        } else if ( delayed == (i-2) )
+        }
+        else if ( delayed == (i-2) )
         {
           outreg(delayed);
           out_symbol(',');
@@ -142,35 +157,35 @@ static void out_reglist(int reg, int cnt)
     }
     else
     {
-      if ( delayed < 0 ) delayed = i;
+      if ( delayed < 0 )
+        delayed = i;
     }
   }
 }
 
 //----------------------------------------------------------------------
-int calc_opimm_flags(void)
+int calc_opimm_flags(const insn_t &insn)
 {
-  bool sign = cmd.itype == H8500_add_q
-           || cmd.itype == H8500_adds
-           || cmd.itype == H8500_subs;
+  bool sign = insn.itype == H8500_add_q
+           || insn.itype == H8500_adds
+           || insn.itype == H8500_subs;
   return OOFS_IFSIGN|OOFW_IMM|(sign ? OOF_SIGNED : 0);
 }
 
 //----------------------------------------------------------------------
-int calc_opdispl_flags(void)
+int calc_opdispl_flags(const insn_t &insn)
 {
-   bool sign = (cmd.auxpref & aux_disp8) != 0;
-   return OOF_ADDR|OOFS_IFSIGN|(sign ? OOF_SIGNED : 0)|
-                     ((cmd.auxpref & aux_disp24) ? OOFW_32 :
-                      (cmd.auxpref & aux_disp16) ? OOFW_16 : OOFW_8);
+   bool sign = (insn.auxpref & aux_disp8) != 0;
+   return OOF_ADDR | OOFS_IFSIGN | (sign ? OOF_SIGNED : 0)
+        | ((insn.auxpref & aux_disp24) ? OOFW_32
+         : (insn.auxpref & aux_disp16) ? OOFW_16 : OOFW_8);
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_h8500_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
-
     case o_void:
       return 0;
 
@@ -186,16 +201,17 @@ bool idaapi outop(op_t &x)
 
     case o_imm:
       out_symbol('#');
-      OutValue(x, calc_opimm_flags());
+      out_value(x, calc_opimm_flags(insn));
       out_sizer(x);
       break;
 
     case o_mem:
       out_symbol('@');
+      // fallthrough
     case o_near:
     case o_far:
       {
-        ea_t ea = calc_mem(x);
+        ea_t ea = calc_mem(insn, x);
         if ( !out_name_expr(x, ea, BADADDR) )
           out_bad_address(x.addr);
         out_sizer(x);
@@ -205,24 +221,26 @@ bool idaapi outop(op_t &x)
     case o_phrase:
       if ( x.phtype == ph_normal )
       {
-        bool outdisp = isOff(uFlag,x.n)
-                    || isStkvar(uFlag,x.n)
-                    || isEnum(uFlag,x.n)
-                    || isStroff(uFlag,x.n);
+        bool outdisp = is_off(F, x.n)
+                    || is_stkvar(F, x.n)
+                    || is_enum(F, x.n)
+                    || is_stroff(F, x.n);
         if ( outdisp )
          goto OUTDISP;
       }
       out_symbol('@');
-      if ( x.phtype == ph_pre  ) out_symbol('-');
+      if ( x.phtype == ph_pre )
+        out_symbol('-');
       outreg(x.phrase);
-      if ( x.phtype == ph_post ) out_symbol('+');
+      if ( x.phtype == ph_post )
+        out_symbol('+');
       break;
 
     case o_displ:
 OUTDISP:
       out_symbol('@');
       out_symbol('(');
-      OutValue(x, calc_opdispl_flags());
+      out_value(x, calc_opdispl_flags(insn));
       out_sizer(x);
       out_symbol(',');
       outreg(x.reg);
@@ -236,37 +254,43 @@ OUTDISP:
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_h8500_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
   const char *postfix = NULL;
-  if      ( cmd.auxpref & aux_byte ) postfix = ".b";
-  else if ( cmd.auxpref & aux_word ) postfix = ".w";
-  else if ( cmd.auxpref & aux_f    ) postfix = "/f";
-  else if ( cmd.auxpref & aux_ne   ) postfix = "/ne";
-  else if ( cmd.auxpref & aux_eq   ) postfix = "/eq";
-  OutMnem(8, postfix);
+  if ( insn.auxpref & aux_byte )
+    postfix = ".b";
+  else if ( insn.auxpref & aux_word )
+    postfix = ".w";
+  else if ( insn.auxpref & aux_f )
+    postfix = "/f";
+  else if ( insn.auxpref & aux_ne )
+    postfix = "/ne";
+  else if ( insn.auxpref & aux_eq )
+    postfix = "/eq";
+  out_mnem(8, postfix);
+}
+
+//----------------------------------------------------------------------
+void out_h8500_t::out_insn(void)
+{
+  out_mnemonic();
 
   out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
   }
 
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Srange) could be made const
+void idaapi h8500_segstart(outctx_t &ctx, segment_t *Srange)
 {
   const char *predefined[] =
   {
@@ -280,119 +304,109 @@ void idaapi segstart(ea_t ea)
     ".bss",     // bss (block started by storage) section, which loads zero-initialized data
   };
 
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(Srange->type) )
+    return;
 
-  char sname[MAXNAMELEN];
-  char sclas[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sname;
+  qstring sclas;
+  get_segm_name(&sname, Srange);
+  get_segm_class(&sclas, Srange);
 
-  int i;
-  for ( i=0; i < qnumber(predefined); i++ )
-    if ( strcmp(sname, predefined[i]) == 0 )
-      break;
-  if ( i != qnumber(predefined) )
-    printf_line(inf.indent, COLSTR("%s", SCOLOR_ASMDIR), sname);
-  else
-    printf_line(inf.indent, COLSTR("%s", SCOLOR_ASMDIR) "" COLSTR("%s %s", SCOLOR_AUTOCMT),
-                 strcmp(sclas,"CODE") == 0
-                    ? ".text"
-                    : strcmp(sclas,"BSS") == 0
-                         ? ".bss"
-                         : ".data",
-                 ash.cmnt,
-                 sname);
-  if ( Sarea->orgbase != 0 )
+  if ( !print_predefined_segname(ctx, &sname, predefined, qnumber(predefined)) )
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s", SCOLOR_ASMDIR) "" COLSTR("%s %s", SCOLOR_AUTOCMT),
+                   sclas == "CODE" ? ".text" :
+                   sclas == "BSS" ? ".bss" :
+                   ".data",
+                   ash.cmnt,
+                   sname.c_str());
+  if ( Srange->orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
-    btoa(buf, sizeof(buf), Sarea->orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    btoa(buf, sizeof(buf), Srange->orgbase);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t) {
+void idaapi h8500_segend(outctx_t &, segment_t *)
+{
 #if 0
   segment_t *s = getseg(ea-1);
-  if ( is_spec_segm(s->type) ) return;
-  printf_line(0,COLSTR(";%-*s ends",SCOLOR_AUTOCMT),inf.indent-2,get_segm_name(s));
+  if ( !is_spec_segm(s->type) )
+    gen_printf(0,COLSTR(";%-*s ends",SCOLOR_AUTOCMT),inf.indent-2,get_visible_segm_name(s));
 #endif
 }
 
 //--------------------------------------------------------------------------
-void idaapi assume(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+void idaapi h8500_assume(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
 
-  if ( !inf.s_assume || seg == NULL )
+  if ( (inf.outflags & OFLG_GEN_ASSUME) == 0 || seg == NULL )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
-  bool used = false;
-  char *ptr = NULL;
-  for ( int i=ph.regFirstSreg; i <= ph.regLastSreg; i++ )
+  for ( int i=ph.reg_first_sreg; i <= ph.reg_last_sreg; i++ )
   {
-    if ( i == ph.regCodeSreg )
+    if ( i == ph.reg_code_sreg )
       continue;
-    segreg_area_t sra;
-    if ( !get_srarea2(&sra, ea, i) )
+    sreg_range_t sra;
+    if ( !get_sreg_range(&sra, ea, i) )
       continue;
-    bool show = sra.startEA == ea;
+    bool show = sra.start_ea == ea;
     if ( show )
     {
-      segreg_area_t prev_sra;
-      if ( get_prev_srarea(&prev_sra, ea, i) )
+      sreg_range_t prev_sra;
+      if ( get_prev_sreg_range(&prev_sra, ea, i) )
         show = sra.val != prev_sra.val;
     }
     if ( seg_started || show )
     {
-      if ( !used )
+      if ( ctx.outbuf.empty() )
       {
-        ptr = tag_on(buf, end, COLOR_AUTOCMT);
-        APPEND(ptr, end, ash.cmnt);
-        APPEND(ptr, end, " assume ");
+        ctx.out_tagon(COLOR_AUTOCMT);
+        ctx.out_line(ash.cmnt);
+        ctx.out_line(" assume ");
       }
       else
       {
-        APPCHAR(ptr, end, ',');
-        APPCHAR(ptr, end, ' ');
+        ctx.out_line(", ");
       }
-      used = true;
-      APPEND (ptr, end, ph.regNames[i]);
-      APPCHAR(ptr, end, ':');
+      ctx.out_line(ph.reg_names[i]);
+      ctx.out_char(':');
       if ( sra.val == BADSEL )
-        APPEND(ptr, end, "nothing");
+        ctx.out_line("nothing");
       else
-        ptr += btoa(ptr, end-ptr, sra.val, 16);
+        ctx.out_btoa(sra.val, 16);
     }
   }
-  if ( used )
+  if ( !ctx.outbuf.empty() )
   {
-    tag_off(ptr, end, COLOR_AUTOCMT);
-    MakeLine(buf, inf.indent);
+    ctx.out_tagoff(COLOR_AUTOCMT);
+    ctx.flush_outbuf(inf.indent);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi h8500_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL);
-  MakeNull();
+  ctx.gen_header(GH_PRINT_ALL);
+  ctx.gen_empty_line();
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi h8500_footer(outctx_t &ctx)
 {
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
   const char *end = ash.end;
   if ( end == NULL )
-    printf_line(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
+    ctx.gen_printf(inf.indent, COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
   else
-    printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR)
-                  " "
-                  COLSTR("%s %s",SCOLOR_AUTOCMT), ash.end, ash.cmnt, name);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                   ash.end, ash.cmnt, name);
 }

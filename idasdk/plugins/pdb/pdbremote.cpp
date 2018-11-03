@@ -8,13 +8,19 @@
 // this is necessary.
 #include <dbg.hpp>
 
+//-------------------------------------------------------------------------
+bool is_win32_remote_debugger_loaded()
+{
+  return dbg != NULL && dbg->is_remote() && streq(dbg->name, "win32");
+}
+
 //----------------------------------------------------------------------------
 HRESULT pdb_sym_t::get_classParent(pdb_sym_t *out)
 {
   DWORD parent_id;
   HRESULT hr = data->get_dword(t_classParentId, &parent_id);
   if ( hr == S_OK )
-    hr = pdb_access.load(*out, parent_id);
+    hr = pdb_access->load(*out, parent_id);
   return hr;
 }
 
@@ -24,7 +30,17 @@ HRESULT pdb_sym_t::get_type(pdb_sym_t *out)
   DWORD type_id;
   HRESULT hr = data->get_dword(t_typeId, &type_id);
   if ( hr == S_OK )
-    hr = pdb_access.load(*out, type_id);
+    hr = pdb_access->load(*out, type_id);
+  return hr;
+}
+
+//----------------------------------------------------------------------------
+HRESULT pdb_sym_t::get_lexicalParent(pdb_sym_t *out)
+{
+  DWORD lparent_id;
+  HRESULT hr = data->get_dword(t_lexicalParentId, &lparent_id);
+  if ( hr == S_OK )
+    hr = pdb_access->load(*out, lparent_id);
   return hr;
 }
 
@@ -36,11 +52,16 @@ const uint32 sym_data_t::sizes[] =
   sizeof(DWORD64),
   sizeof(char *),
   sizeof(LONG),
+  sizeof(ULONGLONG),
   sizeof(VARIANT)
 };
 
 //----------------------------------------------------------------------------
-sym_data_t::sym_data_t(uint32 _tokens, const uchar *buf, size_t bufsize, packing_info_t _packing)
+sym_data_t::sym_data_t(
+        token_mask_t _tokens,
+        const uchar *buf,
+        size_t bufsize,
+        packing_info_t _packing)
   : present(_tokens)
 {
   memset(counters, 0, sizeof(counters));
@@ -49,8 +70,8 @@ sym_data_t::sym_data_t(uint32 _tokens, const uchar *buf, size_t bufsize, packing
   if ( _packing == SYMDAT_PACKED )
   {
     const uchar *ptr = buf;
-    const uchar *end = buf + bufsize;
-    for ( int bit = t_start; bit != t_end; bit <<= 1 )
+    const uchar *const end = buf + bufsize;
+    for ( uint64 bit = t_start; bit != t_end; bit <<= 1 )
     {
       sym_token_t token = sym_token_t(bit);
       if ( !token_present(token) )
@@ -86,6 +107,12 @@ sym_data_t::sym_data_t(uint32 _tokens, const uchar *buf, size_t bufsize, packing
         LONG tmp = unpack_dd(&ptr, end);
         data.append(&tmp, sizeof(tmp));
       }
+      else if ( is_sym_token_ulonglong(token) )
+      {
+        counters[t_ulonglong]++;
+        ULONGLONG tmp = unpack_dq(&ptr, end);
+        data.append(&tmp, sizeof(tmp));
+      }
       else if ( is_sym_token_variant(token) )
       {
         counters[t_variant]++;
@@ -110,12 +137,13 @@ sym_data_t::sym_data_t(uint32 _tokens, const uchar *buf, size_t bufsize, packing
       }
     }
 
-    QASSERT(30201, data.size() == counters[t_bool]    * sizes[t_bool]
-                                + counters[t_dword]   * sizes[t_dword]
-                                + counters[t_dword64] * sizes[t_dword64]
-                                + counters[t_string]  * sizes[t_string]
-                                + counters[t_long]    * sizes[t_long]
-                                + counters[t_variant] * sizes[t_variant]);
+    QASSERT(30201, data.size() == counters[t_bool]      * sizes[t_bool]
+                                + counters[t_dword]     * sizes[t_dword]
+                                + counters[t_dword64]   * sizes[t_dword64]
+                                + counters[t_string]    * sizes[t_string]
+                                + counters[t_long]      * sizes[t_long]
+                                + counters[t_ulonglong] * sizes[t_ulonglong]
+                                + counters[t_variant]   * sizes[t_variant]);
     QASSERT(30202, ptr == end);
   }
   else
@@ -197,9 +225,15 @@ HRESULT sym_data_t::get_string(sym_token_t token, qstring *out) const
 }
 
 //----------------------------------------------------------------------------
-HRESULT sym_data_t::get_long(sym_token_t token, LONG *out) const
+HRESULT sym_data_t::get_dword(sym_token_t token, LONG *out) const
 {
   READ_IF_FOUND(LONG, long)
+}
+
+//----------------------------------------------------------------------------
+HRESULT sym_data_t::get_ulonglong(sym_token_t token, ULONGLONG *out) const
+{
+  READ_IF_FOUND(ULONGLONG, uint64)
 }
 
 //----------------------------------------------------------------------------
@@ -223,6 +257,7 @@ const void *sym_data_t::any_ptr(sym_token_t token, sym_token_t start, sym_token_
     t_dword64_end,
     t_string_end,
     t_long_end,
+    t_ulonglong_end,
     t_variant_end,
   };
   CASSERT(qnumber(ends) == qnumber(counters));
@@ -270,10 +305,11 @@ remote_pdb_access_t::~remote_pdb_access_t()
 //----------------------------------------------------------------------------
 void remote_pdb_access_t::close_connection()
 {
-  if ( connection_is_open )
+  if ( remote_session_id > 0 )
   {
-    send_ioctl(WIN32_IOCTL_PDB_CLOSE, NULL, 0, NULL, NULL);
-    connection_is_open = false;
+    bytevec_t dummy;
+    perform_op(WIN32_IOCTL_PDB_CLOSE, dummy, NULL);
+    remote_session_id = -1;
   }
 
   if ( !was_connected && dbg != NULL )
@@ -285,10 +321,11 @@ void remote_pdb_access_t::close_connection()
 bool remote_pdb_access_t::load_win32_debugger(void)
 {
   was_connected = false;
-  if ( dbg != NULL && (!dbg->is_remote() || strcmp(dbg->name, "win32") != 0) )
+  if ( dbg != NULL && !is_win32_remote_debugger_loaded() )
   {
     // a debugger is loaded, but it's not a remote win32
-    warning("Loading PDB symbols requires a remote win32 debugger. Please stop the current debugging session and try again.");
+    warning("Loading PDB symbols requires a remote win32 debugger. "
+            "Please stop the current debugging session and try again.");
     return false;
   }
   if ( get_process_state() != DSTATE_NOTASK )
@@ -297,47 +334,63 @@ bool remote_pdb_access_t::load_win32_debugger(void)
     was_connected = true;
     return true;
   }
-  if ( !load_debugger("win32", true) || dbg == NULL )
+
+  netnode pdbnode(PDB_NODE_NAME);
+  pdbnode.altset(PDB_LOADING_WIN32_DBG, true);
+  bool win32_dbg_loaded = load_debugger("win32", true) && dbg != NULL;
+  pdbnode.altdel(PDB_LOADING_WIN32_DBG);
+
+  if ( !win32_dbg_loaded )
   {
     warning("Could not load remote Win32 debugger.");
     return false;
   }
 
-  char server[MAXSTR];
-  qstrncpy(server, host[0] != '\0' ? host : "localhost", sizeof(server));
+  qstring server;
+  server = host[0] != '\0' ? host : "localhost";
 
-  char pass[MAXSTR];
+  qstring pass;
   if ( pwd != NULL )
-    qstrncpy(pass, pwd, sizeof(pass));
-  else
-    pass[0] = '\0';
+    pass = pwd;
 
-  while ( !dbg->init_debugger(server, port, pass) )
+  while ( !dbg->init_debugger(server.c_str(), port, pass.c_str()) )
   {
     if ( batch ) // avoid endless (and useless) loop in batch mode
       return false;
     // hrw
-    static const char formstr[] =
+    const char *winremote = inf.is_64bit() ? "win64_remote64.exe" : "win32_remote.exe";
+    qstring formstr;
+    formstr.sprnt(
       "Remote PDB server\n"
-      "In order to load PDB information, IDA requires a running win32_remote.exe debugger server\n"
-      "running on a Windows host, but it could not connect to the win32_remote.exe debugger\n"
+      "In order to load PDB information, IDA requires a running %s debugger server\n"
+      "running on a Windows host, but it could not connect to the %s debugger\n"
       "at the current specified address.\n"
-      "Please make sure that win32_remote.exe is running there.\n\n"
-      "<#Name of the remote host#~H~ostname :A:1023:30::> <#Remote port number#Po~r~t:D:256:8::>\n"
-      "<#Password for the remote host#Pass~w~ord :A:1023:30::>\n"
-      "Hint: to change this permanently, edit pdb.cfg.\n\n";
+      "Please make sure that %s is running there.\n\n"
+      "<#Name of the remote host#~H~ostname :q:1023:30::> <#Remote port number#Po~r~t:D:256:8::>\n"
+      "<#Password for the remote host#Pass~w~ord :q:1023:30::>\n"
+      "Hint: to change this permanently, edit pdb.cfg.\n\n",
+      winremote, winremote, winremote);
     uval_t sport = port;
-    int r = AskUsingForm_c(formstr, server, &sport, pass);
+    int r = ask_form(formstr.c_str(), &server, &sport, &pass);
     if ( r != 1 )
       return false;
     port = sport;
   }
-  msg("PDB: successfully connected to %s\n", server);
+  msg("PDB: successfully connected to %s\n", server.c_str());
   return true;
 }
 
 
 //----------------------------------------------------------------------------
+#define REPORT_ERROR(Msg, Rc)                   \
+  do                                            \
+  {                                             \
+    qfree(outbuf);                              \
+    qstrncpy(errbuf, Msg, sizeof(errbuf));      \
+    return Rc;                                  \
+  } while ( false )
+
+//-------------------------------------------------------------------------
 HRESULT remote_pdb_access_t::open_connection()
 {
   // Load win32 debugger (FIXME: Should just use an RPC client, not a full debugger!)
@@ -353,12 +406,77 @@ HRESULT remote_pdb_access_t::open_connection()
   append_str(oper, pdbargs.spath);
   append_ea64(oper, get_base_address());
   append_dd(oper, pdbargs.flags);
-  ioctl_pdb_code_t code = perform_op(WIN32_IOCTL_PDB_OPEN, oper, NULL);
-  if ( code != pdb_ok )
-    return E_FAIL;
 
-  connection_is_open = true;
-  return S_OK;
+  void *outbuf = NULL;
+  ssize_t outsize = 0;
+  ioctl_pdb_code_t rc = send_ioctl(
+          WIN32_IOCTL_PDB_OPEN,
+          oper.begin(), oper.size(), &outbuf, &outsize);
+  if ( rc != pdb_ok || outsize < 1 )
+    REPORT_ERROR(
+            "PDB symbol extraction is not supported by the remote server",
+            E_FAIL);
+
+  // remote PDB session has become active
+  bytevec_t sidbuf;
+  {
+    const uchar *ptr = (const uchar *) outbuf;
+    const uchar *const end = ptr + outsize;
+    remote_session_id = unpack_dd(&ptr, end);
+    QASSERT(30493, remote_session_id > 0);
+    append_dd(sidbuf, remote_session_id);
+  }
+
+  // now, do the polling game.
+  bool done = false;
+  while ( !done )
+  {
+    qfree(outbuf);
+    outbuf = NULL;
+    qsleep(100);
+    user_cancelled(); // refresh the output window
+    rc = send_ioctl(
+            WIN32_IOCTL_PDB_OPERATION_COMPLETE,
+            sidbuf.begin(), sidbuf.size(),
+            &outbuf, &outsize);
+    if ( rc != pdb_ok || outsize <= 0 )
+      REPORT_ERROR(
+              "remote server reported error while opening PDB",
+              E_FAIL);
+    const uchar *ptr = (const uchar *)outbuf;
+    const uchar *const end = ptr + outsize;
+    pdb_op_completion_t status = pdb_op_completion_t(unpack_dd(&ptr, end));
+    done = true; // only 'not complete' status will make us continue.
+    switch ( status )
+    {
+      case pdb_op_not_complete:
+        done = false;
+        break;
+      case pdb_op_complete:
+        {
+          set_global_symbol_id(unpack_dd(&ptr, end));
+          set_machine_type(unpack_dd(&ptr, end));
+          set_dia_version(unpack_dd(&ptr, end));
+          const char *fname = unpack_str(&ptr, end);
+          msg("PDB: opened %s\n", fname);
+        }
+        break;
+      case pdb_op_failure:
+        {
+          const char *errmsg = unpack_str(&ptr, end);
+          REPORT_ERROR(errmsg, E_FAIL);
+          // if opening pdb fails, win32_remote closes the MSDIA pdb
+          // session automatically.
+          remote_session_id = -1;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  qfree(outbuf);
+
+  return remote_session_id > 0 ? S_OK : E_FAIL;
 }
 
 
@@ -373,9 +491,37 @@ ioctl_pdb_code_t remote_pdb_access_t::send_ioctl(
   if ( dbg == NULL )
     return pdb_error;
 
-  return ioctl_pdb_code_t(dbg->send_ioctl(fn, buf, size, outbuf, outsz));
+  deb(IDA_DEBUG_DEBUGGER, "PDB: send_ioctl(fn=%d, size=%" FMT_Z ")\n", fn, size);
+  // internal_ioctl() will either send the request to the debugger thread if
+  // it exists (i.e., we are in a debugging session), or perform it directly.
+  ioctl_pdb_code_t code = ioctl_pdb_code_t(internal_ioctl(fn, buf, size, outbuf, outsz));
+  // ioctl_pdb_code_t code = ioctl_pdb_code_t(internal_ioctl  dbg->send_ioctl(fn, buf, size, outbuf, outsz));
+  deb(IDA_DEBUG_DEBUGGER, "PDB: send_ioctl(fn=%d) complete. Code=%d\n", fn, int(code));
+  return code;
 }
 
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::_do_iterate_symbols_ids(
+        const DWORD *ids,
+        size_t count,
+        enum SymTagEnum type,
+        children_visitor_t &visitor)
+{
+  HRESULT hr = S_OK;
+  for ( size_t i = 0, n = count; i < n; ++i, ++ids )
+  {
+    DWORD tag;
+    pdb_sym_t cur(this, *ids);
+    if ( type == SymTagNull
+      || cur.get_symTag(&tag) == S_OK && tag == type )
+    {
+      hr = visitor.visit_child(cur);
+      if ( FAILED(hr) )
+        break;
+    }
+  }
+  return hr;
+}
 
 //----------------------------------------------------------------------------
 HRESULT remote_pdb_access_t::do_iterate_children(
@@ -401,22 +547,11 @@ HRESULT remote_pdb_access_t::do_iterate_children(
 
   HRESULT hr = E_FAIL;
   if ( code == pdb_ok )
-  {
-    hr = S_OK;
-    const DWORD *ptr = children.ids;
-    for ( uint32 i = 0, n = children.cnt; i < n; ++i, ++ptr )
-    {
-      DWORD tag;
-      pdb_sym_t cur(*this, *ptr);
-      if ( type == SymTagNull
-        || cur.get_symTag(&tag) == S_OK && tag == type )
-      {
-        hr = visitor.visit_child(cur);
-        if ( FAILED(hr) )
-          break;
-      }
-    }
-  }
+    hr = _do_iterate_symbols_ids(
+            children.ids,
+            children.cnt,
+            type,
+            visitor);
   return hr;
 }
 
@@ -430,14 +565,188 @@ HRESULT remote_pdb_access_t::load(pdb_sym_t &sym, DWORD id)
   return S_OK;
 }
 
+#define HAS_REMAINING_OR_FAIL(Ptr, End)         \
+  do                                            \
+  {                                             \
+    if ( Ptr >= End )                           \
+      return E_FAIL;                            \
+  } while ( false )
+
+#define ALL_CONSUMED_OR_FAIL(Ptr, End)          \
+  do                                            \
+  {                                             \
+    if ( Ptr != End )                           \
+      return E_FAIL;                            \
+  } while ( false )
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::handle_fetch_lnnums(
+        pdb_lnnums_t *out,
+        const bytevec_t &resp) const
+{
+  const uchar *ptr = resp.begin();
+  const uchar *const end = resp.end();
+  uint32 nlines = unpack_dd(&ptr, end);
+  for ( uint32 i = 0; i < nlines; ++i )
+  {
+    HAS_REMAINING_OR_FAIL(ptr, end);
+    pdb_lnnum_t &ln = out->push_back();
+    ln.va = ULONGLONG(extract_ea64(&ptr, end));
+    ln.length = unpack_dd(&ptr, end);
+    ln.columnNumber = unpack_dd(&ptr, end);
+    ln.columnNumberEnd = unpack_dd(&ptr, end);
+    ln.lineNumber = unpack_dd(&ptr, end);
+    ln.lineNumberEnd = unpack_dd(&ptr, end);
+    ln.file_id = unpack_dd(&ptr, end);
+    ln.statement = unpack_db(&ptr, end);
+  }
+  ALL_CONSUMED_OR_FAIL(ptr, end);
+  return S_OK;
+}
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::sip_retrieve_lines_by_va(
+        pdb_lnnums_t *out,
+        ULONGLONG va,
+        ULONGLONG length)
+{
+  bytevec_t req, resp;
+  append_ea64(req, va);
+  append_dq(req, length);
+  ioctl_pdb_code_t code = perform_op(
+          WIN32_IOCTL_PDB_SIP_FETCH_LINES_BY_VA, req, &resp);
+  return code == pdb_ok ? handle_fetch_lnnums(out, resp) : E_FAIL;
+}
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::sip_retrieve_lines_by_coords(
+        pdb_lnnums_t *out,
+        DWORD file_id,
+        int lnnum,
+        int colnum)
+{
+  bytevec_t req, resp;
+  append_dd(req, file_id);
+  append_dd(req, lnnum);
+  append_dd(req, colnum);
+  ioctl_pdb_code_t code = perform_op(
+          WIN32_IOCTL_PDB_SIP_FETCH_LINES_BY_COORDS, req, &resp);
+  return code == pdb_ok ? handle_fetch_lnnums(out, resp) : E_FAIL;
+}
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::sip_iterate_symbols_at_ea(
+        ULONGLONG va,
+        ULONGLONG size,
+        enum SymTagEnum tag,
+        children_visitor_t &visitor)
+{
+  qvector<DWORD> ids;
+  bytevec_t req;
+  append_ea64(req, va);
+  append_dq(req, size);
+  append_dd(req, tag);
+  ioctl_pdb_code_t code = perform_op(
+          WIN32_IOCTL_PDB_SIP_FETCH_SYMBOLS_AT_VA, req, &ids);
+  if ( code != pdb_ok )
+    return E_FAIL;
+  return _do_iterate_symbols_ids(
+          ids.begin(),
+          ids.size(),
+          tag,
+          visitor);
+}
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::sip_iterate_file_compilands(
+        DWORD file_id,
+        children_visitor_t &visitor)
+{
+  qvector<DWORD> ids;
+  bytevec_t req;
+  append_dd(req, file_id);
+  ioctl_pdb_code_t code = perform_op(
+          WIN32_IOCTL_PDB_SIP_FETCH_FILE_COMPILANDS, req, &ids);
+  if ( code != pdb_ok )
+    return E_FAIL;
+  return _do_iterate_symbols_ids(
+          ids.begin(),
+          ids.size(),
+          SymTagNull,
+          visitor);
+}
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::sip_retrieve_file_path(
+        qstring *out,
+        qstring *,
+        DWORD file_id)
+{
+  bytevec_t req, resp;
+  append_dd(req, file_id);
+  ioctl_pdb_code_t code = perform_op(
+          WIN32_IOCTL_PDB_SIP_FETCH_FILE_PATH, req, &resp);
+  if ( code != pdb_ok )
+    return E_FAIL;
+
+  const uchar *ptr = resp.begin();
+  const uchar *const end = resp.end();
+  HAS_REMAINING_OR_FAIL(ptr, end);
+  *out = extract_str(&ptr, end);
+  ALL_CONSUMED_OR_FAIL(ptr, end);
+  return S_OK;
+}
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::handle_fetch_file_ids(
+        qvector<DWORD> *out,
+        const bytevec_t &resp) const
+{
+  const uchar *ptr = resp.begin();
+  const uchar *const end = resp.end();
+  uint32 nfiles = unpack_dd(&ptr, end);
+  out->resize(nfiles);
+  for ( uint32 i = 0; i < nfiles; ++i )
+  {
+    HAS_REMAINING_OR_FAIL(ptr, end);
+    out->at(i) = unpack_dd(&ptr, end);
+  }
+  ALL_CONSUMED_OR_FAIL(ptr, end);
+  return S_OK;
+}
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::sip_retrieve_symbol_files(
+        qvector<DWORD> *out,
+        pdb_sym_t &sym)
+{
+  bytevec_t req, resp;
+  append_dd(req, sym.data->get_id());
+  ioctl_pdb_code_t code = perform_op(
+          WIN32_IOCTL_PDB_SIP_FETCH_SYMBOL_FILES, req, &resp);
+  return code == pdb_ok ? handle_fetch_file_ids(out, resp) : E_FAIL;
+}
+
+//-------------------------------------------------------------------------
+HRESULT remote_pdb_access_t::sip_find_files(
+        qvector<DWORD> *out,
+        const char *fileName)
+{
+  bytevec_t req, resp;
+  append_str(req, fileName);
+  ioctl_pdb_code_t code = perform_op(
+          WIN32_IOCTL_PDB_SIP_FIND_FILES, req, &resp);
+  return code == pdb_ok ? handle_fetch_file_ids(out, resp) : E_FAIL;
+}
+
 //----------------------------------------------------------------------------
 DWORD remote_pdb_access_t::build_and_register_sym_data(
         const uchar **raw,
         const uchar *end)
 {
-  DWORD     child_sym = unpack_dd(raw, end);
-  token_mask_t tokens = unpack_dd(raw, end);
-  uint32       datasz = unpack_dd(raw, end);
+  DWORD child_sym     = unpack_dd(raw, end);
+  token_mask_t tokens = unpack_dq(raw, end);
+  uint32 datasz       = unpack_dd(raw, end);
   const uchar *data = (const uchar *)unpack_obj_inplace(raw, end, datasz);
   cache[child_sym] = new sym_data_t(tokens, data, datasz, SYMDAT_PACKED);
   return child_sym;
@@ -468,81 +777,45 @@ ioctl_pdb_code_t remote_pdb_access_t::perform_op(
         const bytevec_t &oper,
         void *data)
 {
-#define REPORT_ERROR(msg)                       \
-  do                                            \
-  {                                             \
-    if ( outbuf != NULL )                       \
-    {                                           \
-      qfree(outbuf);                            \
-      outbuf = NULL;                            \
-    }                                           \
-    qstrncpy(errbuf, msg, sizeof(errbuf));      \
-    return pdb_error;                           \
-  } while ( false )
-
   void *outbuf = NULL;
   ssize_t outsize = 0;
-  ioctl_pdb_code_t rc = send_ioctl(op_type, oper.begin(), oper.size(), &outbuf, &outsize);
+  bytevec_t raw;
+  QASSERT(30494, remote_session_id > 0);
+  append_dd(raw, remote_session_id);
+  if ( !oper.empty() )
+    raw.append(oper.begin(), oper.size());
+  ioctl_pdb_code_t rc = send_ioctl(op_type, raw.begin(), raw.size(), &outbuf, &outsize);
   if ( rc != pdb_ok )
-    REPORT_ERROR("PDB symbol extraction is not supported by the remote server");
-
-  // If operation is OPEN, then the result is delayed.
-  // We need to start polling for completeness.
-  if ( op_type == WIN32_IOCTL_PDB_OPEN )
-  {
-    // Now, do the polling game.
-    bool done = false;
-    while ( !done )
-    {
-      qfree(outbuf);
-      outbuf = NULL;
-      qsleep(100);
-      wasBreak(); // refresh the output window
-      rc = send_ioctl(WIN32_IOCTL_PDB_OPERATION_COMPLETE, NULL, 0, &outbuf, &outsize);
-      switch ( rc )
-      {
-        case pdb_operation_complete:
-          done = true;
-          break;
-        case pdb_operation_incomplete:
-          break;
-        case pdb_error:
-          {
-            const uchar *ptr = (const uchar *)outbuf;
-            const uchar *end = ptr + outsize;
-            const char *errmsg = unpack_str(&ptr, end);
-            REPORT_ERROR(errmsg);
-            // if opening pdb fails, win32_remote closes the pdb connection
-            // automatically
-            connection_is_open = false;
-          }
-        default:
-          return pdb_error;
-      }
-    }
-  }
+    REPORT_ERROR(
+            "PDB symbol extraction is not supported by the remote server",
+            rc);
 
   // msg(" ok\n");
 
-  // By now, the operation will be done. Let's parse the contents
-  // of the output buffer.
+  // By now, the operation will be done. Let's parse
+  // the contents of the output buffer.
   const uchar *ptr = (const uchar *)outbuf;
-  const uchar *end = ptr + outsize;
+  const uchar *const end = ptr + outsize;
   switch ( op_type )
   {
-    case WIN32_IOCTL_PDB_OPEN:
-      {
-        set_global_symbol_id(unpack_dd(&ptr, end));
-        set_machine_type(unpack_dd(&ptr, end));
-        set_dia_version(unpack_dd(&ptr, end));
-        const char *fname = unpack_str(&ptr, end);
-        msg("PDB: opened %s\n", fname);
-      }
-      break;
     case WIN32_IOCTL_PDB_FETCH_SYMBOL:
     case WIN32_IOCTL_PDB_FETCH_CHILDREN:
+    case WIN32_IOCTL_PDB_SIP_FETCH_SYMBOLS_AT_VA:
+    case WIN32_IOCTL_PDB_SIP_FETCH_FILE_COMPILANDS:
       QASSERT(30207, outsize >= (4 /*(unpacked) nchildren*/));
       handle_fetch_response(&ptr, end, (qvector<DWORD> *)data);
+      break;
+    case WIN32_IOCTL_PDB_SIP_FETCH_LINES_BY_VA:
+    case WIN32_IOCTL_PDB_SIP_FETCH_LINES_BY_COORDS:
+    case WIN32_IOCTL_PDB_SIP_FETCH_FILE_PATH:
+    case WIN32_IOCTL_PDB_SIP_FETCH_SYMBOL_FILES:
+    case WIN32_IOCTL_PDB_SIP_FIND_FILES:
+      {
+        bytevec_t *bvout = (bytevec_t *) data;
+        bvout->append(outbuf, outsize);
+      }
+      break;
+    case WIN32_IOCTL_PDB_CLOSE:
       break;
     default:
       INTERR(30208);

@@ -27,7 +27,10 @@
 #include "aif.h"
 #include "../aof/aof.h"
 
-#define mf inf.mf
+// the following function is defined to be used by aifcmn.cpp
+// included below (see also efd/aif.cpp)
+inline bool is_mf()  { return inf.is_be(); }
+
 #include "aifcmn.cpp"
 
 //--------------------------------------------------------------------------
@@ -36,15 +39,17 @@
 //      and fill 'fileformatname'.
 //      otherwise return 0
 //
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
-  if ( n != 0 )
-    return 0;
-
   if ( !is_aif_file(li) )
     return 0;
 
-  qstrncpy(fileformatname, "ARM Image File", MAX_FILE_FORMAT_NAME);
+  *fileformatname = "ARM Image File";
+  *processor      = "arm";
   return 1;
 }
 
@@ -52,26 +57,26 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
 // Create a section.
 static void create_section(
         ushort sel,
-        ea_t startEA,
-        ea_t endEA,
+        ea_t start_ea,
+        ea_t end_ea,
         const char *name,
         const char *classname)
 {
   set_selector(sel, 0);
 
   segment_t s;
-  s.sel    = sel;
-  s.startEA= startEA;
-  s.endEA  = endEA;
-  s.align  = saRelByte;
-  s.comb   = scPub;
-  s.bitness =1; // 32-bit
+  s.sel     = sel;
+  s.start_ea = start_ea;
+  s.end_ea   = end_ea;
+  s.align   = saRelByte;
+  s.comb    = scPub;
+  s.bitness = 1; // 32-bit
   int flags = ADDSEG_SPARSE | ADDSEG_NOSREG | ADDSEG_NOTRUNC;
   if ( !add_segm_ex(&s, name, classname, flags) )
     loader_failure();
 
-  segment_t *sptr = getseg(startEA);
-  set_arm_segm_flags(startEA, 2 << 10); // alignment
+  segment_t *sptr = getseg(start_ea);
+  set_arm_segm_flags(start_ea, 2 << 10); // alignment
   sptr->update();
 }
 
@@ -142,7 +147,7 @@ static size_t process_item(uchar *di, size_t disize, section_t *sect)
   if ( disize < 4 )
     return 0;
   uint32 fw = *(uint32 *)di;
-  if ( mf )
+  if ( inf.is_be() )
     fw = swap32(fw);
   size_t len = fw >> 16;
   if ( len == 0 || len > disize )
@@ -153,7 +158,7 @@ static size_t process_item(uchar *di, size_t disize, section_t *sect)
       if ( disize < sizeof(section_t) )
         return 0;
       sect = (section_t *)di;
-      if ( mf )
+      if ( inf.is_be() )
         swap_section(sect);
       if ( sect->debugsize != 0 )
       {
@@ -164,16 +169,16 @@ static size_t process_item(uchar *di, size_t disize, section_t *sect)
       switch ( sect->lang )
       {
         case LANG_C:
-          add_long_cmt(sect->codestart,1,"C source level debugging data is present");
+          add_extra_cmt(sect->codestart, true, "C source level debugging data is present");
           break;
         case LANG_PASCAL:
-          add_long_cmt(sect->codestart,1,"Pascal source level debugging data is present");
+          add_extra_cmt(sect->codestart, true, "Pascal source level debugging data is present");
           break;
         case LANG_FORTRAN:
-          add_long_cmt(sect->codestart,1,"Fortran-77 source level debugging data is present");
+          add_extra_cmt(sect->codestart, true, "Fortran-77 source level debugging data is present");
           break;
         case LANG_ASM:
-          add_long_cmt(sect->codestart,1,"ARM assembler line number data is present");
+          add_extra_cmt(sect->codestart, true, "ARM assembler line number data is present");
           break;
       }
       if ( sect->lang == LANG_NONE )
@@ -198,15 +203,15 @@ static size_t process_item(uchar *di, size_t disize, section_t *sect)
           {
             add_pgm_cmt("%s = 0x%X", name, ds->value);
           }
-          else if ( isEnabled(ds->value) )
+          else if ( is_mapped(ds->value) )
           {
             if ( ds->sym & ASD_GLOBSYM )
             {
-              add_entry(ds->value, ds->value, name, is_true_text_symbol(ds, name));
+              add_entry(ds->value, ds->value, name, is_true_text_symbol(ds, name), AEF_IDBENC);
             }
             else
             {
-              do_name_anyway(ds->value, name);
+              force_name(ds->value, name, SN_IDBENC);
               if ( is_true_text_symbol(ds, name) )
                 auto_make_code(ds->value);
             }
@@ -223,9 +228,9 @@ static size_t process_item(uchar *di, size_t disize, section_t *sect)
         qstrncpy(name, (const char *)nptr, sizeof(name));
         name[namelen] = '\0';
         if ( sect->codestart != 0 )
-          add_long_cmt(sect->codestart,1,"Section \"%s\", size 0x%X",name,sect->codesize);
+          add_extra_cmt(sect->codestart, true, "Section \"%s\", size 0x%X",name,sect->codesize);
         if ( sect->datastart != 0 )
-          add_long_cmt(sect->datastart,1,"Section \"%s\", size 0x%X",name,sect->datasize);
+          add_extra_cmt(sect->datastart, true, "Section \"%s\", size 0x%X",name,sect->datasize);
       }
 #if 0
       if ( sect->fileinfo != 0 ) // fileinfo is present?
@@ -306,10 +311,9 @@ static size_t process_item(uchar *di, size_t disize, section_t *sect)
 void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformatname*/)
 {
   aif_header_t hd;
-  if ( ph.id != PLFM_ARM )
-    set_processor_type("arm", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("arm", SETPROC_LOADER);
   lread(li, &hd, sizeof(hd));
-  mf = match_zero_code(hd) != 1;
+  inf.set_be(match_zero_code(&hd) != 1);
   if ( (hd.address_mode & 0xFF) != 32 )
   {
     if ( (hd.address_mode & 0xFF) != 0 )
@@ -323,24 +327,24 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
 
   inf.baseaddr = 0;
   int isexec = is_bl(hd.entry_point);
-  uint32 offset = sizeof(aif_header_t);
-  uint32 start = hd.image_base;
+  qoff64_t offset = sizeof(aif_header_t);
+  ea_t start = hd.image_base;
   if ( isexec )
   {
     start += sizeof(aif_header_t);
     hd.readonly_size -= sizeof(aif_header_t);
   }
-  uint64 rest = qlsize64(li) - offset;
+  uint64 rest = qlsize(li) - offset;
   if ( rest < hd.readonly_size )
 BAD_FILE:
     loader_failure("Corrupted file");
-  uint32 end = start + hd.readonly_size;
+  ea_t end = start + hd.readonly_size;
   file2base(li, offset, start, end, FILEREG_PATCHABLE);
   create_section(1, start, end, NAME_CODE, CLASS_CODE);
   offset += hd.readonly_size;
   if ( hd.readwrite_size != 0 )
   {
-    rest = qlsize64(li) - offset;
+    rest = qlsize(li) - offset;
     if ( rest < hd.readwrite_size )
       goto BAD_FILE;
     start = (hd.address_mode & AIF_SEP_DATA) ? hd.data_base : end;
@@ -363,13 +367,13 @@ BAD_FILE:
                    + ((hd.entry_point & ~BLMASK) << 2)
                    + 8;
   inf.start_cs = 1;
-  inf.startIP  = hd.entry_point;
-  inf.beginEA  = hd.entry_point;
+  inf.start_ip = hd.entry_point;
+  inf.start_ea = hd.entry_point;
 
   validate_array_count(li, &hd.debug_size, 1, "Size of debug info", offset);
   if ( hd.debug_size != 0 )
   {
-    msg("Debugging information is present (%u bytes at file offset 0x%X)...\n",
+    msg("Debugging information is present (%u bytes at file offset 0x%" FMT_64 "X)...\n",
                                                         hd.debug_size, offset);
     uchar *di = qalloc_array<uchar>(size_t(hd.debug_size));
     if ( di == NULL )
@@ -418,5 +422,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

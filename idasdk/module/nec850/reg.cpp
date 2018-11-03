@@ -9,18 +9,20 @@
 #include "necv850.hpp"
 #include "ins.hpp"
 #include <loader.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 // program pointers (gp, tp)
 static netnode prog_pointers;
 #define GP_EA_IDX 1
+#define CTBP_EA_IDX 2
 ea_t g_gp_ea = BADADDR; // global pointer
+ea_t g_ctbp_ea = BADADDR; // CALLT base pointer
 
 //------------------------------------------------------------------
 const char *idaapi set_idp_options(
-  const char *keyword,
-  int value_type,
-  const void *value)
+        const char *keyword,
+        int value_type,
+        const void *value)
 {
   if ( keyword != NULL )
   {
@@ -31,6 +33,13 @@ const char *idaapi set_idp_options(
       g_gp_ea = *((uval_t *)value);
       return IDPOPT_OK;
     }
+    if ( streq(keyword, "CTBP_EA") )
+    {
+      if ( value_type != IDPOPT_NUM )
+        return IDPOPT_BADTYPE;
+      g_ctbp_ea = *((uval_t *)value);
+      return IDPOPT_OK;
+    }
     return IDPOPT_BADKEY;
   }
 
@@ -38,10 +47,11 @@ const char *idaapi set_idp_options(
     "NEC V850x analyzer options\n"
     "\n"
     " <~G~lobal Pointer address:$:16:16::>\n"
+    " <CALLT ~B~ase pointer    :$:16:16::>\n"
     "\n"
     "\n"
     "\n";
-  AskUsingForm_c(form, &g_gp_ea);
+  ask_form(form, &g_gp_ea, &g_ctbp_ea);
 
   return IDPOPT_OK;
 }
@@ -54,7 +64,6 @@ static const asm_t nec850_asm =
   "NEC V850 Assembler",             // assembler name
   0,                                // help
   NULL,                             // array of automatically generated header lines
-  NULL,                             // array of unsupported instructions
   ".org",                           // org directive
   ".end",                           // end directive
   "--",                             // comment string
@@ -75,10 +84,6 @@ static const asm_t nec850_asm =
   ".byte (%s) ?",                   // uninited data (reserve space) ;?
   ".set",                           // 'equ' Used if AS_UNEQU is set
   NULL,                             // seg prefix
-  NULL,                             // preline for checkarg
-  NULL,                             // checkarg_atomprefix
-  NULL,                             // checkarg operations
-  NULL,                             // XlatAsciiOutput
   "PC",                             // a_curip
   NULL,                             // returns function header line
   NULL,                             // returns function footer line
@@ -106,7 +111,6 @@ static const asm_t nec850_asm =
   NULL,                             // high16
   ".include %s",                    // a_include_fmt
   NULL,                             // if a named item is a structure and displayed
-  NULL,                             // 3-byte data
   NULL                              // 'rva' keyword for image based offsets
 };
 
@@ -129,76 +133,209 @@ static const char *const lnames[] =
   NULL
 };
 
-//----------------------------------------------------------------------
-static int idaapi nec850_notify(processor_t::idp_notify msgid, ...)
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
 {
-  va_list va;
-  va_start(va, msgid);
+  switch ( code )
+  {
+    // save database
+    case idb_event::closebase:
+    case idb_event::savebase:
+      prog_pointers.altset(GP_EA_IDX, ea2node(g_gp_ea));
+      prog_pointers.altset(CTBP_EA_IDX, ea2node(g_ctbp_ea));
+      break;
 
-  // A well behaving processor module should call invoke_callbacks()
-  // in his notify() function. If this function returns 0, then
-  // the processor module should process the notification itself
-  // Otherwise the code should be returned to the caller:
+    case idb_event::segm_moved: // A segment is moved
+                                // Fix processor dependent address sensitive information
+      // {
+      //   ea_t from           = va_arg(va, ea_t);
+      //   ea_t to             = va_arg(va, ea_t);
+      //   asize_t size        = va_arg(va, asize_t);
+      //   bool changed_netmap = va_argi(va, bool);
+      //   // adjust gp_ea
+      // }
+      break;
 
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code )
-    return code;
+    default:
+      break;
+  }
+  return 0;
+}
 
+//----------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
   switch ( msgid )
   {
-  case processor_t::init:
-    inf.mf = 0;
-    prog_pointers.create("$ prog pointers");
-    break;
-
-  case processor_t::is_sane_insn:
-    {
-      int no_crefs = va_arg(va, int);
-      return nec850_is_sane_insn(no_crefs);
-    }
-
-  case processor_t::newprc:
-    {
-      int procnum = va_arg(va, int);
-      is_v850e = procnum == 0;
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
+      inf.set_be(false);
+      prog_pointers.create("$ prog pointers");
       break;
-    }
-  case processor_t::term:
-    break;
 
-  // save database
-  case processor_t::closebase:
-  case processor_t::savebase:
-    prog_pointers.altset(GP_EA_IDX, g_gp_ea);
-    break;
+    case processor_t::ev_is_sane_insn:
+      {
+        const insn_t &insn = *va_arg(va, insn_t *);
+        int no_crefs = va_arg(va, int);
+        code = nec850_is_sane_insn(insn, no_crefs) == 1 ? 1 : -1;
+        break;
+      }
 
-  // old file loaded
-  case processor_t::oldfile:
-    g_gp_ea = prog_pointers.altval(GP_EA_IDX);
-    break;
+    case processor_t::ev_newprc:
+      {
+        int procnum = va_arg(va, int);
+        // bool keep_cfg = va_argi(va, bool);
+        is_v850e = procnum == 0;
+        break;
+      }
+    case processor_t::ev_term:
+      unhook_from_notification_point(HT_IDB, idb_callback);
+      break;
 
-  case processor_t::newseg:
-    {
-      segment_t *s = va_arg(va, segment_t *);
-      // Set default value of DS register for all segments
-      set_default_dataseg(s->sel);
-    }
-  // A segment is moved
-  //case processor_t::move_segm:
-  //  // Fix processor dependent address sensitive information
-  //  // args: ea_t from - old segment address
-  //  //       segment_t - moved segment
-  //  {
-  //    ea_t from    = va_arg(va, ea_t);
-  //    segment_t *s = va_arg(va, segment_t *);
-  //    // adjust gp_ea
-  //  }
-  //  break;
-  default:
-    break;
+    // old file loaded
+    case processor_t::ev_oldfile:
+      g_gp_ea = node2ea(prog_pointers.altval(GP_EA_IDX));
+      g_ctbp_ea = node2ea(prog_pointers.altval(CTBP_EA_IDX));
+      break;
+
+    case processor_t::ev_creating_segm:
+      {
+        segment_t *s = va_arg(va, segment_t *);
+        // Set default value of DS register for all segments
+        set_default_dataseg(s->sel);
+      }
+      break;
+
+    case processor_t::ev_may_be_func:
+      {
+        const insn_t &insn = *va_arg(va, insn_t *);
+        code = nec850_may_be_func(insn);
+      }
+      break;
+
+    case processor_t::ev_is_ret_insn:
+      {
+        const insn_t &insn = *va_arg(va, insn_t *);
+        bool strict = va_argi(va, bool);
+        code = nec850_is_return(insn, strict) ? 1 : -1;
+      }
+      break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        nec850_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        nec850_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        nec850_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        nec850_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return nec850_ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return nec850_emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_realcvt:
+      {
+        void *m = va_arg(va, void *);
+        uint16 *e = va_arg(va, uint16 *);
+        uint16 swt = va_argi(va, uint16);
+        int code1 = ieee_realcvt(m, e, swt);
+        return code1 == 0 ? 1 : code1;
+      }
+
+    case processor_t::ev_is_switch:
+      {
+        switch_info_t *si = va_arg(va, switch_info_t *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return nec850_is_switch(si, *insn) ? 1 : 0;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = nec850_is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        nec850_create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_get_frame_retsize:
+      {
+        int *frsize = va_arg(va, int *);
+        const func_t *pfn = va_arg(va, const func_t *);
+        *frsize = nec850_get_frame_retsize(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
+      break;
   }
-  va_end(va);
-  return 1;
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -280,41 +417,29 @@ const char *RegNames[rLastRegister] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,     // kernel version
-  PLFM_NEC_V850X,            // id
-  /*PR_SEGS |*/ PR_DEFSEG32 | PR_USE32 | PRN_HEX | PR_RNAMESOK | PR_NO_SEGMOVE, // flags
-  8,                         // 8 bits in a byte for code segments
-  8,                         // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_NEC_V850X,         // id
+                          // flag
+    PR_DEFSEG32
+  | PR_USE32
+  | PRN_HEX
+  | PR_RNAMESOK
+  | PR_NO_SEGMOVE,
+                          // flag2
+    PR2_REALCVT           // the module has 'realcvt' event implementation
+  | PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,                   // short processor names
   lnames,                    // long processor names
 
   asms,                      // assemblers
 
-  nec850_notify,
+  notify,
 
-  nec850_header,             // function to produce start of disassembled text
-  nec850_footer,             // function to produce end of disassembled text
-
-  nec850_segstart,           // function to produce start of segment
-  nec850_segend,             // function to produce end of segment
-
-  NULL,                      // function to produce assume directives
-
-  nec850_ana,                // Analyze one instruction and fill 'cmd' structure.
-  nec850_emu,                // Emulate instruction
-  nec850_out,                // Generate text representation of an instruction in 'cmd' structure
-  nec850_outop,              // Generate text representation of an instructon operand.
-  intel_data,                // Generate text represenation of data items
-  NULL,                      // Compare instruction operands.
-  NULL,                      // can_have_type
-  rLastRegister,             // Number of registers
   RegNames,                  // Regsiter names
-  NULL,                      // get abstract register
-  0,                         // Number of register files
-  NULL,                      // Register file names
-  NULL,                      // Register descriptions
-  NULL,                      // Pointer to CPU registers
+  rLastRegister,             // Number of registers
 
   rVcs/*rVep*/,              // number of first segment register
   rVds/*rVcs*/,              // number of last segment register
@@ -325,25 +450,9 @@ processor_t LPH =
   NULL,                      // Array of 'return' instruction opcodes
   NEC850_NULL,
   NEC850_LAST_INSTRUCTION,
-  Instructions,
-  NULL,                      // isFarJump or Call
-  NULL,                      // Translation function for offsets
+  Instructions,                 // instruc
   0,                         // size of tbyte
-  ieee_realcvt,
   {0,7,15,0},                // real width
-  nec850_is_switch,          // is this instruction switch
-  NULL,                      // generate map-file
-  NULL,                      // extract address from a string
-  nec850_is_sp_based,        // is_sp_based
-  nec850_create_func_frame,  // create_func_frame
-  nec850_get_frame_retsize,  // get_frame_retsize
-  NULL,                      // gen_stkvar_def
-  gen_spcdef,                // out special segments
   0,                         // icode_return
-  set_idp_options,           // Set IDP options (set_idp_options)
-  NULL,                      // Is alignment instruction?
   NULL,                      // Micro virtual machine description
-  0                          // high_fixup_bits
 };
-
-//-----------------------------------------------------------------------

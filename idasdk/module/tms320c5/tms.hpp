@@ -13,7 +13,7 @@
 
 #include "../idaidp.hpp"
 #include "ins.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //------------------------------------------------------------------------
 // customization of cmd structure:
@@ -44,21 +44,17 @@ struct predefined_t
   const char *cmt;
 };
 
-extern predefined_t iregs[];
-
-bool is_mpy(void);
+bool is_mpy(const insn_t &insn);
 ea_t prevInstruction(ea_t ea);
-int   find_ar(ea_t *res);
+int  find_ar(const insn_t &insn, ea_t *res);
 //------------------------------------------------------------------------
-void    idaapi header(void);
-void    idaapi footer(void);
+void idaapi header(outctx_t &ctx);
+void idaapi footer(outctx_t &ctx);
 
-void    idaapi segstart(ea_t ea);
+void idaapi segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi ana(void);
-int     idaapi emu(void);
-void    idaapi out(void);
-bool    idaapi outop(op_t &op);
-void    idaapi tms_assumes(ea_t ea);
+int  idaapi ana(insn_t *insn);
+int  idaapi emu(const insn_t &insn);
+void idaapi tms_assumes(outctx_t &ctx);
 
 #endif

@@ -7,114 +7,109 @@
 
 #include "cr16.hpp"
 
-static uchar near Rproc(uchar code)
+//----------------------------------------------------------------------
+static uchar Rproc(uchar code)
 {
-  switch (code)
+  switch ( code )
   {
     case 0x1:
-      return (rPSR);
+      return rPSR;
     case 0x3:
-      return (rINTBASE);
+      return rINTBASE;
     case 0x4:
-      return (rINTBASEH);
+      return rINTBASEH;
     case 0x5:
-      return (rCFG);
+      return rCFG;
     case 0x7:
-      return (rDSR);
+      return rDSR;
     case 0x9:
-      return (rDCR);
+      return rDCR;
     case 0xB:
-      return (rISP);
+      return rISP;
     case 0xD:
-      return (rCARL);
+      return rCARL;
     case 0xE:
-      return (rCARH);
+      return rCARH;
   }
-  return (0);
+  return 0;
 }
 
+//----------------------------------------------------------------------
 // immediate operands
-static void near SetImmData(op_t & op, int32 code, int bits)
+static void SetImmData(op_t &op, int32 code, int bits)
 {
   // extend sign
-  if (code & (1 << bits))
+  if ( code & (1 << bits) )
     code -= 1L << (bits + 1);
   op.type = o_imm;
   // always in the second byte
   op.offb = 1;
   // data size
-  op.dtyp = bits > 8 ? (bits > 16 ? dt_dword : dt_word) : dt_byte;
+  op.dtype = bits > 8 ? (bits > 16 ? dt_dword : dt_word) : dt_byte;
   // value
   op.addr = op.value = code;
 }
 
+//----------------------------------------------------------------------
 // register operand
-static void near SetReg(op_t & op, uchar reg_n)
+static void SetReg(op_t &op, uchar reg_n)
 {
-  op.type = o_reg;
-  op.reg  = reg_n;
-  op.dtyp = dt_word;
+  op.type  = o_reg;
+  op.reg   = reg_n;
+  op.dtype = dt_word;
 }
 
 
-/*
-// memory address
-static void near SetMemVar(op_t &op, ea_t addr)
-{
-  op.type = o_mem;
-  op.addr = addr;
-  op.dtyp = dt_word;
-}
-*/
-
+//----------------------------------------------------------------------
 // relative jump
-static void near SetRelative(op_t & op, int32 disp, int bits)
+static void SetRelative(op_t &op, int32 disp, int bits, const insn_t &insn)
 {
-  op.type = o_near;
-  op.dtyp = dt_word;
-  op.offb = 0;
+  op.type  = o_near;
+  op.dtype = dt_word;
+  op.offb  = 0;
   // sign extend
-  if (disp & (1 << bits))
+  if ( disp & (1 << bits) )
     disp -= 1L << (bits + 1);
-  op.addr = cmd.ip + disp;
+  op.addr = insn.ip + disp;
 }
 
-unsigned short GetWord(void)
+//----------------------------------------------------------------------
+static ushort GetWord(insn_t &insn)
 {
-  unsigned short wrd;
-  wrd = ua_next_byte();
-  wrd |= ((unsigned short) ua_next_byte()) << 8;
-  return (wrd);
+  ushort wrd = insn.get_next_byte();
+  wrd |= ((ushort) insn.get_next_byte()) << 8;
+  return wrd;
 }
 
+//----------------------------------------------------------------------
 // store/load operands
-static void near SetSL(op_t & op, unsigned short code)
+static void SetSL(insn_t &insn, op_t &op, ushort code)
 {
   op.reg = rR0 + ((code >> 1) & 0x0F);
-  op.dtyp = (code & 0x2000) ? dt_word : dt_byte;
-  if (code & 1)
+  op.dtype = (code & 0x2000) ? dt_word : dt_byte;
+  if ( code & 1 )
   {
-    if (code & 0x1000)
+    if ( code & 0x1000 )
     {
-      if (code & 0x800)
+      if ( code & 0x800 )
       {
-        if ((code & 0x1F) == 0x1F)
+        if ( (code & 0x1F) == 0x1F )
         {
           // absolute addr
           op.type = o_mem;
-          op.addr = op.value = GetWord() | (((uint32) code & 0x600) << 11);
+          op.addr = op.value = GetWord(insn) | (((uint32) code & 0x600) << 11);
         }
         else
         {                       // reg pair
           op.type = o_displ;
-          op.addr = op.value = GetWord() | (((uint32) code & 0x600) << 11);
+          op.addr = op.value = GetWord(insn) | (((uint32) code & 0x600) << 11);
           op.specflag1 |= URR_PAIR;
         }
       }
       else
       {                         // reg base
         op.type = o_displ;
-        op.addr = op.value = GetWord() | (((uint32) code & 0x600) << 11);
+        op.addr = op.value = GetWord(insn) | (((uint32) code & 0x600) << 11);
       }
     }
     else
@@ -130,23 +125,9 @@ static void near SetSL(op_t & op, unsigned short code)
   }
 }
 
-static void near ClearOperand(op_t & op)
-{
-  op.dtyp = dt_byte;
-  op.type = o_void;
-  op.specflag1 = 0;
-  op.specflag2 = 0;
-  op.offb = 0;
-  op.offo = 0;
-//op.flags=0;
-  op.reg = 0;
-  op.value = 0;
-  op.addr = 0;
-  op.specval = 0;
-}
-
+//----------------------------------------------------------------------
 #define EXTOPS uint16(-2)
-static const uint16 Ops[16] = 
+static const uint16 Ops[16] =
 {
   CR16_addb,  CR16_addub, EXTOPS,    CR16_mulb,
   CR16_ashub, CR16_lshb,  CR16_xorb, CR16_cmpb,
@@ -154,7 +135,7 @@ static const uint16 Ops[16] =
   CR16_movb,  CR16_subcb, CR16_orb,  CR16_subb,
 };
 
-static const uint16 ExtOps[16] = 
+static const uint16 ExtOps[16] =
 {
   CR16_cbitb, CR16_sbitb, CR16_tbitb, CR16_storb,
 };
@@ -169,317 +150,319 @@ static const uint16 ExtOps[16] =
 // 18-bit absolute memory:
 // 54 3 2109 8   76     5  4321        d
 // 00 i 0010 bs1 ex-op bs0 bit-num/Imm 0
-static void near SetExtOp(unsigned short code)
+static void SetExtOp(insn_t &insn, ushort code)
 {
   if ( code & 1 )
   {
     // Register-relative
-    cmd.Op2.reg = rR0 + ((code >> 5) & 9);
-    cmd.Op2.type = o_displ;
-    cmd.Op2.dtyp = (code & 0x2000) ? dt_word : dt_byte;
+    insn.Op2.reg   = rR0 + ((code >> 5) & 9);
+    insn.Op2.type  = o_displ;
+    insn.Op2.dtype = (code & 0x2000) ? dt_word : dt_byte;
     if ( (code >> 14) & 1 )
     {
       // no displacement
-      cmd.Op2.addr = 0;
+      insn.Op2.addr = 0;
     }
     else
     {
-      cmd.Op2.addr = GetWord();
+      insn.Op2.addr = GetWord(insn);
     }
   }
   else
   {
     // 18-bit absolute memory
-    cmd.Op2.type = o_mem;
-    cmd.Op2.dtyp = (code & 0x2000) ? dt_word : dt_byte;
+    insn.Op2.type = o_mem;
+    insn.Op2.dtype = (code & 0x2000) ? dt_word : dt_byte;
     int adext = ((code >> 7) & 2) | ((code >> 5) & 1);
-    cmd.Op2.addr = GetWord() | (adext<<16);
+    insn.Op2.addr = GetWord(insn) | (adext<<16);
   }
-  cmd.Op1.type = o_imm;
-  cmd.Op1.value = (code >> 1) & 0xF;
+  insn.Op1.type = o_imm;
+  insn.Op1.value = (code >> 1) & 0xF;
 }
 
 //----------------------------------------------------------------------
 // analyzer
-int idaapi CR16_ana(void)
+int idaapi CR16_ana(insn_t *_insn)
 {
-  ushort code;
-  uchar WordFlg;
-  uchar OpCode;
-  uchar Oper1;
-  uchar Oper2;
+  if ( _insn == NULL )
+    return 0;
+  insn_t &insn = *_insn;
+  if ( insn.ip & 1 )
+    return 0;
 
-  ClearOperand(cmd.Op1);
-  ClearOperand(cmd.Op2);
-  if (cmd.ip & 1)
-    return (0);
-  
   // get instruction word
-  code = GetWord();
+  ushort code = GetWord(insn);
 
-  WordFlg = (code >> 13) & 1;
-  OpCode = (code >> 9) & 0x0F;
-  Oper1 = (code >> 5) & 0x0F;
-  Oper2 = (code >> 1) & 0x0F;
+  uchar WordFlg = (code >> 13) & 1;
+  uchar OpCode = (code >> 9) & 0x0F;
+  uchar Oper1 = (code >> 5) & 0x0F;
+  uchar Oper2 = (code >> 1) & 0x0F;
 
 
-  switch ((code >> 14) & 3)
+  switch ( (code >> 14) & 3 )
   {
     // register-register op and special OP
     case 0x01:
-      if (code & 1)
+      if ( code & 1 )
       {
         // 01xxxxxxxxxxxxx1
-        switch ((cmd.itype = Ops[OpCode]))
+        insn.itype = Ops[OpCode];
+        switch ( insn.itype )
         {
           case 0:
-            return (0);
+            return 0;
           case EXTOPS:
             {
               int exop = (Oper1 >> 1) & 3;
-              cmd.itype = ExtOps[exop] + WordFlg;
-              SetExtOp(code);
+              insn.itype = ExtOps[exop] + WordFlg;
+              SetExtOp(insn, code);
             }
             break;
             // branch's
           case CR16_br:
-            if (WordFlg)
+            if ( WordFlg )
             {
-              cmd.itype = CR16_jal;
-              SetReg(cmd.Op1, rR0 + Oper1);
-              SetReg(cmd.Op2, rR0 + Oper2);
+              insn.itype = CR16_jal;
+              SetReg(insn.Op1, rR0 + Oper1);
+              SetReg(insn.Op2, rR0 + Oper2);
             }
             else
             {
-              cmd.itype = CR16_jeq + Oper1;
-              SetReg(cmd.Op1, rR0 + Oper2);
+              insn.itype = CR16_jeq + Oper1;
+              SetReg(insn.Op1, rR0 + Oper2);
             }
             break;
             // Special tbit
           case CR16_tbit:
-            if (WordFlg == 0)
-              return (0);
-            cmd.itype--;
+            if ( WordFlg == 0 )
+              return 0;
+            insn.itype--;
+            // fallthrough
             // all other cmds
           default:             // fix word operations
-            if (WordFlg)
-              cmd.itype++;
+            if ( WordFlg )
+              insn.itype++;
             // Setup register OP
-            SetReg(cmd.Op2, rR0 + Oper1);
+            SetReg(insn.Op2, rR0 + Oper1);
             // Setup register OP
-            SetReg(cmd.Op1, rR0 + Oper2);
+            SetReg(insn.Op1, rR0 + Oper2);
             break;
         }
       }
       else
       {                         // 01xxxxxxxxxxxxx0
-        if (WordFlg)
+        if ( WordFlg )
         {
           // 011xxxxxxxxxxxx0
-          static const unsigned char SCmd[16] = {
+          static const uchar SCmd[16] =
+          {
             CR16_mulsb, CR16_mulsw, CR16_movd, CR16_movd,
             CR16_movxb, CR16_movzb, CR16_push, CR16_seq,
             CR16_lpr,   CR16_spr,   CR16_beq,  CR16_bal,
             CR16_retx,  CR16_excp,  CR16_di,   CR16_wait
           };
-          switch ((cmd.itype = SCmd[OpCode]))
+          insn.itype = SCmd[OpCode];
+          switch ( insn.itype )
           {
             case 0:
-              return (0);
+              return 0;
 
             case CR16_beq:
             {
               // 01 1 1010    cond   d16,d19-d17 0
-              cmd.itype = CR16_beq + Oper1;
-              int disp = GetWord();
+              insn.itype = CR16_beq + Oper1;
+              int disp = GetWord(insn);
               disp |= (Oper2 & 8) << (16-3);
               disp |= (Oper2 & 7) << 17;
-              SetRelative(cmd.Op1, disp, 20);
+              SetRelative(insn.Op1, disp, 20, insn);
             }
             break;
 
             case CR16_push:
             {
-              static const unsigned char PQ[4] = {
+              static const uchar PQ[4] =
+              {
                 CR16_push,   CR16_pop,
                 CR16_popret, CR16_popret
               };
               if ( Oper1 > 15 )
                 return 0;
-              cmd.itype = PQ[Oper1 >> 2];
-              SetReg(cmd.Op2, rR0 + Oper2);
-              SetImmData(cmd.Op1, (Oper1 & 3) + 1, 4);
+              insn.itype = PQ[Oper1 >> 2];
+              SetReg(insn.Op2, rR0 + Oper2);
+              SetImmData(insn.Op1, (Oper1 & 3) + 1, 4);
               break;
             }
 
             case CR16_mulsw:
-              SetReg(cmd.Op2, rR0 + Oper1);
-              SetReg(cmd.Op1, rR0 + Oper2);
-              cmd.Op2.specflag1 |= URR_PAIR;
+              SetReg(insn.Op2, rR0 + Oper1);
+              SetReg(insn.Op1, rR0 + Oper2);
+              insn.Op2.specflag1 |= URR_PAIR;
               break;
 
             case CR16_movd:
-              SetReg(cmd.Op2, rR0 + Oper2);
-              cmd.Op2.specflag1 |= URR_PAIR;
+              SetReg(insn.Op2, rR0 + Oper2);
+              insn.Op2.specflag1 |= URR_PAIR;
               // !!!! ADD HIIIII ?!?!?!?
-              SetImmData(cmd.Op1, GetWord(), 20);
+              SetImmData(insn.Op1, GetWord(insn), 20);
               break;
             case CR16_excp:
-              if (Oper1 != 0x0F)
-                return (0);
-              SetImmData(cmd.Op1, Oper2, 4);
+              if ( Oper1 != 0x0F )
+                return 0;
+              SetImmData(insn.Op1, Oper2, 4);
               break;
 
             case CR16_retx:
-              if (Oper1 != 0x0F)
-                return (0);
-              if (Oper2 != 0x0F)
-                return (0);
+              if ( Oper1 != 0x0F )
+                return 0;
+              if ( Oper2 != 0x0F )
+                return 0;
               break;
 
             case CR16_wait:
-              if (Oper1 == 0x0F)
+              if ( Oper1 == 0x0F )
               {
-                if (Oper2 == 0x0F)
+                if ( Oper2 == 0x0F )
                   break;
-                if (Oper2 == 0x03)
+                if ( Oper2 == 0x03 )
                 {
-                  cmd.itype = CR16_eiwait;
+                  insn.itype = CR16_eiwait;
                   break;
                 }
               }
-              if ((code & 0x19E) == 0x84)
+              if ( (code & 0x19E) == 0x84 )
               {
-                cmd.itype = CR16_storm;
-                SetImmData(cmd.Op1, (Oper2 & 3) + 1, 8);
+                insn.itype = CR16_storm;
+                SetImmData(insn.Op1, (Oper2 & 3) + 1, 8);
                 break;
               }
-              if ((code & 0x19E) == 0x04)
+              if ( (code & 0x19E) == 0x04 )
               {
-                cmd.itype = CR16_loadm;
-                SetImmData(cmd.Op1, (Oper2 & 3) + 1, 8);
+                insn.itype = CR16_loadm;
+                SetImmData(insn.Op1, (Oper2 & 3) + 1, 8);
                 break;
               }
-              if ((Oper2 & 0x6) == 0)
+              if ( (Oper2 & 0x6) == 0 )
               {
-                cmd.itype = CR16_muluw;
-                SetReg(cmd.Op2, rR0 + Oper1);
-                SetReg(cmd.Op1, rR0 + Oper2);
-                cmd.Op2.specflag1 |= URR_PAIR;
+                insn.itype = CR16_muluw;
+                SetReg(insn.Op2, rR0 + Oper1);
+                SetReg(insn.Op1, rR0 + Oper2);
+                insn.Op2.specflag1 |= URR_PAIR;
                 break;
               }
 
-              return (0);
+              return 0;
 
             case CR16_di:
-              if (Oper2 != 0x0F)
-                return (0);
-              switch (Oper1)
+              if ( Oper2 != 0x0F )
+                return 0;
+              switch ( Oper1 )
               {
                 case 0x0F:
-                  cmd.itype = CR16_ei;
+                  insn.itype = CR16_ei;
                 case 0x0E:
                   break;
                 default:
-                  return (0);
+                  return 0;
               }
               break;
 
             case CR16_seq:
-              SetReg(cmd.Op1, rR0 + Oper2);
-              if (Oper1 > 0x0D)
-                return (0);
-              cmd.itype = CR16_seq + Oper1;
+              SetReg(insn.Op1, rR0 + Oper2);
+              if ( Oper1 > 0x0D )
+                return 0;
+              insn.itype = CR16_seq + Oper1;
               break;
 
             case CR16_lpr:
-              SetReg(cmd.Op1, rR0 + Oper2);
+              SetReg(insn.Op1, rR0 + Oper2);
               Oper1 = Rproc(Oper1);
-              if (Oper1 == 0)
-                return (0);
-              SetReg(cmd.Op2, Oper1);
+              if ( Oper1 == 0 )
+                return 0;
+              SetReg(insn.Op2, Oper1);
               break;
 
             case CR16_spr:
-              SetReg(cmd.Op2, rR0 + Oper2);
+              SetReg(insn.Op2, rR0 + Oper2);
               Oper1 = Rproc(Oper1);
-              if (Oper1 == 0)
-                return (0);
-              SetReg(cmd.Op1, Oper1);
+              if ( Oper1 == 0 )
+                return 0;
+              SetReg(insn.Op1, Oper1);
               break;
 
             case CR16_bal:
               {
                 // 01 1 1011 lnk-pair  d16,d19-d17 0
-                SetReg(cmd.Op1, rR0 + Oper1);
-                cmd.Op1.specflag1 |= URR_PAIR;
-                int disp = GetWord();
+                SetReg(insn.Op1, rR0 + Oper1);
+                insn.Op1.specflag1 |= URR_PAIR;
+                int disp = GetWord(insn);
                 disp |= (Oper2 & 8) << (16-3);
                 disp |= (Oper2 & 7) << 17;
-                SetRelative(cmd.Op2, disp, 20);
+                SetRelative(insn.Op2, disp, 20, insn);
               }
               break;
 
             default:
-              SetReg(cmd.Op2, rR0 + Oper1);
-              SetReg(cmd.Op1, rR0 + Oper2);
+              SetReg(insn.Op2, rR0 + Oper1);
+              SetReg(insn.Op1, rR0 + Oper2);
               break;
           }
         }
         else
         {                       // jump's
           // 010xxxxxxxxxxxx0
-          cmd.itype = CR16_beq + Oper1;
-          SetRelative(cmd.Op1, (code & 0x1E) | (OpCode << 5), 8);
+          insn.itype = CR16_beq + Oper1;
+          SetRelative(insn.Op1, (code & 0x1E) | (OpCode << 5), 8, insn);
         }
       }
       break;
 
       // short immediate-register (two word)
     case 0x00:
-      switch ((cmd.itype = Ops[OpCode]))
+      insn.itype = Ops[OpCode];
+      switch ( insn.itype )
       {
         case 0:
-          return (0);
+          return 0;
           // branch's
         case CR16_br:
-          if (code & 1)
+          if ( code & 1 )
           {
-            static const unsigned char BQ[4] = {
+            static const uchar BQ[4] =
+            {
               CR16_beq0b, CR16_beq1b,
               CR16_bne0b, CR16_bne1b
             };
-            cmd.itype = BQ[(Oper1 >> 1) & 3];
-            if (WordFlg)
-              cmd.itype++;
-            SetReg(cmd.Op1, rR0 + (Oper1 & 0x9));
-            SetRelative(cmd.Op1, code & 0x1E, 5);
+            insn.itype = BQ[(Oper1 >> 1) & 3];
+            if ( WordFlg )
+              insn.itype++;
+            SetReg(insn.Op1, rR0 + (Oper1 & 0x9));
+            SetRelative(insn.Op1, code & 0x1E, 5, insn);
           }
-          else if (WordFlg)
+          else if ( WordFlg )
           {
-            cmd.itype = CR16_bal;
-            SetReg(cmd.Op1, rR0 + Oper1);
-            if ((code & 0x0F) == 0x0E)
+            insn.itype = CR16_bal;
+            SetReg(insn.Op1, rR0 + Oper1);
+            if ( (code & 0x0F) == 0x0E )
             {
-              SetRelative(cmd.Op2,
-                          GetWord() | (((uint32) code & 0x10) << 12), 16);
-              cmd.Op2.addr = cmd.Op2.value = cmd.Op2.addr & 0x1FFFF;
+              SetRelative(insn.Op2,
+                          GetWord(insn) | (((uint32) code & 0x10) << 12), 16, insn);
+              insn.Op2.addr = insn.Op2.value = insn.Op2.addr & 0x1FFFF;
             }
             else
-              SetRelative(cmd.Op2, code & 0x1F, 4);
+              SetRelative(insn.Op2, code & 0x1F, 4, insn);
           }
           else
           {
-            cmd.itype = CR16_beq + Oper1;
-            if ((code & 0x0F) == 0x0E)
+            insn.itype = CR16_beq + Oper1;
+            if ( (code & 0x0F) == 0x0E )
             {
-              SetRelative(cmd.Op1,
-                          GetWord() | (((uint32) code & 0x10) << 12), 16);
-              cmd.Op1.addr = cmd.Op1.value = cmd.Op2.addr & 0x1FFFF;
+              SetRelative(insn.Op1,
+                          GetWord(insn) | (((uint32) code & 0x10) << 12), 16, insn);
+              insn.Op1.addr = insn.Op1.value = insn.Op2.addr & 0x1FFFF;
             }
             else
             {
-              SetRelative(cmd.Op1, code & 0x1F, 4);
+              SetRelative(insn.Op1, code & 0x1F, 4, insn);
             }
           }
           break;
@@ -489,14 +472,14 @@ int idaapi CR16_ana(void)
             // 54 3 2109 8   76     5  4321        d
             // 00 i 0010 bs1 ex-op bs0 bit-num/Imm d
             int exop = (Oper1 >> 1) & 3;
-            cmd.itype = ExtOps[exop] + WordFlg;
-            SetExtOp(code);
+            insn.itype = ExtOps[exop] + WordFlg;
+            SetExtOp(insn, code);
           }
           break;
 
           // Special tbit
         case CR16_tbit:
-          if (WordFlg == 0)
+          if ( WordFlg == 0 )
           {
             // jcond large format
             // 00 0 1011 cond target-pair 1
@@ -504,54 +487,55 @@ int idaapi CR16_ana(void)
             // 00 0 1011 link-pair target-pair 0
             if ( code & 1 )
             {
-              cmd.itype = CR16_jeq + Oper1;
-              SetReg(cmd.Op1, rR0 + Oper2);
-              cmd.Op1.specflag1 |= URR_PAIR;
+              insn.itype = CR16_jeq + Oper1;
+              SetReg(insn.Op1, rR0 + Oper2);
+              insn.Op1.specflag1 |= URR_PAIR;
             }
             else
             {
-              cmd.itype = CR16_jal;
-              SetReg(cmd.Op1, rR0 + Oper1);
-              cmd.Op1.specflag1 |= URR_PAIR;
-              SetReg(cmd.Op2, rR0 + Oper2);
-              cmd.Op2.specflag1 |= URR_PAIR;
+              insn.itype = CR16_jal;
+              SetReg(insn.Op1, rR0 + Oper1);
+              insn.Op1.specflag1 |= URR_PAIR;
+              SetReg(insn.Op2, rR0 + Oper2);
+              insn.Op2.specflag1 |= URR_PAIR;
             }
             break;
           }
-          cmd.itype--;
+          insn.itype--;
+          // fallthrough
 
           // all other cmds
         default:
           if ( code == 0x200 )
           {
-            cmd.itype = CR16_nop;
+            insn.itype = CR16_nop;
             break;
           }
-          if (WordFlg) // fix word operations
-            cmd.itype++;
+          if ( WordFlg ) // fix word operations
+            insn.itype++;
           // Setup register OP
-          SetReg(cmd.Op2, rR0 + Oper1);
+          SetReg(insn.Op2, rR0 + Oper1);
           // Setup immediate
-          if ((code & 0x1F) == 0x11)
-            SetImmData(cmd.Op1, GetWord(), 15);
+          if ( (code & 0x1F) == 0x11 )
+            SetImmData(insn.Op1, GetWord(insn), 15);
           else
-            SetImmData(cmd.Op1, code & 0x1F, 4);
+            SetImmData(insn.Op1, code & 0x1F, 4);
           break;
       }
       break;
 
       // LOADi
     case 0x02:
-      cmd.itype = WordFlg ? CR16_loadw : CR16_loadb;
-      SetReg(cmd.Op2, rR0 + Oper1);
-      SetSL(cmd.Op1, code);
+      insn.itype = WordFlg ? CR16_loadw : CR16_loadb;
+      SetReg(insn.Op2, rR0 + Oper1);
+      SetSL(insn, insn.Op1, code);
       break;
       // STORi
     case 0x3:
-      cmd.itype = WordFlg ? CR16_storw : CR16_storb;
-      SetReg(cmd.Op1, rR0 + Oper1);
-      SetSL(cmd.Op2, code);
+      insn.itype = WordFlg ? CR16_storw : CR16_storb;
+      SetReg(insn.Op1, rR0 + Oper1);
+      SetSL(insn, insn.Op2, code);
       break;
   }
-  return cmd.size;
+  return insn.size;
 }

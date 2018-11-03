@@ -3,14 +3,17 @@
 #define PDBREMOTE_HPP
 
 #include <map>
-#include "../../dbg/common/rpc_hlp.h"
-#include "../../dbg/common/win32_rpc.h"
+
+#include "../../plugins/debugger/rpc_hlp.h"
+#include "../../plugins/debugger/win32_rpc.h"
+
 #include "pdbaccess.hpp"
 
 // The PDB related code that works on Unix
 // It connects to a Windows computer and asks to retrieve PDB info
 
 //----------------------------------------------------------------------------
+//-V:remote_pdb_access_t:730 not all members of a class are initialized inside the constructor
 class remote_pdb_access_t : public pdb_access_t
 {
 public:
@@ -23,7 +26,7 @@ public:
       host(_host),
       port(_port),
       pwd(_pwd),
-      connection_is_open(false)
+      remote_session_id(-1)
   {
     set_base_address(args.loaded_base);
   }
@@ -41,6 +44,34 @@ public:
         children_visitor_t &visitor);
   virtual HRESULT load(pdb_sym_t &sym, DWORD id);
 
+  virtual HRESULT sip_retrieve_lines_by_va(
+          pdb_lnnums_t *out,
+          ULONGLONG va,
+          ULONGLONG length);
+  virtual HRESULT sip_retrieve_lines_by_coords(
+          pdb_lnnums_t *out,
+          DWORD file_id,
+          int lnnum,
+          int colnum);
+  virtual HRESULT sip_iterate_symbols_at_ea(
+          ULONGLONG va,
+          ULONGLONG size,
+          enum SymTagEnum tag,
+          children_visitor_t &visitor);
+  virtual HRESULT sip_iterate_file_compilands(
+          DWORD file_id,
+          children_visitor_t &visitor);
+  virtual HRESULT sip_retrieve_file_path(
+          qstring *out,
+          qstring *errbuf,
+          DWORD file_id);
+  virtual HRESULT sip_retrieve_symbol_files(
+          qvector<DWORD> *out,
+          pdb_sym_t &sym);
+  virtual HRESULT sip_find_files(
+          qvector<DWORD> *out,
+          const char *name);
+
   // Possibly remote operation.
   // If NULL is returned, it means the symbol is not available, nor
   // could it be fetched remotely.
@@ -49,6 +80,12 @@ public:
 
 
 private:
+  HRESULT _do_iterate_symbols_ids(
+          const DWORD *ids,
+          size_t count,
+          enum SymTagEnum type,
+          children_visitor_t &visitor);
+
 #define SAFE_GET(type)                                          \
   sym_data_t *sym_data;                                         \
   ioctl_pdb_code_t result = get_sym_data(sym, &sym_data);       \
@@ -64,15 +101,23 @@ private:
   // a remote operation, this is used to handle the response
   // and add the fetched symbol data to the cache.
   void handle_fetch_response(
-        const uchar **ptr,
-        const uchar *end,
-        qvector<DWORD> *ids_storage);
+          const uchar **ptr,
+          const uchar *end,
+          qvector<DWORD> *ids_storage);
 
   // Remote operation.
   ioctl_pdb_code_t fetch_children_infos(
-        pdb_sym_t &sym,
-        enum SymTagEnum type,
-        qvector<DWORD> *children_ids);
+          pdb_sym_t &sym,
+          enum SymTagEnum type,
+          qvector<DWORD> *children_ids);
+
+  HRESULT handle_fetch_lnnums(
+          pdb_lnnums_t *out,
+          const bytevec_t &resp) const;
+
+  HRESULT handle_fetch_file_ids(
+          qvector<DWORD> *out,
+          const bytevec_t &resp) const;
 
   sym_data_t *get_sym_data_from_cache(DWORD id);
 
@@ -104,7 +149,7 @@ private:
   const char *pwd;
   bool was_connected;
   bool is_dbg_module;
-  bool connection_is_open;
+  int remote_session_id;
 };
 
 #endif // PDBREMOTE_HPP

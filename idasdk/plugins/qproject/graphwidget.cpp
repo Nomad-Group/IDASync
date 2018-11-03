@@ -109,40 +109,42 @@ GraphWidget::GraphWidget()
 
 void GraphWidget::itemMoved()
 {
-  if (!timerId)
+  if ( !timerId )
     timerId = startTimer(10);
 }
 
 void GraphWidget::keyPressEvent(QKeyEvent *event)
 {
-  switch (event->key()) {
-  case Qt::Key_Up:
-    centerNode->moveBy(0, -20);
-    break;
-  case Qt::Key_Down:
-    centerNode->moveBy(0, 20);
-    break;
-  case Qt::Key_Left:
-    centerNode->moveBy(-20, 0);
-    break;
-  case Qt::Key_Right:
-    centerNode->moveBy(20, 0);
-    break;
-  case Qt::Key_Plus:
-    scaleView(qreal(1.2));
-    break;
-  case Qt::Key_Minus:
-    scaleView(1 / qreal(1.2));
-    break;
-  case Qt::Key_Space:
-  case Qt::Key_Enter:
-    foreach (QGraphicsItem *item, scene()->items()) {
-      if (qgraphicsitem_cast<Node *>(item))
-        item->setPos(-150 + qrand() % 300, -150 + qrand() % 300);
-    }
-    break;
-    default:
-    QGraphicsView::keyPressEvent(event);
+  switch ( event->key() )
+  {
+    case Qt::Key_Up:
+      centerNode->moveBy(0, -20);
+      break;
+    case Qt::Key_Down:
+      centerNode->moveBy(0, 20);
+      break;
+    case Qt::Key_Left:
+      centerNode->moveBy(-20, 0);
+      break;
+    case Qt::Key_Right:
+      centerNode->moveBy(20, 0);
+      break;
+    case Qt::Key_Plus:
+      scaleView(qreal(1.2));
+      break;
+    case Qt::Key_Minus:
+      scaleView(1 / qreal(1.2));
+      break;
+    case Qt::Key_Space:
+    case Qt::Key_Enter:
+      foreach (QGraphicsItem *item, scene()->items())
+      {
+        if ( qgraphicsitem_cast<Node *>(item) )
+          item->setPos(-150 + qrand() % 300, -150 + qrand() % 300);
+      }
+      break;
+      default:
+      QGraphicsView::keyPressEvent(event);
   }
 }
 
@@ -151,8 +153,9 @@ void GraphWidget::timerEvent(QTimerEvent *event)
   Q_UNUSED(event);
 
   QList<Node *> nodes;
-  foreach (QGraphicsItem *item, scene()->items()) {
-    if (Node *node = qgraphicsitem_cast<Node *>(item))
+  foreach (QGraphicsItem *item, scene()->items())
+  {
+    if ( Node *node = qgraphicsitem_cast<Node *>(item) )
       nodes << node;
   }
 
@@ -160,12 +163,14 @@ void GraphWidget::timerEvent(QTimerEvent *event)
     node->calculateForces();
 
   bool itemsMoved = false;
-  foreach (Node *node, nodes) {
-    if (node->advance())
+  foreach (Node *node, nodes)
+  {
+    if ( node->advance() )
       itemsMoved = true;
   }
 
-  if (!itemsMoved) {
+  if ( !itemsMoved )
+  {
     killTimer(timerId);
     timerId = 0;
   }
@@ -184,16 +189,16 @@ void GraphWidget::drawBackground(QPainter *painter, const QRectF &rect)
   QRectF sceneRect = this->sceneRect();
   QRectF rightShadow(sceneRect.right(), sceneRect.top() + 5, 5, sceneRect.height());
   QRectF bottomShadow(sceneRect.left() + 5, sceneRect.bottom(), sceneRect.width(), 5);
-  if (rightShadow.intersects(rect) || rightShadow.contains(rect))
+  if ( rightShadow.intersects(rect) || rightShadow.contains(rect) )
     painter->fillRect(rightShadow, Qt::darkGray);
-  if (bottomShadow.intersects(rect) || bottomShadow.contains(rect))
+  if ( bottomShadow.intersects(rect) || bottomShadow.contains(rect) )
     painter->fillRect(bottomShadow, Qt::darkGray);
 
   // Fill
   QLinearGradient gradient(sceneRect.topLeft(), sceneRect.bottomRight());
   gradient.setColorAt(0, Qt::white);
   gradient.setColorAt(1, Qt::lightGray);
-  painter->fillRect(rect.intersect(sceneRect), gradient);
+  painter->fillRect(rect.intersected(sceneRect), gradient);
   painter->setBrush(Qt::NoBrush);
   painter->drawRect(sceneRect);
 
@@ -216,7 +221,7 @@ void GraphWidget::drawBackground(QPainter *painter, const QRectF &rect)
 void GraphWidget::scaleView(qreal scaleFactor)
 {
   qreal factor = matrix().scale(scaleFactor, scaleFactor).mapRect(QRectF(0, 0, 1, 1)).width();
-  if (factor < 0.07 || factor > 100)
+  if ( factor < 0.07 || factor > 100 )
     return;
 
   scale(scaleFactor, scaleFactor);

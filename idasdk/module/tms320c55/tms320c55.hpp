@@ -232,12 +232,12 @@ enum regnum_t ENUM_SIZE(uint16)
 //------------------------------------------------------------------
 #define Parallel segpref // number of operands for the first line of a parallel instruction
  #define TMS_PARALLEL_BIT -1
-#define SpecialModes auxpref_chars.low
+#define SpecialModes auxpref_u8[0]
  #define TMS_MODE_USER_PARALLEL          0x1 // user parallel bit (E) is set
  #define TMS_MODE_LR                     0x2 // LR postfix
  #define TMS_MODE_CR                     0x4 // CR postfix
  #define TMS_MODE_SIMULATE_USER_PARALLEL 0x8 // the instruction simulate two instructions linked by a user parallelism
-#define OpMem auxpref_chars.high
+#define OpMem auxpref_u8[1]
 
 // complex operands
 
@@ -320,11 +320,6 @@ enum regnum_t ENUM_SIZE(uint16)
 #define o_io o_idpspec3
 
 //------------------------------------------------------------------
-// specific device name
-
-extern char device[MAXSTR];
-
-//------------------------------------------------------------------
 // processor types
 
 typedef uchar proctype_t;
@@ -343,40 +338,31 @@ extern netnode helper;
 
 extern ushort idpflags;
 
-ea_t calc_code_mem(const ea_t ea);
-ea_t calc_data_mem(const op_t &op);
-ea_t calc_io_mem(const op_t &op);
-
 int get_mapped_register(ea_t ea);
-int get_signed(int byte,int mask);
-int get_unsigned(int byte,int mask);
 
 const char *find_sym(ea_t address);
-const ioport_bit_t *find_bits(ea_t address);
-const char *find_bit(ea_t address, int bit);
 //------------------------------------------------------------------
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi header(outctx_t &ctx);
+void idaapi footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);  // function to produce assume directives
+void idaapi segstart(outctx_t &ctx, segment_t *seg);
+void idaapi segend(outctx_t &ctx, segment_t *seg);
+void idaapi assumes(outctx_t &ctx);  // function to produce assume directives
 
-void idaapi out(void);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi ana(insn_t *insn);
+int  idaapi emu(const insn_t &insn);
+void idaapi data(outctx_t &ctx);
 
 bool idaapi create_func_frame(func_t *pfn);
-void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v);
+void idaapi gen_stkvar_def(outctx_t &ctx, const member_t *mptr, sval_t v);
 int  idaapi is_align_insn(ea_t ea);
-bool idaapi can_have_type(op_t &op);
+bool idaapi can_have_type(const op_t &op);
 
-inline ea_t calc_code_mem(ea_t ea)
+ea_t calc_io_mem(const insn_t &insn, const op_t &op);
+ea_t calc_data_mem(const insn_t &insn, const op_t &op);
+inline ea_t calc_code_mem(const insn_t &insn, ea_t ea)
 {
-  return toEA(cmd.cs, ea);
+  return to_ea(insn.cs, ea);
 }
 
 #endif // _TMS320C55_HPP

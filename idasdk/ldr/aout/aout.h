@@ -1,6 +1,6 @@
 #ifndef __AOUT_H__
 #define __AOUT_H__
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
+#pragma pack(push, 1)
 
 struct exec
 {
@@ -127,8 +127,6 @@ struct nlist
 {
   union
   {
-    char  *n_name;
-    nlist *n_next;
     int32 n_strx;
   } n_un;
   uchar n_type;
@@ -198,11 +196,11 @@ enum reloc_type_sparc
   SPARC_RELOC_HI22,     SPARC_RELOC_22,                              // SR 22-bit relocs
   SPARC_RELOC_13,       SPARC_RELOC_LO10,                            // SR 13&10-bit relocs
   SPARC_RELOC_SFA_BASE, SPARC_RELOC_SFA_OFF13,                       // SR S.F.A. relocs
-  SPARC_RELOC_BASE10,   SPARC_RELOC_BASE13,    SPARC_RELOC_BASE22,   // base_relative pic
+  SPARC_RELOC_BASE10,   SPARC_RELOC_BASE13, SPARC_RELOC_BASE22,      // base_relative pic
   SPARC_RELOC_PC10,     SPARC_RELOC_PC22,                            // special pc-rel pic
   SPARC_RELOC_JMP_TBL,                                               // jmp_tbl_rel in pic
   SPARC_RELOC_SEGOFF16,                                              // ShLib offset-in-seg
-  SPARC_RELOC_GLOB_DAT, SPARC_RELOC_JMP_SLOT,  SPARC_RELOC_RELATIVE, // rtld relocs
+  SPARC_RELOC_GLOB_DAT, SPARC_RELOC_JMP_SLOT, SPARC_RELOC_RELATIVE,  // rtld relocs
 };
 
 struct reloc_info_sparc

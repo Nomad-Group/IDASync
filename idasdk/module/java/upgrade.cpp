@@ -12,6 +12,7 @@
 
 #include "java.hpp"
 #include "upgrade.hpp"
+#include "oututil.hpp"
 
 //----------------------------------------------------------------------
 #define _TO_VERSION IDP_JDK16
@@ -19,35 +20,36 @@
 //----------------------------------------------------------------------
 static void make_new_name(ushort name, ushort subnam, uchar mode, uint ip)
 {
-  char str[MAXNAMELEN];
-  init_output_buffer(str, sizeof(str));
-  if ( fmtString(name, sizeof(str)-2, fmt_fullname) )
+  out_java_t *pctx = (out_java_t *)create_outctx(BADADDR);
+  if ( pctx->fmtString(name, MAXNAMELEN-2, fmt_fullname) )
   {
 trunc:
-    trunc_name(ip, mode & 4);
+    pctx->trunc_name(ip, mode & 4);
   }
   else if ( (char)mode > 0 )
   {
-    char *p = get_output_ptr();
-    if ( p >= &str[sizeof(str)-3] )
+    size_t len = pctx->outbuf.length();
+    if ( len >= (MAXNAMELEN-3) )
       goto trunc;
-    *p++ = '.';
-    set_output_ptr(p);
-    if ( fmtString(subnam, &str[sizeof(str)-2] - p, fmt_name) )
+    pctx->out_char(' ');
+    if ( pctx->fmtString(subnam, (MAXNAMELEN-2) - len, fmt_name) )
       goto trunc;
   }
-  term_output_buffer();
-  do_name_anyway(ip, convert_clsname(str));
+  force_name(ip, convert_clsname(pctx->outbuf.begin()));
+  delete pctx;
   hide_name(ip);
 }
 
 //----------------------------------------------------------------------
 int upgrade_db_format(int ver, netnode constnode)
 {
-  if ( askyn_c(1, "AUTOHIDE REGISTRY\nHIDECANCEL\n"
-                "The database has an old java data format.\n"
-                "Do you want to upgrade it?") <= 0 )
+  if ( ask_yn(ASKBTN_YES,
+              "AUTOHIDE REGISTRY\nHIDECANCEL\n"
+              "The database has an old java data format.\n"
+              "Do you want to upgrade it?") <= ASKBTN_NO )
+  {
     qexit(1);
+  }
 
   switch ( ver )
   {
@@ -112,7 +114,7 @@ BADIDB:
   }
 
 // set segments type type for special segments
-  segment_t *S = getseg(curClass.startEA);
+  segment_t *S = getseg(curClass.start_ea);
   if ( S == NULL )
     goto BADIDB;
   S->set_hidden_segtype(true);
@@ -133,7 +135,7 @@ BADIDB:
 #define FLEXPSZ (sizeof(FieldInfo) - offsetof(FieldInfo, annNodes))
   uval_t oldsize = sizeof(SegInfo) - FMEXPSZ - SGEXPSZ;
 
-  for ( int pos=-(int)curClass.MethodCnt; pos<=(int)curClass.FieldCnt; pos++ )
+  for ( int pos=-(int)curClass.MethodCnt; pos <= (int)curClass.FieldCnt; pos++ )
   {
     union
     {
@@ -195,7 +197,7 @@ BADIDB:
       ushort j = (ushort)enode.altval(0);
       if ( j == 0 )
         goto BADIDB;
-      ea_t ea = u.s.startEA + u.s.CodeSize;
+      ea_t ea = u.s.start_ea + u.s.CodeSize;
       ushort i = 1;
       do
       {
@@ -227,7 +229,7 @@ BADIDB:
         char str[MAXNAMELEN];
         qsnprintf(str, sizeof(str), "met%03u_slot%03d", u.s.id.Number, --i);
         --ea;
-        if ( do_name_anyway(ea, str) )
+        if ( force_name(ea, str) )
           make_name_auto(ea);
         else
           hide_name(ea);
@@ -339,7 +341,7 @@ extchar:
   }
 
   if ( curClass.This.Dscr )
-    make_new_name(curClass.This.Name, 0, (uchar)-1, (uint)curClass.startEA);
+    make_new_name(curClass.This.Name, 0, (uchar)-1, (uint)curClass.start_ea);
 
   return _TO_VERSION;
 }
@@ -372,7 +374,7 @@ uchar set_exception_xref(SegInfo *ps, Exception const & exc, ea_t ea)
   {
     if ( !exc.start_pc )
       ps->id.extflg |= XFL_M_LABSTART;  // special label at entry
-    add_dref(ea, ps->startEA + exc.start_pc, dr_I);
+    add_dref(ea, ps->start_ea + exc.start_pc, dr_I);
   }
   if ( exc.end_pc > ps->CodeSize )
   {
@@ -382,10 +384,10 @@ uchar set_exception_xref(SegInfo *ps, Exception const & exc, ea_t ea)
   {
     if ( exc.end_pc == ps->CodeSize )
       ps->id.extflg |= XFL_M_LABEND;  // special label at end
-    add_dref(ea, ps->startEA + exc.end_pc, dr_I);
+    add_dref(ea, ps->start_ea + exc.end_pc, dr_I);
   }
-  if ( exc.handler_pc >= ps->CodeSize)
+  if ( exc.handler_pc >= ps->CodeSize )
     return 1;
-  add_dref(ea, ps->startEA + exc.handler_pc, dr_I);
+  add_dref(ea, ps->start_ea + exc.handler_pc, dr_I);
   return ans;
 }

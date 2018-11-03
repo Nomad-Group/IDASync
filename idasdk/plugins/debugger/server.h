@@ -1,6 +1,10 @@
 #ifndef SERVER_H
 #define SERVER_H
 
+#if defined(__NT__) && !defined(UNDER_CE)
+#include <ws2tcpip.h>
+#endif // __NT__
+
 #include <map>
 #include <algorithm>
 
@@ -42,7 +46,11 @@
 #      endif
 #      define DEBUGGER_ID    DEBUGGER_ID_ARM_LINUX_USER
 #    else
-#      define SYSTEM "Linux"
+#      if defined(__ANDROID_X86__)
+#        define SYSTEM "Android x86"
+#      else
+#        define SYSTEM "Linux"
+#      endif
 #      define DEBUGGER_ID    DEBUGGER_ID_X86_IA32_LINUX_USER
 #    endif
      // linux debugger can not be multithreaded because it uses thread_db.
@@ -50,13 +58,8 @@
      // applications simultaneously.
 #    define __SINGLE_THREADED_SERVER__
 #  elif defined(__MAC__)
-#    if defined(__arm__)
-#      define SYSTEM "iPhone"
-#      define DEBUGGER_ID    DEBUGGER_ID_ARM_IPHONE_USER
-#    else
-#      define SYSTEM "Mac OS X"
-#      define DEBUGGER_ID    DEBUGGER_ID_X86_IA32_MACOSX_USER
-#    endif
+#    define SYSTEM "Mac OS X"
+#    define DEBUGGER_ID    DEBUGGER_ID_X86_IA32_MACOSX_USER
 #  else
 #    error "Unknown platform"
 #  endif
@@ -68,9 +71,19 @@ extern "C" const char *check_connection(int);
 #endif // !__NT__
 
 #ifdef __X64__
-#define SYSBITS " 64-bit"
+#  define _SYSBITS " 64-bit"
 #else
-#define SYSBITS " 32-bit"
+#  define _SYSBITS " 32-bit"
+#endif
+
+#ifdef TESTABLE_BUILD
+#  ifdef __EA64__
+#    define SYSBITS _SYSBITS " (sizeof ea=64)"
+#  else
+#    define SYSBITS _SYSBITS " (sizeof ea=32)"
+#  endif
+#else
+#    define SYSBITS _SYSBITS
 #endif
 
 #ifdef UNDER_CE
@@ -89,13 +102,13 @@ extern "C" const char *check_connection(int);
 #include "rpc_hlp.h"
 #include "rpc_server.h"
 
-// sizeof(ea_t)==8 and sizeof(size_t)==4 servers can not be used to debug 64-bit
-// applications. but to debug 32-bit applications, simple 32-bit servers
-// are enough and can work with both 32-bit and 64-bit versions of ida.
-// so, there is no need to build sizeof(ea_t)==8 and sizeof(size_t)==4 servers
-#if defined(__EA64__) != defined(__X64__)
-#error "Mixed mode servers do not make sense, they should not be compiled"
-#endif
+// // sizeof(ea_t)==8 and sizeof(size_t)==4 servers can not be used to debug 64-bit
+// // applications. but to debug 32-bit applications, simple 32-bit servers
+// // are enough and can work with both 32-bit and 64-bit versions of ida.
+// // so, there is no need to build sizeof(ea_t)==8 and sizeof(size_t)==4 servers
+// #if defined(__EA64__) != defined(__X64__)
+// #error "Mixed mode servers do not make sense, they should not be compiled"
+// #endif
 
 extern rpc_server_list_t clients_list;
 

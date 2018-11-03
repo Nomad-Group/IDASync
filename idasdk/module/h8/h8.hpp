@@ -27,7 +27,7 @@ o_phrase  2 Register indirect
 o_displ   3 Register indirect with displacement
             @(d:2,ERn)/@(d:16,ERn)/@(d:32,ERn)
             x.reg, x.addr, disp_16, disp_32, disp_2
-o_displ   4 Index register indirect with displacement 
+o_displ   4 Index register indirect with displacement
             @(d:16, RnL.B)/@(d:16,Rn.W)/@(d:16,ERn.L)
             @(d:32, RnL.B)/@(d:32,Rn.W)/@(d:32,ERn.L)
             x.displtype = dt_regidx,
@@ -45,14 +45,14 @@ o_imm     7 Immediate
             x.value
 o_near    8 Program-counter relative
             @(d:8,PC)/@(d:16,PC)
-o_pcidx   9 Program-counter relative with index register 
+o_pcidx   9 Program-counter relative with index register
             @(RnL.B,PC)/@(Rn.W,PC)/@(ERn.L,PC)
             x.reg
 o_mem    10 Memory indirect
             @@aa:8
             x.memtype = mem_ind
             x.addr
-o_mem    11 Extended memory indirect 
+o_mem    11 Extended memory indirect
             @@vec:7
             x.memtype = mem_vec7
             x.addr
@@ -131,11 +131,11 @@ enum regnum_t ENUM8BIT
   R0L,   R1L,   R2L,   R3L,   R4L,   R5L,   R6L,   R7L,
   ER0,   ER1,   ER2,   ER3,   ER4,   ER5,   ER6,   ER7,
   // don't change registers order above this line
-  MACL,  MACH,
+  MACL, MACH,
   PC,
-  CCR,   EXR,
+  CCR, EXR,
   rVcs, rVds,   // virtual registers for code and data segments
-  VBR,   SBR,   // base or segment registers 
+  VBR, SBR,     // base or segment registers
 };
 
 //------------------------------------------------------------------
@@ -177,37 +177,32 @@ inline bool is_hew_asm(void)
 extern netnode helper;
 
 ea_t trim_ea_branch(ea_t ea);         // trim address according to proc mode
-ea_t calc_mem(ea_t ea);               // map virtual to physical ea
-ea_t calc_mem_sbr_based(ea_t ea);     // map virtual @aa:8 physical ea
+ea_t calc_mem(const insn_t &insn, ea_t ea); // map virtual to physical ea
+ea_t calc_mem_sbr_based(const insn_t &insn, ea_t ea); // map virtual @aa:8 physical ea
 const char *find_sym(ea_t address);
 
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi h8_header(outctx_t &ctx);
+void idaapi h8_footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);
+void idaapi h8_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi h8_segend(outctx_t &ctx, segment_t *seg);
+void idaapi h8_assumes(outctx_t &ctx);
 
-void idaapi out(void);
-int  idaapi outspec(ea_t ea,uchar segtype);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi ana(insn_t *out_insn);
+int  idaapi emu(const insn_t &insn);
 
 int  idaapi h8_is_align_insn(ea_t ea);
 bool idaapi create_func_frame(func_t *pfn);
-int  idaapi is_sp_based(const op_t &x);
-bool idaapi is_return_insn(void);
+int  idaapi is_sp_based(const insn_t &insn, const op_t &x);
+bool idaapi is_return_insn(const insn_t &insn);
 
-int idaapi h8_get_frame_retsize(func_t *);
+int idaapi h8_get_frame_retsize(const func_t *);
 int is_jump_func(const func_t *pfn, ea_t *jump_target);
-int may_be_func(void);           // can a function start here?
-int get_displ_outf(const op_t &x);
-int is_sane_insn(int nocrefs);
-bool idaapi h8_is_switch(switch_info_ex_t *si);
-void idaapi h8_gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v);
+int may_be_func(const insn_t &insn);           // can a function start here?
+int get_displ_outf(const op_t &x, flags_t F);
+int is_sane_insn(const insn_t &insn, int nocrefs);
+bool idaapi h8_is_switch(switch_info_t *si, const insn_t &insn);
+void idaapi h8_gen_stkvar_def(outctx_t &ctx, const member_t *mptr, sval_t v);
 
 
 #endif // _H8_HPP

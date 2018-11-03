@@ -16,7 +16,7 @@
 
 #include "../idaldr.h"
 #include <exehdr.h>
-#include <queue.hpp>
+#include <problems.hpp>
 #include "w32run.h"
 #include <stddef.h>   //offsetof
 
@@ -26,7 +26,11 @@
 //      and fill 'fileformatname'.
 //      otherwise return 0
 //
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
   union
   {
@@ -35,16 +39,13 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
   };
   uint32 pos;
 
-  if ( n != 0 )
-    return 0;
-
   if ( qlread(li, &ex, sizeof(ex)) != sizeof(ex)
     || ex.exe_ident != EXE_ID
     || (pos = ex.HdrSize) == 0 )
   {
     return 0;
   }
-  uint32 fsize = qlsize(li);
+  uint64 fsize = qlsize(li);
   qlseek(li, pos *= 16, SEEK_SET);
   if ( qlread(li, &wh, sizeof(wh)) != sizeof(wh) )
     return 0;
@@ -58,12 +59,12 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
   {
     return 0;
   }
-  qstrncpy(fileformatname, "Watcom DOS32-extender file", MAX_FILE_FORMAT_NAME);
+  *fileformatname = "Watcom DOS32-extender file";
+  *processor      = "metapc";
   return f_W32RUN;
 }
 
 //--------------------------------------------------------------------------
-
 static w32_hdr wh;
 static uint32 minea, topea;
 static linput_t *li;
@@ -71,28 +72,30 @@ static linput_t *li;
 //-------------------------------------------------------------------------
 static int mread(void *buf, size_t size)
 {
-  if ( size_t(qlread(li, buf, size)) == size )
+  if ( qlread(li, buf, size) == size )
     return 0;
-  if ( askyn_c(0, "HIDECANCEL\nRead error or bad file structure. Continue loading?") <= 0 )
+  if ( ask_yn(ASKBTN_NO,
+              "HIDECANCEL\n"
+              "Read error or bad file structure. Continue loading?") <= ASKBTN_NO )
+  {
     loader_failure();
+  }
   return 1;
 }
 
 //-------------------------------------------------------------------------
 static void realize_relocation(void)
 {
-  fixup_data_t fd;
   char first = 0;
   ushort cnt, tmp;
   register uint32 offset;
   uint32 curv, maxv = 0, ost = wh.read_size - wh.reltbl_offset;
 
-  fd.type = FIXUP_OFF32;
-  fd.displacement = 0;
+  fixup_data_t fd(FIXUP_OFF32);
 
   msg("Reading relocation table...\n");
 
-  for( ; ; )
+  for ( ; ; )
   {
     if ( ost < sizeof(short) )
     {
@@ -116,7 +119,7 @@ static void realize_relocation(void)
     if ( mread(&tmp, sizeof(tmp)) )
       return;
     offset |= tmp;
-    while( true )
+    while ( true )
     {
       if ( offset > wh.reltbl_offset - 4 )
       {
@@ -129,22 +132,22 @@ static void realize_relocation(void)
       else
       {
         uint32 ea = minea + offset;
-        showAddr(ea);
-        curv = get_long(ea);
+        show_addr(ea);
+        curv = get_dword(ea);
         if ( curv >= wh.mem_size )
         {
           msg("Doubtful value after relocation! (%x=>%x)\n", ea, curv + minea);
-          QueueSet(Q_att, ea);
+          remember_problem(PR_ATTN, ea);
         }
         else if ( curv > maxv )
         {
           maxv = curv;
         }
         curv += minea;
-        put_long(ea, curv);
+        put_dword(ea, curv);
         fd.off = offset;
         fd.sel = curv >= topea ? 2 : 1;
-        set_fixup(ea, &fd);
+        fd.set(ea);
       }
       if ( --cnt == 0 )
         break;
@@ -190,25 +193,25 @@ static void add_all_comments(void)
               "                    long   SystemDepenced_2;");
   add_pgm_cmt("                   }");
 
-  set_cmt(inf.startIP, "Calling convention declared in file header", 1);
+  set_cmt(inf.start_ip, "Calling convention declared in file header", 1);
 }
 
 //--------------------------------------------------------------------------
 static void create32(
         sel_t sel,
-        ea_t startEA,
-        ea_t endEA,
+        ea_t start_ea,
+        ea_t end_ea,
         const char *name,
         const char *sclass)
 {
   set_selector(sel, 0);
 
   segment_t s;
-  s.sel    = sel;
-  s.startEA= startEA;
-  s.endEA  = endEA;
-  s.align  = saRelByte;
-  s.comb   = scPub;
+  s.sel     = sel;
+  s.start_ea = start_ea;
+  s.end_ea   = end_ea;
+  s.align   = saRelByte;
+  s.comb    = scPub;
   s.bitness = 1; // 32-bit
 
   if ( !add_segm_ex(&s, name, sclass, ADDSEG_NOSREG|ADDSEG_SPARSE) )
@@ -223,8 +226,7 @@ void idaapi load_file(linput_t *_li, ushort /*neflag*/, const char * /*fileforma
 {
   ushort pos;
 
-  if ( ph.id != PLFM_386 )
-    set_processor_type("80386r", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("metapc", SETPROC_LOADER);
 
   li = _li;
   qlseek(li, offsetof(exehdr, HdrSize));
@@ -236,11 +238,11 @@ void idaapi load_file(linput_t *_li, ushort /*neflag*/, const char * /*fileforma
 //  inf.s_prefflag &= ~PREF_SEGADR;
 //  inf.nametype = NM_EA4;
   inf.lflags |= LFLG_PC_FLAT;
-  minea = (uint32)toEA(W32_DOS_LOAD_BASE, 0);
-  inf.startIP = minea + wh.start_offset;
+  minea = (uint32)to_ea(W32_DOS_LOAD_BASE, 0);
+  inf.start_ip = minea + wh.start_offset;
   inf.start_cs = 1; //selector of code
   topea = minea + wh.reltbl_offset;
-  uint32 fsize = qlsize(li);
+  uint64 fsize = qlsize(li);
   if ( wh.beg_fileoff > fsize || topea-minea > fsize-wh.beg_fileoff )
     loader_failure("Corrupted file");
   file2base(li, wh.beg_fileoff, minea, topea, FILEREG_PATCHABLE);
@@ -276,5 +278,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

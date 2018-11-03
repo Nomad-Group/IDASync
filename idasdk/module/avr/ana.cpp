@@ -150,59 +150,59 @@
 1111 111r rrrr xbbb     sbrs    rr, b
 */
 
-inline uint32 code_address(signed int delta)
+inline uint32 code_address(const insn_t &insn, signed int delta)
 {
-  ea_t newip = cmd.ip + 1 + delta;
+  ea_t newip = insn.ip + 1 + delta;
   uint32 size = romsize != 0 ? romsize : 0x10000;
   return newip % size;
 }
 
 //------------------------------------------------------------------------
-inline ushort ua_next_full_byte(void)
+inline ushort ua_next_full_byte(insn_t &insn)
 {
-  return (ushort)get_full_byte(cmd.ea + cmd.size++);
+  return (ushort)get_wide_byte(insn.ea + insn.size++);
 }
 
 //--------------------------------------------------------------------------
 inline void opreg(op_t &x, uint16 n)
 {
   x.type = o_reg;
-  x.dtyp = dt_byte;
-  x.reg  = n;
+  x.dtype = dt_byte;
+  x.reg = n;
 }
 
 //--------------------------------------------------------------------------
-inline void opimm(op_t &x, int value)
+inline void opimm(const insn_t &insn, op_t &x, int value)
 {
-  x.type   = o_imm;
-  x.dtyp   = dt_byte;
-  x.value  = value;
-  x.specflag1 = uchar(helper.charval(cmd.ea, ELF_AVR_TAG) == ELF_AVR_LDI_NEG);
+  x.type  = o_imm;
+  x.dtype = dt_byte;
+  x.value = value;
+  x.specflag1 = uchar(helper.charval_ea(insn.ea, ELF_AVR_TAG) == ELF_AVR_LDI_NEG);
 }
 
 //--------------------------------------------------------------------------
 inline void opnear(op_t &x, ea_t addr)
 {
-  x.type   = o_near;
-  x.dtyp   = dt_code;
-  x.addr   = addr;
+  x.type  = o_near;
+  x.dtype = dt_code;
+  x.addr  = addr;
 }
 
 //--------------------------------------------------------------------------
-inline void opmem(op_t &x)
+inline void opmem(insn_t &insn, op_t &x)
 {
-  x.type   = o_mem;
-  x.dtyp   = dt_byte;
-  x.offb   = (char)cmd.size;
-  x.addr   = ua_next_full_byte();
+  x.type  = o_mem;
+  x.dtype = dt_byte;
+  x.offb  = (char)insn.size;
+  x.addr  = ua_next_full_byte(insn);
 }
 
 //--------------------------------------------------------------------------
 // 0001 10rd dddd rrrr     sub     rd, rr  6
-static void tworegs(int code)
+static void tworegs(insn_t &insn, int code)
 {
-  opreg(cmd.Op1, (code >> 4) & 31);
-  opreg(cmd.Op2, (code & 15) | ((code >> 5) & 16));
+  opreg(insn.Op1, (code >> 4) & 31);
+  opreg(insn.Op2, (code & 15) | ((code >> 5) & 16));
 }
 
 //--------------------------------------------------------------------------
@@ -217,26 +217,26 @@ inline void opphr(op_t &x, phrase_t phrase)
 {
   x.type   = o_phrase;
   x.phrase = phrase;
-  x.dtyp   = dt_byte;
+  x.dtype  = dt_byte;
 }
 
 //--------------------------------------------------------------------------
 inline void opport(op_t &x, int portnum)
 {
-  x.type   = o_port;
-  x.addr   = portnum;
-  x.dtyp   = dt_byte;
+  x.type  = o_port;
+  x.addr  = portnum;
+  x.dtype = dt_byte;
 }
 
 //--------------------------------------------------------------------------
 inline void opdisp(op_t &x, phrase_t phrase, int delta)
 {
-  if ( delta)
+  if ( delta )
   {
     x.type   = o_displ;
     x.phrase = phrase;
     x.addr   = delta;
-    x.dtyp   = dt_byte;
+    x.dtype  = dt_byte;
   }
   else
   {
@@ -245,10 +245,13 @@ inline void opdisp(op_t &x, phrase_t phrase, int delta)
 }
 
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
-//  if ( cmd.ip & 1 ) return 0;           // alignment error
-  int code = ua_next_full_byte();
+  if ( _insn == NULL )
+    return 0;
+  insn_t &insn = *_insn;
+  // if ( insn.ip & 1 ) return 0;           // alignment error
+  int code = ua_next_full_byte(insn);
   switch ( code >> 12 )
   {
     case 0:
@@ -289,26 +292,27 @@ int idaapi ana(void)
           AVR_mov       // B
         };
         int idx = (code >> 10) & 15;
-        cmd.itype = itypes[idx];
-        tworegs(code);
+        insn.itype = itypes[idx];
+        tworegs(insn, code);
         switch ( idx )
         {
           case 0:
             switch ( (code>>8) & 3 )
             {
               case 0:           // nop
-                if ( code != 0 ) return 0;
-                cmd.Op1.type = cmd.Op2.type = o_void;
+                if ( code != 0 )
+                  return 0;
+                insn.Op1.type = insn.Op2.type = o_void;
                 break;
               case 1:           // movw
-                cmd.itype = AVR_movw;
-                opreg(cmd.Op1, ((code >> 3) & 30));
-                opreg(cmd.Op2, ((code << 1) & 30));
+                insn.itype = AVR_movw;
+                opreg(insn.Op1, ((code >> 3) & 30));
+                opreg(insn.Op2, ((code << 1) & 30));
                 break;
               case 2:           // muls
-                cmd.itype = AVR_muls;
-                opreg(cmd.Op1, 16 + (((code >> 4) & 15)));
-                opreg(cmd.Op2, 16 + (((code >> 0) & 15)));
+                insn.itype = AVR_muls;
+                opreg(insn.Op1, 16 + (((code >> 4) & 15)));
+                opreg(insn.Op2, 16 + (((code >> 0) & 15)));
                 break;
 // 0000 0011 0ddd 0rrr     mulsu   Rd, Rr  0
 // 0000 0011 0ddd 1rrr     fmul    Rd, Rr  0
@@ -319,39 +323,39 @@ int idaapi ana(void)
                   idx = ((code >> 6) & 2) | ((code>>3) & 1);
                   static const uchar subtypes[] =
                     { AVR_mulsu, AVR_fmul, AVR_fmuls, AVR_fmulsu };
-                  cmd.itype = subtypes[idx];
+                  insn.itype = subtypes[idx];
                 }
-                opreg(cmd.Op1, 16 + (((code >> 4) & 7)));
-                opreg(cmd.Op2, 16 + (((code >> 0) & 7)));
+                opreg(insn.Op1, 16 + (((code >> 4) & 7)));
+                opreg(insn.Op2, 16 + (((code >> 0) & 7)));
                 break;
             }
             break;
           case 3: // lsl
-            if ( cmd.Op1.reg == cmd.Op2.reg )
+            if ( insn.Op1.reg == insn.Op2.reg )
             {
-              cmd.itype = AVR_lsl;
-              cmd.Op2.type = o_void;
+              insn.itype = AVR_lsl;
+              insn.Op2.type = o_void;
             }
             break;
           case 7: // rol
-            if ( cmd.Op1.reg == cmd.Op2.reg )
+            if ( insn.Op1.reg == insn.Op2.reg )
             {
-              cmd.itype = AVR_rol;
-              cmd.Op2.type = o_void;
+              insn.itype = AVR_rol;
+              insn.Op2.type = o_void;
             }
             break;
           case 8: // tst
-            if ( cmd.Op1.reg == cmd.Op2.reg )
+            if ( insn.Op1.reg == insn.Op2.reg )
             {
-              cmd.itype = AVR_tst;
-              cmd.Op2.type = o_void;
+              insn.itype = AVR_tst;
+              insn.Op2.type = o_void;
             }
             break;
           case 9: // clr
-            if ( cmd.Op1.reg == cmd.Op2.reg )
+            if ( insn.Op1.reg == insn.Op2.reg )
             {
-              cmd.itype = AVR_clr;
-              cmd.Op2.type = o_void;
+              insn.itype = AVR_clr;
+              insn.Op2.type = o_void;
             }
             break;
         }
@@ -377,9 +381,9 @@ int idaapi ana(void)
           AVR_ori,
           AVR_andi,
         };
-        cmd.itype = itypes[(code >> 12) - 3];
-        opreg(cmd.Op1, ((code >> 4) & 15) + 16);
-        opimm(cmd.Op2, (code & 0x0F) | ((code >> 4) & 0xF0));
+        insn.itype = itypes[(code >> 12) - 3];
+        opreg(insn.Op1, ((code >> 4) & 15) + 16);
+        opimm(insn, insn.Op2, (code & 0x0F) | ((code >> 4) & 0xF0));
       }
       break;
 
@@ -394,20 +398,20 @@ int idaapi ana(void)
 // 1000 001r rrrr 0000     st      Z, rr
 // 1000 001r rrrr 1000     st      Y, rr
       {
-        int delta =   ((code & 0x2000) >> 8)
-                    | ((code & 0x0C00) >> 7)
-                    |  (code & 0x0007);
+        int delta = ((code & 0x2000) >> 8)
+                  | ((code & 0x0C00) >> 7)
+                  | (code & 0x0007);
         if ( code & 0x200 )
         {
-          cmd.itype = delta ? AVR_std : AVR_st;
-          opdisp(cmd.Op1, (code & 8) ? PH_Y : PH_Z, delta);
-          opregd(cmd.Op2, code);
+          insn.itype = delta ? AVR_std : AVR_st;
+          opdisp(insn.Op1, (code & 8) ? PH_Y : PH_Z, delta);
+          opregd(insn.Op2, code);
         }
         else
         {
-          cmd.itype = delta ? AVR_ldd : AVR_ld;
-          opregd(cmd.Op1, code);
-          opdisp(cmd.Op2, (code & 8) ? PH_Y : PH_Z, delta);
+          insn.itype = delta ? AVR_ldd : AVR_ld;
+          opregd(insn.Op1, code);
+          opdisp(insn.Op2, (code & 8) ? PH_Y : PH_Z, delta);
         }
       }
       break;
@@ -456,53 +460,54 @@ int idaapi ana(void)
               0,       AVR_ld,  AVR_ld,   0,
               AVR_ld,  AVR_ld,  AVR_ld,   AVR_pop
             };
-            cmd.itype = itypes[code & 15];
-            opregd(cmd.Op1, code);
+            insn.itype = itypes[code & 15];
+            opregd(insn.Op1, code);
             switch ( code & 15 )
             {
               case 0x0:
-                opmem(cmd.Op2);
-                switch ( helper.charval(cmd.ea+1, ELF_AVR_TAG) )
+                opmem(insn, insn.Op2);
+                switch ( helper.charval_ea(insn.ea+1, ELF_AVR_TAG) )
                 {
                   case ELF_AVR_EEP_OFF:
-                    cmd.Op2.addr += ELF_AVR_EEPROMBASE-ELF_AVR_RAMBASE;
+                    insn.Op2.addr += ELF_AVR_EEPROMBASE-ELF_AVR_RAMBASE;
                   case ELF_AVR_RAM_OFF:
-                    cmd.Op2.addr += ELF_AVR_RAMBASE;
+                    insn.Op2.addr += ELF_AVR_RAMBASE;
                   default:
                     break;
                 }
                 break;
-              case 0x1: opphr(cmd.Op2, PH_ZPLUS);  break;
-              case 0x2: opphr(cmd.Op2, PH_MINUSZ); break;
-              case 0x4: opphr(cmd.Op2, PH_Z);      break;
-              case 0x5: opphr(cmd.Op2, PH_ZPLUS);  break;
-              case 0x6: opphr(cmd.Op2, PH_Z);      break;
-              case 0x7: opphr(cmd.Op2, PH_ZPLUS);  break;
-              case 0x9: opphr(cmd.Op2, PH_YPLUS);  break;
-              case 0xA: opphr(cmd.Op2, PH_MINUSY); break;
-              case 0xC: opphr(cmd.Op2, PH_X);      break;
-              case 0xD: opphr(cmd.Op2, PH_XPLUS);  break;
-              case 0xE: opphr(cmd.Op2, PH_MINUSX); break;
-              case 0xF:                            break;
-              default:  return 0;
+              case 0x1: opphr(insn.Op2, PH_ZPLUS);  break;
+              case 0x2: opphr(insn.Op2, PH_MINUSZ); break;
+              case 0x4: opphr(insn.Op2, PH_Z);      break;
+              case 0x5: opphr(insn.Op2, PH_ZPLUS);  break;
+              case 0x6: opphr(insn.Op2, PH_Z);      break;
+              case 0x7: opphr(insn.Op2, PH_ZPLUS);  break;
+              case 0x9: opphr(insn.Op2, PH_YPLUS);  break;
+              case 0xA: opphr(insn.Op2, PH_MINUSY); break;
+              case 0xC: opphr(insn.Op2, PH_X);      break;
+              case 0xD: opphr(insn.Op2, PH_XPLUS);  break;
+              case 0xE: opphr(insn.Op2, PH_MINUSX); break;
+              case 0xF:                             break;
+              default:
+                return 0;
             }
             if ( code & 0x200 )
             {
-              switch ( cmd.itype )
+              switch ( insn.itype )
               {
                 case AVR_pop:
-                  cmd.itype = AVR_push;
+                  insn.itype = AVR_push;
                   break;
                 case AVR_lds:
-                  cmd.itype = AVR_sts;
+                  insn.itype = AVR_sts;
                   goto SWAP_OPERANDS;
                 case AVR_ld:
-                  cmd.itype = AVR_st;
+                  insn.itype = AVR_st;
 SWAP_OPERANDS:
                   {
-                    op_t tmp = cmd.Op1;
-                    cmd.Op1 = cmd.Op2;
-                    cmd.Op2 = tmp;
+                    op_t tmp = insn.Op1;
+                    insn.Op1 = insn.Op2;
+                    insn.Op2 = tmp;
                   }
                   break;
                 case AVR_lpm:
@@ -514,11 +519,11 @@ SWAP_OPERANDS:
                   {
                     static const uchar itypes2[] =
                     {
-                      AVR_xch, AVR_las,  AVR_lac, AVR_lat,
+                      AVR_xch, AVR_las, AVR_lac, AVR_lat,
                     };
-                    cmd.itype = itypes2[code & 3];
-                    opphr(cmd.Op1, PH_Z);
-                    opregd(cmd.Op2, code);
+                    insn.itype = itypes2[code & 3];
+                    opphr(insn.Op1, PH_Z);
+                    opregd(insn.Op2, code);
                   }
                   break;
               }
@@ -535,8 +540,8 @@ SWAP_OPERANDS:
               switch ( code & 0x0F00 )
               {
                 case 0x0400:
-                  cmd.itype = AVR_des;
-                  opimm(cmd.Op1, (code >> 4) & 0xF);
+                  insn.itype = AVR_des;
+                  opimm(insn, insn.Op1, (code >> 4) & 0xF);
                   break;
                 default: return 0;
               }
@@ -548,10 +553,10 @@ SWAP_OPERANDS:
 // 1001 0101 0001 1001     eicall
               switch ( code & 0xFF0 )
               {
-                case 0x400: cmd.itype = AVR_ijmp;   break;
-                case 0x410: cmd.itype = AVR_eijmp;  break;
-                case 0x500: cmd.itype = AVR_icall;  break;
-                case 0x510: cmd.itype = AVR_eicall; break;
+                case 0x400: insn.itype = AVR_ijmp;   break;
+                case 0x410: insn.itype = AVR_eijmp;  break;
+                case 0x500: insn.itype = AVR_icall;  break;
+                case 0x510: insn.itype = AVR_eicall; break;
                 default: return 0;
               }
               break;
@@ -566,14 +571,22 @@ SWAP_OPERANDS:
 // 1001 0101 1111 1000     espm
               if ( (code & 0x0F00) == 0x0500 )
               {
-                if      ( (code & 0x0090) == 0x0000 ) cmd.itype = AVR_ret;
-                else if ( (code & 0x0090) == 0x0010 ) cmd.itype = AVR_reti;
-                else if ( (code & 0x00E0) == 0x0080 ) cmd.itype = AVR_sleep;
-                else if ( (code & 0x00E0) == 0x00A0 ) cmd.itype = AVR_wdr;
-                else if ( (code & 0x00F0) == 0x00C0 ) cmd.itype = AVR_lpm;
-                else if ( (code & 0x00F0) == 0x00D0 ) cmd.itype = AVR_elpm;
-                else if ( (code & 0x00F0) == 0x00E0 ) cmd.itype = AVR_spm;
-                else if ( (code & 0x00F0) == 0x00F0 ) cmd.itype = AVR_espm;
+                if ( (code & 0x0090) == 0x0000 )
+                  insn.itype = AVR_ret;
+                else if ( (code & 0x0090) == 0x0010 )
+                  insn.itype = AVR_reti;
+                else if ( (code & 0x00E0) == 0x0080 )
+                  insn.itype = AVR_sleep;
+                else if ( (code & 0x00E0) == 0x00A0 )
+                  insn.itype = AVR_wdr;
+                else if ( (code & 0x00F0) == 0x00C0 )
+                  insn.itype = AVR_lpm;
+                else if ( (code & 0x00F0) == 0x00D0 )
+                  insn.itype = AVR_elpm;
+                else if ( (code & 0x00F0) == 0x00E0 )
+                  insn.itype = AVR_spm;
+                else if ( (code & 0x00F0) == 0x00F0 )
+                  insn.itype = AVR_espm;
                 break;
               }
 // 1001 0100 0000 1000     sec                  0
@@ -602,7 +615,7 @@ SWAP_OPERANDS:
                   AVR_clc, AVR_clz, AVR_cln, AVR_clv,
                   AVR_cls, AVR_clh, AVR_clt, AVR_cli,
                 };
-                cmd.itype = itypes[(code >> 4) & 15];
+                insn.itype = itypes[(code >> 4) & 15];
               }
               break;  // case 8
 
@@ -629,8 +642,8 @@ SWAP_OPERANDS:
                   0,       AVR_asr, AVR_lsr,  AVR_ror,
                   0,       0,       AVR_dec,
                 };
-                cmd.itype = itypes[code & 15];
-                opregd(cmd.Op1, code);
+                insn.itype = itypes[code & 15];
+                opregd(insn.Op1, code);
               }
               break;  // case 8
 
@@ -640,11 +653,11 @@ SWAP_OPERANDS:
             case 15:
 // 1001 010k kkkk 110k(1*k)jmp     k
 // 1001 010k kkkk 111k(1*k)call    k
-              cmd.itype = (code & 2) ? AVR_call : AVR_jmp;
-              opnear(cmd.Op1, (ea_t((code & 1) | ((code >> 3) & 0x3E)) << 16)
-                                                           | ua_next_full_byte());
-              if ( helper.charval(cmd.ea+1, ELF_AVR_TAG) == ELF_AVR_ABS_OFF )
-                cmd.Op1.addr += ELF_AVR_ABSBASE;
+              insn.itype = (code & 2) ? AVR_call : AVR_jmp;
+              opnear(insn.Op1, (ea_t((code & 1) | ((code >> 3) & 0x3E)) << 16)
+                                                           | ua_next_full_byte(insn));
+              if ( helper.charval_ea(insn.ea+1, ELF_AVR_TAG) == ELF_AVR_ABS_OFF )
+                insn.Op1.addr += ELF_AVR_ABSBASE;
               break;
           }
           break;
@@ -653,9 +666,9 @@ SWAP_OPERANDS:
         case 7:
 // 1001 0110 kkdd kkkk     adiw    rd, k   (d=24,26,28,30)
 // 1001 0111 kkdd kkkk     sbiw    rd, k   (d=24,26,28,30)
-          cmd.itype = (code & 0x100) ? AVR_sbiw : AVR_adiw;
-          opreg(cmd.Op1, R24 + ((code >> 3) & 6));
-          opimm(cmd.Op2, ((code >> 2) & 0x30) | (code & 0x0F));
+          insn.itype = (code & 0x100) ? AVR_sbiw : AVR_adiw;
+          opreg(insn.Op1, R24 + ((code >> 3) & 6));
+          opimm(insn, insn.Op2, ((code >> 2) & 0x30) | (code & 0x0F));
           break;
 
         case 8:
@@ -668,9 +681,9 @@ SWAP_OPERANDS:
 // 1001 1011 pppp pbbb     sbis    p, b
           {
             static const uchar itypes[] = { AVR_cbi, AVR_sbic, AVR_sbi, AVR_sbis };
-            cmd.itype = itypes[(code >> 8) & 3];
-            opport(cmd.Op1, (code >> 3) & 0x1F);
-            opimm (cmd.Op2, code & 7);
+            insn.itype = itypes[(code >> 8) & 3];
+            opport(insn.Op1, (code >> 3) & 0x1F);
+            opimm(insn, insn.Op2, code & 7);
           }
           break;
 
@@ -679,8 +692,8 @@ SWAP_OPERANDS:
         case 14:
         case 15:
 // 1001 11rd dddd rrrr     mul     rd, rr
-          cmd.itype = AVR_mul;
-          tworegs(code);
+          insn.itype = AVR_mul;
+          tworegs(insn, code);
           break;
       }
       break;
@@ -690,15 +703,15 @@ SWAP_OPERANDS:
 // 1011 1ppr rrrr pppp     out     p, rr
       if ( code & 0x800 )
       {
-        cmd.itype = AVR_out;
-        opport(cmd.Op1, ((code & 0x0600) >> 5) | (code & 15));
-        opregd(cmd.Op2, code);
+        insn.itype = AVR_out;
+        opport(insn.Op1, ((code & 0x0600) >> 5) | (code & 15));
+        opregd(insn.Op2, code);
       }
       else
       {
-        cmd.itype = AVR_in;
-        opregd(cmd.Op1, code);
-        opport(cmd.Op2, ((code & 0x0600) >> 5) | (code & 15));
+        insn.itype = AVR_in;
+        opregd(insn.Op1, code);
+        opport(insn.Op2, ((code & 0x0600) >> 5) | (code & 15));
       }
       break;
 
@@ -707,11 +720,11 @@ SWAP_OPERANDS:
 // 1100 kkkk kkkk kkkk     rjmp    k
 // 1101 kkkk kkkk kkkk     rcall   k
       {
-        cmd.itype = (code & 0x1000) ? AVR_rcall : AVR_rjmp;
+        insn.itype = (code & 0x1000) ? AVR_rcall : AVR_rjmp;
         signed int delta = (code & 0xFFF);
         if ( delta & 0x800 )
           delta |= ~0xFFF;
-        opnear(cmd.Op1, code_address(delta));
+        opnear(insn.Op1, code_address(insn, delta));
       }
       break;
 
@@ -719,20 +732,20 @@ SWAP_OPERANDS:
 // 1110 1111 dddd 1111     ser     rd      (16<=d<=31)
 // 1110 kkkk dddd kkkk     ldi     rd, k
       {
-        cmd.itype = AVR_ldi;
-        opreg(cmd.Op1, ((code >> 4) & 15) + 16);
+        insn.itype = AVR_ldi;
+        opreg(insn.Op1, ((code >> 4) & 15) + 16);
         int x = ((code >> 4) & 0xF0) | (code & 0x0F);
-        if ( x == 0xFF && !get_fixup(cmd.ea, NULL) )
+        if ( x == 0xFF && !exists_fixup(insn.ea) )
         {
-          cmd.itype = AVR_ser;
+          insn.itype = AVR_ser;
           break;
         }
-        opimm(cmd.Op2, x);
+        opimm(insn, insn.Op2, x);
       }
       break;
 
     case 15:
-      switch ( (code >> 9) & 7)
+      switch ( (code >> 9) & 7 )
       {
         case 0:
         case 1:
@@ -764,37 +777,38 @@ SWAP_OPERANDS:
               AVR_brcc, AVR_brne, AVR_brpl, AVR_brvc,
               AVR_brge, AVR_brhc, AVR_brtc, AVR_brid,
             };
-            cmd.itype = itypes[((code >> 7) & 8) | (code & 7)];
+            insn.itype = itypes[((code >> 7) & 8) | (code & 7)];
             signed int delta = (code >> 3) & 0x7F;
             if ( delta & 0x40 )
               delta |= ~0x7F;
-            opnear(cmd.Op1, code_address(delta));
+            opnear(insn.Op1, code_address(insn, delta));
           }
           break;
         case 4:
 // 1111 100d dddd 0bbb     bld     rd, b
-          if ( code & 8 ) return 0;
-          cmd.itype = AVR_bld;
+          if ( code & 8 )
+            return 0;
+          insn.itype = AVR_bld;
           goto REGBIT;
         case 5:
 // 1111 101d dddd Xbbb     bst     rd, b
-          cmd.itype = AVR_bst;
+          insn.itype = AVR_bst;
           goto REGBIT;
         case 6:
 // 1111 110r rrrr xbbb     sbrc    rr, b
-          cmd.itype = AVR_sbrc;
+          insn.itype = AVR_sbrc;
           goto REGBIT;
         case 7:
-          cmd.itype = AVR_sbrs;
+          insn.itype = AVR_sbrs;
 // 1111 111r rrrr xbbb     sbrs    rr, b
 REGBIT:
-          opregd(cmd.Op1, code);
-          opimm(cmd.Op2, code & 7);
+          opregd(insn.Op1, code);
+          opimm(insn, insn.Op2, code & 7);
           break;
       }
       break;
   }
-  if ( cmd.itype == AVR_null )
+  if ( insn.itype == AVR_null )
     return 0;
-  return cmd.size;
+  return insn.size;
 }

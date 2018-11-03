@@ -10,8 +10,6 @@
 
 #include <ida.hpp>
 
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
-
 /*! \file lines.hpp
 
   \brief High level functions that deal with the generation
@@ -23,7 +21,7 @@
   user-defined lines.
 */
 
-struct area_t;
+struct range_t;
 
 //---------------------------------------------------------------------------
 //      C O L O R   D E F I N I T I O N S
@@ -133,9 +131,10 @@ const color_t
   COLOR_OPND4    = COLOR_ADDR+4, ///< Instruction operand 4
   COLOR_OPND5    = COLOR_ADDR+5, ///< Instruction operand 5
   COLOR_OPND6    = COLOR_ADDR+6, ///< Instruction operand 6
+  COLOR_OPND7    = COLOR_ADDR+7, ///< Instruction operand 7
+  COLOR_OPND8    = COLOR_ADDR+8, ///< Instruction operand 8
 
 
-  COLOR_UTF8     = COLOR_ADDR+10,///< Following text is UTF-8 encoded
   COLOR_RESERVED1= COLOR_ADDR+11;///< This tag is reserved for internal IDA use
 //@}
 
@@ -187,7 +186,9 @@ const color_t
 #define SCOLOR_ADDR      "\x28"  ///< Hidden address mark
 //@}
 
-/// This macro is used to build colored string constants
+/// This macro is used to build colored string constants (e.g. for format strings)
+/// \param str string literal to surround with color tags
+/// \param tag  one of SCOLOR_xxx constants
 #define COLSTR(str,tag) SCOLOR_ON tag str SCOLOR_OFF tag
 
 
@@ -199,51 +200,12 @@ const color_t
 /// are not useful in your case.
 //@{
 
-/// Append 'turn on color' sequence to a string.
-/// \param ptr  pointer to the output buffer
-/// \param end  pointer to the end of the buffer
-/// \param tag  one of \ref COLOR_
-/// \return ptr to end of string
-
-idaman char *ida_export tag_on(char *ptr, char *end, color_t tag);
-
-
-/// Append 'turn off color' sequence to a string.
-/// \param ptr  pointer to the output buffer
-/// \param end  pointer to the end of the buffer
-/// \param tag  one of \ref COLOR_
-/// \return ptr to end of string
-
-idaman char *ida_export tag_off(char *ptr, char *end, color_t tag);
-
-
-/// Append a colored character to a string.
-/// \param ptr  pointer to the output buffer
-/// \param end  pointer to the end of the buffer
-/// \param tag  one of \ref COLOR_
-/// \param chr  character to append
-/// \return ptr to end of string
-
-idaman char *ida_export tag_addchr(char *ptr, char *end, color_t tag, char chr);
-
-
-/// Append a colored substring to a string.
-/// \param ptr     pointer to the output buffer
-/// \param end     pointer to the end of the buffer
-/// \param tag     one of \ref COLOR_
-/// \param string  substring to append
-/// \return ptr to end of string
-
-idaman char *ida_export tag_addstr(char *ptr, char *end, color_t tag, const char *string);
-
-
-/// Append an address mark to a string.
-/// \param ptr  pointer to the output buffer
-/// \param end  pointer to the end of the buffer
+/// Insert an address mark into a string. 
+/// \param buf  pointer to the output buffer; the tag will be appended or inserted into it
 /// \param ea   address to include
-/// \return ptr to end of string
+/// \param ins  if true, the tag will be inserted at the beginning of the buffer
 
-idaman char *ida_export tag_addr(char *ptr, char *end, ea_t ea);
+idaman void ida_export tag_addr(qstring *buf, ea_t ea, bool ins=false);
 
 
 /// Move pointer to a 'line' to 'cnt' positions right.
@@ -273,22 +235,33 @@ idaman const char *ida_export tag_skipcodes(const char *line);
 idaman const char *ida_export tag_skipcode(const char *line);
 
 
-/// Calculate length of a colored string.
-/// \return -1 if error
+/// Calculate length of a colored string
+/// This function computes the length in unicode codepoints of a line
+/// \return the number of codepoints in the line, or -1 on error
 
 idaman ssize_t ida_export tag_strlen(const char *line);
 
 
 /// Remove color escape sequences from a string.
-/// Input and output buffer may be the same.
-/// \param instr    input colored string.
-/// \param buf      output buffer.
-///                 if == NULL, then return -1.
-/// \param bufsize  size of output buffer.
-///                 if == 0, then don't check size of output buffer.
+/// \param buf        output buffer with the string, can not be NULL.
+/// \param str        input string, can not be NULL.
+/// \param init_level used to verify that COLOR_ON and COLOR_OFF tags are balanced
 /// \return length of resulting string, -1 if error
 
-idaman ssize_t ida_export tag_remove(const char *instr, char *buf, size_t bufsize);
+idaman ssize_t ida_export tag_remove(qstring *buf, const char *str, int init_level=0);
+
+inline ssize_t idaapi tag_remove(qstring *buf, const qstring &str, int init_level=0)
+{
+  return tag_remove(buf, str.c_str(), init_level);
+}
+
+inline ssize_t idaapi tag_remove(qstring *buf, int init_level=0)
+{
+  if ( buf->empty() )
+    return 0;
+  return tag_remove(buf, buf->begin(), init_level);
+}
+
 //@} color_conv
 
 //@} color_def
@@ -348,7 +321,7 @@ extern bgcolors_t bgcolors;
 /// \param filename  name of source file.
 /// \return success
 
-idaman bool ida_export add_sourcefile(ea_t ea1,ea_t ea2,const char *filename);
+idaman bool ida_export add_sourcefile(ea_t ea1, ea_t ea2, const char *filename);
 
 
 /// Get name of source file occupying the given address.
@@ -358,7 +331,7 @@ idaman bool ida_export add_sourcefile(ea_t ea1,ea_t ea2,const char *filename);
 /// \return NULL if source file information is not found,
 ///          otherwise returns pointer to file name
 
-idaman const char *ida_export get_sourcefile(ea_t ea, area_t *bounds=NULL);
+idaman const char *ida_export get_sourcefile(ea_t ea, range_t *bounds=NULL);
 
 
 /// Delete information about the source file.
@@ -369,27 +342,8 @@ idaman bool ida_export del_sourcefile(ea_t ea);
 //@}
 
 //------------------------------------------------------------------------
-//      G E N E R A T I O N  O F  D I S A S S E M B L E D  T E X T
+//      G E N E R A T I O N   O F   D I S A S S E M B L E D   T E X T
 //------------------------------------------------------------------------
-
-/// \name Additional information
-/// The following variables control generation of additional information.
-/// Initially they are set to 0, you should set them to 1 when you want
-/// additional information generated upon calling MakeLine()
-//@{
-idaman char ida_export_data gl_comm;   ///< generate comment at the next call to MakeLine()
-idaman char ida_export_data gl_name;   ///< generate name    at the next call to MakeLine()
-idaman char ida_export_data gl_xref;   ///< generate xrefs   at the next call to MakeLine()
-//@}
-
-/// \name Prefix lengths
-/// The following variables contain lengths of line prefix and binary line prefix
-/// accordingly. You can use them IDP modules to calculate necessary indentions
-/// and the resulting string length if you need to.
-//@{
-idaman int ida_export_data gl_psize;   ///< Line prefix width (set by setup_makeline)
-idaman int ida_export_data gl_bpsize;  ///< Binary line prefix width (set by setup_makeline)
-//@}
 
 /// \name Generation of disassembled text
 //@{
@@ -400,222 +354,62 @@ idaman int ida_export_data gl_bpsize;  ///< Binary line prefix width (set by set
 /// \param width                     the width of the user-defined prefix
 /// \param get_user_defined_prefix   a callback to get the contents of the prefix.
 ///                                  Its arguments:
+///                                    - buf:      the output buffer
 ///                                    - ea:       linear address
-///                                    - indent:   indent of the line contents.
-///                                                -1 means the default instruction
-///                                                indent and is used for instruction
-///                                                itself. see explanations for printf_line().
+///                                    - indent:   see explanations for gen_printf().
 ///                                    - line:     the line to be generated.
 ///                                                the line usually contains color tags.
 ///                                                this argument can be examined to decide
 ///                                                whether to generated the prefix.
-///                                    - buf:      the output buffer
-///                                    - bufsize:  the size of the output buffer
 ///
 /// In order to remove the callback before unloading the plugin,
 /// specify the width or the callback == NULL.
 
-idaman void ida_export set_user_defined_prefix(size_t width,
-                        void (idaapi*get_user_defined_prefix)(ea_t ea,
-                                                        int lnnum,
-                                                        int indent,
-                                                        const char *line,
-                                                        char *buf,
-                                                        size_t bufsize));
-
-
-/// Generate ONE line of disassembled text. You may call this function from
-/// out.cpp as many times as you need to generate all lines for an item
-/// (instruction or data).
-/// \param contents  colored line to generate
-/// \param indent    see explanation for printf_line()
-/// \retval 1  you've made too many calls to this function, you should stop
-///            calling it and return to the caller.
-///            The current limit is 500 lines per item.
-/// \retval 0  ok
-
-idaman bool ida_export MakeLine(const char *contents,int indent=-1);
-
-
-/// See printf_line()
-
-idaman AS_PRINTF(2, 0) bool ida_export printf_line_v(
-        int indent,
-        const char *format,
-        va_list va);
-
-
-/// Generate ONE line of disassembled text. You may call this function from
-/// out.cpp as many times as you need to generate all lines for an item
-/// (instruction or data).
-/// \param format   printf style colored line to generate
-/// \param indent   indention of the line.
-///                 if indent == -1, the kernel will indent the line
-///                 at \inf{indent}. if indent < 0, -indent will be used for indention.
-///                 The first line printed with indent < 0 is considered as the
-///                 most important line at the current address. Usually it is
-///                 the line with the instruction itself. This line will be
-///                 displayed in the cross-reference lists and other places.
-///                 If you need to output an additional line before the main line
-///                 then pass \inf{indent} instead of -1. The kernel will know
-///                 that your line is not the most important one.
-/// \retval 1  you've made too many calls to this function, you should stop
-///            calling it and return to the caller.
-///            The current limit is 500 lines per item.
-/// \retval 0  ok
-
-AS_PRINTF(2, 3) inline bool printf_line(int indent, const char *format, ...)
-{
-  va_list va;
-  va_start(va,format);
-  bool code = printf_line_v(indent,format,va);
-  va_end(va);
-  return code;
-}
-
-
-/// Generate empty line. This function does nothing if generation of empty
-/// lines is disabled.
-/// \retval 1  the limit of lines per item is reached.
-///            The current limit is determined by MAX_ITEM_LINES in IDA.CFG
-/// \retval 0  ok
-
-idaman bool ida_export MakeNull(void);
-
-
-/// Generate thin border line. This function does nothing if generation
-/// of border lines is disabled.
-/// \retval 1  the limit of lines per item is reached.
-///            The current limit is determined by MAX_ITEM_LINES in IDA.CFG
-/// \retval 0  ok
-
-idaman bool ida_export MakeBorder(void);
-
-
-/// Generate solid border line.
-/// \retval 1  the limit of lines per item is reached.
-///            The current limit is determined by MAX_ITEM_LINES in IDA.CFG
-/// \retval 0  ok
-
-idaman bool ida_export MakeSolidBorder (void);
-
-
-/// See gen_cmt_line()
-
-idaman AS_PRINTF(2, 0) bool ida_export gen_colored_cmt_line_v(
-        color_t color,
-        const char *format,
-        va_list va);
-
-/// See gen_cmt_line()
-
-AS_PRINTF(1, 0) inline bool gen_cmt_line_v(const char *format, va_list va)
-{
-  return gen_colored_cmt_line_v(COLOR_AUTOCMT, format, va);
-}
-
-
-/// Generate one non-indented comment line, colored with ::COLOR_AUTOCMT.
-/// \param format  printf() style format line. The resulting comment line
-///                should not include comment character (;)
-/// \retval 1  the limit of lines per item is reached
-/// \retval 0  ok
-
-AS_PRINTF(1, 2) inline bool gen_cmt_line(const char *format, ...)
-{
-  va_list va;
-  va_start(va, format);
-  bool code = gen_cmt_line_v(format, va);
-  va_end(va);
-  return code;
-}
-
-
-/// Generate one non-indented comment line, colored with ::COLOR_COLLAPSED.
-/// \param format  printf() style format line. The resulting comment line
-///                should not include comment character (;)
-/// \retval 1  you've made too many calls to MakeLine(), you should stop
-///            calling MakeLine() and return to the caller.
-/// \retval 0  ok
-
-AS_PRINTF(1, 2) inline bool gen_collapsed_line(const char *format, ...)
-{
-  va_list va;
-  va_start(va,format);
-  bool answer = gen_colored_cmt_line_v(COLOR_COLLAPSED, format, va);
-  va_end(va);
-  return answer;
-}
-
-
-/// Generate big non-indented comment lines.
-/// \param cmt    comment text. may contain \\n characters to denote new lines.
-///               should not contain comment character (;)
-/// \param color  color of comment text (one of \ref COLOR_)
-/// \retval 1  you've made too many calls to MakeLine(), you should stop
-///            calling MakeLine() and return to the caller.
-///            The current limit is 500 lines per item.
-/// \retval 0  ok
-
-idaman bool ida_export generate_big_comment(const char *cmt, color_t color);
-
-
-/// Generate many non-indented lines.
-/// \param string  text. may contain \\n characters to denote new lines.
-/// \param color   color of the text (one of \ref COLOR_)
-/// \retval 1  you've made too many calls to MakeLine(), you should stop
-///            calling MakeLine() and return to the caller.
-///            The current limit is 500 lines per item.
-/// \retval 0  ok
-
-idaman bool ida_export generate_many_lines(const char *string, color_t color);
+idaman void ida_export set_user_defined_prefix(
+        size_t width,
+        void (idaapi *get_user_defined_prefix)(
+          qstring *buf,
+          ea_t ea,
+          int lnnum,
+          int indent,
+          const char *line));
 
 //@}
 
 //------------------------------------------------------------------------
-//      A N T E R I O R / P O S T E R I O R  L I N E S
+//      A N T E R I O R / P O S T E R I O R   L I N E S
 //------------------------------------------------------------------------
 
 /// \name Anterior/Posterior lines
 //@{
 
-/// Add anterior/posterior line(s).
-/// This is low level function. Use describe() or add_long_cmt() instead.
-/// \param ea      linear address
-/// \param prefix  prefix to use at the start of each line
-/// \param isprev  do we add anterior lines? (0-no, posterior)
-/// \param format  printf() style format string. may contain \\n to denote new lines.
-/// \param va      parameters for format
+/// See higher level functions below
 
-idaman AS_PRINTF(4, 0) void ida_export describex(
+idaman AS_PRINTF(3, 0) bool ida_export vadd_extra_line(
         ea_t ea,
-        const char *prefix,
-        bool isprev,
+        int vel_flags,     // see VEL_...
         const char *format,
         va_list va);
 
+#define VEL_POST 0x01      // append posterior line
+#define VEL_CMT  0x02      // append comment line
 
-/// Add anterior/posterior line(s).
+
+/// Add anterior/posterior non-comment line(s).
 /// \param ea      linear address
 /// \param isprev  do we add anterior lines? (0-no, posterior)
 /// \param format  printf() style format string. may contain \\n to denote new lines.
+/// \return true if success
 
-AS_PRINTF(3, 4) inline void describe(ea_t ea, bool isprev, const char *format, ...)
+AS_PRINTF(3, 4) inline bool add_extra_line(ea_t ea, bool isprev, const char *format, ...)
 {
   va_list va;
   va_start(va,format);
-  describex(ea,NULL,isprev,format,va);
+  int vel_flags = (isprev ? 0 : VEL_POST);
+  bool ok = vadd_extra_line(ea, vel_flags, format, va);
   va_end(va);
+  return ok;
 }
-
-
-/// See add_long_cmt()
-
-idaman AS_PRINTF(3, 0) void ida_export add_long_cmt_v(
-        ea_t ea,
-        bool isprev,
-        const char *format,
-        va_list va);
 
 
 /// Add anterior/posterior comment line(s).
@@ -624,27 +418,32 @@ idaman AS_PRINTF(3, 0) void ida_export add_long_cmt_v(
 /// \param format  printf() style format string. may contain \\n to denote
 ///                new lines. The resulting string should not contain comment
 ///                characters (;), the kernel will add them automatically.
+/// \return true if success
 
-AS_PRINTF(3, 4) inline void add_long_cmt(ea_t ea, bool isprev, const char *format, ...)
+AS_PRINTF(3, 4) inline bool add_extra_cmt(ea_t ea, bool isprev, const char *format, ...)
 {
   va_list va;
   va_start(va,format);
-  add_long_cmt_v(ea, isprev, format, va);
+  int vel_flags = (isprev ? 0 : VEL_POST) | VEL_CMT;
+  bool ok = vadd_extra_line(ea, vel_flags, format, va);
   va_end(va);
+  return ok;
 }
 
 
-/// Add anterior/posterior comment line(s) at the start of program.
+/// Add anterior comment line(s) at the start of program.
 /// \param format  printf() style format string. may contain \\n to denote
 ///                new lines. The resulting string should not contain comment
 ///                characters (;), the kernel will add them automatically.
+/// \return true if success
 
-AS_PRINTF(1, 2) inline void add_pgm_cmt(const char *format, ...)
+AS_PRINTF(1, 2) inline bool add_pgm_cmt(const char *format, ...)
 {
   va_list va;
   va_start(va,format);
-  add_long_cmt_v(inf.minEA, true, format, va);
+  bool ok = vadd_extra_line(inf.min_ea, VEL_CMT, format, va);
   va_end(va);
+  return ok;
 }
 
 //@}
@@ -652,55 +451,33 @@ AS_PRINTF(1, 2) inline void add_pgm_cmt(const char *format, ...)
 ///---------------------------------------------------------------------\cond
 ///         The following functions are used in kernel only:
 
-typedef ssize_t idaapi ml_getcmt_t(color_t *cmttype, char *buf, size_t bufsize);
-typedef ssize_t idaapi ml_getnam_t(color_t *namtype, char *buf, size_t bufsize);
-typedef bool    idaapi ml_genxrf_t(void); // returns: overflow
-typedef bool    idaapi ml_saver_t(const char *line); // returns: overflow
-
-idaman void ida_export setup_makeline(
-        ea_t ea,                                // address to generate lines for
-        const char *prefix,
-        ml_getcmt_t *getcmt,
-        ml_getnam_t *getnam,
-        ml_genxrf_t *genxrf,
-        ml_saver_t *saver,
-        int makeline_flags);
-#define MAKELINE_NONE           0x00
-#define MAKELINE_BINPREF        0x01    // allow display of binary prefix
-#define MAKELINE_VOID           0x02    // allow display of '<suspicious>' marks
-#define MAKELINE_STACK          0x04    // allow display of sp trace prefix
-
-idaman bool ida_export save_line_in_array(const char *line);      // a standard line saver()
-idaman void ida_export init_lines_array(char *lnar[],int maxsize);// initialization function for it
-
-// if keep_makeline_inited, then simply generate the pending comment lines
-// returns number of generated lines
-idaman int ida_export finish_makeline(bool keep_makeline_inited=false);
-
+// Generate disassembly (many lines) and put them into a buffer
+// Returns number of generated lines
 idaman int ida_export generate_disassembly(
-                                // Generate disassembly (many lines)
-                                // and put them into a buffer
-                                // Returns number of generated lines
-        ea_t ea,                // address to generate disassembly for
-        char *lines[],          // buffer to hold pointer to generated lines
-        int bufsize,            // size of buffer
+        qstrvec_t *out,         // buffer to hold generated lines
         int *lnnum,             // number of "the most interesting" line
-                                // may be NULL
+        ea_t ea,                // address to generate disassembly for
+        int maxsize,            // maximum number of lines
         bool as_stack);         // Display undefined items as 2/4/8 bytes
 
+// Generate one line of disassembly
+// This function discards all "non-interesting" lines
+// It is designed to generate one-line descriptions
+// of addresses for lists, etc.
 idaman bool ida_export generate_disasm_line(
-                                // Generate one line of disassembly
-                                // This function discards all "non-interesting" lines
-                                // It is designed to generate one-line descriptions
-                                // of addresses for lists, etc.
+        qstring *buf,           // output buffer
         ea_t ea,                // address to generate disassembly for
-        char *buf,              // pointer to the output buffer
-        size_t bufsize,         // size of the output buffer
         int flags=0);
-#define GENDSM_FORCE_CODE 1     // generate a disassembly line as if
-                                // there is an instruction at 'ea'
-#define GENDSM_MULTI_LINE 2     // if the instruction consists of several lines,
-                                // produce all of them (useful for parallel instructions)
+#define GENDSM_FORCE_CODE  (1 << 0)     // generate a disassembly line as if
+                                        // there is an instruction at 'ea'
+#define GENDSM_MULTI_LINE  (1 << 1)     // if the instruction consists of several lines,
+                                        // produce all of them (useful for parallel instructions)
+#define GENDSM_REMOVE_TAGS (1 << 2)     // remove tags from output buffer
+
+/// Get length of the line prefix that was used for the last generated line
+
+idaman int ida_export get_last_pfxlen(void);
+
 
 // Get pointer to the sequence of characters denoting 'close comment'
 // empty string means no comment (the current assembler has no open-comment close-comment pairs)
@@ -708,17 +485,6 @@ idaman bool ida_export generate_disasm_line(
 
 idaman const char *ida_export closing_comment(void);
 
-
-// Generate the closing comment if any
-//      ptr - pointer to the output buffer
-//      end - the end of the output buffer
-// returns: pointer past the comment
-
-inline char *close_comment(char *ptr, char *end)
-{
-  APPEND(ptr, end, closing_comment());
-  return ptr;
-}
 
 // Every anterior/posterior line has its number.
 // Anterior  lines have numbers from E_PREV
@@ -730,30 +496,14 @@ const int E_NEXT = 2000;
 idaman int ida_export get_first_free_extra_cmtidx(ea_t ea, int start);
 idaman void ida_export update_extra_cmt(ea_t ea, int what, const char *str);
 idaman void ida_export del_extra_cmt(ea_t ea, int what);
-idaman ssize_t ida_export get_extra_cmt(ea_t ea, int what, char *buf, size_t bufsize);
+idaman ssize_t ida_export get_extra_cmt(qstring *buf, ea_t ea, int what);
 idaman void ida_export delete_extra_cmts(ea_t ea, int cmtidx);
 
-inline void save_sourcefiles(void) {}
-inline void init_lines(void) {}
-inline void save_lines(void) {}
 idaman ea_t ida_export align_down_to_stack(ea_t newea);
 idaman ea_t ida_export align_up_to_stack(ea_t ea1, ea_t ea2=BADADDR);
-
-// A makeline producer is a function which completes the generation
-// of a line. Its usual duties are to attach indented comments, xrefs,
-// void marks and similar things to the line and call the saver function.
-// Actually the producer gets what you send to MakeLine as argumens.
-// There are several line producers in the kernel. They are invisible outside.
-
-typedef bool idaapi makeline_producer_t(const char *line, int indent);
 
 ///-------------------------------------------------------------------\endcond
 
 
 
-#ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED int ida_export ExtraFree(ea_t ea, int start);
-#endif
-
-#pragma pack(pop)
 #endif

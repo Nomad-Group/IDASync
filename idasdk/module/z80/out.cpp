@@ -9,6 +9,19 @@
 #include "i5.hpp"
 
 //----------------------------------------------------------------------
+class out_z80_t : public outctx_t
+{
+  out_z80_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void OutReg(int rgnum);
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_z80_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_z80_t)
+
+//----------------------------------------------------------------------
 static const char *const condNames[] =
 {
   "nz",
@@ -25,205 +38,198 @@ static const char *const condNames[] =
 inline bool isFunny(void) { return (ash.uflag & UAS_FUNNY) != 0; }
 
 //----------------------------------------------------------------------
-static void OutReg(int rgnum) {
-  if ( (ash.uflag & UAS_NPAIR) != 0 ) {
-    switch ( rgnum ) {
-      case R_bc: out_register(ph.regNames[R_b]); return;
-      case R_de: out_register(ph.regNames[R_d]); return;
-      case R_hl: out_register(ph.regNames[R_h]); return;
+void out_z80_t::OutReg(int rgnum)
+{
+  if ( (ash.uflag & UAS_NPAIR) != 0 )
+  {
+    switch ( rgnum )
+    {
+      case R_bc: out_register(ph.reg_names[R_b]); return;
+      case R_de: out_register(ph.reg_names[R_d]); return;
+      case R_hl: out_register(ph.reg_names[R_h]); return;
     }
   }
-  if ( rgnum == R_af && isZ80() && !isFunny() ) out_register("af");
-  else out_register(ph.regNames[rgnum]);
+  if ( rgnum == R_af && isZ80() && !isFunny() )
+    out_register("af");
+  else
+    out_register(ph.reg_names[rgnum]);
 }
 
 //----------------------------------------------------------------------
-bool idaapi i5_outop(op_t &x)
+bool out_z80_t::out_operand(const op_t &x)
 {
-  if ( !x.shown() ) return 0;
+  if ( !x.shown() )
+    return false;
 
   switch ( x.type )
   {
-  case o_cond:
+    case o_cond:
+      if ( x.Cond == oc_not )
+        return false;
+      {
+        char buf[3];
+        qstrncpy(buf, condNames[ x.Cond ], sizeof(buf));
+        if ( ash.uflag & UAS_CNDUP )
+          qstrupr(buf);
+        out_keyword(buf);
+      }
+      break;
 
-        if ( x.Cond == oc_not ) return 0;
+    case o_reg:
+      OutReg(x.reg);
+      break;
+
+    case o_displ:         // Z80 only!!! + GB, one instruction
+      if ( ash.uflag & UAS_MKOFF )
+        out_value(x, OOF_ADDR|OOFW_16);
+      if ( !isGB() )
+        out_symbol('(');
+      OutReg(x.phrase);
+      if ( !(ash.uflag & UAS_MKOFF) )
+      {
+        qstring buf;
+        if ( is_off(F, x.n)
+          && get_offset_expression(&buf, insn.ea,x.n,insn.ea+x.offb,x.addr) )
         {
-          char buf[3];
-          qstrncpy(buf, condNames[ x.Cond ], sizeof(buf));
-          if ( ash.uflag & UAS_CNDUP )
-            qstrupr(buf);
-          out_keyword(buf);
+          out_symbol('+');
+          out_line(buf.c_str());
         }
-        break;
+        else
+        {
+          int offbit = (insn.auxpref & aux_off16) ? OOFW_16 : OOFW_8;
+          int outf = OOF_ADDR|offbit|OOFS_NEEDSIGN;
+          if ( ash.uflag & UAS_TOFF )
+            outf |= OOF_SIGNED;
+          out_value(x, outf);
+        }
+      }
+      if ( !isGB() )
+        out_symbol(')');
+      break;
 
-  case o_reg:
-
-        OutReg(x.reg);
-        break;
-
-  case o_displ:         // Z80 only!!! + GB, one instruction
-        if ( ash.uflag & UAS_MKOFF ) OutValue(x,OOF_ADDR|OOFW_16);
-        if ( !isGB() ) out_symbol('(');
+    case o_phrase:
+      if ( isZ80() && !isFunny() )
+      {
+        out_symbol((ash.uflag & UAS_GBASM) ? '[' : '(');
         OutReg(x.phrase);
-        if ( !(ash.uflag & UAS_MKOFF) ) {
-          {
-            char buf[MAXSTR];
-            if ( isOff(uFlag,x.n)
-              && get_offset_expression(cmd.ea,x.n,cmd.ea+x.offb,x.addr,buf,sizeof(buf)) )
-            {
-              out_symbol('+');
-              OutLine(buf);
-            }
-            else
-            {
-              int offbit = (cmd.auxpref & aux_off16) ? OOFW_16 : OOFW_8;
-              if ( ash.uflag & UAS_TOFF )
-                OutValue(x,OOF_ADDR|offbit|OOFS_NEEDSIGN|OOF_SIGNED);
-              else
-                OutValue(x,OOF_ADDR|offbit|OOFS_NEEDSIGN);
-            }
-          }
-        }
-        if ( !isGB() ) out_symbol(')');
-        break;
-
-  case o_phrase:
-
-        if ( isZ80() && !isFunny() )
-        {
-          out_symbol((ash.uflag & UAS_GBASM) ? '[' : '(');
+        out_symbol((ash.uflag & UAS_GBASM) ? ']' : ')');
+      }
+      else
+      {
+        if ( x.phrase == R_hl )
+          out_register("m");
+        else
           OutReg(x.phrase);
+      }
+      break;
+
+    case o_void:
+      return 0;
+
+    case o_imm:
+      {
+        const char *name = NULL;
+        bool needbrace = false;
+        if ( isZ80() )
+        {
+          switch ( insn.itype )
+          {
+            case I5_rst:
+              if ( isFunny() )
+              {
+                int radix = get_radix(F, x.n);
+                out_long(x.value/8, radix);
+                return 1;
+              }
+            case Z80_im:
+            case Z80_bit:
+            case Z80_res:
+            case Z80_set:
+//              name = z80_find_ioport_bit(x.value);
+              break;
+            case HD_in0:
+            case HD_out0:
+              name = z80_find_ioport(x.value);
+              // fallthrough
+            case I5_in:
+            case I5_out:
+            case Z80_outaw:
+            case Z80_inaw:
+              if ( !isFunny() )
+              {
+                out_symbol('(');
+                needbrace = true;
+              }
+              break;
+            default:
+              if ( ash.uflag & UAS_MKIMM )
+                out_symbol('#');
+              break;
+          }
+        }
+        if ( name != NULL )
+          out_line(name, COLOR_IMPNAME);
+        else
+          out_value(x, 0);
+        if ( needbrace )
+          out_symbol(')');
+      }
+      break;
+
+    case o_mem:
+      if ( isZ80() && !isFunny() )
+        out_symbol((ash.uflag & UAS_GBASM) ? '[' : '(');
+      // no break
+    case o_near:
+      {
+        ea_t v = map_ea(insn, x, x.type == o_near);
+        if ( v == insn.ea && ash.a_curip != NULL )
+        {
+          out_line(ash.a_curip);
+        }
+        else if ( !out_name_expr(x, v, x.addr) )
+        {
+          out_tagon(COLOR_ERROR);
+          out_btoa(x.addr,16);
+          out_tagoff(COLOR_ERROR);
+          remember_problem(PR_NONAME,insn.ea);
+        }
+        if ( x.type == o_mem && isZ80() && !isFunny() )
           out_symbol((ash.uflag & UAS_GBASM) ? ']' : ')');
-        } else {
-          if ( x.phrase == R_hl ) out_register("m");
-          else OutReg(x.phrase);
-        }
-        break;
+      }
+      break;
 
-  case o_void:
-
-        return 0;
-
-  case o_imm:
-        {
-          const char *name = NULL;
-          bool needbrace = false;
-          if ( isZ80() )
-          {
-            switch ( cmd.itype )
-            {
-              case I5_rst:
-                if ( isFunny() )
-                {
-                  out_long(x.value/8,(char)getRadix(uFlag,x.n));
-                  return 1;
-                }
-              case Z80_im:
-              case Z80_bit:
-              case Z80_res:
-              case Z80_set:
-//                name = z80_find_ioport_bit(x.value);
-                break;
-              case HD_in0:
-              case HD_out0:
-                name = z80_find_ioport(x.value);
-              case I5_in:
-              case I5_out:
-              case Z80_outaw:
-              case Z80_inaw:
-                if ( !isFunny() )
-                {
-                  out_symbol('(');
-                  needbrace = true;
-                }
-                break;
-              default:
-                if ( ash.uflag & UAS_MKIMM ) out_symbol('#');
-                break;
-            }
-          }
-          if ( name != NULL )
-            out_line(name, COLOR_IMPNAME);
-          else
-            OutValue(x, 0);
-          if ( needbrace ) out_symbol(')');
-        }
-        break;
-
-  case o_mem:
-        if ( isZ80() && ! isFunny() )
-          out_symbol((ash.uflag & UAS_GBASM) ? '[' : '(');
-  case o_near:
-        {
-          ea_t base;
-          if ( x.type == o_mem )
-            base = dataSeg_op(x.n);
-          else
-            base = codeSeg(x.addr,x.n);
-          ea_t v = toEA(base,x.addr);
-//          const char *ptr;
-          if ( v == cmd.ea && ash.a_curip != NULL )
-          {
-            OutLine(ash.a_curip);
-          }
-          else if ( !out_name_expr(x, v, x.addr) )
-          {
-            out_tagon(COLOR_ERROR);
-            OutLong(x.addr,16);
-            out_tagoff(COLOR_ERROR);
-            QueueSet(Q_noName,cmd.ea);
-          }
-          if ( x.type == o_mem && isZ80() && !isFunny() )
-            out_symbol((ash.uflag & UAS_GBASM) ? ']' : ')');
-        }
-        break;
-
-  default:
-        warning("bad optype %x", x.type);
-        break;
+    default:
+      warning("bad optype %x", x.type);
+      break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-static bool isIxyByte(op_t &x)
+static bool isIxyByte(const op_t &x)
 {
-  return x.type == o_reg &&
-        (x.reg == R_xl ||
-         x.reg == R_xh ||
-         x.reg == R_yl ||
-         x.reg == R_yh);
+  return x.type == o_reg
+      && (x.reg == R_xl
+       || x.reg == R_xh
+       || x.reg == R_yl
+       || x.reg == R_yh);
 }
 
 //----------------------------------------------------------------------
-inline bool isIxyOperand(op_t &x)
+inline bool isIxyOperand(const op_t &x)
 {
   return isIxyByte(x) || x.type == o_displ;
 }
 
 //----------------------------------------------------------------------
-void idaapi i5_out(void)
+void out_z80_t::out_insn(void)
 {
-  char buf[MAXSTR];
-
-  init_output_buffer(buf, sizeof(buf));
-
-  if ( ((ash.uflag & UAS_UNDOC) != 0
-     && isIxyOperand(cmd.Op1)
-     && isIxyOperand(cmd.Op2))
-    || ((ash.uflag & UAS_UNDOC) == 0
-     && (isIxyByte(cmd.Op1)
-      || isIxyByte(cmd.Op2)
-      || ((cmd.itype == I5_adc || cmd.itype == Z80_sbc)
-       && (cmd.Op1.reg == R_ix || cmd.Op1.reg == R_iy)))) )
-  {
-    OutBadInstruction();
-  }
-  OutMnem();
+  out_mnemonic();
 
   bool comma = out_one_operand(0);
 
-  if ( comma && cmd.Op2.shown() && cmd.Op2.type != o_void )
+  if ( comma && insn.Op2.shown() && insn.Op2.type != o_void )
   {
     out_symbol(',');
     out_symbol(' ');
@@ -231,89 +237,87 @@ void idaapi i5_out(void)
 
   out_one_operand(1);
 
-  if ( isVoid(cmd.ea,uFlag,0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea,uFlag,1) ) OutImmChar(cmd.Op2);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi i5_header(void)
+void idaapi i5_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX, device[0] ? device : NULL, deviceparams);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX, device.c_str(), deviceparams.c_str());
 }
 
 //--------------------------------------------------------------------------
-void idaapi i5_segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, segm) could be made const
+void idaapi i5_segstart(outctx_t &ctx, segment_t *segm)
 {
-  segment_t *segm = getseg(ea);
-
-  char sname[MAXNAMELEN];
-  get_true_segm_name(segm, sname, sizeof(sname));
+  qstring sname;
+  get_segm_name(&sname, segm);
 
   if ( ash.uflag & UAS_GBASM )
   {
-    printf_line(inf.indent, COLSTR("SECTION \"%s\", %s",SCOLOR_ASMDIR),
-                        sname,
-                        segtype(ea) == SEG_CODE ? "CODE" : "DATA");
+    validate_name(&sname, VNT_IDENT);
+    ctx.gen_printf(inf.indent, COLSTR("SECTION \"%s\", %s",SCOLOR_ASMDIR),
+                   sname.c_str(),
+                   segtype(ctx.insn_ea) == SEG_CODE ? "CODE" : "DATA");
   }
   else if ( ash.uflag & UAS_ZMASM )
   {
     const char *dir = "segment";
-    if ( strcmp(sname, ".text") == 0
-      || strcmp(sname, ".data") == 0
-      || strcmp(sname, ".bss") == 0  )
+    if ( sname == ".text"
+      || sname == ".data"
+      || sname == ".bss" )
     {
-      dir = sname;
-      sname[0] = '\0';
+      sname.clear();
+      dir = sname.c_str();
     }
-    printf_line(inf.indent, COLSTR("%s %s",SCOLOR_ASMDIR), dir, sname);
+    else
+    {
+      validate_name(&sname, VNT_IDENT);
+    }
+    ctx.gen_printf(inf.indent, COLSTR("%s %s",SCOLOR_ASMDIR), dir, sname.c_str());
   }
   else if ( ash.uflag & UAS_CSEGS )
   {
-    gen_cmt_line("segment '%s'", sname);
-    printf_line(inf.indent,COLSTR("%cseg",SCOLOR_ASMDIR),segm->align == saAbs ? 'a' : 'c');
+    validate_name(&sname, VNT_IDENT);
+    ctx.gen_cmt_line("segment '%s'", sname.c_str());
+    ctx.gen_printf(inf.indent,COLSTR("%cseg",SCOLOR_ASMDIR),segm->align == saAbs ? 'a' : 'c');
   }
-  if ( inf.s_org )
+  if ( (inf.outflags & OFLG_GEN_ORG) != 0 )
   {
-    ea_t org = ea - get_segm_base(segm);
+    ea_t org = ctx.insn_ea - get_segm_base(segm);
     if ( org != 0 )
     {
       char buf[MAX_NUMBUF];
       btoa(buf, sizeof(buf), org);
-      printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+      ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi i5_footer(void)
+void idaapi i5_footer(outctx_t & ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   if ( ash.end != NULL )
   {
-    MakeNull();
-    char *ptr = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
-
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
       if ( ash.uflag & UAS_NOENS )
       {
-        MakeLine(buf, inf.indent);
-        ptr = buf;
-        APPEND(ptr, end, ash.cmnt);
+        ctx.out_char(' ');
+        ctx.out_line(ash.cmnt);
       }
-      APPCHAR(ptr, end, ' ');
-      APPEND(ptr, end, name.begin());
+      ctx.out_char(' ');
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }

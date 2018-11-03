@@ -3,9 +3,12 @@
 #define __M65816_HPP__
 
 #include "../../module/idaidp.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include "ins.hpp"
 
+
+// Direct Memory Reference with full-length address
+#define o_mem_far       o_idpspec0
 
 // If there is an address in 'Op[N].full_target_ea',
 // it means the target address of a branch/jump
@@ -30,7 +33,8 @@
 #define UAS_NOENS       0x0200          // don't specify start addr in the .end directive
 
 
-enum M65816_registers {
+enum M65816_registers
+{
   rA,   // Accumulator
   rX,   // X index
   rY,   // Y index
@@ -63,7 +67,10 @@ enum M65816_registers {
   // we run in 6502 emulation or 65816 native mode.
   rFm,
   rFx,
-  rFe
+  rFe,
+
+  // program bank register
+  rPB
 };
 
 
@@ -171,10 +178,10 @@ struct opcode_info_t
   uint16         flags;        // OR'd opcode_flags_t
 };
 
-inline bool is_acc_16_bits (ea_t ea) { return (get_segreg(ea, rFm) == 0); }
-inline bool is_xy_16_bits  (ea_t ea) { return (get_segreg(ea, rFx) == 0); }
-inline bool is_acc_16_bits (void)    { return is_acc_16_bits(cmd.ea); }
-inline bool is_xy_16_bits  (void)    { return is_xy_16_bits(cmd.ea); }
+inline bool is_acc_16_bits(ea_t ea) { return (get_sreg(ea, rFm) == 0); }
+inline bool is_xy_16_bits(ea_t ea)  { return (get_sreg(ea, rFx) == 0); }
+inline bool is_acc_16_bits(const insn_t &insn) { return is_acc_16_bits(insn.ea); }
+inline bool is_xy_16_bits(const insn_t &insn)  { return is_xy_16_bits(insn.ea); }
 
 const struct opcode_info_t &get_opcode_info(uint8 opcode);
 
@@ -201,16 +208,14 @@ const struct opcode_info_t &get_opcode_info(uint8 opcode);
      || ((op) == M65816_ply))
 
 //------------------------------------------------------------------------
-void    idaapi header(void);
-void    idaapi footer(void);
+void    idaapi m65816_header(outctx_t &ctx);
+void    idaapi m65816_footer(outctx_t &ctx);
 
-void    idaapi segstart(ea_t ea);
+void    idaapi m65816_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi ana(void);
-int     idaapi emu(void);
-void    idaapi out(void);
-bool    idaapi outop(op_t &op);
-void    idaapi assumes(ea_t ea);
+int     idaapi ana(insn_t *_insn);
+int     idaapi emu(const insn_t &insn);
+void    idaapi m65816_assumes(outctx_t &ctx);
 
 
 // Translate a (potentially mirrorred) address
@@ -219,6 +224,6 @@ void    idaapi assumes(ea_t ea);
 // This function is provided from ../../ldr/snes/addr.cpp
 ea_t xlat(ea_t address);
 
-ea_t calc_addr(const op_t &x, ea_t *orig_ea=NULL);
+ea_t calc_addr(const op_t &x, ea_t *orig_ea, const insn_t &insn);
 
 #endif

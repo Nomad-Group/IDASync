@@ -7,6 +7,26 @@
 #include <diskio.hpp>
 
 //----------------------------------------------------------------------
+class out_xa_t : public outctx_t
+{
+  out_xa_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void OutReg(int rgnum)
+  {
+    out_register(ph.reg_names[rgnum]);
+  }
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+
+  void do_out_equ(const char *name, uchar off);
+  int out_equ(void);
+};
+CASSERT(sizeof(out_xa_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_xa_t)
+
+//----------------------------------------------------------------------
 AS_PRINTF(1, 0) static void vlog(const char *format, va_list va)
 {
   static FILE *fp = NULL;
@@ -35,19 +55,13 @@ static const char *const phrases[] =
 };
 
 //----------------------------------------------------------------------
-inline void OutReg(int rgnum)
-{
-  out_register(ph.regNames[rgnum]);
-}
-
-//----------------------------------------------------------------------
 // generate the text representation of an operand
 
-bool idaapi outop(op_t &x)
+bool out_xa_t::out_operand(const op_t &x)
 {
   uval_t v = 0;
   int dir, bit;
-  char buf[MAXSTR];
+  qstring qbuf;
   switch ( x.type )
   {
     case o_reg:
@@ -90,14 +104,16 @@ bool idaapi outop(op_t &x)
         case fRlistL:
         case fRlistH:
                 v = x.indreg;
-                dir = (x.dtyp == dt_byte) ? rR0L : rR0;
-                if ( x.phrase == fRlistH ) dir += 8;
-                for (bit = 0; bit < 8; bit++,dir++,v >>= 1)
+                dir = (x.dtype == dt_byte) ? rR0L : rR0;
+                if ( x.phrase == fRlistH )
+                  dir += 8;
+                for ( bit = 0; bit < 8; bit++,dir++,v >>= 1 )
                 {
                   if ( v&1 )
                   {
                     OutReg(dir);
-                    if ( v & 0xfe) out_symbol(',' );
+                    if ( v & 0xfe )
+                      out_symbol(',');
                   }
                 }
                 break;
@@ -105,16 +121,18 @@ bool idaapi outop(op_t &x)
       break;
 
     case o_displ:
-      if ( cmd.itype != XA_lea) out_symbol('[' );
+      if ( insn.itype != XA_lea )
+        out_symbol('[');
       OutReg(x.indreg);
       if ( x.indreg == rR7 || x.phrase != fRi )
-        OutValue(x, OOF_ADDR | OOFS_NEEDSIGN | OOF_SIGNED | OOFW_16);
-      if ( cmd.itype != XA_lea) out_symbol(']' );
+        out_value(x, OOF_ADDR | OOFS_NEEDSIGN | OOF_SIGNED | OOFW_16);
+      if ( insn.itype != XA_lea )
+        out_symbol(']');
       break;
 
     case o_imm:
       out_symbol('#');
-      OutValue(x, OOFS_IFSIGN | /* OOF_SIGNED | */ OOFW_IMM);
+      out_value(x, OOFS_IFSIGN | /* OOF_SIGNED | */ OOFW_IMM);
       break;
 
     case o_mem:
@@ -126,13 +144,13 @@ bool idaapi outop(op_t &x)
           v = map_addr(x.addr);
           break;
         case o_near:
-          v = toEA(cmd.cs, x.addr);
+          v = to_ea(insn.cs, x.addr);
           break;
         case o_far:
           v = x.addr + (x.specval<<16);
           break;
       }
-      if ( get_name_expr(cmd.ea+x.offb, x.n, v, x.addr & 0xFFFF, buf, sizeof(buf)) <= 0 )
+      if ( get_name_expr(&qbuf, insn.ea+x.offb, x.n, v, x.addr & 0xFFFF) <= 0 )
       {
         if ( x.type == o_far )
         {
@@ -141,8 +159,8 @@ bool idaapi outop(op_t &x)
           out_symbol(':');
         }
         // now print the offset
-        OutValue(x, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN | OOFW_32);
-        QueueSet(Q_noName, cmd.ea);
+        out_value(x, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN | OOFW_32);
+        remember_problem(PR_NONAME, insn.ea);
         break;
       }
 
@@ -151,11 +169,11 @@ bool idaapi outop(op_t &x)
 
       if ( x.type == o_mem && x.addr >= 0x400 )
       {
-        tag_remove(buf, buf, sizeof(buf));
-        out_register(buf);
+        tag_remove(&qbuf);
+        out_register(qbuf.begin());
         break;
       }
-      OutLine(buf);
+      out_line(qbuf.begin());
       break;
 
     case o_void:
@@ -163,18 +181,21 @@ bool idaapi outop(op_t &x)
 
     case o_bitnot:
       out_symbol('/');
+      // fallthrough
     case o_bit:
       dir = int(x.addr >> 3);
       bit = x.addr & 7;
       if ( dir & 0x40 ) // SFR
       {
         dir += 0x3c0;
-      } else if ( (dir & 0x20) == 0 ) { // Register file
+      }
+      else if ( (dir & 0x20) == 0 ) // Register file
+      {
         dir = int(x.addr >> 4);
         bit = x.addr & 15;
         OutReg(rR0+dir);
         out_symbol(ash.uflag & UAS_NOBIT ? '_' : '.');
-        if ( bit>9 )
+        if ( bit > 9 )
         {
           out_symbol('1');
           bit -= 10;
@@ -193,8 +214,8 @@ bool idaapi outop(op_t &x)
       }
       {
         v = map_addr(dir);
-        bool ok = get_name_expr(cmd.ea+x.offb, x.n, v, dir, buf, sizeof(buf)) > 0;
-        if ( ok && strchr(buf, '+') == NULL )
+        bool ok = get_name_expr(&qbuf, insn.ea+x.offb, x.n, v, dir) > 0;
+        if ( ok && strchr(qbuf.begin(), '+') == NULL )
         {
 
       // we want to output the bit names always in COLOR_REG,
@@ -202,12 +223,12 @@ bool idaapi outop(op_t &x)
 
           if ( dir < 0x80 )
           {
-            OutLine(buf);
+            out_line(qbuf.begin());
           }
           else
           {
-            tag_remove(buf, buf, sizeof(buf));
-            out_register(buf);
+            tag_remove(&qbuf);
+            out_register(qbuf.begin());
           }
         }
         else
@@ -220,118 +241,117 @@ bool idaapi outop(op_t &x)
       break;
 
      default:
-       warning("out: %a: bad optype %d", cmd.ea, x.type);
+       warning("out: %a: bad optype %d", insn.ea, x.type);
        break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-// generate a text representation of an instruction
-// the information about the instruction is in the 'cmd' structure
-
-void idaapi out(void)
+void out_xa_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-
-  init_output_buffer(buf, sizeof(buf)); // setup the output pointer
-  if ( cmd.Op1.type != o_void ) {
-    switch ( cmd.Op1.dtyp )
+  if ( insn.Op1.type != o_void )
+  {
+    switch ( insn.Op1.dtype )
     {
       case dt_byte:
-        OutMnem(8,".b");
+        out_mnem(8,".b");
         break;
       case dt_word:
-        OutMnem(8,".w");
+        out_mnem(8,".w");
         break;
       case dt_dword:
-        OutMnem(8,".d");
+        out_mnem(8,".d");
         break;
       default:
-        OutMnem();
+        out_mnem();
     }
-  } else
-    OutMnem();                          // output instruction mnemonics
+  }
+  else
+  {
+    out_mnem();                      // output instruction mnemonics
+  }
+}
 
-  out_one_operand(0);                   // output the first operand
+//----------------------------------------------------------------------
+// generate a text representation of an instruction
+// the information about the instruction is in the insn structure
 
-  if ( cmd.Op2.type != o_void)
+void out_xa_t::out_insn(void)
+{
+  out_mnemonic();
+  out_one_operand(0);             // output the first operand
+
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
-    out_one_operand(1);                 // output the second operand
+    out_char(' ');
+    out_one_operand(1);           // output the second operand
   }
 
-  if ( cmd.Op3.type != o_void)
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
-    out_one_operand(2);                 // output the third operand
+    out_char(' ');
+    out_one_operand(2);           // output the third operand
   }
 
 
   // output a character representation of the immediate values
   // embedded in the instruction as comments
-
-  if ( isVoid(cmd.ea,uFlag,0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea,uFlag,1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea,uFlag,2) ) OutImmChar(cmd.Op3);
-
-  term_output_buffer();                 // terminate the output string
-  gl_comm = 1;                          // ask to attach a possible user-
-                                        // defined comment to it
-  MakeLine(buf);                        // pass the generated line to the
-                                        // kernel
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
 // generate start of the disassembly
 
-void idaapi header(void)
+void idaapi xa_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX);
 }
 
 //--------------------------------------------------------------------------
 // generate start of a segment
 
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi xa_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  segment_t *Sarea = getseg(ea);
-
-  char sname[MAXNAMELEN];
-  get_segm_name(Sarea, sname, sizeof(sname));
+  qstring sname;
+  get_visible_segm_name(&sname, Sarea);
 
   if ( ash.uflag & UAS_SECT )
   {
     if ( Sarea->type == SEG_IMEM )
-      MakeLine(".RSECT", inf.indent);
+      ctx.flush_buf(".RSECT", inf.indent);
     else
-      printf_line(0, COLSTR("%s: .section", SCOLOR_ASMDIR), sname);
+      ctx.gen_printf(0, COLSTR("%s: .section", SCOLOR_ASMDIR), sname.c_str());
   }
   else
   {
     if ( ash.uflag & UAS_NOSEG )
-      printf_line(inf.indent, COLSTR("%s.segment %s", SCOLOR_AUTOCMT),
-                 ash.cmnt, sname);
+      ctx.gen_printf(inf.indent, COLSTR("%s.segment %s", SCOLOR_AUTOCMT),
+                 ash.cmnt, sname.c_str());
     else
-      printf_line(inf.indent, COLSTR("segment %s",SCOLOR_ASMDIR), sname);
-    if ( ash.uflag & UAS_SELSG) MakeLine(sname, inf.indent );
+      ctx.gen_printf(inf.indent, COLSTR("segment %s",SCOLOR_ASMDIR), sname.c_str());
+    if ( ash.uflag & UAS_SELSG )
+       ctx.flush_buf(sname.c_str(), inf.indent);
     if ( ash.uflag & UAS_CDSEG )
-      MakeLine(Sarea->type == SEG_IMEM
-                 ? COLSTR("DSEG", SCOLOR_ASMDIR)
-                 : COLSTR("CSEG", SCOLOR_ASMDIR),
-               inf.indent);
+       ctx.flush_buf(Sarea->type == SEG_IMEM
+                   ? COLSTR("DSEG", SCOLOR_ASMDIR)
+                   : COLSTR("CSEG", SCOLOR_ASMDIR),
+                     inf.indent);
             // XSEG - eXternal memory
   }
-  if ( inf.s_org )
+  if ( (inf.outflags & OFLG_GEN_ORG) != 0 )
   {
-    adiff_t org = ea - get_segm_base(Sarea);
-    if( org != 0 )
+    adiff_t org = ctx.insn_ea - get_segm_base(Sarea);
+    if ( org != 0 )
     {
       char buf[MAX_NUMBUF];
       btoa(buf, sizeof(buf), org);
-      gen_cmt_line("%s %s", ash.origin, buf);
+      ctx.gen_cmt_line("%s %s", ash.origin, buf);
     }
   }
 }
@@ -339,64 +359,62 @@ void idaapi segstart(ea_t ea)
 //--------------------------------------------------------------------------
 // generate end of the disassembly
 
-void idaapi footer(void)
+void idaapi xa_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
-  if ( ash.end != NULL)
+  if ( ash.end != NULL )
   {
-    MakeNull();
-    register char *p = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
-      APPCHAR(p, end, ' ');
+      ctx.out_char(' ');
       if ( ash.uflag & UAS_NOENS )
-        APPEND(p, end, ash.cmnt);
-      APPEND(p, end, name.begin());
+        ctx.out_line(ash.cmnt);
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }
 
 //--------------------------------------------------------------------------
 // output one "equ" directive
 
-static void do_out_equ(const char *name,const char *equ,uchar off)
+void out_xa_t::do_out_equ(const char *name, uchar off)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
-  register char *p = buf;
-  gl_name = 0;
-  if ( ash.uflag & UAS_PSAM ) {
-    p = tag_addstr(p, end, COLOR_KEYWORD, equ);
-    APPCHAR(p, end, ' ');
-    APPEND(p, end, name);
-    p = tag_addchr(p, end, COLOR_SYMBOL, ',');
-  } else {
-    APPEND(p, end, name);
-    if ( ash.uflag & UAS_EQCLN )
-      p = tag_addchr(p, end, COLOR_SYMBOL, ':');
-    APPCHAR(p, end, ' ');
-    p = tag_addstr(p, end, COLOR_KEYWORD, equ);
-    APPCHAR(p, end, ' ');
+  if ( (ash.uflag & UAS_PSAM) != 0 )
+  {
+    out_line(ash.a_equ, COLOR_KEYWORD);
+    out_char(' ');
+    out_line(name);
+    out_symbol(',');
   }
-  p = tag_on(p, end, COLOR_NUMBER);
-  p += btoa(p, end-p, off);
-  tag_off(p, end, COLOR_NUMBER);
-  MakeLine(buf, 0);
+  else
+  {
+    out_line(name);
+    if ( ash.uflag & UAS_EQCLN )
+      out_symbol(':');
+    out_char(' ');
+    out_line(ash.a_equ, COLOR_KEYWORD);
+    out_char(' ');
+  }
+  out_long(off, 16);
+  clr_gen_label();
+  out_tagoff(COLOR_SYMBOL);
+  flush_outbuf(0);
 }
 
 //--------------------------------------------------------------------------
 // output "equ" directive(s) if necessary
-static int out_equ(ea_t ea)
+int out_xa_t::out_equ(void)
 {
+  ea_t ea = insn.ea;
   segment_t *s = getseg(ea);
-  if ( s != NULL && s->type == SEG_IMEM && ash.a_equ != NULL)
+  if ( s != NULL && s->type == SEG_IMEM && ash.a_equ != NULL )
   {
     qstring name;
     if ( get_visible_name(&name, ea) > 0
@@ -404,38 +422,37 @@ static int out_equ(ea_t ea)
     {
       get_colored_name(&name, ea);
       uchar off = uchar(ea - get_segm_base(s));
-      do_out_equ(name.begin(), ash.a_equ, off);
+      do_out_equ(name.begin(), off);
       if ( (ash.uflag & UAS_AUBIT) == 0 && (off & 0xF8) == off )
       {
-        char buf[MAXSTR];
-        char *const end = buf + sizeof(buf);
-        char *ptr = tag_on(buf, end, COLOR_SYMBOL);
-        APPCHAR(ptr, end, ash.uflag & UAS_NOBIT ? '_' : '.');
-        APPZERO(ptr, end);
-        tag_off(ptr, end, COLOR_SYMBOL);
-        for( ; ptr[-1] < '8'; off++, (ptr[-1])++ )
+        qstring tmp;
+        out_tagon(COLOR_SYMBOL);
+        out_char(ash.uflag & UAS_NOBIT ? '_' : '.');
+        tmp.swap(outbuf);
+        for ( int i=0; i < 8; i++,off++ )
         {
-          qstring full = name + buf;
-          do_out_equ(full.begin(), ash.a_equ, off);
+          qstring full = tmp;
+          full.append('0' + i);
+          do_out_equ(full.begin(), off);
         }
-        MakeNull();
+        gen_empty_line();
       }
     }
     else
     {
-      gl_name = 0;
-      MakeLine("");
+      clr_gen_label();
+      flush_buf("");
     }
     return 1;
   }
-  if ( ash.uflag & UAS_NODS )
+  if ( (ash.uflag & UAS_NODS) != 0 )
   {
-    if ( !isLoaded(ea) && s->type == SEG_CODE )
+    if ( !is_loaded(ea) && s->type == SEG_CODE )
     {
       adiff_t org = ea - get_segm_base(s) + get_item_size(ea);
       char buf[MAX_NUMBUF];
       btoa(buf, sizeof(buf), org);
-      printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+      gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
       return 1;
     }
   }
@@ -445,26 +462,25 @@ static int out_equ(ea_t ea)
 //--------------------------------------------------------------------------
 // generate a data representation
 // usually all the job is handled by the kernel's standard procedure,
-// intel_data()
-// But 8051 has its own quirks (namely, "equ" directives) and intel_data()
+// out_data()
+// But 8051 has its own quirks (namely, "equ" directives) and out_data()
 // can't handle them. So we output "equ" ourselves and pass everything
-// else to intel_data()
+// else to out_data()
 // Again, let's repeat: usually the data items are output by the kernel
-// function intel_data(). You have to override it only if the processor
+// function out_data(). You have to override it only if the processor
 // has special features and the data itesm should be displayed in a
 // special way.
 
-void idaapi xa_data(ea_t ea)
+void idaapi xa_data(outctx_t &ctx, bool analyze_only)
 {
-  gl_name = 1;
-
   // the kernel's standard routine which outputs the data knows nothing
   // about "equ" directives. So we do the following:
   //    - try to output an "equ" directive
   //    - if we succeed, then ok
-  //    - otherwise let the standard data output routine, intel_data()
+  //    - otherwise let the standard data output routine, out_data()
   //        do all the job
 
-  if ( !out_equ(ea) )
-    intel_data(ea);
+  out_xa_t *p = (out_xa_t *)&ctx;
+  if ( !p->out_equ() )
+    ctx.out_data(analyze_only);
 }

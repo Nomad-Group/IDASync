@@ -3,8 +3,8 @@ PROC=navcolor
 include ../plugin.mak
 
 # MAKEDEP dependency list ------------------
-$(F)navcolor$(O): $(I)area.hpp $(I)bitrange.hpp $(I)bytes.hpp $(I)fpro.h     \
+$(F)navcolor$(O): $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp $(I)fpro.h  \
 	          $(I)funcs.hpp $(I)ida.hpp $(I)idp.hpp $(I)kernwin.hpp     \
 	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
-	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)ua.hpp      \
-	          $(I)xref.hpp navcolor.cpp
+	          $(I)netnode.hpp $(I)pro.h $(I)range.hpp $(I)segment.hpp   \
+	          $(I)ua.hpp $(I)xref.hpp navcolor.cpp

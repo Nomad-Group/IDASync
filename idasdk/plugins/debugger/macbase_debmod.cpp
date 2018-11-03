@@ -53,7 +53,8 @@ static void build_process_ext_name(ext_process_info_t *pinfo)
 // Returns the file name assciated with pid
 bool idaapi macbase_debmod_t::get_exec_fname(
         int _pid,
-        char *buf, size_t bufsize)
+        char *buf,
+        size_t bufsize)
 {
   int mib[3];
   mib[0] = CTL_KERN;
@@ -142,11 +143,11 @@ int idaapi macbase_debmod_t::get_process_list(procvec_t *list)
     if ( _pid == mypid )
       continue;
     mach_port_t port;
-    kern_return_t result = task_for_pid(mach_task_self(), _pid,  &port);
+    kern_return_t result = task_for_pid(mach_task_self(), _pid, &port);
     if ( result == KERN_SUCCESS )
     {
       ext_process_info_t &pi = list->push_back();
-      qstrncpy(pi.name, ep.p_comm, sizeof(pi.name));
+      pi.name = ep.p_comm;
       pi.pid = _pid;
       pi.addrsize = get_process_bitness(_pid);
       build_process_ext_name(&pi);

@@ -14,6 +14,7 @@
 
 #include "elfbase.h"
 
+
 bool unpatched;
 
 #ifndef _LOADER_HPP
@@ -25,7 +26,7 @@ bool unpatched;
 #ifdef BUILD_LOADER
 static void ask_for_exit(const char *str)
 {
-  if ( askyn_c(ASKBTN_YES, "HIDECANCEL\n%s. Continue?", str) <= ASKBTN_NO )
+  if ( ask_yn(ASKBTN_YES, "HIDECANCEL\n%s. Continue?", str) <= ASKBTN_NO )
     loader_failure();
 }
 
@@ -47,9 +48,10 @@ static void _errstruct(int line)
   static bool asked = false;
   if ( !asked )
   {
-    if ( askyn_c(ASKBTN_YES,
-                 "HIDECANCEL\n"
-                 "Bad file structure or read error (line %d). Continue?", line) <= ASKBTN_NO )
+    if ( ask_yn(ASKBTN_YES,
+                "HIDECANCEL\n"
+                "Bad file structure or read error (line %d). Continue?",
+                line) <= ASKBTN_NO )
     {
       loader_failure();
     }
@@ -135,4 +137,5 @@ int elf_machine_2_proc_module_id(reader_t &reader)
   }
   return id;
 }
+
 

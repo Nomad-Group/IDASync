@@ -3,7 +3,9 @@
 */
 
 #ifdef __NT__
-#include <windows.h>
+#  include <windows.h>
+#else
+#  include <sys/utsname.h>
 #endif
 
 #include "debmod.h"
@@ -48,8 +50,24 @@ static const char *get_event_name(event_id_t id)
   }
 }
 
+#if defined(__MAC__) || defined(__LINUX__) || defined(__ANDROID__) || defined(__ANDROID_X86__)
 //---------------------------------------------------------------------------
-#if defined(__MAC__) || defined(__LINUX__) || defined(__ANDROID__)
+inline bool is_esxi()
+{
+#ifdef __LINUX__
+  static int ok = -1;
+  if ( ok == -1 )
+  {
+    utsname utsinfo;
+    ok = uname(&utsinfo) == 0 && strieq(utsinfo.sysname, "VMkernel");
+  }
+  return ok > 0;
+#else
+  return false;
+#endif
+}
+
+//---------------------------------------------------------------------------
 int idaapi maclnx_launch_process(
         debmod_t *debmod,
         const char *path,
@@ -106,8 +124,15 @@ int idaapi maclnx_launch_process(
   lpi.args = args;
   lpi.startdir = startdir[0] != '\0' ? startdir : NULL;
   lpi.flags = LP_NO_ASLR | LP_DETACH_TTY;
+
+  // Vmware ESXi sends SIGHUP when we try to detact. It could be because of a
+  // racing condition in but I do not have ESXi handy to check.
+  if ( is_esxi() )
+    lpi.flags &= ~LP_DETACH_TTY;
   if ( (flags & DBG_NO_TRACE) == 0 )
     lpi.flags |= LP_TRACE;
+  if ( (flags & DBG_HIDE_WINDOW) != 0 )
+    lpi.flags |= LP_HIDE_WINDOW;
 
   if ( (flags & DBG_PROC_64BIT) != 0 )
   {
@@ -152,15 +177,15 @@ debmod_t::debmod_t(void):
 }
 
 //--------------------------------------------------------------------------
-bool debmod_t::same_as_oldmemcfg(const meminfo_vec_t &areas) const
+bool debmod_t::same_as_oldmemcfg(const meminfo_vec_t &ranges) const
 {
-  return old_areas == areas;
+  return old_ranges == ranges;
 }
 
 //--------------------------------------------------------------------------
-void debmod_t::save_oldmemcfg(const meminfo_vec_t &areas)
+void debmod_t::save_oldmemcfg(const meminfo_vec_t &ranges)
 {
-  old_areas = areas;
+  old_ranges = ranges;
 }
 
 //--------------------------------------------------------------------------
@@ -252,7 +277,7 @@ void debmod_t::debdeb(const char *format, ...)
 void debmod_t::cleanup(void)
 {
   input_file_path.qclear();
-  old_areas.qclear();
+  old_ranges.qclear();
   exceptions.qclear();
   clear_debug_names();
   handling_lowcnds.clear();
@@ -357,7 +382,7 @@ void debmod_t::clear_debug_names()
 
   typedef qvector<char *> charptr_vec_t;
   charptr_vec_t::iterator it_end = dn_names.names.end();
-  for ( charptr_vec_t::iterator it=dn_names.names.begin();it!=it_end;++it )
+  for ( charptr_vec_t::iterator it=dn_names.names.begin(); it != it_end; ++it )
     qfree(*it);
 
   dn_names.names.clear();
@@ -376,6 +401,23 @@ bool debmod_t::continue_after_last_event(bool handled)
 {
   last_event.handled = handled;
   return dbg_continue_after_event(&last_event) == 1;
+}
+
+//--------------------------------------------------------------------------
+// if there is an active control bpt at the exception address,
+// unconditionally suspend the execution at it. continuing won't do any good
+// even if the user told us to continue after all exceptions.
+bool debmod_t::should_suspend_at_exception(
+        const debug_event_t *event,
+        const exception_info_t *ei)
+{
+  if ( ei->break_on() )
+    return true;
+  appcalls_t::const_iterator p = appcalls.find(event->tid);
+  if ( p == appcalls.end() )
+    return false;
+  const call_contexts_t &ctxvec = p->second;
+  return !ctxvec.empty() && ctxvec.back().ctrl_ea == event->ea;
 }
 
 //--------------------------------------------------------------------------
@@ -399,8 +441,8 @@ bool debmod_t::should_stop_appcall(thid_t, const debug_event_t *event, ea_t ea)
 }
 
 //--------------------------------------------------------------------------
-// return top of the stack area usable by appcall. usually it is equal to the
-// current esp, unless the area below the stack pointer is not usable
+// return top of the stack range usable by appcall. usually it is equal to the
+// current esp, unless the range below the stack pointer is not usable
 // (for example, AMD64 ABI required the "red zone" not to be modified)
 ea_t debmod_t::calc_appcall_stack(const regvals_t &regvals)
 {
@@ -648,7 +690,7 @@ ea_t idaapi debmod_t::dbg_appcall(
       timeout_ms = GET_APPCALL_TIMEOUT(options);
       if ( timeout_ms > 0 )
       {
-        get_nsec_stamp(&endtime);
+        endtime = get_nsec_stamp();
         endtime += timeout_ms * uint64(1000 * 1000);
       }
       recalc_timeout = 1; // recalc timeout after the first pass
@@ -667,8 +709,7 @@ ea_t idaapi debmod_t::dbg_appcall(
           if ( timeout_ms > 0 )
           {
             // calculate the remaining timeout
-            uint64 now;
-            get_nsec_stamp(&now);
+            uint64 now = get_nsec_stamp();
             timeout_ms = int64(endtime - now) / int64(1000 * 1000);
           }
           if ( timeout_ms <= 0 )
@@ -693,8 +734,9 @@ ea_t idaapi debmod_t::dbg_appcall(
       // - Access violation type: because we try to execute non-executable code
       // - Or a BPT exception if the stack page happens to be executable
       // - Process exit
-      if ( event->eid == PROCESS_EXIT )
-      { // process is gone
+      if ( event->eid == PROCESS_EXIT                       // process is gone
+        || event->eid == THREAD_EXIT && event->tid == tid ) // our thread is gone
+      {
         send_debug_event_to_ida(event, RQ_SILENT);
         args_sp = BADADDR;
         brk = true;
@@ -790,7 +832,10 @@ ea_t idaapi debmod_t::dbg_appcall(
 // is called. It will be called by the kernel for each successful call_app_func()
 int idaapi debmod_t::dbg_cleanup_appcall(thid_t tid)
 {
-  call_contexts_t &calls = appcalls[tid];
+  appcalls_t::iterator p = appcalls.find(tid);
+  if ( p == appcalls.end() )
+    return 0;
+  call_contexts_t &calls = p->second;
   if ( calls.empty() )
     return 0;
 
@@ -810,6 +855,8 @@ int idaapi debmod_t::dbg_cleanup_appcall(thid_t tid)
   }
 
   calls.pop();
+  if ( calls.empty() )
+    appcalls.erase(p);
   return events.empty() ? 1 : 2;
 }
 
@@ -852,7 +899,8 @@ int debmod_t::dbg_perform_single_step(debug_event_t *dev, const insn_t &)
 // nb: recursive calls to this function are not handled in any special way!
 bool debmod_t::handle_lowcnd(lowcnd_t *lc, debug_event_t *event, int elc_flags)
 {
-  if ( (debugger_flags & DBG_FLAG_CAN_CONT_BPT) == 0 )
+  if ( (debugger_flags & DBG_FLAG_CAN_CONT_BPT) == 0
+    || lc->type != BPT_SOFT && find_page_bpt(lc->ea, lc->size) != page_bpts.end() )
   {
     // difficult case: we have to reset pc, remove the bpt, single step, and resume the app
     QASSERT(616, !handling_lowcnds.has(lc->ea));
@@ -911,6 +959,7 @@ bool debmod_t::handle_lowcnd(lowcnd_t *lc, debug_event_t *event, int elc_flags)
 lowcnd_t *debmod_t::get_failed_lowcnd(thid_t tid, ea_t ea)
 {
 #ifndef ENABLE_LOWCNDS
+  //lint -esym(1762, debmod_t::get_failed_lowcnd) could be made const
   qnotused(tid);
   qnotused(ea);
 #else
@@ -928,14 +977,12 @@ lowcnd_t *debmod_t::get_failed_lowcnd(thid_t tid, ea_t ea)
       idc_thread = tid;  // is required by          interpreter
       if ( !lc.compiled )
       {
-        qstring func;
-        func.sprnt("static %s() { return %s; }", name, lc.cndbody.begin());
-        ok = CompileLineEx(func.begin(), NULL, 0, NULL, true);
+        ok = compile_idc_snippet(name, lc.cndbody.begin(), NULL, NULL, true);
         if ( ok )
           lc.compiled = true;
       }
       if ( ok )
-        ok = Run(name, 0, NULL, &rv, NULL, 0);
+        ok = call_idc_func(&rv, name, NULL, 0);
     }
     lock_end();
     if ( !ok )
@@ -944,7 +991,7 @@ lowcnd_t *debmod_t::get_failed_lowcnd(thid_t tid, ea_t ea)
       return NULL;
     }
 
-    VarInt64(&rv);
+    idcv_int64(&rv);
     if ( rv.i64 == 0 )
       return &lc; // condition is not satisfied, resume
   }
@@ -961,12 +1008,12 @@ bool debmod_t::evaluate_and_handle_lowcnd(debug_event_t *event, int elc_flags)
     ea_t ea = event->bpt.kea != BADADDR ? event->bpt.kea
             : event->bpt.hea != BADADDR ? event->bpt.hea
             : event->ea;
-    QASSERT(617, !handling_lowcnds.has(ea));
     lowcnd_t *lc = get_failed_lowcnd(event->tid, ea);
     if ( lc != NULL )
     { // condition is not satisfied, just make a single step and resume
       debdeb("%a: bptcnd yielded false\n", ea);
       event->handled = true;
+      QASSERT(617, !handling_lowcnds.has(ea));
       resume = handle_lowcnd(lc, event, elc_flags);
     }
   }
@@ -981,8 +1028,8 @@ int idaapi debmod_t::dbg_eval_lowcnd(thid_t tid, ea_t ea)
 
 //--------------------------------------------------------------------------
 int idaapi debmod_t::dbg_update_lowcnds(
-      const lowcnd_t *lowcnds,
-      int nlowcnds)
+        const lowcnd_t *lowcnds,
+        int nlowcnds)
 {
 #ifndef ENABLE_LOWCNDS
   qnotused(lowcnds);
@@ -1026,9 +1073,9 @@ int debmod_t::read_bpt_orgbytes(ea_t *p_ea, int *p_len, uchar *buf, int bufsize)
 
 //--------------------------------------------------------------------------
 int idaapi debmod_t::dbg_update_bpts(
-      update_bpt_info_t *ubpts,
-      int nadd,
-      int ndel)
+        update_bpt_info_t *ubpts,
+        int nadd,
+        int ndel)
 {
   // Write breakpoints to the process
   int cnt = 0;
@@ -1074,7 +1121,7 @@ int idaapi debmod_t::dbg_update_bpts(
     }
 
     b->code = code;
-    if ( code == BPT_OK )
+    if ( code == BPT_OK || code == BPT_PAGE_OK )
     {
       cnt++;
       if ( nread > 0 )
@@ -1083,6 +1130,7 @@ int idaapi debmod_t::dbg_update_bpts(
   }
 
   // Delete breakpoints from the process.
+  deleted_bpts.clear();
   end += ndel;
   for ( ; b != end; b++ )
   {
@@ -1091,9 +1139,15 @@ int idaapi debmod_t::dbg_update_bpts(
     int code = dbg_del_bpt(b->type, b->ea, b->orgbytes.begin(), len);
     debdeb("dbg_del_bpt(type=%d, ea=%a) => %d\n", b->type, b->ea, code);
     if ( code > 0 )
+    {
       cnt++;
+      if ( b->type == BPT_SOFT )
+        deleted_bpts.insert(b->ea);
+    }
     else
+    {
       b->code = BPT_WRITE_ERROR;
+    }
   }
 
   return cnt;
@@ -1114,7 +1168,7 @@ page_bpts_t::iterator debmod_t::find_page_bpt(
     --p;
   }
   ea_t page_ea = p->first;
-  int page_len = p->second.real_len;
+  int page_len = p->second.aligned_len;
   if ( !interval::overlap(ea, size, page_ea, page_len) )
     p = page_bpts.end();
   return p;
@@ -1197,22 +1251,21 @@ int idaapi debmod_t::dbg_rexec(const char *cmdline)
 
 //--------------------------------------------------------------------------
 // 1-ok, 0-failed
-// input is valid only if n==0
-int idaapi debmod_t::dbg_process_get_info(int n, const char *input, process_info_t *pinfo)
+int idaapi debmod_t::dbg_get_processes(procinfo_vec_t *procs)
 {
-  if ( n == 0 )
+  proclist.qclear();
+  get_process_list(&proclist);
+
+  size_t size = proclist.size();
+  procs->qclear();
+  procs->reserve(size);
+  for ( size_t i = 0; i < size; i++ )
   {
-    input_file_path = input;
-    proclist.clear();
-    get_process_list(&proclist);
+    process_info_t &procinf = procs->push_back();
+    proclist[i].copy_to(&procinf);
   }
 
-  if ( n < 0 || n >= proclist.size() )
-    return false;
-
-  if ( pinfo != NULL )
-    proclist[n].copy_to(pinfo);
-  return true;
+  return 1;
 }
 
 //--------------------------------------------------------------------------
@@ -1220,4 +1273,28 @@ int idaapi debmod_t::get_process_list(procvec_t *list)
 {
   list->clear();
   return -1;
+}
+
+//--------------------------------------------------------------------------
+uint64 debmod_t::probe_file_size(int fn, uint64 step)
+{
+  uint64 low = 0;
+  uint64 high = step;
+  char dummy;
+  while ( dbg_read_file(fn, high-1, &dummy, 1) == 1 )
+  {
+    low = high;
+    high += step;
+    if ( step < 0x7FFFFFFFFFFFFFFFULL )
+      step *= 2;
+  }
+  while ( low+1 < high )
+  {
+    int middle = (high+low)/2;
+    if ( dbg_read_file(fn, middle-1, &dummy, 1) == 1 )
+      low = middle;
+    else
+      high = middle;
+  }
+  return low;
 }

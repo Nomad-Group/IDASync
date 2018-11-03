@@ -1,4 +1,3 @@
-
 // x86-specific code (compiled only on IDA side, never on the server side)
 
 #include <dbg.hpp>
@@ -252,7 +251,7 @@ CASSERT(qnumber(x86_registers) == X86_NREGS);
 #if 0
 static void DEBUG_REGVALS(regval_t *values)
 {
-  for (int i = 0; i < qnumber(registers); i++)
+  for ( int i = 0; i < qnumber(registers); i++ )
   {
     msg("%s = ", registers[i].name);
     switch ( registers[i].dtyp )
@@ -262,9 +261,10 @@ static void DEBUG_REGVALS(regval_t *values)
       case dt_word:  msg("%04X\n", values[i].ival); break;
       case dt_tbyte:
       {
-        for (int j = 0; j < sizeof(regval_t); j++)
+        for ( int j = 0; j < sizeof(regval_t); j++ )
         {
-          if ( j == 10) msg(" - " ); // higher bytes are not used by x86 floats
+          if ( j == 10 )
+            msg(" - "); // higher bytes are not used by x86 floats
           msg("%02X ", ((unsigned char*)&values[i])[j]);
         }
           // msg("%02X ", (unsigned short)values[i].fval[j]);
@@ -279,19 +279,22 @@ static void DEBUG_REGVALS(regval_t *values)
 
 //--------------------------------------------------------------------------
 int idaapi x86_read_registers(
-      thid_t thread_id,
-      int clsmask,
-      regval_t *values)
+        thid_t thread_id,
+        int clsmask,
+        regval_t *values)
 {
   int code = s_read_registers(thread_id, clsmask, values);
   if ( code > 0 )
   {
     // FPU related registers
-    if ( ph.realcvt != NULL && (clsmask & X86_RC_FPU) != 0 )
+    if ( (clsmask & X86_RC_FPU) != 0 )
     {
       for ( int i=R_ST0; i < R_ST0+FPU_REGS_COUNT; i++ )
       {
-        if ( ph.realcvt(values[i].fval, values[i].fval, 004) != 0 ) // load long double
+        int rc = ph.realcvt(values[i].fval, values[i].fval, 004); // // load long double
+        if ( rc == 0 )
+          break;                 // realcvt not implemented
+        else if ( rc < 0 )       // error
           memset(values[i].fval, 0, sizeof(values[i].fval));
       }
     }
@@ -301,19 +304,19 @@ int idaapi x86_read_registers(
 
 //--------------------------------------------------------------------------
 int idaapi x86_write_register(
-      thid_t thread_id,
-      int reg_idx,
-      const regval_t *value)
+        thid_t thread_id,
+        int reg_idx,
+        const regval_t *value)
 {
   regval_t rv = *value;
   // FPU related registers
-  if ( ph.realcvt != NULL
-    && reg_idx >= R_ST0
+  if ( reg_idx >= R_ST0
     && reg_idx < R_ST0+FPU_REGS_COUNT )
   {
     uchar fn[10];
-    ph.realcvt(fn, rv.fval, 014); // store long double
-    memcpy(rv.fval, fn, 10);
+    int code = ph.realcvt(fn, rv.fval, 014); // store long double    //-V536 octal
+    if ( code == 1 )
+      memcpy(rv.fval, fn, 10);    //-V512 rv.fval underflow
   }
   return s_write_register(thread_id, reg_idx, &rv);
 }

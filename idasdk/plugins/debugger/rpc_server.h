@@ -1,9 +1,7 @@
 #ifndef __RPC_SERVER__
 #define __RPC_SERVER__
 
-#define VERBOSE_ENABLED
 #include "rpc_engine.h"
-
 
 // Note: the rpc_server_t implementation will consider all
 // IOCTL IDs >= 0x01000000 as being server IOCTLs, and those will
@@ -46,7 +44,7 @@ protected:
   int find_free_channel() const;
 
   int rpc_update_lowcnds(const uchar *ptr, const uchar *end);
-  int rpc_update_bpts(const uchar *ptr, const uchar *end, bytevec_t &cmd);
+  int rpc_update_bpts(const uchar *ptr, const uchar *end, bytevec_t &rcmd);
   int rpc_attach_process(const uchar *ptr, const uchar *end);
   bool check_broken_connection(pid_t pid);
   virtual int handle_server_ioctl(int fn, const void *buf, size_t size, void **out, ssize_t *outsz);
@@ -61,6 +59,7 @@ public:
   virtual int poll_events(int timeout_ms);
   virtual bool get_broken_connection(void);
   virtual void set_broken_connection(void);
+  int kill_process(void); // returns 0-ok, >0-failed, after that many seconds
 };
 
 //--------------------------------------------------------------------------

@@ -7,7 +7,7 @@
 
 #include "cr16.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //--------------------------------------------------------------------------
 // list of registers
@@ -27,82 +27,104 @@ static const char *const RegNames[] =
 };
 
 static netnode helper;
-char device[MAXSTR] = "";
-static size_t numports = 0;
-static ioport_t *ports = NULL;
+qstring device;
+static ioports_t ports;
 
 #include "../iocommon.cpp"
 
 //----------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-
-  va_start(va, msgid);
-
-  // A well behaving processor module should call invoke_callbacks()
-  // in his notify() function. If this function returns 0, then
-  // the processor module should process the notification itself
-  // Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-
-  if (code)
-    return code;
-
-  switch (msgid)
+  switch ( msgid )
   {
-    case processor_t::init:
-      inf.mf = 0;
-      inf.s_genflags |= INFFL_LZERO;
+    case processor_t::ev_init:
+      inf.set_be(false);
+      inf.set_gen_lzero(true);
       helper.create("$ CR16");
-    default:
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
+    case processor_t::ev_term:
+      ports.clear();
       break;
 
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       // ask for a  processor from the config file
       // use it to handle ports and registers
       {
         char cfgfile[QMAXFILE];
 
         get_cfg_filename(cfgfile, sizeof(cfgfile));
-        if ( choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0) )
-          set_device_name(device, IORESP_ALL);
+        if ( choose_ioport_device(&device, cfgfile, parse_area_line0) )
+          set_device_name(device.c_str(), IORESP_ALL);
       }
       break;
 
-    case processor_t::newprc:
-      {
-        char buf[MAXSTR];
-        if (helper.supval(-1, buf, sizeof(buf)) > 0)
-          set_device_name(buf, IORESP_PORT);
-      }
+    case processor_t::ev_newprc:
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_PORT);
       break;
 
-    case processor_t::newseg:
+    case processor_t::ev_creating_segm:
       {
         segment_t *s = va_arg(va, segment_t *);
         // Set default value of DS register for all segments
         set_default_dataseg(s->sel);
       }
       break;
-  }
-  va_end(va);
-  return 1;
-}
 
-//-----------------------------------------------------------------------
-//      Checkarg data. Common for all assemblers. Not good.
-//-----------------------------------------------------------------------
-static const char *operdim[15] = // always strictly 15
-{
-  "(", ")", "!", "-", "+", "%",
-  "\\", "/", "*", "&", "|", "^", "<<", ">>", NULL
-};
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        CR16_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        CR16_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        CR16_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return CR16_ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return CR16_emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    default:
+      break;
+  }
+  return 0;
+}
 
 //-----------------------------------------------------------------------
 //      PseudoSam
@@ -115,7 +137,6 @@ static const asm_t pseudosam =
   "Generic CR16 assembler",     // title
   0,                            // help id
   NULL,                         // header
-  NULL,                         // not used instructions
   "org",                        // ORG directive
   "end",                        // end directive
 
@@ -138,10 +159,6 @@ static const asm_t pseudosam =
   "db ?",                       // uninited arrays
   ".equ",                       // equ
   NULL,                         // seg prefix
-  NULL,                         // контроль
-  NULL,                         // atomprefix
-  operdim,                      // массив операций
-  NULL,                         // перекодировка в ASCII
   "$",                          // Текущий IP
   NULL,                         // Заголовок функции
   NULL,                         // Конец функции
@@ -180,8 +197,8 @@ static const uchar retcode_1[] = { 0x00, 0x0B };      // RTS
 
 static const bytes_t retcodes[] =
 {
-  {sizeof(retcode_1), retcode_1},
-  {0, NULL}
+  { sizeof(retcode_1), retcode_1 },
+  { 0, NULL }
 };
 
 //-----------------------------------------------------------------------
@@ -189,11 +206,16 @@ static const bytes_t retcodes[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_CR16,                    // processor ID
-  PR_USE32 | PR_BINMEM | PR_SEGTRANS,   // can use register names for byte names
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for data segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_CR16,              // processor ID
+                          // flag
+    PR_USE32
+  | PR_BINMEM
+  | PR_SEGTRANS,
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for data segments
 
   shnames,                      // короткие имена процессоров (до 9 символов)
   lnames,                       // длинные имена процессоров
@@ -202,54 +224,18 @@ processor_t LPH =
 
   notify,                       // функция оповещения
 
-  CR16_header,                  // создание заголовка текста
-  CR16_footer,                  // создание конца текста
-
-  CR16_segstart,                // начало сегмента
-  std_gen_segm_footer,          // конец сегмента - стандартный, без завершения
-
-  NULL,                         // директивы смены сегмента - не используются
-
-  CR16_ana,                     // канализатор
-  CR16_emu,                     // эмулятор инструкций
-
-  CR16_out,                     // текстогенератор
-  CR16_outop,                   // тектогенератор операндов
-  CR16_data,                    // генератор описания данных
-  NULL,                         // сравнивалка операндов
-  NULL,                         // can have type
-
-  qnumber(RegNames),            // Number of registers
   RegNames,                     // Regsiter names
-  NULL,                         // получить значение регистра
+  qnumber(RegNames),            // Number of registers
 
-  0,                            // число регистровых файлов
-  NULL,                         // имена регистровых файлов
-  NULL,                         // описание регистров
-  NULL,                         // Pointer to CPU registers
   rVcs, rVds,
   2,                            // size of a segment register
   rVcs, rVds,
   NULL,                         // типичные коды начала кодов
   retcodes,                     // коды return'ov
   0, CR16_last,                 // первая и последняя инструкции
-  Instructions,                 // массив названия инструкций
-  NULL,                         // проверка на инструкцию дальнего перехода
-  NULL,                         // транслятор смещений
+  Instructions,                 // instruc
   3,                            // размер tbyte - 24 бита
-  NULL,                         // преобразователь плавающей точки
   {0, 0, 0, 0},                 // длины данных с плавающей точкой
-  NULL,                         // поиск switch
-  NULL,                         // генератор MAP-файла
-  NULL,                         // строка -> адрес
-  NULL,                         // проверка на смещение в стеке
-  NULL,                         // создание фрейма функции
-  NULL,                         // Get size of function return address in bytes (2/4 by default)
-  NULL,                         // создание строки описания стековой переменной
-  NULL,                         // генератор текста для ....
   0,                            // Icode для команды возврата
-  NULL,                         // передача опций в IDP
-  NULL,                         // Is the instruction created only for alignment purposes?
   NULL,                         // micro virtual mashine
-  0                             // fixup bit's
 };

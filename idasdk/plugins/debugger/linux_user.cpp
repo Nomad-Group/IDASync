@@ -13,7 +13,7 @@ static const char wanted_name[] = "Local Linux debugger";
 #include <fpro.h>
 #include <idd.hpp>
 #include <ua.hpp>
-#include <area.hpp>
+#include <range.hpp>
 #include <loader.hpp>
 #include "linux_debmod.h"
 

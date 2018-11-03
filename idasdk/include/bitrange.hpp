@@ -58,8 +58,17 @@ public:
   /// \param src_size  size of source buffer
   /// \param is_mf     is Msb First? (TRUE-big endian, FALSE-little endian)
   //@{
-  inline bool extract(bytevec_t *dst, const void *src, int src_size, bool is_mf) const;
-  inline bool extract(void *dst, int dst_size, const void *src, int src_size, bool is_mf) const;
+  inline bool extract(
+        bytevec_t *dst,
+        const void *src,
+        size_t src_size,
+        bool is_mf) const;
+  inline bool extract(
+        void *dst,
+        size_t dst_size,
+        const void *src,
+        size_t src_size,
+        bool is_mf) const;
   //@}
 
   /// \name Inject
@@ -69,8 +78,17 @@ public:
   /// \param src       source value
   /// \param is_mf     is Msb First? (TRUE-big endian, FALSE-little endian)
   //@{
-  inline bool inject(void *dst, int dst_size, const void *src, int src_size, bool is_mf) const;
-  inline bool inject(void *dst, int dst_size, const bytevec_t &src, bool is_mf) const;
+  inline bool inject(
+        void *dst,
+        size_t dst_size,
+        const void *src,
+        size_t src_size,
+        bool is_mf) const;
+  inline bool inject(
+        void *dst,
+        size_t dst_size,
+        const bytevec_t &src,
+        bool is_mf) const;
   //@}
 
   DECLARE_COMPARISONS(bitrange_t);
@@ -228,36 +246,60 @@ template <class T> inline void bitrange_t::assign_max_nonzero(T mask)
 /// \name Helper functions
 /// Should not be called directly!
 //@{
-idaman bool ida_export bitrange_t_extract_using_bitrange(const bitrange_t *bm, void *dst, int dst_size, const void *src, int src_size, bool is_mf);
-idaman bool ida_export bitrange_t_inject_using_bitrange(const bitrange_t *bm, void *dst, int dst_size, const void *src, int src_size, bool is_mf);
+idaman bool ida_export bitrange_t_extract_using_bitrange(const bitrange_t *bm, void *dst, size_t dst_size, const void *src, size_t src_size, bool is_mf);
+idaman bool ida_export bitrange_t_inject_using_bitrange(const bitrange_t *bm, void *dst, size_t dst_size, const void *src, size_t src_size, bool is_mf);
 //@}
 #else
 #endif // SWIG
 
 //--------------------------------------------------------------------------
-inline bool bitrange_t::extract(void *dst, int dst_size, const void *src, int src_size, bool is_mf) const
+inline bool bitrange_t::extract(
+        void *dst,
+        size_t dst_size,
+        const void *src,
+        size_t src_size,
+        bool is_mf) const
 {
   return bitrange_t_extract_using_bitrange(this, dst, dst_size, src, src_size, is_mf);
 }
 
 //--------------------------------------------------------------------------
-inline bool bitrange_t::extract(bytevec_t *dst, const void *src, int src_size, bool is_mf) const
+inline bool bitrange_t::extract(
+        bytevec_t *dst,
+        const void *src,
+        size_t src_size,
+        bool is_mf) const
 {
-  int dst_size = empty() ? src_size : bytesize();
+  size_t dst_size = empty() ? src_size : bytesize();
   dst->resize(dst_size);
-  return bitrange_t_extract_using_bitrange(this, dst->begin(), dst_size, src, src_size, is_mf);
+  return bitrange_t_extract_using_bitrange(this,
+                                           dst->begin(), dst_size,
+                                           src, src_size,
+                                           is_mf);
 }
 
 //--------------------------------------------------------------------------
-inline bool bitrange_t::inject(void *dst, int dst_size, const void *src, int src_size, bool is_mf) const
+inline bool bitrange_t::inject(
+        void *dst,
+        size_t dst_size,
+        const void *src,
+        size_t src_size,
+        bool is_mf) const
 {
   return bitrange_t_inject_using_bitrange(this, dst, dst_size, src, src_size, is_mf);
 }
 
 //--------------------------------------------------------------------------
-inline bool bitrange_t::inject(void *dst, int dst_size, const bytevec_t &src, bool is_mf) const
+inline bool bitrange_t::inject(
+        void *dst,
+        size_t dst_size,
+        const bytevec_t &src,
+        bool is_mf) const
 {
-  return bitrange_t_inject_using_bitrange(this, dst, dst_size, src.begin(), src.size(), is_mf);
+  return bitrange_t_inject_using_bitrange(this,
+                                          dst, dst_size,
+                                          src.begin(), src.size(),
+                                          is_mf);
 }
 
 #endif // define _BITMASK_HPP

@@ -15,13 +15,12 @@
 #include "uunp.hpp"
 
 #pragma pack(push, 1)
-#ifndef __X64__
+//lint --e{958} Padding required
 struct push_insn_t
 {
   BYTE  push;   // must be 0x68
   DWORD ea;
 };
-#endif
 
 //lint -estring(958,member) padding is required to align members
 struct push_jump_insns_t
@@ -39,27 +38,26 @@ typedef std::map<ea_t, ea_t> thunks_t;
 static thunks_t thunks;
 
 //--------------------------------------------------------------------------
-#ifndef __X64__
 // find the address of the thunk for GetProcessAddress() under Windows 9x
 void win9x_resolve_gpa_thunk(void)
 {
   DWORD off;
 
-  ea_t ea = curmod.startEA + offsetof(IMAGE_DOS_HEADER, e_lfanew);
+  ea_t ea = curmod.start_ea + offsetof(IMAGE_DOS_HEADER, e_lfanew);
   if ( read_dbg_memory(ea, &off, sizeof(off)) != sizeof(off) )
       return;
 
-#define _OI offsetof(IMAGE_NT_HEADERS, OptionalHeader.DataDirectory[ \
+#define _OI offsetof(IMAGE_NT_HEADERS32, OptionalHeader.DataDirectory[ \
                              IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress)
-  if ( read_dbg_memory((DWORD)curmod.startEA + off + _OI, &off, sizeof(off)) != sizeof(off) )
+  if ( read_dbg_memory((DWORD)curmod.start_ea + off + _OI, &off, sizeof(off)) != sizeof(off) )
       return;
 #undef _OI
 
   IMAGE_IMPORT_DESCRIPTOR imp;
-  DWORD hK32 = (DWORD)GetModuleHandle("kernel32");
+  DWORD hK32 = DWORD(size_t(GetModuleHandle("kernel32")));
 
   bool found = false;
-  for ( off += (DWORD)curmod.startEA;
+  for ( off += (DWORD)curmod.start_ea;
         read_dbg_memory(off, &imp, sizeof(imp)) == sizeof(imp) && imp.Name;
         off += sizeof(imp) )
   {
@@ -72,7 +70,7 @@ void win9x_resolve_gpa_thunk(void)
   if ( found )
   {
     DWORD tmp;
-    for ( off = imp.FirstThunk + (DWORD)curmod.startEA;
+    for ( off = imp.FirstThunk + (DWORD)curmod.start_ea;
           read_dbg_memory(off, &tmp, sizeof(tmp)) == sizeof(tmp) && tmp != 0;
           off += sizeof(DWORD) )
     {
@@ -86,7 +84,7 @@ void win9x_resolve_gpa_thunk(void)
         break;
       }
 
-      if( thunk.ea == bp_gpa )
+      if ( thunk.ea == bp_gpa )
       {
         bp_gpa = tmp;
         break;
@@ -94,7 +92,6 @@ void win9x_resolve_gpa_thunk(void)
     }
   }
 }
-#endif
 
 //--------------------------------------------------------------------------
 // find all dwords equal to 'ea' and remember their translations
@@ -103,18 +100,20 @@ static bool calc_thunk_target(uint32 ea32, uint32 imp32)
 {
   bool matched = false;
 
-  for ( ea_t pos = curmod.startEA;
-        pos <= curmod.endEA
-     && (pos = bin_search(pos, curmod.endEA, (uchar *)&ea32, NULL,
-                          4, BIN_SEARCH_FORWARD,
-                          BIN_SEARCH_NOBREAK|BIN_SEARCH_CASE)) != BADADDR;
+  for ( ea_t pos = curmod.start_ea;
+        pos <= curmod.end_ea;
         pos += sizeof(DWORD) )
   {
+    pos = bin_search(pos, curmod.end_ea, (uchar *)&ea32, NULL,
+                     4, BIN_SEARCH_FORWARD,
+                     BIN_SEARCH_NOBREAK|BIN_SEARCH_CASE);
+    if ( pos == BADADDR )
+      break;
     if ( pos & 3 )
       continue;
 
-    flags_t F = getFlags(pos);
-    if( isTail(F) )
+    flags_t F = get_flags(pos);
+    if ( is_tail(F) )
       continue;
 
     matched = true;
@@ -129,7 +128,7 @@ static bool resolve_thunk(ea_t ea)
 {
   push_jump_insns_t thunk;
 
-  if ( !get_many_bytes(ea, &thunk, sizeof(thunk))
+  if ( get_bytes(&thunk, sizeof(thunk), ea) != sizeof(thunk)
     || thunk.push != 0x68 || thunk.jmp != 0xE9
     || thunk.ea < 0x80000000 || thunk.ea >= 0xC0000000 )
   {
@@ -145,23 +144,23 @@ static bool resolve_thunk(ea_t ea)
 // Windows 9x: find thunked imports and their targets
 void find_thunked_imports(void)
 {
-  if( (DWORD)bp_gpa & 0xF )
+  if ( (DWORD)bp_gpa & 0xF )
   {
     warning("Non-standard thunk address");
     return;
   }
 
   // find the thunk area for our module
-  invalidate_dbgmem_contents(curmod.startEA, curmod.endEA); // for bin-search
+  invalidate_dbgmem_contents(curmod.start_ea, curmod.end_ea); // for bin-search
   invalidate_dbgmem_contents(0x80000000, 0xC0000000);
 
-  for(ea_t ea = bp_gpa; ea > 0x80000000; ea -= 0x10)
+  for ( ea_t ea = bp_gpa; ea > 0x80000000; ea -= 0x10 )
   {
       if ( !resolve_thunk(ea) )
         break;
   }
 
-  for(ea_t ea = bp_gpa + 0x10; ea < 0xC0000000; ea += 0x10)
+  for ( ea_t ea = bp_gpa + 0x10; ea < 0xC0000000; ea += 0x10 )
   {
       if ( !resolve_thunk(ea) )
         break;
@@ -175,6 +174,6 @@ void find_thunked_imports(void)
 ea_t win9x_find_thunk(ea_t ea)
 {
   thunks_t::iterator p = thunks.find(ea);
-  ea_t func = p != thunks.end() ? p->second : get_long(ea);
+  ea_t func = p != thunks.end() ? p->second : get_dword(ea);
   return func;
 }

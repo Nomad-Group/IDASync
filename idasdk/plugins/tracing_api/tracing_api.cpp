@@ -23,10 +23,10 @@ bytevec_t last_found;
 
 //--------------------------------------------------------------------------
 bool inline __memmem(
-    const unsigned char *where,
-    size_t size1,
-    const char *what,
-    size_t size2)
+        const unsigned char *where,
+        size_t size1,
+        const char *what,
+        size_t size2)
 {
   if ( size2 > size1 )
     return false;
@@ -88,7 +88,7 @@ static bool find_memory_tev(int i, const char *mem)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   // clear the last found buffer
   last_found.clear();
@@ -98,12 +98,17 @@ void idaapi run(int /*arg*/)
   if ( total == 0 )
   {
     msg("No recorded events.");
-    return;
+    return true;
   }
 
-  char *mem_search = askstr(HIST_SRCH, "", "Enter the string to search in the recorded trace:");
-  if ( mem_search == NULL || mem_search[0] == '\0' )
-    return;
+  qstring mem_search;
+  if ( !ask_str(&mem_search,
+                HIST_SRCH,
+                "Enter the string to search in the recorded trace:")
+    || mem_search.empty() )
+  {
+    return true;
+  }
 
   // iterate over all the recorded events
   for ( int i = total; i != 0; i-- )
@@ -116,10 +121,12 @@ void idaapi run(int /*arg*/)
       // if the string is found in this instruction trace event's memory
       // print the tev object address, thread and number if the output
       // window
-      if ( find_memory_tev(i, mem_search) )
-        msg("%a: tid %d: string '%s' found in tev %d.\n", tev.ea, tev.tid, mem_search, i);
+      const char *str = mem_search.begin();
+      if ( find_memory_tev(i, str) )
+        msg("%a: tid %d: string '%s' found in tev %d.\n", tev.ea, tev.tid, str, i);
     }
   }
+  return true;
 }
 
 //--------------------------------------------------------------------------

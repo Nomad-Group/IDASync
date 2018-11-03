@@ -188,23 +188,30 @@ static entry_t const entries[] =
 static const char *const RegNames[] = { "cs", "ds", "WSR", "WSR1" };
 int extended = 0;
 
-//--------------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)   // Various messages
+//------------------------------------------------------------------------
+static bool idaapi can_have_type(const op_t &x)      // returns 1 - operand can have
 {
-  va_list va;
-  va_start(va, msgid);
+  switch ( x.type )
+  {
+    case o_void:
+    case o_reg:
+    case o_indirect:
+    case o_indirect_inc:
+    case o_bit:
+    case o_mem:
+    case o_near:
+      return 0;
+//    case o_phrase: can have type because of ASI or 0 struct offsets
+  }
+  return 1;
+}
 
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
   switch ( msgid )
   {
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       {
 // ig: вообще у меня теперь такая точка зрения:
 //     не надо в коде задавать вид имен.
@@ -214,107 +221,173 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)   // Various messag
 //      #endif
 
         segment_t *sptr = get_first_seg();
-        if( sptr != NULL )    set_segm_class( sptr, "CODE" );
+        if ( sptr != NULL )
+          set_segm_class(sptr, "CODE");
 
         ea_t ea, ea1;
 
-        for( int i = 0; i < qnumber(entries); i++ )
+        for ( int i = 0; i < qnumber(entries); i++ )
         {
-          ea = toEA( inf.baseaddr, entries[i].off );
+          ea = to_ea(inf.baseaddr, entries[i].off);
 
-          if( isEnabled(ea) )
+          if ( is_mapped(ea) )
           {
-            switch( entries[i].type )
+            switch ( entries[i].type )
             {
               case I196F_BTS:
                 if ( i < qnumber(entries)-1 )
                 {
-                  doByte( ea, entries[i+1].off-entries[i].off );
-                  set_cmt( ea, entries[i].cmt, 0 );
+                  create_byte(ea, entries[i+1].off-entries[i].off);
+                  set_cmt(ea, entries[i].cmt, 0);
                 }
                 break;
 
               case I196F_CMT:
-                if( entries[i].cmt )
-                  add_long_cmt( ea, 1, "%s", entries[i].cmt );
+                if ( entries[i].cmt != NULL )
+                  add_extra_cmt(ea, true, "%s", entries[i].cmt);
                 else
-                  describe( ea, 1, "" );
+                  add_extra_line(ea, true, "");
                 break;
 
               case I196F_OFF:
-                doWord( ea, 2 );
-                set_offset( ea, 0, toEA( inf.baseaddr, 0 ) );
+                create_word(ea, 2);
+                op_plain_offset(ea, 0, to_ea(inf.baseaddr, 0));
 
-                ea1 = toEA( inf.baseaddr, get_word( ea ) );
-                auto_make_proc( ea1 );
+                ea1 = to_ea(inf.baseaddr, get_word(ea));
+                auto_make_proc(ea1);
 //dash: long_cmt здесь не смотрится, так как рисуется до заголовка
 //      хорошо бы поставить func_cmt, но к этому моменту функций еще нет
 //      как быть?
 //ig: воспользоваться простым комментарием
 //    при создании функции комментарий перетащится
-                set_cmt( ea1, entries[i].cmt, 1 );
+                set_cmt(ea1, entries[i].cmt, 1);
             }
 
-            set_name( ea, entries[i].name );
+            set_name(ea, entries[i].name);
           }
         }
 
-        ea = toEA( inf.baseaddr, 0x2080 );
-        if( isEnabled( ea ) )
+        ea = to_ea(inf.baseaddr, 0x2080);
+        if ( is_mapped(ea) )
         {
-          inf.beginEA = ea;
-          inf.startIP = 0x2080;
+          inf.start_ea = ea;
+          inf.start_ip = 0x2080;
         }
 
         segment_t s;
-        s.startEA = toEA( inf.baseaddr, 0 );
-        s.endEA   = toEA( inf.baseaddr, 0x400 );
+        s.start_ea = to_ea(inf.baseaddr, 0);
+        s.end_ea   = to_ea(inf.baseaddr, 0x400);
         s.sel     = inf.baseaddr;
         s.type    = SEG_IMEM;                         // internal memory
 // ig: лучше искать дырку не от нуля, а от базы загрузки
-//      ea_t bottom = toEA( inf.baseaddr, 0 );
-//      intmem    = s.startEA = freechunk( bottom, 1024, 0xF );
-//      s.endEA   = s.startEA + 1024;
-//      s.sel     = ushort(s.startEA >> 4);
+//      ea_t bottom = to_ea(inf.baseaddr, 0);
+//      intmem    = s.start_ea = free_chunk(bottom, 1024, 0xF);
+//      s.end_ea   = s.start_ea + 1024;
+//      s.sel     = ushort(s.start_ea >> 4);
 // dash: дырку искать не пришлось, но я оставил это как пример на будущее
-        add_segm_ex( &s, "INTMEM", NULL, ADDSEG_OR_DIE);
+        add_segm_ex(&s, "INTMEM", NULL, ADDSEG_OR_DIE);
 
         const predefined_t *ptr;
         for ( ptr = iregs; ptr->name != NULL; ptr++ )
         {
-          ea = toEA(inf.baseaddr, ptr->addr);
-          ea_t oldea = get_name_ea( BADADDR, ptr->name );
+          ea = to_ea(inf.baseaddr, ptr->addr);
+          ea_t oldea = get_name_ea(BADADDR, ptr->name);
           if ( oldea != ea )
           {
             if ( oldea != BADADDR )
-              set_name( oldea, NULL );
-            do_unknown( ea, DOUNK_EXPAND );
-            set_name( ea, ptr->name );
+              set_name(oldea, NULL);
+            del_items(ea, DELIT_EXPAND);
+            set_name(ea, ptr->name);
           }
           if ( ptr->cmt != NULL )
-            set_cmt( ea, ptr->cmt, 1 );
+            set_cmt(ea, ptr->cmt, 1);
         }
       }
-//      do16bit( 0x18, 2 );           // SP always word
+//      create_16bit_data(0x18, 2);           // SP always word
       break;
 
-    case processor_t::newseg:
+    case processor_t::ev_creating_segm:
                       // default DS is equal to Base Address
-      (va_arg(va, segment_t *))->defsr[rVds-ph.regFirstSreg] = inf.baseaddr;
+      {
+        segment_t *sg = va_arg(va, segment_t *);
+        sg->defsr[rVds-ph.reg_first_sreg] = inf.baseaddr;
+      }
       break;
 
-    case processor_t::newprc:
+    case processor_t::ev_newprc:
       extended = va_arg(va,int) != 0;
       if ( !extended )
         ph.flag &= ~PR_SEGS;
       else
         ph.flag |= PR_SEGS;
+      break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i196_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i196_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        i196_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        i196_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
     default:
       break;
   }
-  va_end(va);
-
-  return(1);
+  return 0;
 }
 
 //--------------------------------------------------------------------------
@@ -329,7 +402,6 @@ static const asm_t unkasm =
   0,
   "Abstract Assembler",
   0,
-  NULL,
   NULL,
   "org",
   "end",
@@ -353,8 +425,6 @@ static const asm_t unkasm =
   "ds %s",  // uninited arrays
   "equ",    // Equ
   NULL,     // seg prefix
-  NULL, NULL, NULL,     // checkarg is not present in this module
-  NULL,
   "$",
   NULL,         // func_header
   NULL,         // func_footer
@@ -387,27 +457,9 @@ static const uchar retcode[] = { 0xF0 };  // ret
 
 static const bytes_t retcodes[] =
 {
- { sizeof( retcode ), retcode },
- { 0, NULL }
+  { sizeof(retcode), retcode },
+  { 0, NULL }
 };
-
-//------------------------------------------------------------------------
-static bool idaapi can_have_type(op_t &x)      // returns 1 - operand can have
-{
-  switch ( x.type )
-  {
-    case o_void:
-    case o_reg:
-    case o_indirect:
-    case o_indirect_inc:
-    case o_bit:
-    case o_mem:
-    case o_near:
-      return 0;
-//    case o_phrase: can have type because of ASI or 0 struct offsets
-  }
-  return 1;
-}
 
 //-----------------------------------------------------------------------
 //      Processor Definition
@@ -417,9 +469,16 @@ processor_t LPH =
 {
   IDP_INTERFACE_VERSION,  // version
   PLFM_80196,             // id
-  PRN_HEX|PR_USE32|PR_SEGS|PR_BINMEM|PR_RNAMESOK,
-  8,                    // 8 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+                          // flag
+    PRN_HEX
+  | PR_USE32
+  | PR_SEGS
+  | PR_BINMEM
+  | PR_RNAMESOK,
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,    // short processor names (null term)
   lnames,     // long processor names (null term)
@@ -428,33 +487,8 @@ processor_t LPH =
 
   notify,     // Various messages:
 
-  header,     // produce start of text file
-  footer,     // produce end of text file
-
-  segstart,   // produce start of segment
-  segend,     // produce end of segment
-
-  NULL,
-
-  ana,
-  emu,
-
-  out,
-  outop,
-//!!! должна быть своя функция ???
-// ig: нет, необязательно.
-//     при желании можно сделать свою, если intel_data чем нибудь не устраивает
-  intel_data,   //i196_data,
-  NULL,         // compare operands
-  can_have_type,        // can have type
-  qnumber(RegNames),    // Number of registers
   RegNames,             // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(RegNames),    // Number of registers
 
   rVcs,WSR1,
   2,                    // size of a segment register
@@ -464,5 +498,5 @@ processor_t LPH =
   retcodes,
 
   0, I196_last,
-  Instructions
+  Instructions,                 // instruc
 };

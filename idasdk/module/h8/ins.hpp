@@ -104,7 +104,7 @@ H8_xorc,           // Logical XOR with control register
 
 // H8SX
 H8_rtel,           // Returns from an exception, restoring data to multiple general registers
-H8_rtsl,           // Returns from a subroutine, restoring data to multiple general registers 
+H8_rtsl,           // Returns from a subroutine, restoring data to multiple general registers
 H8_movmd,          // Transfers a data block
 H8_movsd,          // Transfers a data block with zero detection
 H8_bras,           // Branch always after the next instruction (delay slot)
@@ -119,7 +119,7 @@ H8_bstz,           // Bit STore Zero flag
 H8_bistz,          // Bit Invert STore Zero flag
 H8_bfld,           // Bit Field LoaD
 H8_bfst,           // Bit Field STore
-H8_muls,           // MULtiply as Signed 
+H8_muls,           // MULtiply as Signed
 H8_divs,           // DIVide as Signed
 H8_mulu,           // MULtiply as Unsigned
 H8_divu,           // DIVide as Unsigned
@@ -127,7 +127,7 @@ H8_mulsu,          // MULtiply as Signed
 H8_muluu,          // MULtiply as Unsigned
 H8_brabc,          // BRAnch if Bit Cleared
 H8_brabs,          // BRAnch if Bit Set
-H8_bsrbc,          // Branch to SubRoutine if Bit Cleared 
+H8_bsrbc,          // Branch to SubRoutine if Bit Cleared
 H8_bsrbs,          // Branch to SubRoutine if Bit Set
 
 H8_last,

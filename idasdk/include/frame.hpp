@@ -8,7 +8,6 @@
 #ifndef _FRAME_HPP
 #define _FRAME_HPP
 #include <idp.hpp>
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
 
 /*! \file frame.hpp
 
@@ -55,16 +54,17 @@ class op_t;
 /// \param pfn      pointer to function structure
 /// \param frsize   size of function local variables
 /// \param frregs   size of saved registers
-/// \param argsize  size of function arguments area which will be purged upon return.
+/// \param argsize  size of function arguments range which will be purged upon return.
 ///                 this parameter is used for __stdcall and __pascal calling conventions.
 ///                 for other calling conventions please pass 0.
 /// \retval 1  ok
 /// \retval 0  failed (no function, frame already exists)
 
-idaman bool ida_export add_frame(func_t *pfn,
-                                 sval_t frsize,
-                                 ushort frregs,
-                                 asize_t argsize);
+idaman bool ida_export add_frame(
+        func_t *pfn,
+        sval_t frsize,
+        ushort frregs,
+        asize_t argsize);
 
 
 /// Delete a function frame.
@@ -81,10 +81,11 @@ idaman bool ida_export del_frame(func_t *pfn);
 /// \param argsize  size of function arguments
 /// \return success
 
-idaman bool ida_export set_frame_size(func_t *pfn,
-                                      asize_t frsize,
-                                      ushort frregs,
-                                      asize_t argsize);
+idaman bool ida_export set_frame_size(
+        func_t *pfn,
+        asize_t frsize,
+        ushort frregs,
+        asize_t argsize);
 
 
 /// Get full size of a function frame.
@@ -93,13 +94,13 @@ idaman bool ida_export set_frame_size(func_t *pfn,
 /// \param pfn  pointer to function structure, may be NULL
 /// \return size of frame in bytes or zero
 
-idaman asize_t ida_export get_frame_size(func_t *pfn);
+idaman asize_t ida_export get_frame_size(const func_t *pfn);
 
 
 /// Get size of function return address.
 /// \param pfn  pointer to function structure, can't be NULL
 
-idaman int ida_export get_frame_retsize(func_t *pfn);
+idaman int ida_export get_frame_retsize(const func_t *pfn);
 
 /// Parts of a frame
 enum frame_part_t
@@ -111,69 +112,69 @@ enum frame_part_t
 };
 
 /// Get offsets of the frame part in the frame.
-/// \param pfn    pointer to function structure, can't be NULL
-/// \param part   frame part
 /// \param range  pointer to the output buffer with the frame part
 ///               start/end(exclusive) offsets, can't be NULL
+/// \param pfn    pointer to function structure, can't be NULL
+/// \param part   frame part
 
-idaman void ida_export get_frame_part(func_t *pfn, frame_part_t part, area_t *range);
+idaman void ida_export get_frame_part(range_t *range, const func_t *pfn, frame_part_t part);
 
 /// Get starting address of arguments section
 
-inline ea_t frame_off_args(func_t *pfn)
+inline ea_t frame_off_args(const func_t *pfn)
 {
-  area_t range;
-  get_frame_part(pfn, FPC_ARGS, &range);
-  return range.startEA;
+  range_t range;
+  get_frame_part(&range, pfn, FPC_ARGS);
+  return range.start_ea;
 }
 
 /// Get starting address of return address section
 
-inline ea_t frame_off_retaddr(func_t *pfn)
+inline ea_t frame_off_retaddr(const func_t *pfn)
 {
-  area_t range;
-  get_frame_part(pfn, FPC_RETADDR, &range);
-  return range.startEA;
+  range_t range;
+  get_frame_part(&range, pfn, FPC_RETADDR);
+  return range.start_ea;
 }
 
 /// Get starting address of saved registers section
 
-inline ea_t frame_off_savregs(func_t *pfn)
+inline ea_t frame_off_savregs(const func_t *pfn)
 {
-  area_t range;
-  get_frame_part(pfn, FPC_SAVREGS, &range);
-  return range.startEA;
+  range_t range;
+  get_frame_part(&range, pfn, FPC_SAVREGS);
+  return range.start_ea;
 }
 
 /// Get start address of local variables section
 
-inline ea_t frame_off_lvars(func_t *pfn)
+inline ea_t frame_off_lvars(const func_t *pfn)
 {
-  area_t range;
-  get_frame_part(pfn, FPC_LVARS, &range);
-  return range.startEA;
+  range_t range;
+  get_frame_part(&range, pfn, FPC_LVARS);
+  return range.start_ea;
 }
 
 /// Does the given offset lie within the arguments section?
 
-inline bool is_funcarg_off(func_t *pfn, uval_t frameoff)
+inline bool is_funcarg_off(const func_t *pfn, uval_t frameoff)
 {
-  area_t args;
-  get_frame_part(pfn, FPC_ARGS, &args);
+  range_t args;
+  get_frame_part(&args, pfn, FPC_ARGS);
   return ph.stkup()
-       ? frameoff < args.endEA
-       : frameoff >= args.startEA;
+       ? frameoff < args.end_ea
+       : frameoff >= args.start_ea;
 }
 
 /// Does the given offset lie within the local variables section?
 
-inline sval_t lvar_off(func_t *pfn, uval_t frameoff)
+inline sval_t lvar_off(const func_t *pfn, uval_t frameoff)
 {
-  area_t lvars;
-  get_frame_part(pfn, FPC_LVARS, &lvars);
+  range_t lvars;
+  get_frame_part(&lvars, pfn, FPC_LVARS);
   return ph.stkup()
-         ? frameoff - lvars.startEA
-         : lvars.endEA - frameoff;
+       ? frameoff - lvars.start_ea
+       : lvars.end_ea - frameoff;
 }
 
 /// Get pointer to function frame.
@@ -190,7 +191,7 @@ inline struc_t *get_frame(ea_t ea) { return get_frame(get_func(ea)); }
 /// Update frame pointer delta.
 /// \param pfn  pointer to function structure
 /// \param fpd  new fpd value.
-///             can not be bigger than the local variable area size.
+///             can not be bigger than the local variable range size.
 /// \return success
 
 idaman bool ida_export update_fpd(func_t *pfn, asize_t fpd);
@@ -221,26 +222,31 @@ idaman ea_t ida_export get_func_by_frame(tid_t frame_id);
 //--------------------------------------------------------------------------
 
 /// Get pointer to stack variable.
-/// \param x       reference to instruction operand
-/// \param v       immediate value in the operand (usually x.addr)
 /// \param actval  actual value used to fetch stack variable
 ///                this pointer may point to 'v'
+/// \param insn    the instruction
+/// \param x       reference to instruction operand
+/// \param v       immediate value in the operand (usually x.addr)
 /// \return NULL or ptr to stack variable
 
-idaman member_t *ida_export get_stkvar(const op_t &x, sval_t v, sval_t *actval);
-
+idaman member_t *ida_export get_stkvar(
+        sval_t *actval,
+        const insn_t &insn,
+        const op_t &x,
+        sval_t v);
 
 /// Automatically add stack variable if doesn't exist.
-/// Processor modules should use ua_stkvar().
+/// Processor modules should use insn_t::create_stkvar().
+/// \param insn   the instruction
 /// \param x      reference to instruction operand
 /// \param v      immediate value in the operand (usually x.addr)
 /// \param flags  \ref STKVAR_1
 /// \return success
 
-idaman bool ida_export add_stkvar3(const op_t &x, sval_t v, int flags);
+idaman bool ida_export add_stkvar(const insn_t &insn, const op_t &x, sval_t v, int flags);
 
 /// \defgroup STKVAR_1 Add stkvar flags
-/// Passed as 'flags' parameter to add_stkvar3()
+/// Passed as 'flags' parameter to add_stkvar()
 //@{
 #define STKVAR_VALID_SIZE       0x0001 ///< x.dtyp contains correct variable type
                                        ///< (for insns like 'lea' this bit must be off)
@@ -253,36 +259,43 @@ idaman bool ida_export add_stkvar3(const op_t &x, sval_t v, int flags);
 /// \param name    variable name, NULL means autogenerate a name
 /// \param off     offset of the stack variable in the frame.
 ///                negative values denote local variables, positive - function arguments.
-/// \param flags   variable type flags (byteflag() for a byte variable, for example)
+/// \param flags   variable type flags (byte_flag() for a byte variable, for example)
 /// \param ti      additional type information (like offsets, structs, etc)
 /// \param nbytes  number of bytes occupied by the variable
 /// \return success
 
-idaman bool ida_export add_stkvar2(func_t *pfn,
-                                   const char *name,
-                                   sval_t off,
-                                   flags_t flags,
-                                   const opinfo_t *ti,
-                                   asize_t nbytes);
+idaman bool ida_export define_stkvar(
+        func_t *pfn,
+        const char *name,
+        sval_t off,
+        flags_t flags,
+        const opinfo_t *ti,
+        asize_t nbytes);
 
 
 /// Build automatic stack variable name.
-/// \param buf  pointer to buffer. must be at least MAXNAMELEN
+/// \param buf  pointer to buffer
 /// \param pfn  pointer to function (can't be NULL!)
 /// \param v    value of variable offset
-/// \return ptr to buf
+/// \return length of stack variable name or -1
 
-idaman char *ida_export build_stkvar_name(char *buf, size_t bufsize, func_t *pfn, sval_t v);
+idaman ssize_t ida_export build_stkvar_name(
+        qstring *buf,
+        const func_t *pfn,
+        sval_t v);
 
 
 /// Calculate offset of stack variable in the frame structure.
 /// \param pfn  pointer to function (can't be NULL!)
-/// \param ea   linear address of the instruction
+/// \param insn the instruction
 /// \param n    number of operand: (0..#UA_MAXOP-1)
 ///              -1 if error, return #BADADDR
 /// \return #BADADDR if some error (issue a warning if stack frame is bad)
 
-idaman ea_t ida_export calc_stkvar_struc_offset(func_t *pfn, ea_t ea, int n);
+idaman ea_t ida_export calc_stkvar_struc_offset(
+        func_t *pfn,
+        const insn_t &insn,
+        int n);
 
 
 /// Find and delete unreferenced stack variable definitions.
@@ -312,7 +325,7 @@ idaman int ida_export delete_wrong_stkvar_ops(func_t *pfn);
 /// to a meaningful name.
 /// IDA doesn't check whether the target assembler supports the register renaming.
 /// All register definitions will appear at the beginning of the function.
-struct regvar_t : public area_t
+struct regvar_t : public range_t
 {
   char *canon;          ///< canonical register name (case-insensitive)
   char *user;           ///< user-defined register name
@@ -328,10 +341,13 @@ struct regvar_t : public area_t
 /// \param cmt      comment for the definition
 /// \return \ref REGVAR_ERROR_
 
-idaman int ida_export add_regvar(func_t *pfn, ea_t ea1, ea_t ea2,
-                        const char *canon,
-                        const char *user,
-                        const char *cmt);
+idaman int ida_export add_regvar(
+        func_t *pfn,
+        ea_t ea1,
+        ea_t ea2,
+        const char *canon,
+        const char *user,
+        const char *cmt);
 /// \defgroup REGVAR_ERROR_ Register variable error codes
 /// Return values for functions in described in \ref regvar
 //@{
@@ -344,7 +360,8 @@ idaman int ida_export add_regvar(func_t *pfn, ea_t ea1, ea_t ea2,
 /// Find a register variable definition (powerful version).
 /// One of 'canon' and 'user' should be NULL.
 /// \param pfn      function in question
-/// \param ea1,ea2  range of addresses to search
+/// \param ea1,ea2  range of addresses to search.
+///                 ea1==BADADDR means the entire function
 /// \param canon    name of a general register
 /// \param user     user-defined name for the register
 /// \return NULL-not found, otherwise ptr to regvar_t
@@ -447,7 +464,7 @@ const char *get_llabel(func_t *pfn, ea_t ea);
 /// \param delta  difference between old and new values of SP
 /// \return success
 
-idaman bool ida_export add_auto_stkpnt2(func_t *pfn, ea_t ea, sval_t delta);
+idaman bool ida_export add_auto_stkpnt(func_t *pfn, ea_t ea, sval_t delta);
 
 
 /// Add user-defined SP register change point.
@@ -543,11 +560,4 @@ typedef qvector<xreflist_entry_t> xreflist_t; ///< vector of xrefs to variables 
 idaman void ida_export build_stkvar_xrefs(xreflist_t *out, func_t *pfn, const member_t *mptr);
 
 
-#ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED bool ida_export add_auto_stkpnt(ea_t ea, sval_t delta);
-idaman DEPRECATED bool ida_export add_stkvar(const op_t &x, sval_t v);
-#endif
-
-
-#pragma pack(pop)
 #endif // _FRAME_HPP

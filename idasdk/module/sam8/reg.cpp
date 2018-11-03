@@ -1,5 +1,5 @@
 #include "sam8.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 /*
  * Kernel event handler
@@ -8,56 +8,105 @@
  * @param ... Variable list of arguments
  * @return 1 on success
  */
-static int idaapi notify(processor_t::idp_notify msgid, ...) {
-  va_list va;
-  va_start(va, msgid);
-
-  // do IDA callbacks
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
   // deal with notification codes
-  switch ( msgid ) {
-  case processor_t::init:
-    inf.mf = 1;       // Set big endian mode in the IDA kernel
-    break;
+  int code = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+      inf.set_be(true);       // Set big endian mode in the IDA kernel
+      break;
 
-  case processor_t::newfile: {
-    {
-      // create a new segment for code data
-      segment_t seg;
-      seg.startEA = SAM8_CODESEG_START;
-      seg.endEA   = SAM8_CODESEG_START + SAM8_CODESEG_SIZE;
-      seg.sel     = allocate_selector(seg.startEA >> 4);
-      seg.type    = SEG_NORM;
-      add_segm_ex(&seg, "code", NULL, ADDSEG_NOSREG|ADDSEG_OR_DIE);
-    }
-    {
-      // create a new segment for the external data
-      segment_t seg;
-      seg.startEA = SAM8_EDATASEG_START;
-      seg.endEA   = SAM8_EDATASEG_START + SAM8_EDATASEG_SIZE;
-      seg.sel     = allocate_selector(seg.startEA >> 4);
-      seg.flags   = SFL_HIDDEN;
-      seg.type    = SEG_BSS;
-      add_segm_ex(&seg, "emem", NULL, ADDSEG_NOSREG|ADDSEG_OR_DIE);
-    }
-    break;
+    case processor_t::ev_newfile:
+      {
+        // create a new segment for code data
+        segment_t seg;
+        seg.start_ea = SAM8_CODESEG_START;
+        seg.end_ea   = SAM8_CODESEG_START + SAM8_CODESEG_SIZE;
+        seg.sel     = allocate_selector(seg.start_ea >> 4);
+        seg.type    = SEG_NORM;
+        add_segm_ex(&seg, "code", NULL, ADDSEG_NOSREG|ADDSEG_OR_DIE);
+      }
+      {
+        // create a new segment for the external data
+        segment_t seg;
+        seg.start_ea = SAM8_EDATASEG_START;
+        seg.end_ea   = SAM8_EDATASEG_START + SAM8_EDATASEG_SIZE;
+        seg.sel     = allocate_selector(seg.start_ea >> 4);
+        seg.flags   = SFL_HIDDEN;
+        seg.type    = SEG_BSS;
+        add_segm_ex(&seg, "emem", NULL, ADDSEG_NOSREG|ADDSEG_OR_DIE);
+      }
+      break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        sam8_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        sam8_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        sam8_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_data:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        bool analyze_only = va_argi(va, bool);
+        sam8_out_data(*ctx, analyze_only);
+        return 1;
+      }
+
+    default:
+      break;
   }
-
-  default:
-    break;
-  }
-  va_end(va);
-
-  // OK
-  return(1);
+  return code;
 }
 
 
 //-----------------------------------------------------------------------
 // Condition codes
-const char *const ccNames[] = {
+const char *const ccNames[] =
+{
   "F",
   "LT",
   "LE",
@@ -80,7 +129,8 @@ const char *const ccNames[] = {
 /************************************************************************/
 /* Register names                                                       */
 /************************************************************************/
-static const char *const RegNames[] = {
+static const char *const RegNames[] =
+{
   "cs","ds"
 };
 
@@ -94,26 +144,28 @@ static const char *const RegNames[] = {
 /************************************************************************/
 /* File headers for SAMA assembler                                      */
 /************************************************************************/
-static const char *const sama_headers[] = {
+static const char *const sama_headers[] =
+{
   "",
   "; Filename of DEF file describing the chip in use",
   "CHIP <DEF Filename>",
   "",
   "; External memory EQU definitions",
   "; These will appear here when output using the samaout plugin",
-  NULL };
+  NULL
+};
 
 
 /************************************************************************/
 /* Definition of SAMA assembler                                         */
 /************************************************************************/
-static const asm_t sama = {
+static const asm_t sama =
+{
   AS_COLON,
   0,
   "Samsung Assembler (SAMA) by Samsung Semiconductor Division",
   0,
   (const char**) sama_headers,         // no headers
-  NULL,         // no bad instructions
   "org",
   "end",
 
@@ -136,8 +188,6 @@ static const asm_t sama = {
   NULL,         // uninited arrays
   "equ",        // equ
   NULL,         // seg prefix
-  NULL, NULL, NULL,
-  NULL,
   "$",
   NULL,         // func_header
   NULL,         // func_footer
@@ -178,7 +228,8 @@ static const char *const shnames[] =
 /* Long names of processor                                              */
 /************************************************************************/
 #define FAMILY "Samsung microcontrollers:"
-static const char *const lnames[] = {
+static const char *const lnames[] =
+{
   FAMILY"Samsung SAM8-based processors",
   NULL
 };
@@ -194,10 +245,11 @@ static const char *const lnames[] = {
 static const uchar retcode_1[] = { 0xAF };
 static const uchar retcode_2[] = { 0xBF };
 
-static bytes_t retcodes[] = {
- { sizeof(retcode_1), retcode_1 },
- { sizeof(retcode_2), retcode_2 },
- { 0, NULL }                            // NULL terminated array
+static bytes_t retcodes[] =
+{
+  { sizeof(retcode_1), retcode_1 },
+  { sizeof(retcode_2), retcode_2 },
+  { 0, NULL }                            // NULL terminated array
 };
 
 
@@ -209,11 +261,15 @@ static bytes_t retcodes[] = {
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,// version
-  PLFM_SAM8,            // id
-  PR_RNAMESOK | PR_BINMEM,          // can use register names for byte names
-  8,                    // 8 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_SAM8,              // id
+                          // flag
+    PR_RNAMESOK           // can use register names for byte names
+  | PR_BINMEM,
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,              // array of short processor names
                         // the short names are used to specify the processor
@@ -226,31 +282,8 @@ processor_t LPH =
 
   notify,               // the kernel event notification callback
 
-  header,               // generate the disassembly header
-  footer,               // generate the disassembly footer
-
-  segstart,             // generate a segment declaration (start of segment)
-  std_gen_segm_footer,  // generate a segment footer (end of segment)
-
-  NULL,                 // generate 'assume' directives
-
-  ana,                  // analyze an instruction and fill the 'cmd' structure
-  emu,                  // emulate an instruction
-
-  out,                  // generate a text representation of an instruction
-  outop,                // generate a text representation of an operand
-  out_data,             // generate a text representation of a data item
-  NULL,                 // compare operands
-  NULL,                 // can an operand have a type?
-
-  qnumber(RegNames),    // Number of registers
   RegNames,             // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(RegNames),    // Number of registers
 
   rVcs,rVds,
   0,                    // size of a segment register
@@ -260,5 +293,5 @@ processor_t LPH =
   retcodes,
 
   0,SAM8_last,
-  Instructions
+  Instructions,                 // instruc
 };

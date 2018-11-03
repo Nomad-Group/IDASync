@@ -10,11 +10,11 @@ static bool flow;               // flow stop flag
 
 //----------------------------------------------------------------------
 // handle using/changing of operands
-static void near TouchArg(op_t & x, int isAlt, int isload)
+static void handle_operand(const insn_t &insn, const op_t &x, bool is_forced, bool isload)
 {
-  ea_t ea = toEA(codeSeg(x.addr, x.n), x.addr);
+  ea_t ea = map_code_ea(insn, x);
 
-  switch (x.type)
+  switch ( x.type )
   {
     // nothing to do
     case o_void:
@@ -27,81 +27,79 @@ static void near TouchArg(op_t & x, int isAlt, int isload)
       // can't be changed
       if ( !isload )
         goto badTouch;
-      doImmd(cmd.ea);
+      set_immd(insn.ea);
       // if not forced and marked as offset
-      if (!isAlt && isOff(uFlag, x.n))
+      if ( !is_forced && is_off(get_flags(insn.ea), x.n) )
       {
         // it's an offset
-        if ( x.dtyp == dt_word )
+        if ( x.dtype == dt_word )
           ea &= 0xFFFF;
-        else if ( x.dtyp == dt_byte )
+        else if ( x.dtype == dt_byte )
           ea &= 0xFF;
-        ua_add_dref(x.offb, ea, dr_O);
+        insn.add_dref(ea, x.offb, dr_O);
       }
       break;
 
     // jump or call
     case o_near:
-      if (InstrIsSet(cmd.itype, CF_CALL))
+      if ( has_insn_feature(insn.itype, CF_CALL) )
       {
         // add cross-reference
-        ua_add_cref(x.offb, ea, fl_CN);
+        insn.add_cref(ea, x.offb, fl_CN);
         // doesn't return?
         flow = func_does_return(ea);
       }
       else
       {
-        ua_add_cref(x.offb, ea, fl_JN);
+        insn.add_cref(ea, x.offb, fl_JN);
       }
       break;
 
     // memory reference
     case o_mem:
       // make data at target address
-      ua_dodata2(x.offb, ea, x.dtyp);
-      if ( !isload )
-        doVar(ea);
+      insn.create_op_data(ea, x);
       // add xref to memory
-      ua_add_dref(x.offb, ea, isload ? dr_R : dr_W);
+      insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
       break;
 
     // other - report error
     default:
     badTouch:
-      warning("%a %s,%d: bad optype %d", cmd.ea, cmd.get_canon_mnem(), x.n, x.type);
+      warning("%a %s,%d: bad optype %d", insn.ea, insn.get_canon_mnem(), x.n, x.type);
       break;
   }
 }
 
 //----------------------------------------------------------------------
 // emulator
-int idaapi CR16_emu(void)
+int idaapi CR16_emu(const insn_t &insn)
 {
-  uint32 Feature = cmd.get_canon_feature();
+  uint32 Feature = insn.get_canon_feature();
 
   // get operand types
-  int flag1 = is_forced_operand(cmd.ea, 0);
-  int flag2 = is_forced_operand(cmd.ea, 1);
+  bool flag1 = is_forced_operand(insn.ea, 0);
+  bool flag2 = is_forced_operand(insn.ea, 1);
 
   flow = ((Feature & CF_STOP) == 0);
 
   // handle reads
-  if (Feature & CF_USE1)
-    TouchArg(cmd.Op1, flag1, 1);
-  if (Feature & CF_USE2)
-    TouchArg(cmd.Op2, flag2, 1);
+  if ( Feature & CF_USE1 )
+    handle_operand(insn, insn.Op1, flag1, true);
+  if ( Feature & CF_USE2 )
+    handle_operand(insn, insn.Op2, flag2, true);
 
-  if (Feature & CF_JUMP)
-    QueueSet(Q_jumps, cmd.ea);
+  if ( Feature & CF_JUMP )
+    remember_problem(PR_JUMP, insn.ea);
 
   // handle writes
-  if (Feature & CF_CHG1)
-    TouchArg(cmd.Op1, flag1, 0);
-  if (Feature & CF_CHG2)
-    TouchArg(cmd.Op2, flag2, 0);
+  if ( Feature & CF_CHG1 )
+    handle_operand(insn, insn.Op1, flag1, false);
+  if ( Feature & CF_CHG2 )
+    handle_operand(insn, insn.Op2, flag2, false);
   // if not stopping, add flow xref
-  if (flow)
-    ua_add_cref(0, cmd.ea + cmd.size, fl_F);
+  if ( flow )
+    add_cref(insn.ea, insn.ea + insn.size, fl_F);
 
   return 1;
 }

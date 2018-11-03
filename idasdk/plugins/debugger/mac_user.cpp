@@ -17,7 +17,7 @@ static const char wanted_name[] = "Local Mac OS X debugger";
 #include <pro.h>
 #include <idd.hpp>
 #include <ua.hpp>
-#include <area.hpp>
+#include <range.hpp>
 #include <loader.hpp>
 #include "mac_debmod.h"
 

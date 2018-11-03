@@ -40,10 +40,15 @@
 
 #ifdef __NT__
 
-//lint -esym(843, g_diadlls, g_pdb_errors) could be declared as const
+//lint -esym(843, g_diadlls, g_pdb_errors, PathIsUNC) could be declared as const
 
 int pdb_session_t::session_count = 0;
 bool pdb_session_t::co_initialized = false;
+
+typedef BOOL (__stdcall *PathIsUNC_t)(LPCTSTR pszPath);
+static PathIsUNC_t PathIsUNC = NULL;
+
+static bool check_for_odd_paths(const char *fname);
 
 //----------------------------------------------------------------------
 // Common code for PDB handling
@@ -55,14 +60,14 @@ class CCallback : public IDiaLoadCallback2,
   int m_nRefCount;
   ea_t m_load_address;
   HANDLE hFile;
-  input_exe_reader_t exe_reader;
-  input_mem_reader_t mem_reader;
+  input_exe_reader_t *exe_reader;
+  input_mem_reader_t *mem_reader;
   void *user_data;
   pdb_session_t *pdb_session;
-  debug_entry_t last_de;
+  DWORDLONG last_cv_off;
 public:
-  CCallback(input_exe_reader_t _exe_reader,
-            input_mem_reader_t _mem_reader,
+  CCallback(input_exe_reader_t *_exe_reader,
+            input_mem_reader_t *_mem_reader,
             void *_user_data,
             pdb_session_t *_pdb_session):
       exe_reader(_exe_reader), mem_reader(_mem_reader),
@@ -70,7 +75,7 @@ public:
       user_data(_user_data),
       pdb_session(_pdb_session)
   {
-    memset(&last_de, 0, sizeof(last_de));
+    last_cv_off = 0;
   }
 
   virtual ~CCallback()
@@ -149,15 +154,14 @@ public:
               DWORD cbData,
               BYTE data[])
   {
-    // msdia90.dll can crash on bogus data
+    // msdia90.dll can crash on bogus CV data
     // so we remember the offset here and check it in ReadFileAt
-    if ( fExecutable && cbData >= sizeof(last_de) )
+    if ( fExecutable && cbData >= sizeof(debug_entry_t) )
     {
-      memcpy(&last_de, data, sizeof(last_de));
-    }
-    else
-    {
-      memset(&last_de, 0, sizeof(last_de));
+      debug_entry_t curr_de;
+      memcpy(&curr_de, data, sizeof(curr_de));
+      if ( curr_de.type == DBG_CV )
+        last_cv_off = curr_de.seek;
     }
     return S_OK;
   }
@@ -165,12 +169,11 @@ public:
               LPCOLESTR dbgPath,
               HRESULT resultCode)
   {
-    qstring spath;
-    u2cstr(dbgPath, &spath);
-    if ( SUCCEEDED(resultCode) )
-      deb(IDA_DEBUG_DEBUGGER, "PDB: found DBG file: '%s'\n", spath.c_str());
+    if ( resultCode == S_OK )
+      deb(IDA_DEBUG_DEBUGGER, "PDB: dbg file %S matched\n", dbgPath);
     else
-      deb(IDA_DEBUG_DEBUGGER, "PDB: '%s': %s\n", spath.c_str(), pdberr(resultCode));
+      deb(IDA_DEBUG_DEBUGGER, "PDB: %S: %s\n", dbgPath, pdberr(resultCode));
+
     return S_OK;
   }
 
@@ -178,13 +181,13 @@ public:
               LPCOLESTR pdbPath,
               HRESULT resultCode)
   {
-    qstring spath;
-    u2cstr(pdbPath, &spath);
-    if ( SUCCEEDED(resultCode) )
-      deb(IDA_DEBUG_DEBUGGER, "PDB: '%s' matched.\n", spath.c_str());
+    if ( resultCode == S_OK )
+      deb(IDA_DEBUG_DEBUGGER, "PDB: %S matched\n", pdbPath);
     else
-      deb(IDA_DEBUG_DEBUGGER, "PDB: '%s': %s\n", spath.c_str(), pdberr(resultCode));
+      deb(IDA_DEBUG_DEBUGGER, "PDB: %S: %s\n", pdbPath, pdberr(resultCode));
 #ifdef _DEBUG
+    qstring spath;
+    utf16_utf8(&spath, pdbPath);
     pdb_session->pdb_path = spath;
 #endif
     return S_OK;
@@ -220,8 +223,8 @@ public:
   HRESULT STDMETHODCALLTYPE ReadExecutableAtRVA(
    DWORD  relativeVirtualAddress,
    DWORD  cbData,
-   DWORD* pcbData,
-   BYTE   data[] )
+   DWORD *pcbData,
+   BYTE data[])
   {
     if ( mem_reader != NULL )
     {
@@ -233,7 +236,7 @@ public:
       return S_OK;
     }
 #ifdef PDB_PLUGIN
-    if ( get_many_bytes(m_load_address + relativeVirtualAddress, data, cbData) )
+    if ( get_bytes(data, cbData, m_load_address + relativeVirtualAddress) == cbData )
     {
       *pcbData = cbData;
       return S_OK;
@@ -263,14 +266,25 @@ public:
     bool ok = hFile != INVALID_HANDLE_VALUE
       && SetFilePointerEx(hFile, pos, NULL, FILE_BEGIN) != 0
       && ReadFile(hFile, pbData, cbData, pcbData, NULL) != 0;
-    if ( ok )
+    if ( ok && fileOffset != 0 )
     {
-      // check if we're reading the debug directory entry
-      if ( last_de.type == DBG_CV && last_de.seek == fileOffset && cbData > 4 )
+      // are we reading the CV debug directory entry?
+      if ( last_cv_off == fileOffset && cbData > 4 )
       {
-        // check that the data has a valid NB or RSDS signature
-        ok = (pbData[0] == 'N' && pbData[1] == 'B' && cbData >= sizeof(cv_info_pdb20_t))
-          || (memcmp(pbData, "RSDS", 4) == 0 && cbData >= sizeof(rsds_t));
+        // check that the data has a valid NB or RSDS signature and PDB path doesn't look suspicious
+        ok = false;
+        if ( pbData[0] == 'N' && pbData[1] == 'B' && cbData >= sizeof(cv_info_pdb20_t) )
+        {
+          char *pdbname = (char*)pbData + sizeof(cv_info_pdb20_t);
+          pbData[cbData-1] = '\0';
+          ok = check_for_odd_paths(pdbname);
+        }
+        else if ( memcmp(pbData, "RSDS", 4) == 0 && cbData >= sizeof(rsds_t) )
+        {
+          char *pdbname = (char*)pbData + sizeof(rsds_t);
+          pbData[cbData-1] = '\0';
+          ok = check_for_odd_paths(pdbname);
+        }
       }
     }
     return ok ? S_OK : E_FAIL;
@@ -323,8 +337,12 @@ inline void pdberr_suggest_vs_runtime(HRESULT hr)
 {
   if ( hr == E_NOINTERFACE )
   {
-    msg("<< It appears that MS DIA SDK is not installed.\n"
-        "Please try installing \"Microsoft Visual C++ 2008 Redistributable Package / x86\" >>\n");
+    msg("<< It appears that MS DIA SDK is not installed.\n");
+#ifndef __X64__
+    msg("Please try installing \"Microsoft Visual C++ 2008 Redistributable Package / x86\" >>\n");
+#else
+    msg("Please try installing \"Microsoft Visual C++ 2008 Redistributable Package / x64\" >>\n");
+#endif
   }
 }
 
@@ -351,16 +369,16 @@ static const GUID *const g_d80 = &__uuidof(DiaSource80);  // msdia80.dll
 static const GUID *const g_d71 = &__uuidof(DiaSource71);  // msdia71.dll
 static const GUID *const g_msdiav[] = { g_d90, g_d80, g_d71 };
 static const int         g_diaver[] = { 900,   800,   710 };
-static const char *g_diadlls[] = { "msdia90.dll", "msdia80.dll", "msdia71.dll"};
+static const char *const g_diadlls[] = { "msdia90.dll", "msdia80.dll", "msdia71.dll" };
 
 //----------------------------------------------------------------------
 HRESULT __stdcall CoCreateInstanceNoReg(
-  LPCTSTR szDllName,
-  IN REFCLSID rclsid,
-  IUnknown* pUnkOuter,
-  IN REFIID riid,
-  OUT LPVOID FAR* ppv,
-  OUT HMODULE *phMod)
+        LPCTSTR szDllName,
+        IN REFCLSID rclsid,
+        IUnknown *pUnkOuter,
+        IN REFIID riid,
+        OUT LPVOID FAR *ppv,
+        OUT HMODULE *phMod)
 {
   // http://lallousx86.wordpress.com/2007/01/29/emulating-cocreateinstance/
   HRESULT hr = REGDB_E_CLASSNOTREG;
@@ -371,7 +389,7 @@ HRESULT __stdcall CoCreateInstanceNoReg(
     if ( hDll == NULL )
       break;
 
-    HRESULT (__stdcall *GetClassObject)(REFCLSID rclsid, REFIID riid, LPVOID FAR* ppv);
+    HRESULT (__stdcall *GetClassObject)(REFCLSID rclsid, REFIID riid, LPVOID FAR *ppv);
     *(FARPROC*)&GetClassObject = GetProcAddress(hDll, "DllGetClassObject");
     if ( GetClassObject == NULL )
       break;
@@ -402,7 +420,7 @@ static void get_input_and_sym_path(
 {
   char env_sympath[4096];
   char temp_path[QMAXPATH];
-  char spath[sizeof(spath_prefix)+sizeof(temp_path)+sizeof(spath_suffix)];
+  char spath[sizeof(g_spath_prefix)+sizeof(temp_path)+sizeof(g_spath_suffix)];
   // no symbol path passed? let us compute default values
   if ( user_spath == NULL || user_spath[0] == '\0' )
   {
@@ -414,7 +432,7 @@ static void get_input_and_sym_path(
         temp_path[0] = '\0';
       else
         qstrncat(temp_path, "ida", sizeof(temp_path));
-      qsnprintf(spath, sizeof(spath), "%s%s%s", spath_prefix, temp_path, spath_suffix);
+      qsnprintf(spath, sizeof(spath), "%s%s%s", g_spath_prefix, temp_path, g_spath_suffix);
       user_spath = spath;
     }
     else
@@ -422,8 +440,8 @@ static void get_input_and_sym_path(
       user_spath = env_sympath;
     }
   }
-  c2ustr(user_spath, wspath);
-  c2ustr(input_file, winput);
+  utf8_utf16(wspath, user_spath);
+  utf8_utf16(winput, input_file);
 }
 
 //----------------------------------------------------------------------------
@@ -487,7 +505,7 @@ void pdb_session_t::close()
   }
 
 #ifdef _DEBUG
-  if ( !pdb_path.empty() )
+  if ( !pdb_path.empty() && qfileexist(pdb_path.begin() ) )
   {
     HANDLE hFile = CreateFileA(pdb_path.begin(), GENERIC_READ, /*FILE_SHARE_READ*/ 0, 0, OPEN_EXISTING, 0, 0);
     if ( hFile == INVALID_HANDLE_VALUE )
@@ -498,14 +516,45 @@ void pdb_session_t::close()
 #endif
 }
 
+//----------------------------------------------------------------------
+typedef BOOL (CALLBACK *SymbolServerSetOptions_t)(UINT_PTR options, ULONG64 data);
+typedef BOOL (CALLBACK *SymbolServerGetOptionData_t)(UINT_PTR option, PULONG64 pData);
+
+// copied from dbghelp.h
+#define SSRVOPT_CALLBACK            0x000001
+#define SSRVOPT_SETCONTEXT          0x000800
+#define SSRVACTION_QUERYCANCEL  2
+#define SSRVACTION_SIZE         5
+
+//----------------------------------------------------------------------
+static BOOL CALLBACK SymbolServerCallback(
+        UINT_PTR action,
+        ULONG64 data,
+        ULONG64 context)
+{
+  if ( action == SSRVACTION_SIZE )
+  {
+    bool *wait_box_shown = (bool *) context;
+    if ( !*wait_box_shown )
+      show_wait_box("Downloading pdb...");
+    *wait_box_shown = true;
+  }
+  else if ( action == SSRVACTION_QUERYCANCEL )
+  {
+    BOOL *do_cancel = (BOOL *) data;
+    if ( user_cancelled() )
+      *do_cancel = TRUE;
+  }
+  return TRUE;
+}
+
 //----------------------------------------------------------------------------
 static HRESULT check_and_load_pdb(
         IDiaDataSource *pSource,
-        LPCOLESTR pdb_file_pth,
+        LPCOLESTR pdb_path,
         const pdb_signature_t &pdb_sign,
-        bool types_only)
+        bool load_anyway)
 {
-  bool load_anyway = types_only;
   HRESULT hr = E_FAIL;
   if ( !load_anyway )
   {
@@ -522,18 +571,49 @@ static HRESULT check_and_load_pdb(
     }
     if ( sig == 0 && age == 0 && pcsig70 == NULL )
       return E_FAIL;
-    hr =  pSource->loadAndValidateDataFromPdb(pdb_file_pth, pcsig70, sig, age);
+    hr =  pSource->loadAndValidateDataFromPdb(pdb_path, pcsig70, sig, age);
+    deb(IDA_DEBUG_DEBUGGER, "PDB: loadAndValidateDataFromPdb(%S): %s\n", pdb_path, pdberr(hr));
     if ( hr == E_PDB_INVALID_SIG || hr == E_PDB_INVALID_AGE )
     {
-      load_anyway = askyn_c(ASKBTN_NO,
-                        "HIDECANCEL\nICON WARNING\nAUTOHIDE NONE\n"
-                        "PDB signature and/or age does not match the input file.\n"
-                        "Do you want to load it anyway?") == ASKBTN_YES;
+      load_anyway = ask_yn(ASKBTN_NO,
+                           "HIDECANCEL\nICON WARNING\nAUTOHIDE NONE\n"
+                           "PDB signature and/or age does not match the input file.\n"
+                           "Do you want to load it anyway?") == ASKBTN_YES;
     }
   }
   if ( load_anyway )
-    hr = pSource->loadDataFromPdb(pdb_file_pth);
+  {
+    hr = pSource->loadDataFromPdb(pdb_path);
+    deb(IDA_DEBUG_DEBUGGER, "PDB: loadDataFromPdb(%S): %s\n", pdb_path, pdberr(hr));
+  }
   return hr;
+}
+
+//----------------------------------------------------------------------------
+// warn the user about eventual UNC or other problematic paths
+static bool check_for_odd_paths(const char *fname)
+{
+  if ( PathIsUNC == NULL )
+  {
+    HMODULE h = GetModuleHandle("shlwapi.dll");
+    if ( h != NULL )
+      PathIsUNC = (PathIsUNC_t)(void*)GetProcAddress(h, "PathIsUNCA");
+  }
+  if ( fname[0] == '\\'
+    || fname[0] == '/'
+    || PathIsUNC != NULL && PathIsUNC(fname) )
+  {
+    if ( ask_yn(ASKBTN_NO,
+                "AUTOHIDE NONE\nHIDECANCEL\n"
+                "Please be careful, the debug path looks odd!\n"
+                "'%s'\n"
+                "Do you really want IDA to access this path (possibly a remote server)?",
+                fname) != ASKBTN_YES )
+    {
+      return false;
+    }
+  }
+  return true;
 }
 
 //----------------------------------------------------------------------------
@@ -550,6 +630,9 @@ HRESULT pdb_session_t::open_session(const pdbargs_t &pdbargs)
     CoInitialize(NULL);
     co_initialized = true;
   }
+
+  if ( !check_for_odd_paths(pdbargs.fname()) )
+    return E_PDB_NOT_FOUND;
 
   // When the debugger is active, first try to load debug directory from the memory
   ea_t load_addrs[2];
@@ -580,88 +663,119 @@ HRESULT pdb_session_t::open_session(const pdbargs_t &pdbargs)
     // No interface was created?
     hr = create_dia_source(&pSource, &dia_version);
     if ( FAILED(hr) )
-      goto CLEANUP;
+      break;
 
-    used_fname = pdbargs.pdb_path;
-    if ( used_fname.empty() || !qfileexist(used_fname.c_str()) )
+    char buf[QMAXPATH];
+    const char *path = pdbargs.pdb_path.c_str();
+    if ( path[0] == '\0' || !qfileexist(path) )
     {
-      qstring tmp;
-      const char *ptr = pdbargs.input_path.c_str();
-      if ( *ptr == '\0' )
-        ptr = used_fname.c_str();
-      if ( !qfileexist(ptr) )
-      { // If the input path came from a remote system, it is unlikely to be
+      bool found = false;
+      if ( !pdbargs.input_path.empty() )
+      {
+        path = pdbargs.input_path.begin();
+        found = qfileexist(path);
+      }
+      if ( !found )
+      {
+        // If the input path came from a remote system, it is unlikely to be
         // correct on our system. DIA does not care about the exact file name
         // but uses the directory path to locate the PDB file. It combines
         // the name of the pdb file from the debug directory and the directory
         // from the input path.
         // Since we can not rely on remote paths, we simply use the current dir
-        char buf[QMAXPATH];
         qgetcwd(buf, sizeof(buf));
-        tmp.sprnt("%s\\%s", buf, qbasename(ptr));
-        ptr = tmp.begin();
+        char *ptr = tail(buf);
+        char *end = buf + sizeof(buf);
+        APPCHAR(ptr, end, '\\');
+        APPEND(ptr, end, qbasename(pdbargs.fname()));
+        found = qfileexist(buf);
+        msg("%s: not found, trying %s\n", path, buf);
+        path = buf;
       }
-      if ( !used_fname.empty() )
-        msg("%s: not found, trying %s\n", used_fname.begin(), ptr);
-      used_fname = ptr;
     }
+    used_fname = path;
 
     qwstring wpath, winput;
-    get_input_and_sym_path(&winput, &wpath, used_fname.begin(), pdbargs.spath);
+    get_input_and_sym_path(&winput, &wpath, path, pdbargs.spath.c_str());
 
     // Try to load input file as PDB
-    bool types_only = (pdbargs.flags & PDBFLG_ONLY_TYPES) != 0;
-    hr = check_and_load_pdb(pSource, winput.c_str(), pdbargs.pdb_sign, types_only);
+    bool force_load = (pdbargs.flags & (PDBFLG_ONLY_TYPES|PDBFLG_EFD)) != 0;
+    hr = check_and_load_pdb(pSource, winput.c_str(), pdbargs.pdb_sign, force_load);
     if ( hr == E_PDB_INVALID_SIG || hr == E_PDB_INVALID_AGE ) // Mismatching PDB
-      goto CLEANUP;
+      break;
 
     // Failed? Try to load as EXE
-    if ( FAILED(hr) )
+    if ( hr != S_OK )
     {
-
       CCallback callback(pdbargs.exe_reader, pdbargs.mem_reader, pdbargs.user_data, this);
       callback.AddRef();
 
+      // Open the executable
       if ( !remote_debug )
-      {
-        // Open the executable
         callback.OpenExe(winput.c_str());
+
+      // Setup symsrv callback to show wait box for pdb downloading
+      HMODULE symsrv_hmod = LoadLibrary("symsrv.dll");
+      bool wait_box_shown = false;
+      SymbolServerGetOptionData_t get_option_data = NULL; // "DbgHelp.dll 10.0 or later"
+      SymbolServerSetOptions_t set_options = NULL;
+      ULONG64 was_context = 0;
+      ULONG64 was_callback = 0;
+      if ( symsrv_hmod != NULL )
+      {
+        get_option_data = (SymbolServerGetOptionData_t)(void *)GetProcAddress(symsrv_hmod, "SymbolServerGetOptionData");
+        if ( get_option_data != NULL )
+        {
+          was_context = get_option_data(SSRVOPT_SETCONTEXT, &was_context);
+          was_callback = get_option_data(SSRVOPT_CALLBACK, &was_callback);
+        }
+
+        set_options = (SymbolServerSetOptions_t)(void *)GetProcAddress(symsrv_hmod, "SymbolServerSetOptions");
+        if ( set_options != NULL )
+        {
+          set_options(SSRVOPT_SETCONTEXT, (ULONG64) (intptr_t) &wait_box_shown);
+          set_options(SSRVOPT_CALLBACK, (ULONG64) SymbolServerCallback);
+        }
       }
 
-#ifdef _DEBUG
-      // If we are here, and have a ".pdb" file, we're dead.
-      // It's not even worth the effort going through the
-      // (possibly-remote) reading of the .exe file.
-      const char *ext = get_file_ext(used_fname.begin());
-      if ( ext != NULL && strieq(ext, "pdb") )
-        warning("File \"%s\" appears to be a PDB file."
-                " 'loadDataForExe()' is not gonna like it.", used_fname.begin());
-#endif
       for ( int i=0; i < qnumber(load_addrs); i++ )
       {
         deb(IDA_DEBUG_DEBUGGER, "PDB: Trying loadDataForExe with %a\n", load_addrs[i]);
         callback.SetLoadAddress(load_addrs[i]);
         hr = pSource->loadDataForExe(winput.c_str(), wpath.c_str(), (IDiaLoadCallback *)&callback);
-        deb(IDA_DEBUG_DEBUGGER, "PDB: loadDataForExe: %x\n", hr);
-        if ( SUCCEEDED(hr) )
+        deb(IDA_DEBUG_DEBUGGER, "PDB: loadDataForExe(%S, %S): %s\n", winput.c_str(), wpath.c_str(), pdberr(hr));
+        if ( hr == S_OK )
           break;
-        // if pdb is not found, is there any sense of trying again with
-        // another address?
         if ( hr == E_PDB_NOT_FOUND )
-          break;
+          break; // another address won't help
         if ( load_addrs[0] == load_addrs[1] )
           break; // no need to try again with the same address
+      }
+
+      // Hide wait box for pdb downloading if needed
+      if ( symsrv_hmod != NULL )
+      {
+        if ( set_options != NULL )
+        {
+          set_options(SSRVOPT_SETCONTEXT, was_context);
+          set_options(SSRVOPT_CALLBACK, was_callback);
+        }
+        FreeLibrary(symsrv_hmod);
+        symsrv_hmod = NULL;
+        if ( wait_box_shown )
+          hide_wait_box();
       }
     }
 
     // Failed? Then nothing else to try, quit
     if ( FAILED(hr) )
-      goto CLEANUP;
+      break;
 
     // Open a session for querying symbols
     hr = pSource->openSession(&pSession);
+    deb(IDA_DEBUG_DEBUGGER, "PDB: openSession(): %s\n", pdberr(hr));
     if ( FAILED(hr) )
-      goto CLEANUP;
+      break;
 
     // Set load address
     if ( load_address != BADADDR )
@@ -671,34 +785,26 @@ HRESULT pdb_session_t::open_session(const pdbargs_t &pdbargs)
     }
 
     // Retrieve a reference to the global scope
-    hr = pSession->get_globalScope(&pGlobal);
-    if ( FAILED(hr) )
-      goto CLEANUP;
+    hr = pSession->get_globalScope(&pGlobal); //-V595 The 'pSession' pointer was utilized before it was verified against nullptr
+    if ( hr != S_OK )
+      break;
 
-    hr = S_OK;
+    pdb_access = new local_pdb_access_t(pdbargs, pSource, pSession, pGlobal);
+
+    DWORD pdb_machType, machType;
+    if ( pGlobal->get_machineType(&pdb_machType) != S_OK ) //-V595 The 'pGlobal' pointer was utilized before it was verified against nullptr
+      pdb_machType = IMAGE_FILE_MACHINE_I386;
+    machType = get_machine_type(pdb_machType);
+
+    pdb_access->set_machine_type(machType);
+    pdb_access->set_dia_version(dia_version);
+
+    hr = pdb_access->init();
+    if ( hr == S_OK )
+      return hr;
+
   } while ( false );
 
-  // Make sure we cleanup
-  if ( FAILED(hr) )
-    goto CLEANUP;
-
-  pdb_access = new local_pdb_access_t(pdbargs, pSource, pSession, pGlobal);
-
-  DWORD pdb_machType, machType;
-  if ( pGlobal->get_machineType(&pdb_machType) != S_OK )
-    pdb_machType = IMAGE_FILE_MACHINE_I386;
-  machType = get_machine_type(pdb_machType);
-
-  pdb_access->set_machine_type(machType);
-  pdb_access->set_dia_version(dia_version);
-
-  hr = pdb_access->init();
-  if ( FAILED(hr) )
-    goto CLEANUP;
-
-  return hr;
-
- CLEANUP:
   // In the event of an error, this will be reached.
   if ( pdb_access == NULL )
   {
@@ -720,7 +826,7 @@ HRESULT pdb_session_t::create_dia_source(IDiaDataSource **pSource, int *dia_vers
   // "C:\Program Files (x86)\Common Files\microsoft shared\VC"
   char common_files[QMAXPATH];
   qstring vc_shared;
-  if ( get_special_folder(CSIDL_PROGRAM_FILES_COMMON, common_files, sizeof(common_files)) )
+  if ( get_special_folder(common_files, sizeof(common_files), CSIDL_PROGRAM_FILES_COMMON) )
   {
     vc_shared = common_files;
     vc_shared.append("\\Microsoft Shared\\VC");
@@ -740,9 +846,13 @@ HRESULT pdb_session_t::create_dia_source(IDiaDataSource **pSource, int *dia_vers
     {
       // Search for this interface in DIA dlls
       char path[QMAXPATH];
-      if ( !search_path(g_diadlls[i], path, sizeof(path), false)
-           && (vc_shared.empty() || SearchPathA(vc_shared.c_str(), g_diadlls[i], NULL, qnumber(path), path, NULL) == 0) )
+      if ( !search_path(path, sizeof(path), g_diadlls[i], false)
+        && (vc_shared.empty()
+         || SearchPathA(vc_shared.c_str(), g_diadlls[i], NULL,
+                        qnumber(path), path, NULL) == 0) )
+      {
         continue;
+      }
 
       for ( size_t j=0; j < qnumber(g_msdiav); j++ )
       {
@@ -753,7 +863,7 @@ HRESULT pdb_session_t::create_dia_source(IDiaDataSource **pSource, int *dia_vers
                                    (void**)pSource,
                                    &dia_hmod);
 
-        if ( SUCCEEDED(hr) )
+        if ( hr == S_OK )
         {
           static bool displayed = false;
           if ( !displayed )
@@ -767,7 +877,7 @@ HRESULT pdb_session_t::create_dia_source(IDiaDataSource **pSource, int *dia_vers
       }
     }
 
-    if ( SUCCEEDED(hr) )
+    if ( hr == S_OK )
     {
       *dia_version = g_diaver[i];
       static bool displayed = false;

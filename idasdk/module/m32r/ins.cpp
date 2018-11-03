@@ -2,7 +2,8 @@
 #include "m32r.hpp"
 
 // m32r instructions definition
-instruc_t Instructions[] = {
+instruc_t Instructions[] =
+{
 
     { "",           0                              },    // Null instruction
     { "add",        CF_USE1|CF_USE2|CF_CHG1        },    // Add

@@ -34,16 +34,11 @@
 //
 #include "../idaidp.hpp"
 
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 #include "ins.hpp"
 #include "out.hpp"
 #include "reg.hpp"
-
-void outReg(int);
-void outPhrase(int);
-void outImmediate(const op_t &, int);
-void outNear(const op_t &);
 
 //
 // outSegStart()
@@ -52,10 +47,9 @@ void outNear(const op_t &);
 //
 // Generate assembly text before the start of a segment.
 //
-void
-idaapi outSegStart(ea_t )
+void idaapi outSegStart(outctx_t &ctx, segment_t *)
 {
-        gen_cmt_line("A segment starts here.");
+  ctx.gen_cmt_line("A segment starts here.");
 }
 
 //
@@ -65,10 +59,9 @@ idaapi outSegStart(ea_t )
 //
 // Generate assembly text after the end of a segment.
 //
-void
-idaapi outSegEnd(ea_t )
+void idaapi outSegEnd(outctx_t &ctx, segment_t *)
 {
-        gen_cmt_line("A segment ends here.");
+  ctx.gen_cmt_line("A segment ends here.");
 }
 
 //
@@ -78,10 +71,9 @@ idaapi outSegEnd(ea_t )
 //
 // Generate an assembly header for the top of the file.
 //
-void
-idaapi outHeader(void)
+void idaapi outHeader(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_PROC_AND_ASM);
+  ctx.gen_header(GH_PRINT_PROC_AND_ASM);
 }
 
 //
@@ -91,10 +83,9 @@ idaapi outHeader(void)
 //
 // Generate an assembly footer for the bottom of the file.
 //
-void
-idaapi outFooter(void)
+void idaapi outFooter(outctx_t &ctx)
 {
-        gen_cmt_line("End of file");
+  ctx.gen_cmt_line("End of file");
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -103,62 +94,41 @@ idaapi outFooter(void)
 //
 ////////////////////////////////////////////////////////////////////////////
 
-//
-// outReg
-// Display a register name in the register color.
-//
-inline
-void
-outReg(int rgnum)
-{
-        out_register(ph.regNames[rgnum]);
-}
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_tms320c1_t)
 
 //
 // outPhrase(phrase)
 // Output a TMS320C1X-specific operand phrase.
 //
-void
-outPhrase(int phrase)
+void out_tms320c1_t::outPhrase(int phrase)
 {
-        //
-        // Complex phrase operand.
-        // (Processor specific)
-        //
-        switch ( phrase ) {
-        case IPH_AR:
-                //
-                // Current address register, indirect.
-                //
-                out_symbol('*');
-                break;
-        case IPH_AR_INCR:
-                //
-                // Current address register, indirect, post-increment.
-                //
-                out_symbol('*');
-                out_symbol('+');
-                break;
-        case IPH_AR_DECR:
-                //
-                // Current address register, indirect, post-decrement.
-                //
-                out_symbol('*');
-                out_symbol('-');
-                break;
-        }
-}
-
-//
-// outImmediate(operand, flags)
-//
-// Generate text for an immediate numerical value in the given
-// operand.
-//
-void
-outImmediate(const op_t &op, int flags)
-{
-        OutValue(op, flags);
+  //
+  // Complex phrase operand.
+  // (Processor specific)
+  //
+  switch ( phrase )
+  {
+    case IPH_AR:
+      //
+      // Current address register, indirect.
+      //
+      out_symbol('*');
+      break;
+    case IPH_AR_INCR:
+      //
+      // Current address register, indirect, post-increment.
+      //
+      out_symbol('*');
+      out_symbol('+');
+      break;
+    case IPH_AR_DECR:
+      //
+      // Current address register, indirect, post-decrement.
+      //
+      out_symbol('*');
+      out_symbol('-');
+      break;
+  }
 }
 
 //
@@ -167,34 +137,31 @@ outImmediate(const op_t &op, int flags)
 // Display an operand that is known to reference another piece of
 // of code.
 //
-void
-outNear(const op_t &op)
+void out_tms320c1_t::outNear(const op_t &op)
 {
-        ea_t        ea;
+  //
+  // Calculate the effective address of this code reference.
+  //
+  ea_t ea = to_ea(insn.cs, op.addr);
 
-        //
-        // Calculate the effective address of this code reference.
-        //
-        ea = toEA(cmd.cs, op.addr);
+  //
+  // Find or create a name for the code address that this operand
+  // references so that we can output that name in the operand's
+  // place.
+  //
+  if ( !out_name_expr(op, ea, op.addr) )
+    //
+    // The code address didn't have a name.  Default to
+    // displaying the address as a number.
+    //
+    out_value(op, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN);
 
-        //
-        // Find or create a name for the code address that this operand
-        // references so that we can output that name in the operand's
-        // place.
-        //
-        if ( !out_name_expr(op, ea, op.addr) )
-          //
-          // The code address didn't have a name.  Default to
-          // displaying the address as a number.
-          //
-          OutValue(op, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN);
-
-        //
-        // Let the user know that he or she should look at this
-        // instruction and attempt to name the address that it
-        // references.
-        //
-        QueueSet(Q_noName, cmd.ea);
+  //
+  // Let the user know that he or she should look at this
+  // instruction and attempt to name the address that it
+  // references.
+  //
+  remember_problem(PR_NONAME, insn.ea);
 }
 
 
@@ -203,205 +170,164 @@ outNear(const op_t &op)
 //
 // Display an operand that is known to reference data RAM.
 //
-void
-outMem(const op_t &op)
+void out_tms320c1_t::outMem(const op_t &op)
 {
-        ea_t        ea;
-        sel_t       data_selector;
+  //
+  // Ask the IDA kernel for the value of the current data page
+  // pointer for execution of this instruction.
+  //
+  sel_t data_selector = get_sreg(insn.ea, IREG_VDS);
 
-        //
-        // Ask the IDA kernel for the value of the current data page
-        // pointer for execution of this instruction.
-        //
-        data_selector = get_segreg(cmd.ea, IREG_VDS);
+  //
+  // Is it known?
+  //
+  if ( data_selector == BADSEL )
+  {
+    //
+    // The current data page pointer is not known.
+    //
+    //
+    // Display the current operand as a regular number and
+    // return.
+    //
+    out_value(op, OOF_ADDR);
+    return;
+  }
 
-        //
-        // Is it known?
-        //
-        if ( data_selector == BADSEL ) {
-                //
-                // The current data page pointer is not known.
-                //
-                //
-                // Display the current operand as a regular number and
-                // return.
-                //
-                OutValue(op, OOF_ADDR);
-                return;
-        }
+  //
+  // The current data page pointer is known.  Use it to calculate the
+  // effective address of the memory being referenced by this
+  // operand.
+  //
+  ea_t ea = sel2ea(data_selector) + op.addr;
 
-        //
-        // The current data page pointer is known.  Use it to calculate the
-        // effective address of the memory being referenced by this
-        // operand.
-        //
-        ea = sel2ea(data_selector) + op.addr;
+  //
+  // Find or create a name for the data address that this operand
+  // references so that we can output that name in the operand's
+  // place.
+  //
+  if ( !out_name_expr(op, ea, op.addr) )
+  {
+    //
+    // No name was found and no name was created.
+    // Display the current operand as a regular number.
+    //
+    out_value(op, OOF_ADDR);
 
-        //
-        // Find or create a name for the data address that this operand
-        // references so that we can output that name in the operand's
-        // place.
-        //
-        if ( !out_name_expr(op, ea, op.addr) ) {
-                //
-                // No name was found and no name was created.
-                // Display the current operand as a regular number.
-                //
-                OutValue(op, OOF_ADDR);
-
-                //
-                // Let the user know that he or she should look at this
-                // instruction and attempt to name the address that it
-                // references.
-                //
-                QueueSet(Q_noName, cmd.ea);
-        }
+    //
+    // Let the user know that he or she should look at this
+    // instruction and attempt to name the address that it
+    // references.
+    //
+    remember_problem(PR_NONAME, insn.ea);
+  }
 }
 
-//
-// outOp(operand)
-//
-// [ This function is named in our processor_t.u_outop member ]
-//
-// Generate the text representation of the given instruction operand.
-// Called directly by the IDA kernel in response to a call to
-// out_one_operand().  This roundabout calling method allows IDA to
-// overide the display of each operand within an instruction
-// if the user so chooses to provide a manual operand in its place.
-//
-//lint -esym(1764,op)
-bool idaapi outOp(op_t &op)
+bool out_tms320c1_t::out_operand(const op_t &op)
 {
-        switch ( op.type ) {
-        case o_reg:
-                //
-                // Register operand.
-                //
-                outReg(op.reg);
-                break;
-        case o_phrase:
-                //
-                // Complex phrase.
-                // (Processor specific)
-                //
-                outPhrase(op.phrase);
-                break;
-        case o_imm:
-                //
-                // Immediate value.
-                //
-                outImmediate(op, 0);
-                break;
-        case o_near:
-                //
-                // Code reference.
-                //
-                outNear(op);
-                break;
-        case o_mem:
-                //
-                // Data memory reference.
-                //
-                outMem(op);
-                break;
-        default:
-                break;
-        }
-
-        return 1;
+  switch ( op.type )
+  {
+    case o_reg:
+      //
+      // Register operand.
+      //
+      outreg(op.reg);
+      break;
+    case o_phrase:
+      //
+      // Complex phrase.
+      // (Processor specific)
+      //
+      outPhrase(op.phrase);
+      break;
+    case o_imm:
+      //
+      // Immediate value.
+      //
+      out_value(op, 0);
+      break;
+    case o_near:
+      //
+      // Code reference.
+      //
+      outNear(op);
+      break;
+    case o_mem:
+      //
+      // Data memory reference.
+      //
+      outMem(op);
+      break;
+    default:
+      break;
+  }
+  return 1;
 }
 
-//
-// out()
-//
-// [ This function is named in our processor_t.u_out member ]
-//
-void
-idaapi out(void)
+void out_tms320c1_t::out_insn()
 {
-        char buf[MAXSTR];
+  //
+  // An unseen parameter to this function is the 'insn' structure
+  // which holds all the information about the instruction that we
+  // are being asked to display.
+  //
 
-        //
-        // An unseen parameter to this function is the global 'cmd' structure
-        // which holds all the information about the instruction that we
-        // are being asked to display.
-        //
+  // This call to out_mnemonic() is a helper function in the IDA kernel that
+  // displays an instruction mnemonic for the current instruction.
+  // It does so by taking the integer value in insn.itype and using it
+  // as an index into the array that we named in this processor module's
+  // processor_t.instruc member. From this indexed element comes the
+  // instruction mnemonic to be displayed.
+  //
+  out_mnemonic();
 
-        //
-        // Initialize the output buffer
-        //
-        init_output_buffer(buf, sizeof(buf));
+  //
+  // If the current instruction has a non-empty first operand,
+  // then display it.
+  //
+  if ( insn.Op1.type != o_void )
+  {
+    //
+    // This call to out_one_operand() is another IDA kernel function that
+    // is mandatory for a properly behaved processor module.
+    //
+    // Normally, this helper function turns around and calls the function
+    // named in our processor_t.u_outop member with a reference to
+    // the current instruction's operand numbered in the first argument.
+    // However, if through the course of interacting with the
+    // disassembly the user chooses to manually override the specified
+    // operand in this instruction, the IDA kernel will forego the call
+    // to u_outop() -- instead calling an internal IDA routine to
+    // display the user's manually entered operand.
+    //
+    out_one_operand(0);
+  }
+  //
+  // Display the second operand, if non-empty.
+  //
+  if ( insn.Op2.type != o_void )
+  {
+    //
+    // This call to out_symbol() is another helper function in the
+    // IDA kernel.  It writes the specified character to the current
+    // buffer, using the user-configurable 'symbol' color.
+    //
+    out_symbol(',');
+    out_char(' ');
+    out_one_operand(1);
+  }
+  //
+  // Finally, display the third operand, if non-empty.
+  //
+  if ( insn.Op3.type != o_void )
+  {
+    out_symbol(',');
+    out_char(' ');
+    out_one_operand(2);
+  }
 
-        //
-        // This call to OutMnem() is a helper function in the IDA kernel that
-        // displays an instruction mnemonic for the current instruction.
-        // It does so by taking the integer value in cmd.itype and using it
-        // as an index into the array that we named in this processor module's
-        // processor_t.instruc member.  From this indexed element comes the
-        // instruction mnemonic to be displayed.
-        //
-        // Like most of the IDA kernel helper functions, OutMnem() expects
-        // the output buffer to be initialized by the caller.
-        //
-        OutMnem();
-
-        //
-        // If the current instruction has a non-empty first operand,
-        // then display it.
-        //
-        if ( cmd.Op1.type != o_void ) {
-                //
-                // This call to out_one_operand() is another IDA kernel function that
-                // is mandatory for a properly behaved processor module.
-                //
-                // Normally, this helper function turns around and calls the function
-                // named in our processor_t.u_outop member with a reference to
-                // the current instruction's operand numbered in the first argument.
-                // However, if through the course of interacting with the
-                // disassembly the user chooses to manually override the specified
-                // operand in this instruction, the IDA kernel will forego the call
-                // to u_outop() -- instead calling an internal IDA routine to
-                // display the user's manually entered operand.
-                //
-                out_one_operand(0);
-        }
-        //
-        // Display the second operand, if non-empty.
-        //
-        if ( cmd.Op2.type != o_void ) {
-                //
-                // This call to out_symbol() is another helper function in the
-                // IDA kernel.  It writes the specified character to the current
-                // buffer, using the user-configurable 'symbol' color.
-                //
-                out_symbol(',');
-                OutChar(' ');
-                out_one_operand(1);
-        }
-        //
-        // Finally, display the third operand, if non-empty.
-        //
-        if ( cmd.Op3.type != o_void ) {
-                out_symbol(',');
-                OutChar(' ');
-                out_one_operand(2);
-        }
-
-        //
-        // Now our temporary buffer holds the entire colored text line to be displayed
-        // for this instruction.  We need to terminate it properly.
-        //
-        term_output_buffer();
-
-        //
-        // The global variable 'g1_comm' is a flag used by the MakeLine()
-        // function (which we will call next).  When set it will add any comments
-        // that the user has entered for this instruction to the line.
-        //
-        gl_comm = 1;
-
-        //
-        // Tell IDA to display our constructed line.
-        //
-        MakeLine(buf);
+  //
+  // Tell IDA to display our constructed line.
+  //
+  flush_outbuf();
 }

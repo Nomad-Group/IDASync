@@ -27,9 +27,8 @@ static const char *RegNames[] =
   "cs", "ds" // required by IDA kernel
 };
 
-static size_t numports = 0;
-static ioport_t *ports = NULL;
-char device[MAXSTR] = "";
+static ioports_t ports;
+qstring device;
 static char const cfgname[] = "m32r.cfg";
 
 inline void get_cfg_filename(char *buf, size_t bufsize)
@@ -41,19 +40,23 @@ inline void get_cfg_filename(char *buf, size_t bufsize)
 #define NO_GET_CFG_PATH
 #include "../iocommon.cpp"
 
-static void idaapi choose_device(TView *[], int)
+//----------------------------------------------------------------------------
+static int idaapi choose_device(int, form_actions_t &)
 {
-  if ( choose_ioport_device(cfgname, device, sizeof(device), NULL) )
-    set_device_name(device, IORESP_NONE);
+  if ( choose_ioport_device(&device, cfgname) )
+    set_device_name(device.c_str(), IORESP_NONE);
+  return 0;
 }
 
+//----------------------------------------------------------------------------
 // create the netnode helper and fetch idpflags value
-inline static uint32 refresh_idpflags(void)
+inline uint32 refresh_idpflags(void)
 {
   idpflags = (uint32)helper.altval(-1);
   return idpflags;
 }
 
+//----------------------------------------------------------------------------
 // patch the RegNames[] array according to the use_reg_aliases parameter.
 static void patch_regnames(void)
 {
@@ -68,114 +71,24 @@ static void patch_regnames(void)
   RegNames[rCR7] = use_reg_aliases() ? "fpsr" : "CR7";
 }
 
-// The kernel event notifications
-// Here you may take desired actions upon some kernel events
-static int idaapi notify(processor_t::idp_notify msgid, ...)
-{
-  va_list va;
-  va_start(va, msgid);
-
-  // A well behavior processor module should call invoke_callbacks()
-  // in his notify() function. If this function returns 0, then
-  // the processor module should process the notification itself
-  // Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code )
-    return code;
-
-  switch ( msgid )
-  {
-    case processor_t::init:
-      // this processor is big endian
-      inf.mf = 1;
-      helper.create("$ m32r");
-    default:
-      break;
-
-    case processor_t::term:
-      free_ioports(ports, numports);
-      break;
-
-    case processor_t::newfile:
-      if ( choose_ioport_device(cfgname, device, sizeof(device), NULL) )
-        set_device_name(device, IORESP_ALL);
-      // default configuration
-      if ( refresh_idpflags() == 0 )
-      {
-        idpflags = 0;
-        idpflags |= NETNODE_USE_INSN_SYNTHETIC;
-        idpflags |= NETNODE_USE_REG_ALIASES;
-      }
-
-      // patch register names according to idpflags
-      patch_regnames();
-      break;
-
-    case processor_t::newprc:
-      ptype = processor_subtype_t(va_arg(va, int));
-//      msg("ptype = %s\n", ptype == prc_m32r ? "m32r" : ptype == prc_m32rx ? "m32rx" : "???");
-      break;
-
-    case processor_t::oldfile:
-      refresh_idpflags();
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_NONE);
-      }
-      // patch register names according to idpflags
-      patch_regnames();
-      break;
-
-    case processor_t::savebase:
-    case processor_t::closebase:
-      // synchronize the database long variable with the current configuration settings
-#ifdef DEBUG
-      msg("Saving configuration: synthetic insn %s, aliases registers %s\n",
-          use_synthetic_insn() ? "true " : "false",
-          use_reg_aliases() ? "true" : "false");
-#endif
-      helper.altset(-1, idpflags);
-      helper.supset(-1, device);
-      break;
-
-    case processor_t::create_switch_xrefs:
-      {
-        ea_t insn_ea = va_arg(va, ea_t);
-        switch_info_ex_t *si = va_arg(va, switch_info_ex_t *);
-        return m32r_create_switch_xrefs(insn_ea, *si);
-      }
-
-    case processor_t::calc_switch_cases:
-      {
-        ea_t insn_ea         = va_arg(va, ea_t);
-        switch_info_ex_t *si = va_arg(va, switch_info_ex_t *);
-        casevec_t *casevec   = va_arg(va, casevec_t *);
-        eavec_t *targets     = va_arg(va, eavec_t *);
-        return m32r_calc_switch_cases(insn_ea, si, casevec, targets);
-      }
-  }
-
-  va_end(va);
-  return 1;
-}
-
+//----------------------------------------------------------------------------
 // This function (called when opening the module related configuration in
 // the general options) will create a dialog box asking the end-user if he
 // wants to use synthetic instructions and register aliases.
 const char *idaapi set_idp_options(
-    const char *keyword,
-    int /*value_type*/,
-    const void * /*value*/ )
+        const char *keyword,
+        int /*value_type*/,
+        const void * /*value*/)
 {
   short opt_subs = 0;
 
   if ( keyword != NULL )
     return IDPOPT_BADKEY;
 
-  if ( use_synthetic_insn() )     opt_subs |= 1;
-  if ( use_reg_aliases() )        opt_subs |= 2;
+  if ( use_synthetic_insn() )
+    opt_subs |= 1;
+  if ( use_reg_aliases() )
+    opt_subs |= 2;
 
   static const char form[] =
     "HELP\n"
@@ -225,11 +138,13 @@ const char *idaapi set_idp_options(
     "<~C~hoose device name:B:0::>"
     "\n\n\n";
 
-  AskUsingForm_c(form, &opt_subs, choose_device);
+  ask_form(form, &opt_subs, choose_device);
 
   idpflags = 0;    // reset the configuration
-  if ( opt_subs & 1 )    idpflags |= NETNODE_USE_INSN_SYNTHETIC;
-  if ( opt_subs & 2 )    idpflags |= NETNODE_USE_REG_ALIASES;
+  if ( opt_subs & 1 )
+    idpflags |= NETNODE_USE_INSN_SYNTHETIC;
+  if ( opt_subs & 2 )
+    idpflags |= NETNODE_USE_REG_ALIASES;
 
   patch_regnames();
   return IDPOPT_OK;
@@ -239,7 +154,7 @@ const char *idaapi set_idp_options(
 // otherwise, returns NULL.
 const ioport_t *find_sym(ea_t address)
 {
-  return find_ioport(ports, numports, address);
+  return find_ioport(ports, address);
 }
 
 // GNU Assembler description
@@ -254,7 +169,6 @@ static const asm_t gnu_asm =
   "m32r GNU Assembler",
   0,
   NULL,         // no headers
-  NULL,         // no bad instructions
   NULL,
   NULL,
 
@@ -282,10 +196,6 @@ static const asm_t gnu_asm =
   "dfs %s",     // uninited arrays
   "equ",        // Equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline()
-  NULL,         // checkarg_atomprefix()
-  NULL,         // checkarg_operations()
-  NULL,         // translation to use in character & string constants
   "$",          // current IP (instruction pointer) symbol in assembler
   NULL,         // func_header
   NULL,         // func_footer
@@ -345,20 +255,217 @@ static const bytes_t retcodes[] =
   { 0, NULL }                            // NULL terminated array
 };
 
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
+{
+  switch ( code )
+  {
+    case idb_event::savebase:
+    case idb_event::closebase:
+      // synchronize the database long variable with the current configuration settings
+      helper.altset(-1, idpflags);
+      helper.supset(-1, device.c_str());
+      break;
+  }
+  return 0;
+}
+
+//----------------------------------------------------------------------------
+// The kernel event notifications
+// Here you may take desired actions upon some kernel events
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
+      // this processor is big endian
+      inf.set_be(true);
+      helper.create("$ m32r");
+      break;
+
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
+      break;
+
+    case processor_t::ev_newfile:
+      if ( choose_ioport_device(&device, cfgname) )
+        set_device_name(device.c_str(), IORESP_ALL);
+      // default configuration
+      if ( refresh_idpflags() == 0 )
+      {
+        idpflags = 0;
+        idpflags |= NETNODE_USE_INSN_SYNTHETIC;
+        idpflags |= NETNODE_USE_REG_ALIASES;
+      }
+
+      // patch register names according to idpflags
+      patch_regnames();
+      break;
+
+    case processor_t::ev_newprc:
+      ptype = processor_subtype_t(va_arg(va, int));
+//      msg("ptype = %s\n", ptype == prc_m32r ? "m32r" : ptype == prc_m32rx ? "m32rx" : "???");
+      break;
+
+    case processor_t::ev_oldfile:
+      refresh_idpflags();
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_NONE);
+      // patch register names according to idpflags
+      patch_regnames();
+      break;
+
+    case processor_t::ev_create_switch_xrefs:
+      {
+        ea_t insn_ea = va_arg(va, ea_t);
+        switch_info_t *si = va_arg(va, switch_info_t *);
+        return m32r_create_switch_xrefs(insn_ea, *si);
+      }
+
+    case processor_t::ev_calc_switch_cases:
+      {
+        casevec_t *casevec = va_arg(va, casevec_t *);
+        eavec_t *targets   = va_arg(va, eavec_t *);
+        ea_t insn_ea       = va_arg(va, ea_t);
+        switch_info_t *si  = va_arg(va, switch_info_t *);
+        return m32r_calc_switch_cases(casevec, targets, insn_ea, *si);
+      }
+
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        m32r_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        m32r_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        m32r_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
+    case processor_t::ev_realcvt:
+      {
+        void *m = va_arg(va, void *);
+        uint16 *e = va_arg(va, uint16 *);
+        uint16 swt = va_argi(va, uint16);
+        int code1 = ieee_realcvt(m, e, swt);
+        return code1 == 0 ? 1 : code1;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_get_frame_retsize:
+      {
+        int *frsize = va_arg(va, int *);
+        const func_t *pfn = va_arg(va, const func_t *);
+        *frsize = m32r_get_frame_retsize(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
+      break;
+  }
+  return code;
+}
+
 //-----------------------------------------------------------------------
 //      Processor Definition
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,// version
-  PLFM_M32R,            // id
-  PR_RNAMESOK           // can use register names for byte names
-  |PR_BINMEM            // The module creates RAM/ROM segments for binary files
-                        // (the kernel shouldn't ask the user about their sizes and addresses)
-  |PR_USE32
-  |PR_DEFSEG32,
-  8,                    // 8 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_M32R,              // id
+                          // flag
+    PR_RNAMESOK           // can use register names for byte names
+  | PR_BINMEM             // The module creates RAM/ROM segments for binary files
+                          // (the kernel shouldn't ask the user about their sizes and addresses)
+  | PR_USE32
+  | PR_DEFSEG32,
+                          // flag2
+    PR2_REALCVT           // the module has 'realcvt' event implementation
+  | PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,              // array of short processor names
                         // the short names are used to specify the processor
@@ -371,31 +478,8 @@ processor_t LPH =
 
   notify,               // the kernel event notification callback
 
-  header,               // generate the disassembly header
-  footer,               // generate the disassembly footer
-
-  gen_segm_header,      // generate a segment declaration (start of segment)
-  std_gen_segm_footer,  // generate a segment footer (end of segment)
-
-  NULL,                 // generate 'assume' directives
-
-  ana,                  // analyze an instruction and fill the 'cmd' structure
-  emu,                  // emulate an instruction
-
-  out,                  // generate a text representation of an instruction
-  outop,                // generate a text representation of an operand
-  intel_data,           // generate a text representation of a data item
-  NULL,                 // compare operands
-  can_have_type,        // can an operand have a type?
-
-  qnumber(RegNames),    // Number of registers
   RegNames,             // Regsiter names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(RegNames),    // Number of registers
 
   rVcs,rVds,
   0,                    // size of a segment register
@@ -405,28 +489,13 @@ processor_t LPH =
   retcodes,
 
   0,m32r_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  ieee_realcvt,         // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 0 },      // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  is_sp_based,          // int (*is_sp_based)(op_t &x);
-  create_func_frame,    // int (*create_func_frame)(func_t *pfn);
-  m32r_get_frame_retsize, // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   m32r_rte,             // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL                  // mvm_t *mvm;
 };

@@ -8,6 +8,8 @@
 #include "win32_rpc.h"
 #include "win32_undoc.h"
 
+#include "dbg_pe_hlp.cpp"
+
 struct impfunc_t
 {
   const char *name;
@@ -46,22 +48,32 @@ static UNICODE_STRING DriverName = RTL_CONSTANT_STRING(L"\\Device\\kldbgdrv");
 #define lread myread     // since we can't use loader_failure()
 inline void myread(linput_t *li, void *buf, size_t size)
 {
-  eread(qlfile(li), buf, size);
+  int bytes_read = qlread(li, buf, size);
+  if ( bytes_read != size )
+  {
+    int saved_code = qerrcode();
+    const char *errmsg = qerrstr();
+    uint64 pos = qltell(li) - bytes_read;
+    static const char *const format =
+      "Read error: %s\n"
+      "(file position 0x%" FMT_64 "X, wanted 0x%" FMT_Z "X bytes, read 0x%X)";
+
+    error(format,
+      saved_code ? errmsg : "read past end of file",
+      pos,
+      size,
+      bytes_read);
+  }
 }
 
 #include "../../ldr/pe/common.cpp"
 
-#ifdef UNICODE
 #define GetMappedFileName_Name "GetMappedFileNameW"
 #define GetModuleFileNameEx_Name "GetModuleFileNameExW"
-#else
-#define GetMappedFileName_Name "GetMappedFileNameA"
-#define GetModuleFileNameEx_Name "GetModuleFileNameExA"
-#endif
 
 // function prototypes
-typedef DWORD (WINAPI *GetMappedFileName_t)(HANDLE hProcess, LPVOID lpv, LPTSTR lpFilename, DWORD nSize);
-typedef DWORD (WINAPI *GetModuleFileNameEx_t)(HANDLE hProcess, HMODULE hModule, LPTSTR lpFilename, DWORD nSize);
+typedef DWORD (WINAPI *GetMappedFileName_t)(HANDLE hProcess, LPVOID lpv, LPWSTR lpFilename, DWORD nSize);
+typedef DWORD (WINAPI *GetModuleFileNameEx_t)(HANDLE hProcess, HMODULE hModule, LPWSTR lpFilename, DWORD nSize);
 
 // functions pointers
 //lint -esym(843,_GetMappedFileName,_GetModuleFileNameEx) could be const
@@ -83,13 +95,13 @@ LPVOID win32_debmod_t::correct_exe_image_base(LPVOID base)
 }
 
 //--------------------------------------------------------------------------
-ea_t win32_debmod_t::s0tops(ea_t ea)
+eanat_t win32_debmod_t::s0tops(eanat_t ea)
 {
   return ea;
 }
 
 //--------------------------------------------------------------------------
-ea_t win32_debmod_t::pstos0(ea_t ea)
+eanat_t win32_debmod_t::pstos0(eanat_t ea)
 {
   return ea;
 }
@@ -129,7 +141,8 @@ static ssize_t find_signature(const uchar *sign, size_t signlen, const uchar *bu
   const uchar *end = buf + bufsize - signlen;
   for ( const uchar *ptr=buf; ptr <= end; ptr++ )
   {
-    if ( *ptr != c ) continue;
+    if ( *ptr != c )
+      continue;
     if ( memcmp(sign, ptr, signlen) == 0 )
       return ptr-buf;
   }
@@ -148,11 +161,11 @@ static ssize_t find_bcc_sign(const uchar *buf, size_t bufsize)
 }
 
 //--------------------------------------------------------------------------
-bool win32_debmod_t::add_thread_areas(
-  HANDLE process_handle,
-  thid_t tid,
-  images_t &thread_areas,
-  images_t &class_areas)
+bool win32_debmod_t::add_thread_ranges(
+        HANDLE process_hnd,
+        thid_t tid,
+        images_t &thr_ranges,
+        images_t &cls_ranges)
 {
   thread_info_t *ti = threads.get(tid);
   if ( ti == NULL )
@@ -168,35 +181,35 @@ bool win32_debmod_t::add_thread_areas(
   if ( EA_T(tib.Self) != ea_tib )
     return false;
 
-  // add TIB area
+  // add TIB range
   char name[MAXSTR];
   qsnprintf(name, sizeof(name), "TIB[%08X]", tid);
   // we suppose the whole page is reserved for the TIB
   image_info_t ii_tib(this, ea_tib, system_teb_size, name);
-  thread_areas.insert(std::make_pair(ii_tib.base, ii_tib));
-  // add stack area - we also verify it is valid by analyzing SP
+  thr_ranges.insert(std::make_pair(ii_tib.base, ii_tib));
+  // add stack range - we also verify it is valid by analyzing SP
   if ( EA_T(tib.StackLimit) > ti->ctx.Esp || ti->ctx.Esp >= EA_T(tib.StackBase) )
     return false;
 
   asize_t size = EA_T(tib.StackBase) - EA_T(tib.StackLimit);
   qsnprintf(name, sizeof(name), "Stack[%08X]", tid);
   image_info_t ii_stack(this, EA_T(tib.StackLimit), size, name);
-  thread_areas.insert(std::make_pair(ii_stack.base, ii_stack));
+  thr_ranges.insert(std::make_pair(ii_stack.base, ii_stack));
   ii_stack.name = "STACK";
-  class_areas.insert(std::make_pair(ii_stack.base, ii_stack));
+  cls_ranges.insert(std::make_pair(ii_stack.base, ii_stack));
   // verify a Stack PAGE_GUARD page exists
   ea_t ea_guard = ii_stack.base - MEMORY_PAGE_SIZE;
   MEMORY_BASIC_INFORMATION MemoryBasicInformation;
-  if ( VirtualQueryEx(process_handle, (LPCVOID)ea_guard,
+  if ( VirtualQueryEx(process_hnd, (LPCVOID)(size_t)ea_guard,
                 &MemoryBasicInformation, sizeof(MemoryBasicInformation)) )
   {
     if ( MemoryBasicInformation.Protect & PAGE_GUARD ) // a Stack PAGE_GUARD exists
     {
       qsnprintf(name, sizeof(name), "Stack_PAGE_GUARD[%08X]", tid);
       image_info_t ii_guard(this, ea_guard, MEMORY_PAGE_SIZE, name);
-      thread_areas.insert(std::make_pair(ii_guard.base, ii_guard));
+      thr_ranges.insert(std::make_pair(ii_guard.base, ii_guard));
       ii_guard.name = "STACK";
-      class_areas.insert(std::make_pair(ii_guard.base, ii_guard));
+      cls_ranges.insert(std::make_pair(ii_guard.base, ii_guard));
     }
   }
   return true;
@@ -208,7 +221,7 @@ bool win32_debmod_t::add_thread_areas(
 //     child==true:ea is an address in the child process
 //     child==false:ea is an address in the the debugger itself
 // Returns: offset to the headers, BADADDR means failure
-ea_t win32_debmod_t::get_pe_header(ea_t ea, peheader_t *nh)
+ea_t win32_debmod_t::get_pe_header(eanat_t ea, peheader_t *nh)
 {
   uint32 offset = 0;
   uint32 magic;
@@ -238,67 +251,84 @@ ea_t win32_debmod_t::get_pe_header(ea_t ea, peheader_t *nh)
 // since we could not find anything nice, we just look
 // at the beginning of the DLL module in the memory and extract
 // correct value from the file header
-uint32 win32_debmod_t::calc_imagesize(ea_t base)
+uint32 win32_debmod_t::calc_imagesize(eanat_t base)
 {
   peheader_t nh;
-  ea_t offset = get_pe_header(base, &nh);
-  if ( offset == BADADDR )
+  ea_t peoff = get_pe_header(base, &nh);
+  if ( peoff == BADADDR )
     return 0;
   return nh.imagesize;
 }
 
 //--------------------------------------------------------------------------
 bool win32_debmod_t::create_process(
-    const char *path,
-    const char *args,
-    const char *startdir,
-    bool is_gui,
-    PROCESS_INFORMATION *ProcessInformation)
+        const char *path,
+        const char *args,
+        const char *startdir,
+        bool is_gui,
+        bool hide_window,
+        PROCESS_INFORMATION *ProcessInformation)
 {
-#ifndef __X64__
   linput_t *li = open_linput(path, false);
   if ( li == NULL )
     return false;
-
   pe_loader_t pl;
   pl.read_header(li, true);
   close_linput(li);
+
+#ifndef __EA64__
   if ( pl.pe.is_pe_plus() )
   {
-    static const char server_name[] = "win64_remotex64.exe";
-#ifdef __EA64__
-    if ( askyn_c(1, "AUTOHIDE REGISTRY\nHIDECANCEL\nDebugging 64-bit applications is only possible with the %s server. Launch it now?", server_name) == 1 ) do
+    dwarning("AUTOHIDE NONE\nPlease use ida64 to debug 64-bit applications");
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return false;
+  }
+#endif
+
+#ifndef __X64__
+  if ( pl.pe.is_pe_plus() )
+  {
+    static const char server_name[] = "win64_remote64.exe";
+    if ( ask_yn(ASKBTN_YES,
+                "AUTOHIDE REGISTRY\nHIDECANCEL\n"
+                "Debugging 64-bit applications is only possible with the %s server.\n"
+                "Launch it now?",
+                server_name) == ASKBTN_YES )
     {
-      // Switch to the remote win32 debugger
-      if ( !load_debugger("win32_stub", true))
+      do
       {
-        warning("Failed to switch to the remote windows debugger!");
-        break;
-      }
+        // Switch to the remote win32 debugger
+        if ( !load_debugger("win32_stub", true) )
+        {
+          warning("Failed to switch to the remote windows debugger!");
+          break;
+        }
 
-      // Form the server path
-      char server_exe[QMAXPATH];
-      qmakepath(server_exe, sizeof(server_exe), idadir(NULL), server_name, NULL);
+        // Form the server path
+        char server_exe[QMAXPATH];
+        qmakepath(server_exe, sizeof(server_exe), idadir(NULL), server_name, NULL);
 
-      // Try to launch the server
-      STARTUPINFO si = {sizeof(si)};
-      PROCESS_INFORMATION pi;
-      if ( !::CreateProcess(server_exe, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi) )
-      {
-        warning("Failed to run the 64-bit remote server!");
-        break;
-      }
+        // Try to launch the server
+        STARTUPINFO si = { sizeof(si) };
+        PROCESS_INFORMATION pi;
+        if ( hide_window )
+        {
+          si.dwFlags |= STARTF_USESHOWWINDOW;
+          si.wShowWindow = SW_HIDE; /* SW_FORCEMINIMIZE ? */
+        }
+        if ( !::CreateProcess(server_exe, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi) )
+        {
+          warning("Failed to run the 64-bit remote server!");
+          break;
+        }
 
-      // Set the remote debugging options: localhost
-      set_remote_debugger("localhost", "", -1);
+        // Set the remote debugging options: localhost
+        set_remote_debugger("localhost", "", -1);
 
-      // Notify the user
-      info("Debugging server has been started, please try debugging the program again.");
-    } while ( false );
-#else
-    dwarning("AUTOHIDE NONE\n"
-      "Please use %s remote server to debug 64-bit applications", server_name);
-#endif // __EA64__
+        // Notify the user
+        info("Debugging server has been started, please try debugging the program again.");
+      } while ( false );
+    }
     SetLastError(ERROR_NOT_SUPPORTED);
     return false;
   }
@@ -316,6 +346,9 @@ bool win32_debmod_t::create_process(
   lpp.flags |= LP_TRACE | LP_PATH_WITH_ARGS;
   if ( !is_gui )
     lpp.flags |= LP_NEW_CONSOLE;
+  if ( hide_window )
+    lpp.flags |= LP_HIDE_WINDOW;
+
   lpp.path = path;
   lpp.args = args;
   lpp.startdir = startdir;
@@ -340,7 +373,7 @@ bool win32_debmod_t::set_debug_hook(ea_t base)
   if ( peoff == BADADDR )
     return false;
 
-  ea_t text = base + pe.text_start;
+  eanat_t text = base + pe.text_start;
   uchar buf[4096];
   if ( _read_memory(text, buf, sizeof(buf)) != sizeof(buf) )
     return false;
@@ -412,70 +445,14 @@ bool win32_debmod_t::can_access(ea_t addr)
 }
 
 //--------------------------------------------------------------------------
-// get path+name from a mapped file in the debugged process
-bool win32_debmod_t::get_mapped_filename(HANDLE process_handle,
-                         ea_t imagebase,
-                         char *buf,
-                         size_t bufsize)
-{
-  if ( _GetMappedFileName != NULL )
-  {
-    TCHAR name[QMAXPATH];
-    name[0] = '\0';
-    if ( !can_access(imagebase) )
-      imagebase += MEMORY_PAGE_SIZE;
-    if ( _GetMappedFileName(process_handle, (LPVOID)imagebase, name, qnumber(name)) )
-    {
-      // translate path with device name to drive letters.
-      //   based on http://msdn.microsoft.com/library/default.asp?url=/library/en-us/fileio/base/obtaining_a_file_name_from_a_file_handle.asp
-      TCHAR szTemp[MAX_PATH];
-      szTemp[0] = '\0';
-      if ( GetLogicalDriveStrings(sizeof(szTemp), szTemp) )
-      {
-        char szName[MAX_PATH];
-        char szDrive[3] = " :";
-        bool bFound = FALSE;
-        char *p = szTemp;
-        do
-        {
-          // Copy the drive letter to the template string
-          szDrive[0] = *p;
-          // Look up each device name
-          if ( QueryDosDevice(szDrive, szName, MAX_PATH) )
-          {
-            size_t uNameLen = strlen(szName);
-            if ( uNameLen < MAX_PATH )
-            {
-              bFound = strnicmp(name, szName, uNameLen) == 0;
-              if ( bFound )
-              {
-                // Reconstruct pszFilename using szTemp
-                // Replace device path with DOS path
-                qstrncpy(name, szDrive, sizeof(name));
-                qstrncat(name, name+uNameLen, sizeof(name));
-              }
-            }
-          }
-          // Go to the next NULL character.
-          while ( *p++ );
-        } while ( !bFound && *p ); // end of string
-      }
-      wcstr(buf, name, bufsize);
-      return true;
-    }
-  }
-  return false;
-}
-
-//--------------------------------------------------------------------------
 // return the address of all names exported by a DLL in 'ni'
 // if 'exported_name' is given, only the address of this exported name will be returned in 'ni'
 static bool get_dll_exports_from_file(
-    const char *dllname,
-    linput_t *li,
-    ea_t imagebase,
-    name_info_t &ni,
-    const char *exported_name = NULL)
+        const char *dllname,
+        linput_t *li,
+        ea_t imagebase,
+        name_info_t &ni,
+        const char *exported_name = NULL)
 {
   pe_loader_t pl;
   if ( !pl.read_header(li) )
@@ -521,30 +498,51 @@ static bool get_dll_exports_from_file(
 // return the address of all names exported by a DLL in 'ni'
 // if 'exported_name' is given, only the address of this exported name will be returned in 'ni'
 bool win32_debmod_t::get_dll_exports(
-  const images_t &dlls,
-  ea_t imagebase,
-  name_info_t &ni,
-  const char *exported_name)
+        const images_t &loaded_dlls,
+        ea_t imagebase,
+        name_info_t &ni,
+        const char *exported_name)
 {
   char prefix[MAXSTR];
-  images_t::const_iterator p = dlls.find(imagebase);
-  if ( p == dlls.end() )
+  images_t::const_iterator p = loaded_dlls.find(imagebase);
+  if ( p == loaded_dlls.end() )
   {
     dwarning("get_dll_exports: can't find dll name for imagebase %a", imagebase);
     return false;
   }
+  char dname[MAXSTR];
   const char *dllname = p->second.name.c_str();
-
-  linput_t *li = open_linput(dllname, false);
+  qstrncpy(dname, dllname, sizeof(dname));
+  if ( debapp_attrs.addrsize == 4 )
+    replace_system32(dname, MAXSTR);
+  linput_t *li = open_linput(dname, false);
   if ( li == NULL )
   {
     // sysWOW64: ntdll32.dll does not exist but there is a file called ntdll.dll
     if ( stricmp(qbasename(dllname), "ntdll32.dll") != 0 )
       return false;
-    qstrncpy(prefix, dllname, sizeof(prefix));
-    char *fname = qbasename(prefix);
-    qstrncpy(fname, "ntdll.dll", sizeof(prefix)-(fname-prefix));
-    dllname = prefix;
+    if ( qisabspath(dllname) )
+    {
+      qstrncpy(prefix, dllname, sizeof(prefix));
+      char *fname = qbasename(prefix);
+      qstrncpy(fname, "ntdll.dll", sizeof(prefix)-(fname-prefix));
+      dllname = prefix;
+    }
+    else
+    {
+#ifndef __X64__
+      // TODO: On X86 there might by file redirection active on a X64 host
+      // Therefore we will load on such system always 32 bit DLL, as we can
+      // access 64 bit one without disabling the redirection
+      dllname = "C:\\Windows\\System32\\ntdll.dll";
+#else
+#ifndef __EA64__
+      dllname = "C:\\Windows\\SysWOW64\\ntdll.dll";
+#else
+      dllname = debapp_attrs.addrsize != 4 ? "C:\\Windows\\System32\\ntdll.dll" : "C:\\Windows\\SysWOW64\\ntdll.dll";
+#endif
+#endif
+    }
     li = open_linput(dllname, false);
     if ( li == NULL )
       return false;
@@ -565,15 +563,15 @@ bool win32_debmod_t::get_dll_exports(
 //--------------------------------------------------------------------------
 // get name from export directory in PE image in debugged process
 bool win32_debmod_t::get_pe_export_name_from_process(
-  ea_t imagebase,
-  char *name,
-  size_t namesize)
+        eanat_t imagebase,
+        char *name,
+        size_t namesize)
 {
   peheader_t pe;
   ea_t peoff = get_pe_header(imagebase, &pe);
-  if ( peoff != BADADDR && pe.expdir.rva != 0)
+  if ( peoff != BADADDR && pe.expdir.rva != 0 )
   {
-    ea_t ea = imagebase + pe.expdir.rva;
+    eanat_t ea = imagebase + pe.expdir.rva;
     peexpdir_t expdir;
     if ( _read_memory(ea, &expdir, sizeof(expdir)) == sizeof(expdir) )
     {

@@ -33,8 +33,15 @@
   #define get_reg_class(reg_idx) get_x86_reg_class(reg_idx)
 #endif
 
-typedef HANDLE (WINAPI *OpenThread_t)(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwThreadId);
-OpenThread_t _OpenThread = NULL;
+typedef HANDLE WINAPI OpenThread_t(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwThreadId);
+static OpenThread_t *_OpenThread = NULL;
+
+#ifdef __X64__
+typedef BOOL WINAPI Wow64GetThreadContext_t(HANDLE hThread, PWOW64_CONTEXT lpContext);
+typedef BOOL WINAPI Wow64SetThreadContext_t(HANDLE hThread, const WOW64_CONTEXT *lpContext);
+static Wow64GetThreadContext_t *_Wow64GetThreadContext = NULL;
+static Wow64SetThreadContext_t *_Wow64SetThreadContext = NULL;
+#endif
 
 //--------------------------------------------------------------------------
 // Macro to test the DBG_FLAG_DONT_DISTURB flag
@@ -62,10 +69,10 @@ void win32_debmod_t::check_thread(bool must_be_main_thread) const
 }
 
 //--------------------------------------------------------------------------
-static int unicode_to_ansi(char *buf, size_t bufsize, LPCWSTR unicode)
+static int utf16_to_utf8(char *buf, size_t bufsize, LPCWSTR unicode)
 {
   qstring res;
-  u2cstr(unicode, &res);
+  utf16_utf8(&res, unicode);
   qstrncpy(buf, res.c_str(), bufsize);
   size_t n = res.length();
   if ( n > bufsize )
@@ -118,7 +125,7 @@ FOUND:
 }
 
 //--------------------------------------------------------------------------
-ssize_t win32_debmod_t::access_memory(ea_t ea, void *buffer, ssize_t size, bool do_write, bool suspend)
+ssize_t win32_debmod_t::access_memory(eanat_t ea, void *buffer, ssize_t size, bool do_write, bool suspend)
 {
   if ( process_handle == INVALID_HANDLE_VALUE )
     return -1;
@@ -130,7 +137,7 @@ ssize_t win32_debmod_t::access_memory(ea_t ea, void *buffer, ssize_t size, bool 
     suspend_all_threads();
 
   ea = s0tops(ea);
-  void *addr = (void *)(size_t)ea;
+  void *addr = (void *)ea;
 
   DWORD_PTR size_access = 0;
   const DWORD BADPROT = DWORD(-1);
@@ -165,7 +172,7 @@ ssize_t win32_debmod_t::access_memory(ea_t ea, void *buffer, ssize_t size, bool 
               oldprotect,
               &oldprotect) )
       {
-        deberr("VirtualProtectEx2(%08a)", ea);
+        deberr("VirtualProtectEx2(%p)", addr);
       }
       break; // do not attempt more than once
     }
@@ -180,7 +187,7 @@ ssize_t win32_debmod_t::access_memory(ea_t ea, void *buffer, ssize_t size, bool 
     int code = GetLastError();
     if ( code != ERROR_NOACCESS && code != ERROR_PARTIAL_COPY )
     {
-      deberr("%sProcessMemory(%a)", do_write ? "Write" : "Read", ea);
+      deberr("%sProcessMemory(%p)", do_write ? "Write" : "Read", ea);
       break;
     }
 
@@ -206,7 +213,7 @@ ssize_t win32_debmod_t::access_memory(ea_t ea, void *buffer, ssize_t size, bool 
       do_write ? PAGE_EXECUTE_READWRITE : PAGE_EXECUTE_READ,
       &oldprotect) )
     {
-      deberr("VirtualProtectEx1(%08a, size=%d for %s)", ea, int(size), do_write ? "write" : "read");
+      deberr("VirtualProtectEx1(%08p, size=%d for %s)", ea, int(size), do_write ? "write" : "read");
       break;
     }
   }
@@ -223,7 +230,7 @@ ssize_t win32_debmod_t::access_memory(ea_t ea, void *buffer, ssize_t size, bool 
 }
 
 //--------------------------------------------------------------------------
-ssize_t win32_debmod_t::_read_memory(ea_t ea, void *buffer, size_t size, bool suspend)
+ssize_t win32_debmod_t::_read_memory(eanat_t ea, void *buffer, size_t size, bool suspend)
 {
   return access_memory(ea, buffer, size, false, suspend);
 }
@@ -358,7 +365,7 @@ int win32_debmod_t::get_dmi_cb(debmod_t *sess, MODULEENTRY32 *me32, void *ud)
   // if the module name doesn't correspond to the process name,
   // we continue to iterate
   char buf[QMAXPATH];
-  wcstr(buf, me32->szModule, sizeof(buf));
+  tchar_utf8(buf, me32->szModule, sizeof(buf));
   if ( !_this->process_path.empty() && stricmp(buf, qbasename(_this->process_path.c_str())) != 0 )
     return 0;
 
@@ -388,7 +395,7 @@ void idaapi win32_debmod_t::dbg_stopped_at_debug_event(void)
   // we will take advantage of this event to import information
   // about the exported functions from the loaded dlls
   name_info_t &ni = *get_debug_names();
-  for ( easet_t::iterator p=dlls_to_import.begin(); p != dlls_to_import.end(); )
+  for ( easet_t::iterator p = dlls_to_import.begin(); p != dlls_to_import.end(); )
   {
     get_dll_exports(dlls, *p, ni);
     dlls_to_import.erase(p++);
@@ -398,9 +405,9 @@ void idaapi win32_debmod_t::dbg_stopped_at_debug_event(void)
 //--------------------------------------------------------------------------
 // return the address of an exported name
 ea_t win32_debmod_t::get_dll_export(
-  const images_t &_dlls,
-  ea_t imagebase,
-  const char *exported_name)
+        const images_t &_dlls,
+        ea_t imagebase,
+        const char *exported_name)
 {
   ea_t ret = BADADDR;
 
@@ -412,17 +419,16 @@ ea_t win32_debmod_t::get_dll_export(
 
 //--------------------------------------------------------------------------
 win32_debmod_t::win32_debmod_t()
+  : expecting_debug_break(0), stop_at_ntdll_bpts(false)
 {
-  debug_break_ea = ea_t(0);
-  expecting_debug_break = false;
   fake_suspend_event = false;
 
   pid = -1;
 
   // Reset handles
-  process_handle =
-  thread_handle  =
-  redirin_handle =
+  process_handle  = INVALID_HANDLE_VALUE;
+  thread_handle   = INVALID_HANDLE_VALUE;
+  redirin_handle  = INVALID_HANDLE_VALUE;
   redirout_handle = INVALID_HANDLE_VALUE;
 
   attach_evid = INVALID_HANDLE_VALUE;
@@ -438,7 +444,6 @@ win32_debmod_t::win32_debmod_t()
   exiting = false;
   DebugBreakProcess_requested = false;
 
-  pdb_remote_session = NULL;
   broken_event_handle = NULL;
   // we don't set platform name here because it will be inherited
   // from winbase_debmod_t
@@ -482,7 +487,7 @@ int idaapi win32_debmod_t::dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *ori
 }
 
 //--------------------------------------------------------------------------
-ssize_t win32_debmod_t::_write_memory(ea_t ea, const void *buffer, size_t size, bool suspend)
+ssize_t win32_debmod_t::_write_memory(eanat_t ea, const void *buffer, size_t size, bool suspend)
 {
   if ( !may_write(ea) )
     return -1;
@@ -495,11 +500,8 @@ void idaapi win32_debmod_t::dbg_term(void)
   check_thread(true);
   cleanup_hwbpts();
   cleanup();
-  if ( pdb_remote_session != NULL )
-  {
-    close_pdb_remote_session(pdb_remote_session);
-    pdb_remote_session = NULL;
-  }
+  for ( size_t i = 0; i < pdb_remote_sessions.size(); ++i )
+    close_pdb_remote_session(pdb_remote_sessions[i]);
   inherited::dbg_term();
 }
 
@@ -509,7 +511,7 @@ bool win32_debmod_t::has_bpt_at(ea_t ea)
   uchar bytes[8];
   int size = bpt_code.size();
   return _read_memory(ea, bytes, size) == size
-    && memcmp(bytes, bpt_code.begin(), size) == 0;
+      && memcmp(bytes, bpt_code.begin(), size) == 0;
 }
 
 //--------------------------------------------------------------------------
@@ -549,34 +551,33 @@ int idaapi win32_debmod_t::dbg_add_bpt(bpttype_t type, ea_t ea, int len)
 }
 
 //--------------------------------------------------------------------------
-int idaapi win32_debmod_t::dbg_get_memory_info(meminfo_vec_t &areas)
+int idaapi win32_debmod_t::dbg_get_memory_info(meminfo_vec_t &ranges)
 {
   check_thread(false);
   NODISTURB_ASSERT(in_event != NULL);
 
   images.clear();
-  thread_areas.clear();
-  class_areas.clear();
+  thread_ranges.clear();
+  class_ranges.clear();
   for ( threads_t::iterator t=threads.begin(); t != threads.end(); ++t )
-    add_thread_areas(process_handle, t->first, thread_areas, class_areas);
+    add_thread_ranges(process_handle, t->first, thread_ranges, class_ranges);
 
   if ( process_handle != INVALID_HANDLE_VALUE )
   {
-    page_bpts_t::iterator p = page_bpts.begin();
     for ( ea_t ea=0; ea != BADADDR; )
     {
       memory_info_t meminf;
-      ea = get_region_info(&p, ea, &meminf);
-      if ( meminf.startEA != BADADDR )
-        areas.push_back(meminf);
+      ea = get_region_info(ea, &meminf);
+      if ( ea != BADADDR && meminf.start_ea != BADADDR )
+        ranges.push_back(meminf);
     }
     enable_page_bpts(true);
   }
 
-  if ( same_as_oldmemcfg(areas) )
+  if ( same_as_oldmemcfg(ranges) )
     return -2;
 
-  save_oldmemcfg(areas);
+  save_oldmemcfg(ranges);
   return 1;
 }
 
@@ -587,6 +588,8 @@ int idaapi win32_debmod_t::dbg_thread_suspend(thid_t tid)
   check_thread(false);
   NODISTURB_ASSERT(in_event != NULL);
   int count = SuspendThread(get_thread_handle(tid));
+  if ( count == -1 )
+    deberr("SuspendThread(%08X)", tid);
 
   if ( debug_debugger )
     debdeb("SuspendThread(%08X) -> %d\n", tid, count);
@@ -602,44 +605,214 @@ int idaapi win32_debmod_t::dbg_thread_continue(thid_t tid)
   NODISTURB_ASSERT(in_event != NULL);
   int count = ResumeThread(get_thread_handle(tid));
   if ( count == -1 )
-  {
     deberr("ResumeThread(%08X)", tid);
-  }
-  //else if ( debug_debugger )
-  //{
-  //  debdeb("ResumeThread(%08X) -> %d\n", tid, count);
-  //}
+
+  if ( debug_debugger )
+    debdeb("ResumeThread(%08X) -> %d\n", tid, count);
+
   return count != -1;
 }
 
 //--------------------------------------------------------------------------
+static int calc_ctxflags(int clsmask)
+{
+  int ctxflags = CONTEXT_CONTROL|CONTEXT_INTEGER;
+#ifdef __ARM__
+  qnotused(clsmask);
+#else
+  if ( (clsmask & X86_RC_SEGMENTS) != 0 )
+    ctxflags |= CONTEXT_SEGMENTS;
+  if ( (clsmask & (X86_RC_FPU|X86_RC_MMX)) != 0 )
+    ctxflags |= CONTEXT_FLOATING_POINT;
+  if ( (clsmask & X86_RC_XMM) != 0 )
+#ifdef __X64__
+    ctxflags |= CONTEXT_FLOATING_POINT;
+#else
+    ctxflags |= CONTEXT_EXTENDED_REGISTERS;
+#endif
+#endif
+  return ctxflags;
+}
+
+//--------------------------------------------------------------------------
+// assertions that ensure that the conversion between CONTEXT and WOW64_CONTEXT
+// is correct
+#ifndef __X64__
+#ifndef __ARM__
+CASSERT(sizeof(FLOATING_SAVE_AREA) == 112);
+CASSERT(CONTEXT_CONTROL                   == 0x10001);
+CASSERT(CONTEXT_INTEGER                   == 0x10002);
+CASSERT(CONTEXT_SEGMENTS                  == 0x10004);
+CASSERT(CONTEXT_FLOATING_POINT            == 0x10008);
+CASSERT(CONTEXT_DEBUG_REGISTERS           == 0x10010);
+CASSERT(CONTEXT_EXTENDED_REGISTERS        == 0x10020);
+#endif
+#else
+CASSERT(sizeof(WOW64_FLOATING_SAVE_AREA) == 112);
+CASSERT(sizeof(XSAVE_FORMAT) == WOW64_MAXIMUM_SUPPORTED_EXTENSION);
+CASSERT(WOW64_CONTEXT_CONTROL             == 0x10001);
+CASSERT(WOW64_CONTEXT_INTEGER             == 0x10002);
+CASSERT(WOW64_CONTEXT_SEGMENTS            == 0x10004);
+CASSERT(WOW64_CONTEXT_FLOATING_POINT      == 0x10008);
+CASSERT(WOW64_CONTEXT_DEBUG_REGISTERS     == 0x10010);
+CASSERT(WOW64_CONTEXT_EXTENDED_REGISTERS  == 0x10020);
+#endif
+
+#ifdef __X64__
+#undef Esp
+#undef Eip
+//--------------------------------------------------------------------------
+inline int ctxflags_to_wow64(int ctxflags)
+{
+  return ctxflags; // see CASSERTs anout CONTEXT_... bits above
+}
+
+//--------------------------------------------------------------------------
+void thread_info_t::cvt_from_wow64(const WOW64_CONTEXT &wow64ctx, int clsmask)
+{
+  ctx.ContextFlags = calc_ctxflags(clsmask);
+
+  ctx.Dr0 = wow64ctx.Dr0;
+  ctx.Dr1 = wow64ctx.Dr1;
+  ctx.Dr2 = wow64ctx.Dr2;
+  ctx.Dr3 = wow64ctx.Dr3;
+  ctx.Dr6 = wow64ctx.Dr6;
+  ctx.Dr7 = wow64ctx.Dr7;
+
+  ctx.SegGs = wow64ctx.SegGs;
+  ctx.SegFs = wow64ctx.SegFs;
+  ctx.SegEs = wow64ctx.SegEs;
+  ctx.SegDs = wow64ctx.SegDs;
+
+  ctx.Rdi = wow64ctx.Edi;
+  ctx.Rsi = wow64ctx.Esi;
+  ctx.Rbx = wow64ctx.Ebx;
+  ctx.Rdx = wow64ctx.Edx;
+  ctx.Rcx = wow64ctx.Ecx;
+  ctx.Rax = wow64ctx.Eax;
+
+  ctx.Rbp    = wow64ctx.Ebp;
+  ctx.SegCs  = wow64ctx.SegCs;
+  ctx.EFlags = wow64ctx.EFlags;
+  ctx.SegSs  = wow64ctx.SegSs;
+  ctx.Rip    = wow64ctx.Eip;
+  ctx.Rsp    = wow64ctx.Esp;
+
+  if ( (wow64ctx.ContextFlags & WOW64_CONTEXT_FLOATING_POINT) != 0 )
+  {
+    ctx.FltSave.ControlWord   = wow64ctx.FloatSave.ControlWord;
+    ctx.FltSave.StatusWord    = wow64ctx.FloatSave.StatusWord;
+    ctx.FltSave.TagWord       = wow64ctx.FloatSave.TagWord;
+    ctx.FltSave.ErrorOffset   = wow64ctx.FloatSave.ErrorOffset;
+    ctx.FltSave.ErrorSelector = wow64ctx.FloatSave.ErrorSelector;
+    ctx.FltSave.DataOffset    = wow64ctx.FloatSave.DataOffset;
+    ctx.FltSave.DataSelector  = wow64ctx.FloatSave.DataSelector;
+    memset(ctx.FltSave.FloatRegisters, 0, sizeof(ctx.FltSave.FloatRegisters));
+    for ( int i=0; i < 8; i++ )
+      memcpy(&ctx.FltSave.FloatRegisters[i], &wow64ctx.FloatSave.RegisterArea[i*10], 10);
+  }
+  else if ( (wow64ctx.ContextFlags & WOW64_CONTEXT_EXTENDED_REGISTERS) != 0 )
+  {
+    memcpy(&ctx.FltSave, wow64ctx.ExtendedRegisters, sizeof(ctx.FltSave));
+  }
+}
+
+//--------------------------------------------------------------------------
+void thread_info_t::cvt_to_wow64(WOW64_CONTEXT *wow64ctx, int clsmask) const
+{
+  int cflags = calc_ctxflags(clsmask);
+  int wflags = ctxflags_to_wow64(cflags);
+  wow64ctx->ContextFlags = wflags;
+
+  wow64ctx->Dr0 = ctx.Dr0;
+  wow64ctx->Dr1 = ctx.Dr1;
+  wow64ctx->Dr2 = ctx.Dr2;
+  wow64ctx->Dr3 = ctx.Dr3;
+  wow64ctx->Dr6 = ctx.Dr6;
+  wow64ctx->Dr7 = ctx.Dr7;
+
+  wow64ctx->SegGs = ctx.SegGs;
+  wow64ctx->SegFs = ctx.SegFs;
+  wow64ctx->SegEs = ctx.SegEs;
+  wow64ctx->SegDs = ctx.SegDs;
+
+  wow64ctx->Edi = ctx.Rdi;
+  wow64ctx->Esi = ctx.Rsi;
+  wow64ctx->Ebx = ctx.Rbx;
+  wow64ctx->Edx = ctx.Rdx;
+  wow64ctx->Ecx = ctx.Rcx;
+  wow64ctx->Eax = ctx.Rax;
+
+  wow64ctx->Ebp    = ctx.Rbp;
+  wow64ctx->SegCs  = ctx.SegCs;
+  wow64ctx->EFlags = ctx.EFlags;
+  wow64ctx->SegSs  = ctx.SegSs;
+  wow64ctx->Eip    = ctx.Rip;
+  wow64ctx->Esp    = ctx.Rsp;
+
+  if ( (wflags & WOW64_CONTEXT_FLOATING_POINT) != 0 )
+  {
+    wow64ctx->FloatSave.ControlWord   = ctx.FltSave.ControlWord;
+    wow64ctx->FloatSave.StatusWord    = ctx.FltSave.StatusWord;
+    wow64ctx->FloatSave.TagWord       = ctx.FltSave.TagWord;
+    wow64ctx->FloatSave.ErrorOffset   = ctx.FltSave.ErrorOffset;
+    wow64ctx->FloatSave.ErrorSelector = ctx.FltSave.ErrorSelector;
+    wow64ctx->FloatSave.DataOffset    = ctx.FltSave.DataOffset;
+    wow64ctx->FloatSave.DataSelector  = ctx.FltSave.DataSelector;
+    for ( int i=0; i < 8; i++ )
+      memcpy(&wow64ctx->FloatSave.RegisterArea[i*10], &ctx.FltSave.FloatRegisters[i], 10);
+  }
+  if ( (wflags & WOW64_CONTEXT_EXTENDED_REGISTERS) != 0 )
+    memcpy(wow64ctx->ExtendedRegisters, &ctx.FltSave, sizeof(ctx.FltSave));
+}
+
+#define Eip Rip
+#endif
+
+//--------------------------------------------------------------------------
 bool thread_info_t::read_context(int clsmask)
 {
-  if ( (flags & clsmask) != clsmask )
-  {
-    int ctxflags = CONTEXT_CONTROL|CONTEXT_INTEGER;
-#ifdef __ARM__
-    qnotused(clsmask);
-#else
-    if ( (clsmask & X86_RC_SEGMENTS) != 0 )
-      ctxflags |= CONTEXT_SEGMENTS;
-    if ( (clsmask & (X86_RC_FPU|X86_RC_MMX)) != 0 )
-      ctxflags |= CONTEXT_FLOATING_POINT;
-    if ( (clsmask & X86_RC_XMM) != 0 )
+  if ( (flags & clsmask) == clsmask )
+    return true;
+
+  int ctxflags = calc_ctxflags(clsmask);
 #ifdef __X64__
-      ctxflags |= CONTEXT_FLOATING_POINT;
-#else
-      ctxflags |= CONTEXT_EXTENDED_REGISTERS;
+  if ( (flags & THR_WOW64) != 0 && _Wow64GetThreadContext != NULL )
+  {
+    WOW64_CONTEXT wow64ctx;
+    wow64ctx.ContextFlags = ctxflags_to_wow64(ctxflags);
+    if ( !_Wow64GetThreadContext(hThread, &wow64ctx) )
+      return false;
+    invalidate_context();
+    cvt_from_wow64(wow64ctx, clsmask);
+  }
+  else
 #endif
-#endif
+  {
     ctx.ContextFlags = ctxflags;
     if ( !GetThreadContext(hThread, &ctx) )
       return false;
     invalidate_context();
     ctx.ContextFlags = ctxflags; // invalidate_context() zeroed it
-    flags |= clsmask | RC_GENERAL;
   }
+  flags |= (clsmask | RC_GENERAL) & THR_CLSMASK;
   return true;
+}
+
+//--------------------------------------------------------------------------
+bool thread_info_t::write_context(int clsmask)
+{
+#ifdef __X64__
+  if ( (flags & THR_WOW64) != 0 && _Wow64SetThreadContext != NULL )
+  {
+    WOW64_CONTEXT wow64ctx;
+    cvt_to_wow64(&wow64ctx, clsmask);
+    return _Wow64SetThreadContext(hThread, &wow64ctx) != 0;
+  }
+#else
+  qnotused(clsmask);
+#endif
+  return SetThreadContext(hThread, &ctx) != 0;
 }
 
 //--------------------------------------------------------------------------
@@ -652,7 +825,8 @@ int idaapi win32_debmod_t::dbg_prepare_to_pause_process(void)
   if ( wth->use_debug_break_process() ) // only possible on XP/2K3 or higher
   {
     ok = wth->debug_break_process(process_handle);
-    expecting_debug_break = ok;
+    if ( !stop_at_ntdll_bpts )
+      expecting_debug_break = ok;
   }
   else
   {
@@ -694,14 +868,14 @@ int idaapi win32_debmod_t::dbg_prepare_to_pause_process(void)
 //----------------------------------------------------------------------
 // return the name associated with an existing image in 'images' list
 // containing a particular range
-static const char *get_range_name(const images_t &images, const area_t *range)
+static const char *get_range_name(const images_t &images, const range_t *range)
 {
   for ( images_t::const_iterator p=images.begin(); p != images.end(); ++p )
   {
     const image_info_t &img = p->second;
     ea_t ea1 = (ea_t)img.base;
     ea_t ea2 = ea1 + img.imagesize;
-    area_t b = area_t(ea1, ea2);
+    range_t b = range_t(ea1, ea2);
     b.intersect(*range);
     if ( !b.empty() )
       return img.name.c_str();
@@ -713,20 +887,15 @@ static const char *get_range_name(const images_t &images, const area_t *range)
 void win32_debmod_t::restore_original_bytes(ea_t ea, bool really_restore)
 {
   bpt_info_t::iterator p = thread_bpts.find(ea);
-  if ( p == thread_bpts.end() )
-  {
-    derror("interr: can't find orig_bytes info for %a", ea);
-  }
-  if ( --p->second.count == 0 )
+  QASSERT(1488, p != thread_bpts.end());
+  if ( --p->second.count == 0 )   //-V783 Dereferencing of the invalid iterator 'p'
   {
     uchar *obytes = p->second.orig_bytes;
     if ( really_restore )
     {
       int size = bpt_code.size();
       if ( _write_memory(ea, obytes, size) != size )
-      {
-        derror("interr: could not restore orginal insn of tmp bpt\n");
-      }
+        INTERR(1489);
     }
     thread_bpts.erase(p);
   }
@@ -767,20 +936,14 @@ bool win32_debmod_t::del_thread_bpt(thread_info_t &ti, ea_t ea)
     ti.ctx.Eip = ti.bpt_ea; // reset EIP
     DWORD saved = ti.ctx.ContextFlags;
     ti.ctx.ContextFlags = CONTEXT_CONTROL;
-    if ( !SetThreadContext(ti.hThread, &ti.ctx) )
+    if ( !ti.write_context(RC_GENERAL) )
       deberr("del_thread_bpt: SetThreadContext");
     ti.ctx.ContextFlags = saved;
   }
 
-  // do not restore the thread breakpoint if we installed
-  // a temporary breakpoint to workaround the stepping over
-  // callgates problem
-  if ( !ti.is_tracing() || ti.bpt_ea != ti.callgate_ea )
-  {
-    // restore old insn if necessary
-    restore_original_bytes(ti.bpt_ea);
-    ti.bpt_ea = BADADDR;
-  }
+  // restore old insn if necessary
+  restore_original_bytes(ti.bpt_ea);
+  ti.bpt_ea = BADADDR;
   return true;
 }
 
@@ -820,6 +983,18 @@ bool win32_debmod_t::set_thread_bpt(thread_info_t &ti, ea_t ea)
   debdeb("%a: set_thread_bpt() failed to pause thread %d\n", ti.bpt_ea, ti.tid);
   ti.bpt_ea = BADADDR;
   return false;
+}
+
+//--------------------------------------------------------------------------
+void win32_debmod_t::add_thread(const CREATE_THREAD_DEBUG_INFO &thr_info, thid_t tid)
+{
+#ifdef __ARM__
+  wow64_state_t w = WOW64_NO;
+#else
+  wow64_state_t w = check_wow64_process();
+#endif
+  thread_info_t ti(thr_info, tid, w);
+  threads.insert(std::make_pair(tid, ti));
 }
 
 //--------------------------------------------------------------------------
@@ -924,7 +1099,7 @@ gdecode_t win32_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
     case CREATE_THREAD_DEBUG_EVENT:
       {
         // add this thread to our list
-        threads.insert(std::make_pair(event->tid, thread_info_t(DebugEvent.u.CreateThread, event->tid)));
+        add_thread(DebugEvent.u.CreateThread, event->tid);
         event->eid = THREAD_START;
         event->ea = EA_T(DebugEvent.u.CreateThread.lpStartAddress);
         // set hardware breakpoints if any
@@ -956,18 +1131,19 @@ gdecode_t win32_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
         ctdi.hThread           = cpdi.hThread;
         ctdi.lpThreadLocalBase = cpdi.lpThreadLocalBase;
         ctdi.lpStartAddress    = cpdi.lpStartAddress;
-        threads.insert(std::make_pair(DebugEvent.dwThreadId, thread_info_t(ctdi, DebugEvent.dwThreadId)));
+        add_thread(ctdi, DebugEvent.dwThreadId);
 
         // set hardware breakpoints if any
         set_hwbpts(cpdi.hThread);
 
         // test hardware breakpoints:
         // add_hwbpt(HWBPT_WRITE, 0x0012FF68, 4);
-        if ( !debug_break_ea && get_win_version()->is_DW32() ) // dw32 specific
+        if ( ntdlls.empty() && winver.is_DW32() ) // dw32 specific
         {
           HINSTANCE h = GetModuleHandle(TEXT(TOOLHELP_LIB_NAME));
-          debug_break_ea = (DWORD_PTR)GetProcAddress(h, TEXT("DebugBreak"));
-          expecting_debug_break = true;
+          eanat_t addr = eanat_t(h);
+          uint32 size = calc_imagesize(addr);
+          ntdlls.add(addr, size);
         }
         break;
       }
@@ -994,69 +1170,83 @@ gdecode_t win32_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
 
     case LOAD_DLL_DEBUG_EVENT:
       {
+        eanat_t addr = eanat_t(DebugEvent.u.LoadDll.lpBaseOfDll);
         event->eid               = LIBRARY_LOAD;
-        event->ea                = EA_T(DebugEvent.u.LoadDll.lpBaseOfDll);
+        event->ea                = addr;
         event->modinfo.base      = event->ea;
         event->modinfo.rebase_to = BADADDR; // this must be determined locally - see common_local.cpp
 
         char full_name[MAXSTR];
-        get_filename_for(EA_T(DebugEvent.u.LoadDll.lpImageName),
+        full_name[0] = '\0';
+        get_filename_for(eanat_t(DebugEvent.u.LoadDll.lpImageName),
           DebugEvent.u.LoadDll.fUnicode != 0,
-          event->ea,
+          addr,
           full_name,
           sizeof(full_name),
           process_handle,
           process_path.c_str());
 
         qstrncpy(event->modinfo.name, full_name, sizeof(event->modinfo.name));
-        image_info_t di(this, DebugEvent.u.LoadDll, full_name);
-        di.name = full_name;
+        uint32 size = calc_imagesize(addr);
+        event->modinfo.size = size;
 
-        // set debug hook to get information about exceptions
-        set_debug_hook(di.base);
+        // does the address fit into ea_t?
+        HANDLE ntdll_handle = DebugEvent.u.LoadDll.hFile;
+        if ( ntdlls.check_high_address_and_add(addr, size, ntdll_handle) )
+        {
+          debdeb("%p: 64bit DLL loaded into high addresses has been detected\n",
+                 addr);
+          goto SILENTLY_RESUME;
+        }
 
         // we defer the import of the dll until the moment when ida stops
         // at a debug event. we do so to avoid unnecessary imports because
         // the dll might get unloaded before ida stops.
-        event->modinfo.size = add_dll(di);
-
+        image_info_t di(this, DebugEvent.u.LoadDll, size, full_name);
+        add_dll(di);
+        // set debug hook to get information about exceptions
+        set_debug_hook(addr);
 #ifndef UNDER_CE
-        // determine the first breakpoint if needed
-        if ( debug_break_ea == 0 )
+        // determine the attach breakpoint if needed
+        size_t max_ntdlls = check_wow64_process() == WOW64_YES ? 2 : 1;
+        if ( ntdlls.size() < max_ntdlls )
         {
-          const char *base_name = qbasename(full_name);
-          if ( get_win_version()->is_NT() ) // NT
-          {
-            if ( stricmp(base_name, "ntdll.dll") == 0
-              || stricmp(base_name, "ntdll32.dll") == 0 ) // sysWOW64 under Win64
-            {
-              debug_break_ea = get_dll_export(dlls, di.base, "DbgBreakPoint");
-            }
-          }
-          else // 9x
-          {
-            if ( stricmp(base_name, KERNEL_LIB_NAME) == 0 ) // 9X/Me and KERNEL32.DLL
-              debug_break_ea = get_dll_export(dlls, di.base, "DebugBreak");
-          }
-          if ( attach_status == as_none )
-            expecting_debug_break = true;
+          if ( is_ntdll_name(full_name) )
+            ntdlls.add(addr, size);
+          if ( attach_status == as_none && !stop_at_ntdll_bpts )
+            expecting_debug_break = ntdlls.size();
         }
 #endif
+        break;
       }
-      break;
+
+SILENTLY_RESUME:
+      // do not report this event to ida
+      event->handled = true;
+      dbg_continue_after_event(event);
+      return GDE_NO_EVENT;
 
     case UNLOAD_DLL_DEBUG_EVENT:
       event->eid = LIBRARY_UNLOAD;
       {
-        area_t area(EA_T(DebugEvent.u.UnloadDll.lpBaseOfDll),
-          EA_T(DebugEvent.u.UnloadDll.lpBaseOfDll)+MEMORY_PAGE_SIZE); // we assume DLL image is at least a PAGE size
-        const char *name = get_range_name(dlls, &area);
+        eanat_t addr = eanat_t(DebugEvent.u.UnloadDll.lpBaseOfDll);
+        range_t range(addr, addr+MEMORY_PAGE_SIZE); // we assume DLL image is at least a PAGE size
+        const char *name = get_range_name(dlls, &range);
         if ( name != NULL )
           qstrncpy(event->info, name, sizeof(event->info));
         else
           event->info[0] = '\0';
+
+        // remove ntdll from the list
+        HANDLE ntdll_handle;
+        if ( ntdlls.del_and_check_high_address(&ntdll_handle, addr) )
+        {
+          myCloseHandle(ntdll_handle);
+          goto SILENTLY_RESUME;
+        }
+
         // close the associated DLL handle
-        images_t::iterator p = dlls.find(EA_T(DebugEvent.u.UnloadDll.lpBaseOfDll));
+        images_t::iterator p = dlls.find(addr);
         if ( p != dlls.end() )
         {
           myCloseHandle(p->second.dll_info.hFile);
@@ -1127,7 +1317,7 @@ bool win32_debmod_t::get_debug_string(const DEBUG_EVENT &ev, char *buf, size_t b
     if ( ev.u.DebugString.fUnicode )
     {
       *(wchar_t*)(buf + rsize) = 0;
-      unicode_to_ansi(buf, bufsize, (LPCWSTR)buf);
+      utf16_to_utf8(buf, bufsize, (LPCWSTR)buf);
     }
     return true;
   }
@@ -1149,17 +1339,19 @@ void win32_debmod_t::cleanup()
   for ( images_t::iterator p=dlls.begin(); p != dlls.end(); ++p )
     myCloseHandle(p->second.dll_info.hFile);
 
-  pid            = (DWORD)  -1;
-  debug_break_ea = qgetenv("IDA_SYSTEMBREAKPOINT") ? BADADDR : 0;
-  in_event       = NULL;
+  pid = -1;
+  ntdlls.clear();
+  stop_at_ntdll_bpts = qgetenv("IDA_SYSTEMBREAKPOINT");
+  expecting_debug_break = 0;
+  in_event = NULL;
   memset(&cpdi, 0, sizeof(cpdi));
-  cpdi.hFile    = INVALID_HANDLE_VALUE;
+  cpdi.hFile = INVALID_HANDLE_VALUE;
   cpdi.hProcess = INVALID_HANDLE_VALUE;
-  cpdi.hThread  = INVALID_HANDLE_VALUE;
+  cpdi.hThread = INVALID_HANDLE_VALUE;
   attach_status = as_none;
   attach_evid = INVALID_HANDLE_VALUE;
 
-  old_areas.clear();
+  old_ranges.clear();
   threads.clear();
   thread_bpts.clear();
   bpts.clear();
@@ -1167,20 +1359,20 @@ void win32_debmod_t::cleanup()
   dlls.clear();
   dlls_to_import.clear();
   images.clear();
-  thread_areas.clear();
-  class_areas.clear();
+  thread_ranges.clear();
+  class_ranges.clear();
   inherited::cleanup();
 }
 
 //--------------------------------------------------------------------------
 void win32_debmod_t::get_filename_for(
-  ea_t image_name_ea,
-  bool use_unicode,
-  ea_t image_base,
-  char *buf,
-  size_t bufsize,
-  HANDLE handle,
-  const char *path)
+        eanat_t image_name_ea,
+        bool use_unicode,
+        eanat_t image_base,
+        char *buf,
+        size_t bufsize,
+        HANDLE handle,
+        const char *path)
 {
   buf[0] = '\0';
 
@@ -1192,23 +1384,15 @@ void win32_debmod_t::get_filename_for(
 #ifndef UNDER_CE
   if ( buf[0] == '\0' && _GetModuleFileNameEx != NULL )
   {
-    TCHAR tbuf[MAXSTR];
+    wchar16_t tbuf[MAXSTR];
     HMODULE hmod = (HMODULE)(size_t)image_base;
     if ( _GetModuleFileNameEx(handle, hmod, tbuf, qnumber(tbuf)) )
-      wcstr(buf, tbuf, bufsize);
+    {
+      qstring tmp;
+      utf16_utf8(&tmp, tbuf);
+      qstrncpy(buf, tmp.c_str(), bufsize);
+    }
   }
-#endif
-
-#if 0 // Commented out because the file can be mapped to the memory
-  // for reading purposes. Vista generates LOAD_DLL event even in this case!
-  // I saw it myself: the system was displaying the "open file" dialog box,
-  // the current directory had a file named ar.exe. A LOAD_DLL event
-  // with this file name and image address has been generated.
-  // After that, the debugger tried to patch the Borland's activehook variable
-  // and consequently the debugged application crashed (later).
-  // second: we try to get DLL path+name using PSAPI.DLL if available.
-  if ( buf[0] == '\0' || qbasename(buf) == buf )
-    get_mapped_filename(handle, image_base, buf, bufsize);
 #endif
 
   // third: we try to get DLL name by looking at the export name from
@@ -1234,7 +1418,7 @@ void win32_debmod_t::get_filename_for(
 
   // convert possible short path to long path
   qffblk64_t fb;
-  if ( qfindfirst64(buf, &fb, 0) == 0 )
+  if ( qfindfirst(buf, &fb, 0) == 0 )
   {
     char *fptr = qbasename(buf);
     qstrncpy(fptr, fb.ff_name, bufsize-(fptr-buf));
@@ -1258,10 +1442,15 @@ int idaapi win32_debmod_t::dbg_detach_process()
 }
 
 //--------------------------------------------------------------------------
-int idaapi win32_debmod_t::dbg_init(bool _debug_debugger)
+void idaapi win32_debmod_t::dbg_set_debugging(bool _debug_debugger)
+{
+  debug_debugger = _debug_debugger;
+}
+
+//--------------------------------------------------------------------------
+int idaapi win32_debmod_t::dbg_init(void)
 {
   check_thread(true);
-  debug_debugger = _debug_debugger;
 
   cleanup();
   cleanup_hwbpts();
@@ -1276,24 +1465,25 @@ image_info_t::image_info_t(win32_debmod_t *ses)
   memset(&dll_info, 0, sizeof(dll_info));
 }
 
-image_info_t::image_info_t(win32_debmod_t *ses, ea_t _base, const qstring &_name)
-  : sess(ses), base(_base), name(_name)
-{
-  imagesize = sess->calc_imagesize(base);
-  memset(&dll_info, 0, sizeof(dll_info));
-}
-
-image_info_t::image_info_t(win32_debmod_t *ses, ea_t _base, uval_t _imagesize, const qstring &_name)
+image_info_t::image_info_t(
+        win32_debmod_t *ses,
+        ea_t _base,
+        uint32 _imagesize,
+        const qstring &_name)
   : sess(ses), base(_base), imagesize(_imagesize), name(_name)
 {
   memset(&dll_info, 0, sizeof(dll_info));
 }
 
-image_info_t::image_info_t(win32_debmod_t *ses, const LOAD_DLL_DEBUG_INFO &i, const char *_name)
+image_info_t::image_info_t(
+        win32_debmod_t *ses,
+        const LOAD_DLL_DEBUG_INFO &i,
+        uint32 _imagesize,
+        const char *_name)
   : sess(ses), name(_name), dll_info(i)
 {
   base = EA_T(i.lpBaseOfDll);
-  imagesize = sess->calc_imagesize(base);
+  imagesize = _imagesize;
 }
 
 image_info_t::image_info_t(win32_debmod_t *ses, const module_info_t &m)
@@ -1307,7 +1497,7 @@ image_info_t::image_info_t(win32_debmod_t *ses, const module_info_t &m)
 // lpFileName - pointer to pointer to the file name
 // use_unicode - true if the filename is in unicode
 bool win32_debmod_t::get_filename_from_process(
-        ea_t name_ea,
+        eanat_t name_ea,
         bool use_unicode,
         char *buf,
         size_t bufsize)
@@ -1316,25 +1506,22 @@ bool win32_debmod_t::get_filename_from_process(
   if ( name_ea == 0 )
     return false;
 #ifndef UNDER_CE
-  LPVOID dll_addr;
+  eanat_t dll_addr;
   if ( _read_memory(name_ea, &dll_addr, sizeof(dll_addr)) != sizeof(dll_addr) )
     return false;
   if ( dll_addr == NULL )
     return false;
-  name_ea = EA_T(dll_addr);
+  name_ea = dll_addr;
 #endif
   if ( _read_memory(name_ea, buf, bufsize) != bufsize )
     return false;
   if ( use_unicode )
-    unicode_to_ansi(buf, bufsize, (LPCWSTR)buf);
+    utf16_to_utf8(buf, bufsize, (LPCWSTR)buf);
   return true;
 }
 
 //--------------------------------------------------------------------------
-ea_t win32_debmod_t::get_region_info(
-        page_bpts_t::iterator *pbpts,
-        ea_t ea,
-        memory_info_t *mi)
+ea_t win32_debmod_t::get_region_info(ea_t ea, memory_info_t *mi)
 {
   // okay to keep static, they won't change between clients
   static DWORD_PTR totalVirtual = 0;
@@ -1370,34 +1557,45 @@ ea_t win32_debmod_t::get_region_info(
 
   ea_t startea = EA_T(meminfo.BaseAddress);
   ea_t endea = startea + meminfo.RegionSize;
-  if ( endea < startea )
+  if ( endea <= startea )
+  {
+    // ignore empty sections ...
+    if ( endea == startea
+      && endea < totalVirtual
+      && (totalVirtual - endea) < 1 )
+    {
+      mi->start_ea = BADADDR;
+      mi->end_ea   = BADADDR;
+      return endea + 1;
+    }
     endea = BADADDR;
+  }
 
-  debdeb("VirtualQueryEx(%a): base = %a, end = %a, protect=0x%x, allocprotect=0x%x, state=0x%x\n", ea, startea, endea, meminfo.Protect, meminfo.AllocationProtect, meminfo.State);
+//  debdeb("VirtualQueryEx(%a): base = %a, end = %a, protect=0x%x, allocprotect=0x%x, state=0x%x\n", ea, startea, endea, meminfo.Protect, meminfo.AllocationProtect, meminfo.State);
 
   // hide the page bpts in this memory region from ida
   uint32 prot = meminfo.Protect;
-  if ( mask_page_bpts(pbpts, startea, endea, &prot) )
+  if ( mask_page_bpts(startea, endea, &prot) )
   {
     debdeb("   masked protect=0x%x\n", prot);
     meminfo.Protect = prot;
   }
 
 #ifndef UNDER_CE
-  if ( (meminfo.State & (MEM_FREE|MEM_RESERVE)) != 0 // if the area isn't interesting for/accessible by IDA
+  if ( (meminfo.State & (MEM_FREE|MEM_RESERVE)) != 0 // if the range isn't interesting for/accessible by IDA
     || (meminfo.Protect & PAGE_NOACCESS) != 0 )
-  { // we simply return an invalid area, and a pointer to the next (eventual) area
-    mi->startEA = BADADDR;
-    mi->endEA   = BADADDR;
+  { // we simply return an invalid range, and a pointer to the next (eventual) range
+    mi->start_ea = BADADDR;
+    mi->end_ea   = BADADDR;
     return endea;
   }
 #endif
 
-  mi->startEA = startea;
-  mi->endEA   = endea;
+  mi->start_ea = startea;
+  mi->end_ea   = endea;
 #ifdef __EA64__
   // we may be running a 32bit process in wow64 with idaq64
-  mi->bitness = check_wow64_process(process_handle) ? 1 : 2;
+  mi->bitness = check_wow64_process() > 0 ? 1 : 2;
 #else
   mi->bitness = 1; // 32bit
 #endif
@@ -1405,12 +1603,12 @@ ea_t win32_debmod_t::get_region_info(
   // convert Windows protection modes to IDA protection modes
   mi->perm = win_prot_to_ida_perm(meminfo.Protect);
 
-  // try to associate a segment name to the memory area
+  // try to associate a segment name to the memory range
   const char *ptr;
-  if ( (ptr=get_range_name(curproc,      mi)) != NULL   // first try with the current process
-    || (ptr=get_range_name(dlls,         mi)) != NULL   // then try in DLLs
-    || (ptr=get_range_name(images,       mi)) != NULL   // then try in previous images areas
-    || (ptr=get_range_name(thread_areas, mi)) != NULL ) // and finally in thread areas
+  if ( (ptr=get_range_name(curproc,       mi)) != NULL   // first try with the current process
+    || (ptr=get_range_name(dlls,          mi)) != NULL   // then try in DLLs
+    || (ptr=get_range_name(images,        mi)) != NULL   // then try in previous images ranges
+    || (ptr=get_range_name(thread_ranges, mi)) != NULL ) // and finally in thread ranges
   {
     // return the filename without the file path
     mi->name = qbasename(ptr);
@@ -1419,30 +1617,40 @@ ea_t win32_debmod_t::get_region_info(
   {
     char buf[MAXSTR];
     // if we found nothing, we suppose the segment is a PE file header, and we try to locate a name in it
-    if ( get_pe_export_name_from_process(mi->startEA, buf, sizeof(buf)) )
-    {                   // we insert it in the image areas list
-      image_info_t ii(this, mi->startEA, buf);
+    if ( get_pe_export_name_from_process(mi->start_ea, buf, sizeof(buf)) )
+    { // we insert it in the image ranges list
+      uint32 size = calc_imagesize(mi->start_ea);
+      image_info_t ii(this, mi->start_ea, size, buf);
       images.insert(std::make_pair(ii.base, ii));
       mi->name = buf;
     }
   }
 
-  // try to associate a segment class name to the memory area
-  mi->sclass = get_range_name(class_areas, mi);
+  // try to associate a segment class name to the memory range
+  mi->sclass = get_range_name(class_ranges, mi);
   return endea;
 }
 
 //--------------------------------------------------------------------------
 // 1-ok, 0-failed
-int idaapi win32_debmod_t::dbg_attach_process(pid_t _pid, int event_id)
+int idaapi win32_debmod_t::dbg_attach_process(pid_t _pid, int event_id, int /*flags*/)
 {
   check_thread(false);
+  int addrsize = get_process_addrsize(_pid);
+#ifndef __EA64__
+  if ( addrsize > 4 )
+  {
+    dwarning("AUTOHIDE NONE\nPlease use ida64 to debug 64-bit applications");
+    SetLastError(ERROR_NOT_SUPPORTED);
+    return false;
+  }
+#endif
   if ( !DebugActiveProcess(_pid) )
   {
     deberr("DebugActiveProcess %08lX", _pid);
     return false;
   }
-  debapp_attrs.addrsize = get_process_addrsize(_pid);
+  debapp_attrs.addrsize = addrsize;
   attach_status = as_attaching;
   attach_evid = (HANDLE)(INT_PTR)(event_id);
   exiting = false;
@@ -1469,10 +1677,15 @@ int idaapi win32_debmod_t::dbg_start_process(
   input_file_path = input_path;
   is_dll = (flags & DBG_PROC_IS_DLL) != 0;
 
+  char fullpath[QMAXPATH];
   if ( !qfileexist(path) )
   {
-    dwarning("AUTOHIDE NONE\nCan not find host file '%s'", path);
-    return -1;
+    if ( qisabspath(path) || !search_path(fullpath, sizeof(fullpath), path, false) )
+    {
+      dwarning("AUTOHIDE NONE\nCan not find application file '%s'", path);
+      return -1;
+    }
+    path = fullpath;
   }
 
   int mismatch = 0;
@@ -1497,7 +1710,8 @@ int idaapi win32_debmod_t::dbg_start_process(
 
   PROCESS_INFORMATION ProcessInformation;
   bool is_gui = (flags & DBG_PROC_IS_GUI) != 0;
-  if ( !create_process(path, args, startdir, is_gui, &ProcessInformation) )
+  bool hide_window = (flags & DBG_HIDE_WINDOW) != 0;
+  if ( !create_process(path, args, startdir, is_gui, hide_window, &ProcessInformation) )
     return 0;
 
   pid            = ProcessInformation.dwProcessId;
@@ -1561,14 +1775,15 @@ gdecode_t win32_debmod_t::handle_exception(
   int code = er.ExceptionCode;
   const exception_info_t *ei = find_exception(code);
 
+  eanat_t addr = eanat_t(er.ExceptionAddress);
   event->eid          = EXCEPTION;
-  event->ea           = EA_T(er.ExceptionAddress);
+  event->ea           = addr;
   event->exc.code     = code;
   event->exc.can_cont = (er.ExceptionFlags == 0);
   event->exc.ea       = BADADDR;
   event->handled      = false;
 
-  if ( exiting && event->eid == EXCEPTION && ei == NULL )
+  if ( exiting && ei == NULL )
   {
     event->eid = PROCESS_EXIT;
     event->exit_code = -1;
@@ -1577,35 +1792,38 @@ gdecode_t win32_debmod_t::handle_exception(
 
   bool suspend = true;
 
+  // we don't expect callgate breakpoints anymore
+  ea_t was_callgate_ea = BADADDR;
+  thread_info_t *ti = threads.get(event->tid);
+  if ( ti != NULL )
+  {
+    was_callgate_ea = ti->callgate_ea;
+    ti->callgate_ea = BADADDR;
+  }
+
   if ( ei != NULL )
   {
     event->handled = ei->handle();
     // if the user asked to suspend the process, do not resume
     if ( !was_thread_bpt )
       suspend = ei->break_on();
+    if ( !suspend )
+      suspend = should_suspend_at_exception(event, ei);
     event->exc.info[0] = '\0';
     int elc_flags = 0;
     switch ( uint32(code) )
     {
       case EXCEPTION_BREAKPOINT:
+      case STATUS_WX86_BREAKPOINT:
         if ( was_thread_bpt )
         {
-          thread_info_t *ti = threads.get(event->tid);
           QASSERT(638, ti != NULL);
 
           // is installed the workaround for the 'freely running after syscall' problem?
-          if ( ti->callgate_ea == event->ea )
-          {
-            // uninstall the temporary breakpoint
-            ti->callgate_ea = BADADDR;
-            del_thread_bpt(*ti, event->ea);
-
+          if ( was_callgate_ea == event->ea )
             event->eid = STEP;
-          }
           else
-          {
             event->eid = PROCESS_SUSPEND;
-          }
           break;
         }
         if ( attach_status == as_breakpoint ) // the process was successfully suspended after an attachement
@@ -1613,21 +1831,19 @@ gdecode_t win32_debmod_t::handle_exception(
           create_attach_event(event, true);
           break;
         }
-        // Win7 RC has a hardcoded bpt in LdrpDoDebuggerBreak() instead of a call to DbgBreakPoint()
-        // Since we can not calculate its address, we relax the address verification.
-        if ( event->ea > 0x70000000 /*event->ea == debug_break_ea*/ // reached the kernel breakpoint?
-          && expecting_debug_break
-          && get_kernel_bpt_ea(event->ea) == BADADDR ) // not user-defined bpt
+        if ( expecting_debug_break > 0
+          && ntdlls.has(addr)
+          && get_kernel_bpt_ea(event->ea, event->tid) == BADADDR ) // not user-defined bpt
         {
-          expecting_debug_break = false;
-          debdeb("%a: resuming after DbgBreakPoint()\n", event->ea);
+          --expecting_debug_break;
+          debdeb("%a: resuming after DbgBreakPoint(), expecting bpts: %d\n", event->ea, expecting_debug_break);
           event->handled = true;
           dbg_continue_after_event(event);
           return GDE_NO_EVENT;
         }
         // is this a breakpoint set by ida?
         {
-          ea_t kea = get_kernel_bpt_ea(event->ea);
+          ea_t kea = get_kernel_bpt_ea(event->ea, event->tid);
           if ( kea != BADADDR )
           {
             event->eid = BREAKPOINT;
@@ -1638,8 +1854,8 @@ gdecode_t win32_debmod_t::handle_exception(
         }
         break;
       case EXCEPTION_SINGLE_STEP:
+      case STATUS_WX86_SINGLE_STEP:
         {
-          thread_info_t *ti = threads.get(event->tid);
           bool is_stepping = ti != NULL && ti->is_tracing();
 #ifndef UNDER_CE
           // if this happened because of a hardware breakpoint
@@ -1682,7 +1898,6 @@ gdecode_t win32_debmod_t::handle_exception(
             ea_t exc_eip = EA_T(er.ExceptionAddress);
             if ( !should_fire_page_bpt(p, exc_ea, er.ExceptionInformation[0], exc_eip, dep_policy) )
             { // Silently step over the page breakpoint
-              thread_info_t *ti = threads.get(event->tid);
               if ( ti != NULL && ti->is_tracing() )
                 elc_flags |= ELC_KEEP_SUSP;
               lowcnd_t lc;
@@ -1735,6 +1950,25 @@ gdecode_t win32_debmod_t::handle_exception(
             return handle_exception(event, r2, false, false);
         }
         break;
+#define MS_VC_EXCEPTION 0x406D1388L
+      case MS_VC_EXCEPTION:
+        // SetThreadName
+        // https://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx
+        if ( er.ExceptionInformation[0] == 0x1000
+          && er.ExceptionInformation[3] == 0x00 )
+        {
+          qstring name;
+          name.resize(MAXSTR);
+          ea_t nameaddr = er.ExceptionInformation[1];
+          if ( dbg_read_memory(nameaddr, name.begin(), name.length()) > 0 )
+          {
+            DWORD dwThreadID = er.ExceptionInformation[2];
+            msg("Thread %d is named '%s'\n", int(dwThreadID), name.c_str());
+            // TODO actually use this thread name information
+            event->handled = true;
+          }
+        }
+        break;
     }
     if ( evaluate_and_handle_lowcnd(event, elc_flags) )
       return GDE_NO_EVENT;
@@ -1754,7 +1988,6 @@ gdecode_t win32_debmod_t::handle_exception(
   {
     log_exception(event, ei);
     // if a single step was scheduled by the user
-    thread_info_t *ti = threads.get(event->tid);
     if ( ti != NULL && ti->is_tracing() )
     {
       clear_tbit(*ti);
@@ -1814,7 +2047,7 @@ void win32_debmod_t::create_start_event(debug_event_t *event)
     if ( pe32.th32ProcessID == event->pid )
     {
       char exefile[QMAXPATH];
-      wcstr(exefile, pe32.szExeFile, sizeof(exefile));
+      tchar_utf8(exefile, pe32.szExeFile, sizeof(exefile));
       if ( process_path.empty() || qisabspath(exefile) )
         process_path = exefile;
       break;
@@ -1829,9 +2062,9 @@ void win32_debmod_t::create_start_event(debug_event_t *event)
 }
 
 //--------------------------------------------------------------------------
-ea_t win32_debmod_t::get_kernel_bpt_ea(ea_t ea)
+ea_t win32_debmod_t::get_kernel_bpt_ea(ea_t ea, thid_t tid)
 {
-  if ( bpts.find(ea) != bpts.end() )
+  if ( is_ida_bpt(ea, tid) )
     return ea;
 #ifdef UNDER_CE
   // we are forced to enumerate all addresses and check each manually
@@ -1858,7 +2091,7 @@ ssize_t idaapi win32_debmod_t::dbg_write_memory(ea_t ea, const void *buffer, siz
 
 //--------------------------------------------------------------------------
 // 1-ok, 0-failed
-int idaapi win32_debmod_t::dbg_thread_get_sreg_base(thid_t tid, int sreg_value, ea_t *pea)
+int idaapi win32_debmod_t::dbg_thread_get_sreg_base(ea_t *pea, thid_t tid, int sreg_value)
 {
   check_thread(false);
   NODISTURB_ASSERT(in_event != NULL);
@@ -1870,7 +2103,7 @@ int idaapi win32_debmod_t::dbg_thread_get_sreg_base(thid_t tid, int sreg_value, 
     return 0;
 
   LDT_ENTRY se;
-  if( !GetThreadSelectorEntry(h, sreg_value, &se) )
+  if ( !GetThreadSelectorEntry(h, sreg_value, &se) )
   {
     if ( GetLastError() == ERROR_NOT_SUPPORTED )
     {
@@ -1881,9 +2114,9 @@ int idaapi win32_debmod_t::dbg_thread_get_sreg_base(thid_t tid, int sreg_value, 
     return 0;
   }
 
-  *pea = (se.HighWord.Bytes.BaseHi << 24)  |
-    (se.HighWord.Bytes.BaseMid << 16) |
-    se.BaseLow;
+  *pea = (se.HighWord.Bytes.BaseHi << 24)
+       | (se.HighWord.Bytes.BaseMid << 16)
+       | se.BaseLow;
   return 1;
 #endif
 }
@@ -1905,9 +2138,9 @@ int idaapi win32_debmod_t::dbg_thread_get_sreg_base(thid_t tid, int sreg_value, 
 
 // 1-ok, 0-failed
 int idaapi win32_debmod_t::dbg_write_register(
-  thid_t tid,
-  int reg_idx,
-  const regval_t *value)
+        thid_t tid,
+        int reg_idx,
+        const regval_t *value)
 {
   check_thread(false);
   if ( value == NULL )
@@ -1927,7 +2160,7 @@ int idaapi win32_debmod_t::dbg_write_register(
   // Patch one field
   patch_context_struct(ctx, reg_idx, value);
 
-  bool ok = SetThreadContext(ti->hThread, &ctx) != 0;
+  bool ok = ti->write_context(regclass);
   if ( !ok )
     deberr("SetThreadContext");
   debdeb("write_register: %d\n", ok);
@@ -1936,11 +2169,11 @@ int idaapi win32_debmod_t::dbg_write_register(
 
 //--------------------------------------------------------------------------
 bool idaapi win32_debmod_t::write_registers(
-  thid_t thread_id,
-  int start,
-  int count,
-  const regval_t *values,
-  const int *indices)
+        thid_t thread_id,
+        int start,
+        int count,
+        const regval_t *values,
+        const int *indices)
 {
   thread_info_t *ti = threads.get(thread_id);
   if ( ti == NULL )
@@ -1954,7 +2187,9 @@ bool idaapi win32_debmod_t::write_registers(
     patch_context_struct(ti->ctx, idx, values);
   }
 
-  bool ok = SetThreadContext(ti->hThread, &ti->ctx) == TRUE;
+  bool ok = ti->write_context(RC_ALL);
+  if ( !ok )
+    deberr("SetThreadContext");
   debdeb("write_registers: %d\n", ok);
   return ok;
 }
@@ -2017,6 +2252,7 @@ int idaapi win32_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t 
     values[R_EBP].ival    = ctx.Rbp;
     values[R_ESP].ival    = ctx.Rsp;
     values[R_EIP].ival    = ctx.Rip;
+#  ifdef __EA64__
     values[R64_R8 ].ival  = ctx.R8;
     values[R64_R9 ].ival  = ctx.R9;
     values[R64_R10].ival  = ctx.R10;
@@ -2025,6 +2261,7 @@ int idaapi win32_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t 
     values[R64_R13].ival  = ctx.R13;
     values[R64_R14].ival  = ctx.R14;
     values[R64_R15].ival  = ctx.R15;
+#  endif
 #else
     values[R_EAX].ival    = ctx.Eax;
     values[R_EBX].ival    = ctx.Ebx;
@@ -2062,6 +2299,32 @@ int idaapi win32_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t 
 }
 
 //--------------------------------------------------------------------------
+#ifndef __ARM__
+bool thread_info_t::toggle_tbit(bool set_tbit, win32_debmod_t *debmod)
+{
+  if ( !read_context(RC_GENERAL) )
+    return false;
+
+  bool ok = true;
+  CASSERT(EFLAGS_TRAP_FLAG == 0x100); // so we can shift set_tbit << 8
+  if ( (ctx.EFlags & EFLAGS_TRAP_FLAG) != (set_tbit << 8) )
+  {
+    QASSERT(30117, (ctx.ContextFlags & CONTEXT_CONTROL) != 0);
+    ctx.EFlags |= EFLAGS_TRAP_FLAG;
+    int saved = ctx.ContextFlags;
+    ctx.ContextFlags = CONTEXT_CONTROL;
+    ok = write_context(RC_GENERAL);
+    ctx.ContextFlags = saved;
+    if ( ok )
+      setflag(flags, THR_TRACING, set_tbit);
+    else
+      debmod->deberr("%d: SetThreadContext failed", tid);
+  }
+  return ok;
+}
+#endif
+
+//--------------------------------------------------------------------------
 // 1-ok, 0-failed
 int idaapi win32_debmod_t::dbg_set_resume_mode(thid_t tid, resume_mode_t resmod)
 {
@@ -2074,25 +2337,13 @@ int idaapi win32_debmod_t::dbg_set_resume_mode(thid_t tid, resume_mode_t resmod)
   return 0;
 #else
   thread_info_t *ti = threads.get(tid);
-  if ( ti == NULL || !ti->read_context(RC_GENERAL) )
+  if ( ti == NULL )
     return 0;
 
-  int ok = 1;
-  CONTEXT &ctx = ti->ctx;
-  if ( (ctx.EFlags & EFLAGS_TRAP_FLAG) == 0 )
-  {
-    QASSERT(30117, (ctx.ContextFlags & CONTEXT_CONTROL) != 0);
-    ctx.EFlags |= EFLAGS_TRAP_FLAG;
-    int saved = ctx.ContextFlags;
-    ctx.ContextFlags = CONTEXT_CONTROL;
-    ok = SetThreadContext(ti->hThread, &ctx);
-    ctx.ContextFlags = saved;
-    if ( ok )
-      ti->set_tracing();
-    else
-      deberr("%d: (set_step) SetThreadContext failed", tid);
-  }
-  return ok;
+  int ok = ti->toggle_tbit(true, this);
+  if ( ok < 0 )
+    deberr("%d: (set_step) SetThreadContext failed", tid);
+  return ok > 0;
 #endif
 }
 
@@ -2103,24 +2354,10 @@ bool win32_debmod_t::clear_tbit(thread_info_t &ti)
 #ifdef __ARM__
   return false;
 #else
-  bool ok = false;
-  if ( ti.read_context(RC_GENERAL) )
-  {
-    CONTEXT &ctx = ti.ctx;
-    if ( (ctx.EFlags & EFLAGS_TRAP_FLAG) != 0 )
-    {
-      ctx.EFlags &= ~EFLAGS_TRAP_FLAG;
-      int saved = ctx.ContextFlags;
-      ctx.ContextFlags = CONTEXT_CONTROL;
-      ok = SetThreadContext(ti.hThread, &ctx) != 0;
-      ctx.ContextFlags = saved;
-      if ( ok )
-        ti.clr_tracing();
-      else
-        deberr("%d: (clear_tbit) SetThreadContext failed", ti.tid);
-    }
-  }
-  return ok;
+  int ok = ti.toggle_tbit(false, this);
+  if ( ok < 0 )
+    deberr("%d: (clr_step) SetThreadContext failed", ti.tid);
+  return ok > 0;
 #endif
 }
 
@@ -2246,86 +2483,86 @@ void win32_debmod_t::show_exception_record(const EXCEPTION_RECORD &er, int level
 
 //--------------------------------------------------------------------------
 void win32_debmod_t::show_debug_event(
-                      const DEBUG_EVENT &ev,
-                      HANDLE handle,
-                      const char *path)
+        const DEBUG_EVENT &ev,
+        HANDLE handle,
+        const char *path)
 {
   if ( !debug_debugger )
     return;
   dmsg("[%u %d] ", ev.dwProcessId, ev.dwThreadId);
-  switch( ev.dwDebugEventCode )
+  switch ( ev.dwDebugEventCode )
   {
-  case EXCEPTION_DEBUG_EVENT:
-    {
-      const EXCEPTION_RECORD &er = ev.u.Exception.ExceptionRecord;
-      dmsg("EXCEPTION: ea=%a first: %d ",
-        EA_T(er.ExceptionAddress), ev.u.Exception.dwFirstChance);
-      show_exception_record(er);
-    }
-    break;
+    case EXCEPTION_DEBUG_EVENT:
+      {
+        const EXCEPTION_RECORD &er = ev.u.Exception.ExceptionRecord;
+        dmsg("EXCEPTION: ea=%p first: %d ",
+          er.ExceptionAddress, ev.u.Exception.dwFirstChance);
+        show_exception_record(er);
+      }
+      break;
 
-  case CREATE_THREAD_DEBUG_EVENT:
-    dmsg("CREATE_THREAD: hThread=%X LocalBase=%a Entry=%a\n",
-      ev.u.CreateThread.hThread,
-      EA_T(ev.u.CreateThread.lpThreadLocalBase),
-      ev.u.CreateThread.lpStartAddress);
-    break;
+    case CREATE_THREAD_DEBUG_EVENT:
+      dmsg("CREATE_THREAD: hThread=%X LocalBase=%p Entry=%p\n",
+        ev.u.CreateThread.hThread,
+        ev.u.CreateThread.lpThreadLocalBase,
+        ev.u.CreateThread.lpStartAddress);
+      break;
 
-  case CREATE_PROCESS_DEBUG_EVENT:
-    {
-      const CREATE_PROCESS_DEBUG_INFO &cpinf = ev.u.CreateProcessInfo;
-      dmsg("CREATE_PROCESS: hFile=%X hProcess=%X hThread=%X "
-        "base=%a\n dbgoff=%X dbgsiz=%X tlbase=%a start=%a\n",
-        cpinf.hFile, cpinf.hProcess, cpinf.hThread, EA_T(cpinf.lpBaseOfImage),
-        cpinf.dwDebugInfoFileOffset, cpinf.nDebugInfoSize, EA_T(cpinf.lpThreadLocalBase),
-        EA_T(cpinf.lpStartAddress));
-    }
-    break;
+    case CREATE_PROCESS_DEBUG_EVENT:
+      {
+        const CREATE_PROCESS_DEBUG_INFO &cpinf = ev.u.CreateProcessInfo;
+        dmsg("CREATE_PROCESS: hFile=%X hProcess=%X hThread=%X "
+          "base=%p\n dbgoff=%X dbgsiz=%X tlbase=%p start=%p\n",
+          cpinf.hFile, cpinf.hProcess, cpinf.hThread, cpinf.lpBaseOfImage,
+          cpinf.dwDebugInfoFileOffset, cpinf.nDebugInfoSize, cpinf.lpThreadLocalBase,
+          cpinf.lpStartAddress);
+      }
+      break;
 
-  case EXIT_THREAD_DEBUG_EVENT:
-    dmsg("EXIT_THREAD: code=%d\n", ev.u.ExitThread.dwExitCode);
-    break;
+    case EXIT_THREAD_DEBUG_EVENT:
+      dmsg("EXIT_THREAD: code=%d\n", ev.u.ExitThread.dwExitCode);
+      break;
 
-  case EXIT_PROCESS_DEBUG_EVENT:
-    dmsg("EXIT_PROCESS: code=%d\n", ev.u.ExitProcess.dwExitCode);
-    break;
+    case EXIT_PROCESS_DEBUG_EVENT:
+      dmsg("EXIT_PROCESS: code=%d\n", ev.u.ExitProcess.dwExitCode);
+      break;
 
-  case LOAD_DLL_DEBUG_EVENT:
-    {
-      char name[MAXSTR];
-      const LOAD_DLL_DEBUG_INFO &di = ev.u.LoadDll;
-      get_filename_for(EA_T(di.lpImageName),
-        di.fUnicode != 0,
-        EA_T(di.lpBaseOfDll),
-        name,
-        sizeof(name),
-        handle,
-        path);
-      dmsg("LOAD_DLL: h=%X base=%a dbgoff=%X dbgsiz=%X name=%X '%s'\n",
-        di.hFile, EA_T(di.lpBaseOfDll), di.dwDebugInfoFileOffset, di.nDebugInfoSize,
-        di.lpImageName, name);
-    }
-    break;
+    case LOAD_DLL_DEBUG_EVENT:
+      {
+        char name[MAXSTR];
+        const LOAD_DLL_DEBUG_INFO &di = ev.u.LoadDll;
+        get_filename_for(eanat_t(di.lpImageName),
+          di.fUnicode != 0,
+          eanat_t(di.lpBaseOfDll),
+          name,
+          sizeof(name),
+          handle,
+          path);
+        dmsg("LOAD_DLL: h=%X base=%p dbgoff=%X dbgsiz=%X name=%X '%s'\n",
+          di.hFile, di.lpBaseOfDll, di.dwDebugInfoFileOffset, di.nDebugInfoSize,
+          di.lpImageName, name);
+      }
+      break;
 
-  case UNLOAD_DLL_DEBUG_EVENT:
-    dmsg("UNLOAD_DLL: base=%a\n", EA_T(ev.u.UnloadDll.lpBaseOfDll));
-    break;
+    case UNLOAD_DLL_DEBUG_EVENT:
+      dmsg("UNLOAD_DLL: base=%p\n", ev.u.UnloadDll.lpBaseOfDll);
+      break;
 
-  case OUTPUT_DEBUG_STRING_EVENT:
-    {
-      char buf[MAXSTR];
-      get_debug_string(ev, buf, sizeof(buf));
-      dmsg("OUTPUT_DEBUG_STRING: str=\"%s\"\n", buf);
-    }
-    break;
+    case OUTPUT_DEBUG_STRING_EVENT:
+      {
+        char buf[MAXSTR];
+        get_debug_string(ev, buf, sizeof(buf));
+        dmsg("OUTPUT_DEBUG_STRING: str=\"%s\"\n", buf);
+      }
+      break;
 
-  case RIP_EVENT:
-    dmsg("RIP_EVENT (system debugging error)\n");
-    break;
+    case RIP_EVENT:
+      dmsg("RIP_EVENT (system debugging error)\n");
+      break;
 
-  default:
-    dmsg("UNKNOWN_DEBUG_EVENT %d\n", ev.dwDebugEventCode);
-    break;
+    default:
+      dmsg("UNKNOWN_DEBUG_EVENT %d\n", ev.dwDebugEventCode);
+      break;
   }
 }
 
@@ -2375,6 +2612,7 @@ void win32_debmod_t::patch_context_struct(
     case R_EBP:    ctx.Rbp                   = value->ival; break;
     case R_ESP:    ctx.Rsp                   = value->ival; break;
     case R_EIP:    ctx.Rip                   = value->ival; break;
+#  ifdef __EA64__
     case R64_R8:   ctx.R8                    = value->ival; break;
     case R64_R9 :  ctx.R9                    = value->ival; break;
     case R64_R10:  ctx.R10                   = value->ival; break;
@@ -2383,6 +2621,7 @@ void win32_debmod_t::patch_context_struct(
     case R64_R13:  ctx.R13                   = value->ival; break;
     case R64_R14:  ctx.R14                   = value->ival; break;
     case R64_R15:  ctx.R15                   = value->ival; break;
+#  endif
 #else
     case R_EAX:    ctx.Eax                   = (size_t)value->ival; break;
     case R_EBX:    ctx.Ebx                   = (size_t)value->ival; break;
@@ -2411,8 +2650,8 @@ void win32_debmod_t::patch_context_struct(
     case R_MXCSR:  XMMREG_MXCSR              = value->ival; break;
     default:
       {
-        void *xptr;
-        int nbytes;
+        void *xptr = NULL;
+        int nbytes = 0;
         int regclass = get_reg_class(reg_idx);
         if ( (regclass & X86_RC_XMM) != 0 )
         { // XMM registers
@@ -2466,9 +2705,6 @@ int win32_debmod_t::dbg_thaw_threads_except(thid_t tid)
 bool idaapi win32_debmod_t::dbg_prepare_broken_connection(void)
 {
   broken_connection = true;
-  debmod_t *d = this;
-  d->pid = this->pid;
-
   bool ret = false;
   if ( restore_broken_breakpoints() )
   {
@@ -2523,7 +2759,7 @@ bool idaapi win32_debmod_t::dbg_continue_broken_connection(pid_t _pid)
     return false;
   }
 
-  if ( dbg_attach_process(_pid, -1) && reopen_threads() )
+  if ( dbg_attach_process(_pid, -1, 0) && reopen_threads() )
   {
     resume_suspended_threads(_suspended_threads);
     return true;
@@ -2560,7 +2796,7 @@ bool init_subsystem()
   if ( g_subsys_inited )
     return true;
 
-  if ( !win32_debmod_t::get_win_version()->ok() )
+  if ( !win32_debmod_t::winver.ok() )
     return false;
 
   win_tool_help_t *wth = win32_debmod_t::get_tool_help();
@@ -2586,6 +2822,12 @@ bool init_subsystem()
 
   HINSTANCE h = GetModuleHandle(TEXT(TOOLHELP_LIB_NAME));
   *(FARPROC*)&_OpenThread = GetProcAddress(h, TEXT("OpenThread"));
+
+#ifdef __X64__
+  h = GetModuleHandle(TEXT("kernel32.dll"));
+  *(FARPROC*)&_Wow64GetThreadContext = GetProcAddress(h, TEXT("Wow64GetThreadContext"));
+  *(FARPROC*)&_Wow64SetThreadContext = GetProcAddress(h, TEXT("Wow64SetThreadContext"));
+#endif
 
   g_subsys_inited = g_code != 0;
   return g_subsys_inited;
@@ -2626,20 +2868,20 @@ debmod_t *create_debug_session()
 static HMODULE hAdvapi32 = NULL;
 // function prototypes
 typedef BOOL (WINAPI *OpenProcessToken_t)(
-      HANDLE ProcessHandle,
-      DWORD DesiredAccess,
-      PHANDLE TokenHandle);
+        HANDLE ProcessHandle,
+        DWORD DesiredAccess,
+        PHANDLE TokenHandle);
 typedef BOOL (WINAPI *LookupPrivilegeValue_t)(
-      LPCTSTR lpSystemName,
-      LPCTSTR lpName,
-      PLUID lpLuid);
+        LPCTSTR lpSystemName,
+        LPCTSTR lpName,
+        PLUID lpLuid);
 typedef BOOL (WINAPI *AdjustTokenPrivileges_t)(
-      HANDLE TokenHandle,
-      BOOL DisableAllPrivileges,
-      PTOKEN_PRIVILEGES NewState,
-      DWORD BufferLength,
-      PTOKEN_PRIVILEGES PreviousState,
-      PDWORD ReturnLength);
+        HANDLE TokenHandle,
+        BOOL DisableAllPrivileges,
+        PTOKEN_PRIVILEGES NewState,
+        DWORD BufferLength,
+        PTOKEN_PRIVILEGES PreviousState,
+        PDWORD ReturnLength);
 
 // Function pointers
 static OpenProcessToken_t      _OpenProcessToken      = NULL;
@@ -2685,7 +2927,7 @@ static bool init_advapi32(void)
 // http://support.microsoft.com/support/kb/articles/Q131/0/65.asp
 static bool enable_privilege(LPCTSTR privilege, bool enable)
 {
-  if ( !win32_debmod_t::get_win_version()->is_NT() ) // no privileges on 9X/ME
+  if ( !win32_debmod_t::winver.is_NT() ) // no privileges on 9X/ME
     return true;
 
   bool ok = false;

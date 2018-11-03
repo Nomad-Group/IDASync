@@ -68,7 +68,7 @@ instruc_t Instructions[NEC850_LAST_INSTRUCTION] =
   { "ld.h", CF_USE1|CF_CHG2 }, // Load half-word
   { "ld.w", CF_USE1|CF_CHG2 }, // Load word
   { "jr", CF_USE1|CF_STOP }, // Jump Relative
-  { "jmp", CF_USE1|CF_JUMP|CF_STOP}, // Jump Register
+  { "jmp", CF_USE1|CF_JUMP|CF_STOP }, // Jump Register
   { "jarl", CF_CALL|CF_USE1|CF_CHG2 }, // Jump and Register Link
   { "halt", CF_STOP }, // Halt
   { "ei", 0 }, // Enable interrupt
@@ -81,7 +81,7 @@ instruc_t Instructions[NEC850_LAST_INSTRUCTION] =
   { "bz", CF_USE1 }, // Branch if zero
   { "bnh", CF_USE1 }, // Branch if not higher
   { "bn", CF_USE1 }, // Branch if negative
-  { "br", CF_USE1 | CF_STOP}, // Branch if always
+  { "br", CF_USE1 | CF_STOP }, // Branch if always
   { "blt", CF_USE1 }, // Branch if less than (signed)
   { "ble", CF_USE1 }, // Branch if less than or equal (signed)
   { "bnv", CF_USE1 }, // Branch if no overflow
@@ -99,7 +99,7 @@ instruc_t Instructions[NEC850_LAST_INSTRUCTION] =
   //
   // V850E
   //
-  { "switch", CF_USE1|CF_STOP|CF_JUMP}, // Jump with table look up
+  { "switch", CF_USE1|CF_STOP|CF_JUMP }, // Jump with table look up
   { "zxb", CF_USE1|CF_CHG1 }, //
   { "sxb", CF_USE1|CF_CHG1 }, //
   { "zxh", CF_USE1|CF_CHG1 }, //

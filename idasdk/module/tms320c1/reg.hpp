@@ -40,15 +40,16 @@
 #else
 #define ENUM8BIT
 #endif
-enum tms320c1x_register ENUM8BIT {
-        IREG_AR0, // Address register zero
-        IREG_AR1, // Address register one
-        //
-        // Virtual registers required by IDA kernel
-        //
-        IREG_VCS,
-        IREG_VDS,
-        IREG__LAST
+enum tms320c1x_register ENUM8BIT
+{
+  IREG_AR0, // Address register zero
+  IREG_AR1, // Address register one
+  //
+  // Virtual registers required by IDA kernel
+  //
+  IREG_VCS,
+  IREG_VDS,
+  IREG__LAST
 };
 
 extern const char *registerNames[];

@@ -3,68 +3,159 @@
 #include "pdb.hpp"
 #include "tilbuild.hpp"
 
+struct pdb_modinfo_t;
+
+static source_item_t *new_pdb_symbol(
+        pdb_modinfo_t *pdb_module,
+        DWORD sym_id);
+static source_item_t *new_pdb_symbol_or_delete(
+        pdb_modinfo_t *pdb_module,
+        pdb_sym_t *sym);
+
+typedef qvector<source_item_ptr> source_items_vec_t;
+
+//-------------------------------------------------------------------------
+// will steal data from all 'child' instances passed to 'visit_child()',
+// and create new pdb_sym_t objects (wrapped in source_item_t's) with
+// that data.
+struct source_items_vec_builder_t : public pdb_access_t::children_visitor_t
+{
+  source_items_vec_t items;
+  pdb_modinfo_t *pdb_module;
+  source_items_vec_builder_t(pdb_modinfo_t *_mod) : pdb_module(_mod) {}
+  virtual HRESULT visit_child(pdb_sym_t &child);
+};
 
 //--------------------------------------------------------------------------
 // Implementation of source information provider using PDB information
 // and the DIA SDK
 
 //--------------------------------------------------------------------------
-// Information about a PDB module. Contains pointer to IDiaSession
-// as well as a type cache, that'll last the same time as the
-// DIA session.
+// Information about a PDB module. Contains a type cache, that'll
+// last the same time as the debugging session.
 struct pdb_modinfo_t
 {
-  pdb_modinfo_t(): type_cache(NULL) { }
+  pdb_modinfo_t()
+    : base(BADADDR),
+      size(0),
+      opened(false),
+      pdb_access(NULL),
+      type_cache(NULL) {}
 
   ~pdb_modinfo_t()
   {
     if ( type_cache != NULL )
       delete type_cache;
+#ifndef __NT__
+    // on windows, 'session_ref' owns the pdb_access
+    if ( pdb_access != NULL )
+      delete pdb_access;
+#endif
   }
 
-  HRESULT open(const char *input_file, const char *user_spath, ea_t load_address)
-  {
-    QASSERT(30212, type_cache == NULL);
-    pdbargs_t args;
-    args.input_path = input_file;
-    args.spath = user_spath;
-    args.loaded_base = load_address;
-    HRESULT hr = pdbref.open_session(args);
-    if ( SUCCEEDED(hr) )
-    {
-      type_cache = new til_builder_t(idati, NULL);
-      type_cache->set_pdb_access(pdbref.session->pdb_access);
-    }
-    return hr;
-  }
+  pdb_access_t *get_access() { return pdb_access; }
 
-  IDiaSession *get_session()
-  {
-    return pdbref.session->pdb_access->dia_session;
-  }
+  HRESULT open(const char *input_file, const char *user_spath, ea_t load_address);
+  source_item_t *find_static_item_in_module(const char *iname);
+
+  typedef std::map<qstring,DWORD> module_globals_t;
+  module_globals_t module_globals;
 
   qstring path;
   ea_t base;
   asize_t size;
   bool opened;
-  pdb_session_ref_t pdbref;
+  pdb_access_t *pdb_access;
+#ifndef ENABLE_REMOTEPDB
+  pdb_session_ref_t session_ref;
+#endif
   til_builder_t *type_cache;
 };
 typedef std::map<ea_t, pdb_modinfo_t> pdb_modules_t;
 
-//--------------------------------------------------------------------------
-// Vector to hold DIA session and source file enumerator
-struct pdb_fileenum_t
+//-------------------------------------------------------------------------
+HRESULT pdb_modinfo_t::open(
+        const char *input_file,
+        const char *user_spath,
+        ea_t load_address)
 {
-  pdb_modinfo_t *pdb_module;
-  IDiaEnumSourceFiles *enumerator;
-};
-typedef qvector<pdb_fileenum_t> fileenumvec_t;
+  QASSERT(30212, type_cache == NULL);
+  pdbargs_t args;
+  args.input_path = input_file;
+  args.spath = user_spath;
+  args.loaded_base = load_address;
+  HRESULT hr = E_FAIL;
+#ifdef ENABLE_REMOTEPDB
+  if ( is_win32_remote_debugger_loaded() )
+  {
+    args.flags |= PDBFLG_DBG_MODULE;
+    remote_pdb_access_t *rpdb_access = new remote_pdb_access_t(
+            args,
+            "TESTER-SQUISH",
+            23946,
+            "");
+    hr = rpdb_access->open_connection();
+    if ( hr == S_OK )
+      pdb_access = rpdb_access;
+    else
+      delete rpdb_access;
+  }
+#else // ENABLE_REMOTEPDB
+  hr = session_ref.open_session(args);
+  if ( hr == S_OK )
+    pdb_access = session_ref.session->pdb_access;
+#endif // ENABLE_REMOTEPDB
+  if ( hr == S_OK )
+  {
+    type_cache = new til_builder_t(CONST_CAST(til_t *)(get_idati()), NULL);
+    type_cache->set_pdb_access(pdb_access);
+  }
+  return hr;
+}
 
-//--------------------------------------------------------------------------
-typedef qvector<IDiaLineNumber *> lnvec_t;
-typedef std::map<int, lnvec_t> lnmap_t;
+//-------------------------------------------------------------------------
+source_item_t *pdb_modinfo_t::find_static_item_in_module(
+        const char *iname)
+{
+  if ( !opened )
+    return NULL;
 
+  DWORD id = 0;
+  module_globals_t::iterator p = module_globals.find(iname);
+  if ( p != module_globals.end() )
+  {
+    id = p->second;
+  }
+  else
+  {
+    struct ida_local iter_t : public pdb_access_t::children_visitor_t
+    {
+      pdb_modinfo_t *pdb_module;
+      const char *name;
+      DWORD id;
+      iter_t(
+              pdb_modinfo_t *_pdb_module,
+              const char *_name)
+        : pdb_module(_pdb_module), name(_name), id(0) {}
+      virtual HRESULT visit_child(pdb_sym_t &data)
+      {
+        qstring cname;
+        if ( data.get_name(&cname) == S_OK && cname == name )
+          data.get_symIndexId(&id);
+        return id == 0 ? S_OK : E_FAIL; // 'id' still 0? keep iterating
+      }
+    };
+    iter_t iter(this, iname);
+    pdb_sym_t global(get_access(), 1);
+    get_access()->iterate_children(global, SymTagData, iter);
+    id = iter.id;
+    module_globals[iname] = id; // populate
+  }
+  return id != 0 ? new_pdb_symbol(this, id) : NULL;
+}
+
+//-------------------------------------------------------------------------
+//
 //-------------------------------------------------------------------------
 static bool get_pdb_register_info(int *p_reg, uint64 *p_mask, int machine, int reg)
 {
@@ -72,7 +163,7 @@ static bool get_pdb_register_info(int *p_reg, uint64 *p_mask, int machine, int r
   if ( name == NULL )
     return false;
   reg_info_t ri;
-  if ( !parse_reg_name(name, &ri) )
+  if ( !parse_reg_name(&ri, name) )
     return false;
   *p_reg = ri.reg;
   *p_mask = left_shift(uint64(1), 8*ri.size) - 1;
@@ -80,45 +171,28 @@ static bool get_pdb_register_info(int *p_reg, uint64 *p_mask, int machine, int r
 }
 
 //--------------------------------------------------------------------------
-class pdb_symbol_t;
-
-static pdb_symbol_t *new_pdb_symbol(
-    pdb_modinfo_t *pdb_module,
-    IDiaSymbol *sym,
-    src_item_kind_t desired_kind=SRCIT_NONE);
-
-//--------------------------------------------------------------------------
 struct pdb_source_file_t : public source_file_t
 {
   pdb_modinfo_t *pdb_module;
-  IDiaSourceFile *file;
-  qstring res;
+  DWORD file_id;
+  qstring my_path;
 
-  pdb_source_file_t(pdb_modinfo_t *_pdb_module, IDiaSourceFile *f)
-    : pdb_module(_pdb_module),
-      file(f) {}
+  pdb_source_file_t(pdb_modinfo_t *_mod, DWORD _fid)
+    : pdb_module(_mod), file_id(_fid) {}
 
   srcinfo_provider_t *idaapi get_provider(void) const;
-  virtual ~pdb_source_file_t(void)
-  {
-    file->Release();
-  }
-
+  virtual ~pdb_source_file_t(void) {}
   virtual void idaapi release() { delete this; }
-
   const char *idaapi get_path(qstring *errbuf)
   {
-    BSTR filename;
-    HRESULT hr = file->get_fileName(&filename);
-    if ( FAILED(hr) )
+    if ( my_path.empty() )
     {
-      if ( errbuf != NULL )
-        *errbuf = winerr(hr);
-      return NULL;
+      pdb_module->get_access()->sip_retrieve_file_path(
+              &my_path,
+              errbuf,
+              file_id);
     }
-    u2cstr(filename, &res);
-    SysFreeString(filename);
-    return res.c_str();
+    return my_path.c_str();
   }
 
   bool idaapi read_file(strvec_t *buf, qstring *errbuf)
@@ -148,102 +222,57 @@ struct pdb_source_file_t : public source_file_t
       return false;
     }
 
-    char line[MAXSTR];
     int tabsize = get_tab_size(path);
-    while ( qfgets(line, sizeof(line), fp) )
+    qstring line;
+    while ( qgetline(&line, fp) >= 0 )
     {
-      size_t len = strlen(line);
-      if ( len > 0 && line[len-1] == '\n' )
-        line[len-1] = '\0';
-
       simpleline_t &sl = buf->push_back();
       sl.line.clear();
-      replace_tabs(&sl.line, line, tabsize);
+      replace_tabs(&sl.line, line.c_str(), tabsize);
     }
 
     qfclose(fp);
     return true;
   }
 
-  TForm *open_srcview(strvec_t ** /*strvec*/, TCustomControl ** /*pview*/, int, int)
+  TWidget *open_srcview(strvec_t ** /*strvec*/, TWidget ** /*pview*/, int, int)
   {
     return NULL;
   }
 };
 
 //--------------------------------------------------------------------------
-class pdb_file_iterator : public _source_file_iterator
+struct pdb_file_iterator : public _source_file_iterator
 {
-  // We have a vector of source file enumerators
-  fileenumvec_t files;
-
-  // Enumerator index
+  struct entry_t
+  {
+    pdb_modinfo_t *pdb_module;
+    DWORD file_id;
+  };
+  qvector<entry_t> entries;
   int idx;
 
-  // Current source file item
-  IDiaSourceFile *file;
-public:
-
-  pdb_file_iterator(fileenumvec_t *fv)
-  {
-    fv->swap(files);
-    file = NULL;
-  }
-
-  virtual ~pdb_file_iterator(void)
-  {
-    for ( int i=0; i < files.size(); i++ )
-      files[i].enumerator->Release();
-
-    if ( file != NULL )
-      file->Release();
-  }
+  pdb_file_iterator() : idx(-1) {}
+  virtual ~pdb_file_iterator(void) {}
 
   void idaapi release(void) { delete this; }
-
   bool idaapi first(void)
   {
-    idx = 0;
-    if ( files.empty() )
-      return false;
-    files[0].enumerator->Reset();
+    idx = -1;
     return next();
   }
 
   bool idaapi next(void)
   {
-    if ( idx >= files.size() )
-      return false;
-
-    // Free previous item
-    if ( file != NULL )
-    {
-      file->Release();
-      file = NULL;
-    }
-
-    while ( true )
-    {
-      // Get next source file in this enumerator
-      ULONG celt = 0;
-      if ( SUCCEEDED(files[idx].enumerator->Next(1, &file, &celt)) && celt > 0 )
-        break;
-
-      // Advance to next enumerator
-      if ( ++idx >= files.size() )
-        return false;
-
-      // Rewind enumerator
-      files[idx].enumerator->Reset();
-    }
-    return true;
+    ++idx;
+    return idx < entries.size();
   }
 
   source_file_ptr idaapi operator *()
   {
-    source_file_t *sf = new pdb_source_file_t(files[idx].pdb_module, file);
-    file = NULL;
-    return source_file_ptr(sf);
+    const entry_t &e = entries[idx];
+    return source_file_ptr(
+            new pdb_source_file_t(e.pdb_module, e.file_id));
   }
 };
 
@@ -260,18 +289,18 @@ struct dummy_item_t : public source_item_t
   int idaapi get_end_colnum() const { return -1; }
   ea_t idaapi get_ea() const { return BADADDR; }
   asize_t idaapi get_size() const { return 0; }
-  bool idaapi get_item_bounds(areaset_t *set) const
+  bool idaapi get_item_bounds(rangeset_t *set) const
   {
     ea_t ea = get_ea();
     if ( ea == BADADDR )
       return false;
     asize_t size = get_size();
-    set->add(area_t(ea, ea+size));
+    set->add(range_t(ea, ea+size));
     return true;
   }
   source_item_ptr idaapi get_parent(src_item_kind_t) const { return source_item_ptr(NULL); }
   source_item_iterator idaapi create_children_iterator() { return source_item_iterator(NULL); }
-  bool idaapi get_hint(const eval_ctx_t *, qstring *hint, int *nlines) const
+  bool idaapi get_hint(qstring *hint, const eval_ctx_t *, int *nlines) const
   {
     // TODO: remove these test lines
     *hint = "test";
@@ -289,230 +318,150 @@ struct dummy_item_t : public source_item_t
   virtual srcinfo_provider_t *idaapi get_provider(void) const;
 };
 
-//--------------------------------------------------------------------------
-struct pdb_module_t : public dummy_item_t
+//-------------------------------------------------------------------------
+//
+//-------------------------------------------------------------------------
+bool pdb_lnnums_t::get_item_bounds(rangeset_t *set) const
 {
-  const pdb_modinfo_t *info;
-
-  pdb_module_t(const pdb_modinfo_t *i) : info(i) {}
-
-  ea_t idaapi get_ea() const
+  for ( size_t i = 0, sz = size(); i < sz; ++i )
   {
-    return info->base;
+    const pdb_lnnum_t &ln = at(i);
+    set->add(ln.va, ln.va + ln.length);
+  }
+  return !set->empty();
+}
+
+//-------------------------------------------------------------------------
+int pdb_lnnums_t::get_lnnum() const
+{
+  return empty() ? -1 : at(0).lineNumber;
+}
+
+//-------------------------------------------------------------------------
+int pdb_lnnums_t::get_colnum() const
+{
+  return empty() ? -1 : at(0).columnNumber;
+}
+
+//-------------------------------------------------------------------------
+int pdb_lnnums_t::get_end_lnnum() const
+{
+  return empty() ? -1 : at(size() - 1).lineNumber; //should it be lineNumberEnd; ?
+}
+
+//-------------------------------------------------------------------------
+int pdb_lnnums_t::get_end_colnum() const
+{
+  return empty() ? -1 : at(size() - 1).columnNumber; //should it be columnNumberEnd; ?
+}
+
+
+//--------------------------------------------------------------------------
+//                               pdb_item_iterator
+//--------------------------------------------------------------------------
+struct pdb_item_iterator : public _source_item_iterator
+{
+  pdb_modinfo_t *pdb_module;
+  source_items_vec_t items;
+  int index;
+
+  pdb_item_iterator(pdb_modinfo_t *_mod, source_items_vec_t &_items)
+    : pdb_module(_mod), index(-1)
+  {
+    items.swap(_items);
   }
 
-  asize_t idaapi get_size() const
+  virtual ~pdb_item_iterator(void) {}
+
+  void idaapi release(void)
   {
-    return info->size;
+    delete this;
+  }
+
+  bool idaapi first(void)
+  {
+    index = -1;
+    return next();
+  }
+
+  bool idaapi next(void)
+  {
+    ++index;
+    return index < items.size();
+  }
+
+  source_item_ptr idaapi operator *()
+  {
+    return items[index];
   }
 };
 
-//--------------------------------------------------------------------------
-// helper class to work with lnnum enumerator
-// A line number enumerator could be retrieved via dia_session->findLinesByVA for example
-class pdb_lnnums_t
-{
-  int _get_colnum(IDiaLineNumber *lnnum) const
-  {
-    DWORD n = -1;
-    if ( lnnum != NULL )
-      lnnum->get_columnNumber(&n);
-    return n;
-  }
 
-  int _get_lnnum(IDiaLineNumber *lnnum) const
-  {
-    DWORD n = -1;
-    if ( lnnum != NULL )
-      lnnum->get_lineNumber(&n);
-
-    return n;
-  }
-
-  int _get_end_lnnum(IDiaLineNumber *lnnum) const
-  {
-    DWORD n = -1;
-    if ( lnnum != NULL )
-      lnnum->get_lineNumberEnd(&n);
-    return n;
-  }
-
-public:
-  IDiaEnumLineNumbers *enumerator;
-  mutable IDiaLineNumber *first_line;
-  mutable IDiaLineNumber *last_line;
-
-  bool inited(void) const
-  {
-    return enumerator != NULL;
-  }
-
-  pdb_lnnums_t(IDiaEnumLineNumbers *e=NULL)
-    : enumerator(e), first_line(NULL), last_line(NULL)
-  {
-  }
-
-  ~pdb_lnnums_t(void)
-  {
-    term();
-  }
-
-  void term()
-  {
-    if ( inited() )
-    {
-      enumerator->Release();
-      enumerator = NULL;
-    }
-
-    if ( first_line != NULL )
-    {
-      first_line->Release();
-      first_line = NULL;
-    }
-
-    if ( last_line != NULL )
-    {
-      last_line->Release();
-      last_line = NULL;
-    }
-  }
-
-  IDiaLineNumber *get_first_lnnum_obj(void) const
-  {
-    if ( first_line == NULL )
-      enumerator->Item(0, &first_line);
-
-    return first_line;
-  }
-
-  IDiaLineNumber *get_last_lnnum_obj(void) const
-  {
-    if ( last_line == NULL )
-    {
-      LONG idx;
-      HRESULT hr = enumerator->get_Count(&idx);
-      if ( SUCCEEDED(hr) )
-        enumerator->Item(--idx, &last_line);
-    }
-    return last_line;
-  }
-
-  bool get_item_bounds(areaset_t *set) const
-  {
-    if ( enumerator->Reset() != S_OK )
-      return false;
-    LONG idx = 0;
-    if ( enumerator->get_Count(&idx) != S_OK )
-      return false;
-
-    IDiaLineNumber *lines[64];
-    ULONG got = 0;
-    for ( LONG i=0; i < idx; i += got )
-    {
-      // Fetch many line number information at once
-      enumerator->Next(qnumber(lines), lines, &got);
-      if ( got == 0 )
-        break;
-
-      for ( ULONG j=0; j < got; j++ )
-      {
-        DWORD length = 0;
-        lines[j]->get_length(&length);
-
-        ULONGLONG va = BADADDR;
-        lines[j]->get_virtualAddress(&va);
-
-        if ( va != BADADDR && length > 0 )
-          set->add(va, va+length);
-
-        lines[j]->Release();
-      }
-    }
-    return !set->empty();
-  }
-
-  int idaapi get_lnnum() const
-  {
-    return _get_lnnum(get_first_lnnum_obj());
-  }
-
-  int idaapi get_colnum() const
-  {
-    return _get_colnum(get_first_lnnum_obj());
-  }
-
-  int idaapi get_end_lnnum() const
-  {
-    return _get_lnnum(get_last_lnnum_obj());
-  }
-
-  int idaapi get_end_colnum() const
-  {
-    return _get_colnum(get_last_lnnum_obj());
-  }
-};
-
+//-------------------------------------------------------------------------
+//                               pdb_symbol_t
 //--------------------------------------------------------------------------
 // source item based on dia symbol
 class pdb_symbol_t : public dummy_item_t
 {
-  pdb_modinfo_t  *pdb_module;
-  IDiaSymbol    *sym;
-  // cached ptr to line number enumerator
-  mutable pdb_lnnums_t lnnums;
+  pdb_modinfo_t *pdb_module;
+  pdb_sym_t *sym;
+  mutable pdb_lnnums_t lnnums; // cached ptr to line number enumerator
   src_item_kind_t kind;
+  bool own_sym;
 
   bool init_lnnums() const
   {
-    if ( !lnnums.inited() )
+    if ( !lnnums.inited )
     {
       ULONGLONG va;
       if ( sym->get_virtualAddress(&va) == S_OK )
       {
         ULONGLONG length;
-        sym->get_length(&length);
-        pdb_module->get_session()->findLinesByVA(va, length, &lnnums.enumerator);
+        if ( sym->get_length(&length) == S_OK )
+        {
+          pdb_access_t *pa = pdb_module->get_access();
+          if ( pa->sip_retrieve_lines_by_va(&lnnums, va, length) == S_OK )
+            lnnums.inited = true;
+        }
       }
     }
-    return lnnums.inited();
+    return lnnums.inited;
   }
 
 public:
   pdb_symbol_t(pdb_modinfo_t *_pdb_module,
-               IDiaSymbol *symbol,
+               pdb_sym_t *_sym,
+               bool _own_sym,
                src_item_kind_t k)
     : pdb_module(_pdb_module),
-      sym(symbol),
-      kind(k)
+      sym(_sym),
+      kind(k),
+      own_sym(_own_sym)
   {
   }
 
   virtual ~pdb_symbol_t(void)
   {
-    sym->Release();
+    if ( own_sym )
+      delete sym;
   }
+
+  pdb_sym_t *get_pdb_sym() { return sym; }
 
   source_file_iterator idaapi get_source_files(void)
   {
     pdb_file_iterator *ret = NULL;
-    // Retrieve source file name associated with the current symbol
-    BSTR path;
-    HRESULT hr = sym->get_sourceFileName(&path);
-    if ( hr == S_OK ) // can not use SUCCEEDED(hr) because S_OK means success
+    qvector<DWORD> ids;
+    HRESULT hr = pdb_module->get_access()->sip_retrieve_symbol_files(
+            &ids, *sym);
+    if ( hr == S_OK )
     {
-      IDiaEnumSourceFiles *files;
-      hr = pdb_module->get_session()->findFile(NULL, path, nsfFNameExt, &files);
-      SysFreeString(path);
-
-      if ( SUCCEEDED(hr) )
+      ret = new pdb_file_iterator();
+      for ( size_t i = 0; i < ids.size(); ++i )
       {
-        fileenumvec_t fv;
-        pdb_fileenum_t &pfenum = fv.push_back();
-
-        pfenum.pdb_module = pdb_module;
-        pfenum.enumerator = files;
-        ret = new pdb_file_iterator(&fv);
+        pdb_file_iterator::entry_t &e = ret->entries.push_back();
+        e.pdb_module = pdb_module;
+        e.file_id = ids[i];
       }
     }
     return source_file_iterator(ret);
@@ -520,13 +469,7 @@ public:
 
   bool idaapi get_name(qstring *buf) const
   {
-    BSTR name;
-    HRESULT code = sym->get_name(&name);
-    if ( FAILED(code) )
-      return false;
-    u2cstr(name, buf);
-    SysFreeString(name);
-    return true;
+    return sym->get_name(buf) == S_OK;
   }
 
   int idaapi get_lnnum() const
@@ -553,36 +496,38 @@ public:
 
   ea_t idaapi get_ea() const
   {
-    ULONGLONG va;
+    ULONGLONG va = ULONGLONG(-1);
     return FAILED(sym->get_virtualAddress(&va)) ? BADADDR : va;
   }
 
   asize_t idaapi get_size() const
   {
-    ULONGLONG len;
+    ULONGLONG len = 0;
     return FAILED(sym->get_length(&len)) ? BADADDR : len;
   }
 
-  bool idaapi get_item_bounds(areaset_t *set) const
+  bool idaapi get_item_bounds(rangeset_t *set) const
   {
     return init_lnnums() ? lnnums.get_item_bounds(set) : false;
   }
 
   source_item_ptr idaapi get_parent(src_item_kind_t /*max_kind*/) const
   {
-    pdb_symbol_t *ret = NULL;
-    IDiaSymbol *parent;
-    HRESULT hr = sym->get_lexicalParent(&parent);
-    if ( SUCCEEDED(hr) )
-      ret = new_pdb_symbol(pdb_module, parent);
-
+    source_item_t *ret = NULL;
+    pdb_sym_t lpar(pdb_module->get_access());
+    DWORD par_id = 0;
+    if ( sym->get_lexicalParent(&lpar) == S_OK
+      && lpar.get_symIndexId(&par_id) == S_OK )
+    {
+      ret = new_pdb_symbol(pdb_module, par_id);
+    }
     return source_item_ptr(ret);
   }
 
   source_item_iterator idaapi create_children_iterator();
 
   // TODO: not implemented yet
-  /*bool idaapi get_hint(const eval_ctx_t *ctx, qstring *hint, int *nlines) const
+  /*bool idaapi get_hint(qstring *hint, const eval_ctx_t *ctx, int *nlines) const
   {
     return false;
   }*/
@@ -593,12 +538,7 @@ public:
     return false;
   }
 
-  virtual src_item_kind_t idaapi get_item_kind() const
-  {
-    return kind;
-  }
-
-  virtual src_item_kind_t idaapi get_kind(const eval_ctx_t * /*ctx*/) const
+  virtual src_item_kind_t idaapi get_item_kind(const eval_ctx_t * /*ctx*/) const
   {
     return kind;
   }
@@ -607,10 +547,10 @@ public:
   {
     DWORD loctype = LocIsNull;
     HRESULT hr = sym->get_locationType(&loctype);
-    if ( !SUCCEEDED(hr) )
+    if ( FAILED(hr) )
       return false;
     bool ok = false;
-    int machine = pdb_module->pdbref.session->pdb_access->get_machine_type();
+    int machine = pdb_module->get_access()->get_machine_type();
     switch ( loctype )
     {
       case LocIsRegRel:
@@ -656,9 +596,8 @@ public:
 
   bool idaapi get_expr_tinfo(tinfo_t *tif) const
   {
-    pdb_sym_t pdbsym(*pdb_module->type_cache->pdb_access, sym, false);
     til_builder_t::tpinfo_t tpi;
-    bool res = pdb_module->type_cache->retrieve_type(&tpi, pdbsym, NULL, NULL);
+    bool res = pdb_module->type_cache->retrieve_type(&tpi, *sym, NULL, NULL);
 
     *tif = tpi.type;
 
@@ -666,8 +605,8 @@ public:
     {
       qstring type_str;
       tpi.type.print(&type_str);
-      DWORD sym_id;
-      pdbsym.get_symIndexId(&sym_id);
+      DWORD sym_id = 0;
+      sym->get_symIndexId(&sym_id);
       qstring name;
       deb(IDA_DEBUG_SRCDBG, "Retrieved type for %s (symbol #%u): %s\n",
           get_name(&name) ? name.c_str() : "<unnamed>",
@@ -684,6 +623,7 @@ public:
     pdb_symbol_t *other = (pdb_symbol_t*) othr;
     return other != NULL
         && other->sym != NULL
+        && pdb_module == other->pdb_module
         && sym->get_symIndexId(&this_id) == S_OK
         && other->sym->get_symIndexId(&other_id) == S_OK
         && this_id == other_id;
@@ -691,235 +631,122 @@ public:
 };
 
 //--------------------------------------------------------------------------
-class pdb_item_iterator : public _source_item_iterator
-{
-  pdb_modinfo_t *pdb_module;
-  IDiaEnumSymbols *pEnumSymbols;
-  IDiaSymbol *item;
-public:
-
-  pdb_item_iterator(pdb_modinfo_t *_pdb_module, IDiaEnumSymbols *p)
-    : pdb_module(_pdb_module), pEnumSymbols(p), item(NULL)
-  {
-  }
-
-  virtual ~pdb_item_iterator(void)
-  {
-    pEnumSymbols->Release();
-    if ( item != NULL )
-      item->Release();
-  }
-
-  void idaapi release(void)
-  {
-    delete this;
-  }
-
-  bool idaapi first(void)
-  {
-    pEnumSymbols->Reset();
-    return next();
-  }
-
-  bool idaapi next(void)
-  {
-    if ( item != NULL )
-    {
-      item->Release();
-      item = NULL;
-    }
-
-    ULONG celt = 0;
-    HRESULT hr = pEnumSymbols->Next(1, &item, &celt);
-    return SUCCEEDED(hr) && celt == 1;
-  }
-
-  source_item_ptr idaapi operator *()
-  {
-    source_item_t *si = new_pdb_symbol(pdb_module, item);
-    item = NULL;
-    return source_item_ptr(si);
-  }
-};
-
-//--------------------------------------------------------------------------
 source_item_iterator idaapi pdb_symbol_t::create_children_iterator()
 {
   pdb_item_iterator *ret = NULL;
-  IDiaEnumSymbols *pEnumSymbols;
-  HRESULT hr = sym->findChildren(SymTagNull, NULL, nsNone, &pEnumSymbols);
-  if ( SUCCEEDED(hr) )
-    ret = new pdb_item_iterator(pdb_module, pEnumSymbols);
-
+  source_items_vec_builder_t items_builder(pdb_module);
+  if ( pdb_module->get_access()->iterate_children(
+               *sym, SymTagNull, items_builder) == S_OK )
+    ret = new pdb_item_iterator(pdb_module, items_builder.items);
   return source_item_iterator(ret);
 }
-
-//--------------------------------------------------------------------------
-// source file iterator
-class pdb_single_file_iterator : public _source_file_iterator
-{
-  pdb_modinfo_t *pdb_module;
-  IDiaSourceFile *file;
-
-public:
-
-  pdb_single_file_iterator(pdb_modinfo_t *_pdb_module, IDiaSourceFile *f)
-    : pdb_module(_pdb_module), file(f)
-  {
-  }
-
-  virtual ~pdb_single_file_iterator(void)
-  {
-    if ( file != NULL )
-      file->Release();
-  }
-
-  void idaapi release(void)
-  {
-    delete this;
-  }
-
-  bool idaapi first(void)
-  {
-    return file != NULL;
-  }
-
-  bool idaapi next(void)
-  {
-    return false;
-  }
-
-  source_file_ptr idaapi operator *()
-  {
-    source_file_t *sf = new pdb_source_file_t(pdb_module, file);
-    file = NULL;
-    return source_file_ptr(sf);
-  }
-};
 
 //--------------------------------------------------------------------------
 class pdb_lnnum_item_t : public dummy_item_t
 {
   pdb_modinfo_t *pdb_module;
-  IDiaLineNumber *lnnum;        // we do not own this pointer
+  pdb_lnnum_t *lnnum;        // we do not own this pointer
 
 public:
-  pdb_lnnum_item_t(pdb_modinfo_t *_pdb_module, IDiaLineNumber *l)
+  pdb_lnnum_item_t(pdb_modinfo_t *_pdb_module, pdb_lnnum_t *l)
     : pdb_module(_pdb_module),
       lnnum(l) {}
 
   virtual ~pdb_lnnum_item_t(void) {}
 
-  source_file_iterator idaapi get_source_files(void)
+  virtual source_file_iterator idaapi get_source_files(void)
   {
-    pdb_single_file_iterator *ret = NULL;
-    IDiaSourceFile *file;
-    HRESULT hr = lnnum->get_sourceFile(&file);
-    if ( SUCCEEDED(hr) )
-      ret = new pdb_single_file_iterator(pdb_module, file);
+    pdb_file_iterator *ret = NULL;
+    if ( lnnum->file_id != DWORD(-1) )
+    {
+      ret = new pdb_file_iterator();
+      pdb_file_iterator::entry_t &e = ret->entries.push_back();
+      e.pdb_module = pdb_module;
+      e.file_id = lnnum->file_id;
+    }
     return source_file_iterator(ret);
   }
 
-  bool idaapi get_name(qstring *) const
+  virtual bool idaapi get_name(qstring *) const
   {
     return false;
   }
 
-  int idaapi get_lnnum() const
+  virtual int idaapi get_lnnum() const
   {
-    DWORD n = -1;
-    lnnum->get_lineNumber(&n);
-    return n;
+    return lnnum->lineNumber;
   }
 
-  int idaapi get_end_lnnum() const
+  virtual int idaapi get_end_lnnum() const
   {
-    DWORD n = -1;
-    lnnum->get_lineNumberEnd(&n);
-    return n;
+    return lnnum->lineNumberEnd;
   }
 
-  int idaapi get_colnum() const
+  virtual int idaapi get_colnum() const
   {
-    DWORD n = -1;
-    lnnum->get_columnNumber(&n);
-    return n;
+    return lnnum->columnNumber;
   }
 
-  int idaapi get_end_colnum() const
+  virtual int idaapi get_end_colnum() const
   {
-    DWORD n = -1;
-    lnnum->get_columnNumberEnd(&n);
-    return n;
+    return lnnum->columnNumberEnd;
   }
 
-  ea_t idaapi get_ea() const
+  virtual ea_t idaapi get_ea() const
   {
-    ULONGLONG va = BADADDR;
-    lnnum->get_virtualAddress(&va);
-    return va;
+    return ea_t(lnnum->va);
   }
 
-  asize_t idaapi get_size() const
+  virtual asize_t idaapi get_size() const
   {
-    DWORD len = 0;
-    lnnum->get_length(&len);
-    return len;
+    return lnnum->length;
   }
 
-  virtual src_item_kind_t idaapi get_item_kind() const
+  virtual src_item_kind_t idaapi get_item_kind(const eval_ctx_t * /*ctx*/) const
   {
-    BOOL is_stmt = false;
-    lnnum->get_statement(&is_stmt);
-    return is_stmt ? SRCIT_STMT : SRCIT_EXPR;
+    return lnnum->statement ? SRCIT_STMT : SRCIT_EXPR;
   }
 
-  virtual src_item_kind_t idaapi get_kind(const eval_ctx_t * /*ctx*/) const
-  {
-    return get_item_kind();
-  }
-
-  source_item_ptr idaapi get_parent(src_item_kind_t /*max_kind*/) const
+  virtual source_item_ptr idaapi get_parent(src_item_kind_t /*max_kind*/) const
   {
     source_item_t *ret = NULL;
     ea_t ea = get_ea();
     if ( ea != BADADDR )
     {
-      // ;! we assume that the parent of a statement/expression is a function
-      // i do not know how to get an enclosing block. if it is possible, we could
-      // return it too
-      LONG disp;
-      IDiaSymbol *sym;
-      HRESULT hr = pdb_module->get_session()->findSymbolByVAEx(ea, SymTagFunction, &sym, &disp);
-      if ( SUCCEEDED(hr) )
-        ret = new_pdb_symbol(pdb_module, sym);
+      source_items_vec_builder_t items_builder(pdb_module);
+      HRESULT hr = pdb_module->get_access()->sip_iterate_symbols_at_ea(
+              ea, /*size=*/ 1, SymTagFunction, items_builder);
+      if ( hr == S_OK && !items_builder.items.empty() )
+      {
+        DWORD sym_id = 0;
+        pdb_symbol_t &pit = (pdb_symbol_t &) *items_builder.items[0];
+        hr = pit.get_pdb_sym()->get_symIndexId(&sym_id);
+        if ( hr == S_OK )
+          ret = new_pdb_symbol(pdb_module, sym_id);
+      }
     }
     return source_item_ptr(ret);
   }
 
   bool idaapi equals(const source_item_t *othr) const
   {
-    ULONGLONG this_va, other_va;
     pdb_lnnum_item_t *other = (pdb_lnnum_item_t*) othr;
     return other != NULL
         && other->lnnum != NULL
-        && lnnum->get_virtualAddress(&this_va) == S_OK
-        && other->lnnum->get_virtualAddress(&other_va) == S_OK
-        && this_va == other_va;
+        && lnnum->va != BADADDR
+        && other->lnnum->va != BADADDR
+        && lnnum->va == other->lnnum->va;
   }
 };
 
-//--------------------------------------------------------------------------
-static pdb_symbol_t *new_pdb_symbol(
-        pdb_modinfo_t *pdb_module,
-        IDiaSymbol *sym,
-        src_item_kind_t desired_kind)
+//-------------------------------------------------------------------------
+static src_item_kind_t find_srcitem_kind(pdb_sym_t *sym)
 {
-  DWORD tag;
+  src_item_kind_t kind = SRCIT_NONE;
+  DWORD tag = 0;
   HRESULT hr = sym->get_symTag(&tag);
-  if ( SUCCEEDED(hr) )
+  if ( hr == S_OK )
   {
-    src_item_kind_t kind = SRCIT_NONE;
     switch ( tag )
     {
       case SymTagFunction:
@@ -946,7 +773,9 @@ static pdb_symbol_t *new_pdb_symbol(
               DWORD dwReg;
               if ( sym->get_registerId(&dwReg) == S_OK
                 && (dwReg == CV_REG_EBP || dwReg == CV_AMD64_RSP) )
+              {
                 kind = SRCIT_LOCVAR;
+              }
               break;
 
             case LocIsEnregistered:
@@ -956,14 +785,28 @@ static pdb_symbol_t *new_pdb_symbol(
         }
         break;
     }
-
-    if ( kind != SRCIT_NONE )
-    {
-      if ( desired_kind == SRCIT_NONE || kind == desired_kind )
-        return new pdb_symbol_t(pdb_module, sym, kind);
-    }
   }
-  sym->Release();
+  return kind;
+}
+
+//--------------------------------------------------------------------------
+static source_item_t *new_pdb_symbol(pdb_modinfo_t *pdb_module, DWORD sym_id)
+{
+  pdb_sym_t *sym = new pdb_sym_t(pdb_module->get_access(), sym_id);
+  src_item_kind_t kind = find_srcitem_kind(sym);
+  if ( kind != SRCIT_NONE )
+    return new pdb_symbol_t(pdb_module, sym, /*own=*/ true, kind);
+  delete sym;
+  return NULL;
+}
+
+//--------------------------------------------------------------------------
+static source_item_t *new_pdb_symbol_or_delete(pdb_modinfo_t *pdb_module, pdb_sym_t *sym)
+{
+  src_item_kind_t kind = find_srcitem_kind(sym);
+  if ( kind != SRCIT_NONE )
+    return new pdb_symbol_t(pdb_module, sym, /*own=*/ true, kind);
+  delete sym;
   return NULL;
 }
 
@@ -979,7 +822,7 @@ class pdb_provider_t : public srcinfo_provider_t
     {
       msg("PDBSRC: loading symbols for '%s'...\n", mod.path.c_str());
       HRESULT hr = mod.open(mod.path.c_str(), search_path.c_str(), mod.base);
-      if ( !SUCCEEDED(hr) )
+      if ( FAILED(hr) )
       { // failed to open the corresponding pdb file
         modules.erase(p);
         return NULL;
@@ -990,6 +833,7 @@ class pdb_provider_t : public srcinfo_provider_t
   }
   pdb_modinfo_t *find_module(ea_t ea)
   {
+    deb(IDA_DEBUG_SRCDBG, "PDB: find_module(%a)\n", ea);
     pdb_modules_t::iterator p = modules.lower_bound(ea);
     if ( p == modules.end() || p->first > ea )
     {
@@ -1001,6 +845,15 @@ class pdb_provider_t : public srcinfo_provider_t
         return NULL;
     }
     return open_module(p);
+  }
+  pdb_modinfo_t *find_module(const char *path)
+  {
+    deb(IDA_DEBUG_SRCDBG, "PDB: find_module(%s)\n", path);
+    pdb_modules_t::iterator p = modules.begin();
+    for ( ; p != modules.end(); ++p )
+      if ( p->second.path == path )
+        return &p->second;
+    return NULL;
   }
 
 public:
@@ -1014,8 +867,11 @@ public:
   source_item_iterator idaapi find_source_items(source_file_t *sf, int lnnum, int colnum);
   source_file_iterator idaapi create_file_iterator(const char *filename);
   source_item_iterator idaapi create_item_iterator(const source_file_t *sf);
-  pdb_provider_t(const char *name, const char *display_name)
-    : srcinfo_provider_t(name, display_name) {}
+  bool idaapi apply_module_info(const char *path);
+  source_item_ptr idaapi find_static_item(const char *name, ea_t ea);
+
+  pdb_provider_t(const char *nm, const char *dnm)
+    : srcinfo_provider_t(nm, dnm) {}
   virtual ~pdb_provider_t(void) {}
 };
 
@@ -1049,6 +905,7 @@ void idaapi pdb_provider_t::add_module(
         ea_t base,
         asize_t size)
 {
+  deb(IDA_DEBUG_DEBUGGER, "PDB: add_module(%s, [%a -> %a))\n", path, base, ea_t(base + size));
   pdb_modinfo_t &mod = modules[base];
   mod.path = path;
   mod.base = base;
@@ -1080,132 +937,42 @@ int idaapi pdb_provider_t::get_change_flags(void)
 }
 
 //--------------------------------------------------------------------------
-static void clear_lnmap(lnmap_t *lnmap)
-{
-  for ( lnmap_t::iterator p=lnmap->begin(); p != lnmap->end(); ++p )
-  {
-    lnvec_t &vec = p->second;
-    for ( int i=0; i < vec.size(); i++ )
-      vec[i]->Release();
-  }
-}
-
-//--------------------------------------------------------------------------
-class pdb_global_item_iterator : public _source_item_iterator
-{
-  pdb_modinfo_t *pdb_module;
-  ea_t ea, cur;
-  asize_t size;
-  enum SymTagEnum tag;
-  IDiaSymbol *sym;
-public:
-
-  pdb_global_item_iterator(pdb_modinfo_t *_pdb_module, ea_t a, asize_t sz, enum SymTagEnum t)
-    : pdb_module(_pdb_module), ea(a), size(sz), tag(t), sym(NULL)
-  {
-  }
-
-  virtual ~pdb_global_item_iterator(void)
-  {
-    if ( sym != NULL )
-      sym->Release();
-  }
-
-  void idaapi release(void)
-  {
-    delete this;
-  }
-
-  bool idaapi first(void)
-  {
-    cur = ea;
-    return next();
-  }
-
-  bool idaapi next(void)
-  {
-    if ( sym != NULL )
-    {
-      sym->Release();
-      sym = NULL;
-    }
-
-    if ( cur >= ea+size )
-      return false;
-
-    ea_t old = cur;
-    qnotused(old);
-
-    LONG disp;
-    HRESULT hr = pdb_module->get_session()->findSymbolByVAEx(cur, tag, &sym, &disp);
-    if ( FAILED(hr) || sym == NULL )
-      return false;
-
-    cur -= disp;
-
-    ULONGLONG length = 0;
-    sym->get_length(&length);
-    cur += length;
-
-    QASSERT(30169, cur > old); // to avoid endless loops - i do not know if they are possible
-    return true;
-  }
-
-  source_item_ptr idaapi operator *()
-  {
-    source_item_t *si = new_pdb_symbol(pdb_module, sym);
-    sym = NULL;
-    return source_item_ptr(si);
-  }
-};
-
-//--------------------------------------------------------------------------
 // Retrieve the line numbers into a map
 // 'enumerator' will be freed by this function
-static void retrieve_lnnums(lnmap_t *map, IDiaEnumLineNumbers *enumerator)
+static void lnnums_to_lnmap(lnmap_t *map, const pdb_lnnums_t &lnnums)
 {
-  LONG lncnt = 0;
-  enumerator->get_Count(&lncnt);
-
+  const size_t lncnt = lnnums.size();
   if ( lncnt > 0 )
   {
-    lnvec_t vec;
+    pdb_lnnum_vec_t vec;
     vec.resize(lncnt);
-
-    ULONG got = 0;
-    enumerator->Next(lncnt, vec.begin(), &got);
-
-    QASSERT(30170, got == lncnt);
-    for ( ULONG j=0; j < got; j++ )
+    for ( size_t i = 0; i < lncnt; ++i )
     {
-      DWORD n;
-      IDiaLineNumber *lnnum = vec[j];
-      if ( SUCCEEDED(lnnum->get_lineNumber(&n)) )
-        (*map)[n].push_back(lnnum);
+      const pdb_lnnum_t &lnnum = lnnums[i];
+      (*map)[lnnum.lineNumber].push_back(lnnum);
     }
   }
-  enumerator->Release();
 }
 
 //--------------------------------------------------------------------------
 class pdb_lnmap_iterator : public _source_item_iterator
 {
   pdb_modinfo_t *pdb_module;
-  lnmap_t lnmap;        // lnnum -> lnvec_t
-  IDiaLineNumber *item; // holds the answer after next()
+  lnmap_t lnmap;        // lnnum -> pdb_lnnum_vec_t
+  pdb_lnnum_t *item;    // holds the answer after next()
   lnmap_t::iterator p;  // current lnnum
   size_t idx;           // current item on the line
 public:
 
   pdb_lnmap_iterator(pdb_modinfo_t *_pdb_module, lnmap_t *map)
-    : pdb_module(_pdb_module)
+    : pdb_module(_pdb_module), item(NULL), idx(0)
   {
     map->swap(lnmap);
+    p = lnmap.end();
   }
 
   virtual ~pdb_lnmap_iterator(void)
   {
-    clear_lnmap(&lnmap);
   }
 
   void idaapi release(void)
@@ -1231,12 +998,12 @@ public:
       return false;
 
     // remember the item to return when dereferenced
-    item = p->second[idx];
+    item = &p->second[idx];
 
     // advance pointer
     if ( ++idx >= size )
     {
-      // go to next lnvec_t
+      // go to next pdb_lnnum_vec_t
       ++p;
 
       // reset the index in the vector
@@ -1260,11 +1027,11 @@ source_item_iterator idaapi pdb_provider_t::find_source_items(
         src_item_kind_t level,
         bool)
 {
-  pdb_global_item_iterator *ret = NULL;
+  deb(IDA_DEBUG_SRCDBG, "PDB: find_source_items(ea=%a, size=%" FMT_64 "u)\n", ea, (uint64) size);
+  pdb_item_iterator *ret = NULL;
   pdb_modinfo_t *pdb_module = find_module(ea);
   if ( pdb_module != NULL )
   {
-    IDiaSession *session = pdb_module->get_session();
     enum SymTagEnum tag;
     switch ( level )
     {
@@ -1275,13 +1042,14 @@ source_item_iterator idaapi pdb_provider_t::find_source_items(
       case SRCIT_EXPR:       // an expression (a+b*c)
         {
           pdb_lnmap_iterator *ret2 = NULL;
-          IDiaEnumLineNumbers *enumerator;
-          HRESULT hr = session->findLinesByVA(ea, size, &enumerator);
-          if ( SUCCEEDED(hr) )
+          pdb_lnnums_t lnnums;
+          HRESULT hr = pdb_module->get_access()->sip_retrieve_lines_by_va(
+                  &lnnums, ea, size);
+          if ( hr == S_OK )
           {
             // Precompute the lines associated with the given address
             lnmap_t lnmap;
-            retrieve_lnnums(&lnmap, enumerator);
+            lnnums_to_lnmap(&lnmap, lnnums);
             ret2 = new pdb_lnmap_iterator(pdb_module, &lnmap);
           }
           return source_item_iterator(ret2);
@@ -1295,7 +1063,12 @@ source_item_iterator idaapi pdb_provider_t::find_source_items(
         tag = SymTagData;
         break;
     }
-    ret = new pdb_global_item_iterator(pdb_module, ea, size, tag);
+    source_items_vec_builder_t items_builder(pdb_module);
+    if ( pdb_module->get_access()->sip_iterate_symbols_at_ea(
+                 ea, size, tag, items_builder) == S_OK )
+    {
+      ret = new pdb_item_iterator(pdb_module, items_builder.items);
+    }
   }
   return source_item_iterator(ret);
 }
@@ -1307,47 +1080,15 @@ source_item_iterator idaapi pdb_provider_t::find_source_items(
         int colnum)
 {
   pdb_lnmap_iterator *ret = NULL;
-  IDiaEnumSymbols *syms;
   pdb_source_file_t *psf = (pdb_source_file_t *)sf;
-  HRESULT hr = psf->file->get_compilands(&syms);
-  if ( SUCCEEDED(hr) )
+  pdb_lnnums_t lnnums;
+  HRESULT hr = psf->pdb_module->get_access()->sip_retrieve_lines_by_coords(
+          &lnnums, psf->file_id, lnnum, colnum);
+  if ( hr == S_OK && !lnnums.empty() )
   {
-    qvector<IDiaEnumLineNumbers *> enumvec;
-    while ( true )
-    {
-      ULONG got = 0;
-      IDiaSymbol *compiland;
-      syms->Next(1, &compiland, &got);
-      if ( got == 0 )
-        break;
-
-      IDiaEnumLineNumbers *enumerator;
-      IDiaSession *dia_session = psf->pdb_module->get_session();
-      if ( lnnum == 0 )
-        hr = dia_session->findLines(compiland, psf->file, &enumerator);
-      else
-        hr = dia_session->findLinesByLinenum(compiland, psf->file, lnnum,
-                                             colnum, &enumerator);
-      compiland->Release();
-
-      if ( SUCCEEDED(hr) )
-        enumvec.push_back(enumerator);
-    }
-
-    syms->Release();
-
-    if ( !enumvec.empty() )
-    {
-      // if multiple lines are requested, rearrange data by line numbers
-      // lnnum -> vector<IDiaLineNumber*>
-      lnmap_t lnmap;
-      for ( int i=0; i < enumvec.size(); i++ )
-      {
-        IDiaEnumLineNumbers *enumerator = enumvec[i];
-        retrieve_lnnums(&lnmap, enumerator);
-      }
-      ret = new pdb_lnmap_iterator(psf->pdb_module, &lnmap);
-    }
+    lnmap_t lnmap;
+    lnnums_to_lnmap(&lnmap, lnnums);
+    ret = new pdb_lnmap_iterator(psf->pdb_module, &lnmap);
   }
   return source_item_iterator(ret);
 }
@@ -1377,32 +1118,30 @@ source_file_iterator idaapi pdb_provider_t::create_file_iterator(const char *fil
   // if so, immediately return because such names are used by the decompiler sip
   if ( !is_hexrays_filename(filename) )
   {
-    qwstring fnamebuf;
-    wchar16_t *fname = NULL;
-    if ( filename != NULL )
-    {
-      qstring fnametmp = filename;
-      c2ustr(qstrlwr(&fnametmp[0]), &fnamebuf);
-      fname = fnamebuf.begin();
-    }
+    ret = new pdb_file_iterator();
 
     // Get a source file item iterators from each module
-    fileenumvec_t fv;
     for ( pdb_modules_t::iterator p=modules.begin(); p != modules.end(); )
     {
       pdb_modinfo_t *m = open_module(p++);
       if ( m != NULL )
       {
-        pdb_fileenum_t pfe;
-        pfe.pdb_module = m;
-        IDiaSession *session = pfe.pdb_module->get_session();
-        if ( session->findFile(NULL, fname, nsfFNameExt, &pfe.enumerator) == S_OK )
-          fv.push_back(pfe);
+        qvector<DWORD> files_ids;
+        m->get_access()->sip_find_files(&files_ids, filename);
+        for ( size_t i = 0; i < files_ids.size(); ++i )
+        {
+          pdb_file_iterator::entry_t &e = ret->entries.push_back();
+          e.pdb_module = m;
+          e.file_id = files_ids[i];
+        }
       }
     }
 
-    if ( !fv.empty() )
-      ret = new pdb_file_iterator(&fv);
+    if ( ret->entries.empty() )
+    {
+      delete ret;
+      ret = NULL;
+    }
   }
   return source_file_iterator(ret);
 }
@@ -1410,17 +1149,75 @@ source_file_iterator idaapi pdb_provider_t::create_file_iterator(const char *fil
 //--------------------------------------------------------------------------
 source_item_iterator idaapi pdb_provider_t::create_item_iterator(const source_file_t *sf)
 {
+  pdb_source_file_t *psf = (pdb_source_file_t *) sf;
   pdb_item_iterator *ret = NULL;
-  pdb_source_file_t &psf = *(pdb_source_file_t *)&sf;
-  IDiaEnumSymbols *syms;
-  HRESULT hr = psf.file->get_compilands(&syms);
-  if ( SUCCEEDED(hr) )
+  pdb_modinfo_t *mod = psf->pdb_module;
+  source_items_vec_builder_t svec_builder(mod);
+  if ( mod->get_access()->sip_iterate_file_compilands(
+               psf->file_id, svec_builder) == S_OK )
   {
-    // enumerates compilands
-    // it is possible to get their children and retrieve all symbols(?)
-    ret = new pdb_item_iterator(psf.pdb_module, syms);
+    ret = new pdb_item_iterator(mod, svec_builder.items);
   }
   return source_item_iterator(ret);
+}
+
+//-------------------------------------------------------------------------
+bool idaapi pdb_provider_t::apply_module_info(const char *path)
+{
+#ifdef ENABLE_REMOTEPDB
+  if ( !is_win32_remote_debugger_loaded() )
+    return false;
+#endif
+
+  pdb_modinfo_t *module = find_module(path);
+  if ( module == NULL )
+    return false;
+  pdbargs_t pdbargs;
+  pdbargs.flags = PDBFLG_DBG_MODULE;
+  if ( inf.filetype != f_PE && !is_miniidb() )
+    pdbargs.flags |= PDBFLG_ONLY_TYPES;
+  pdbargs.loaded_base = module->base;
+  pdbargs.input_path = module->path.c_str();
+  show_wait_box("HIDECANCEL\nRetrieving symbol information from '%s'",
+                qbasename(module->path.c_str()));
+  bool rc = apply_debug_info(pdbargs);
+  hide_wait_box();
+  return rc;
+}
+
+//-------------------------------------------------------------------------
+source_item_ptr idaapi pdb_provider_t::find_static_item(
+        const char *iname,
+        ea_t ea)
+{
+  source_item_t *si = NULL;
+  pdb_modinfo_t *pdb_module = find_module(ea);
+
+  // find in current module
+  if ( pdb_module != NULL )
+    si = pdb_module->find_static_item_in_module(iname);
+
+  // not found? search in other modules
+  if ( si == NULL )
+  {
+    pdb_modules_t::iterator p = modules.begin();
+    for ( ; si == NULL && p != modules.end(); ++p )
+      if ( &p->second != pdb_module )
+        si = p->second.find_static_item_in_module(iname);
+  }
+
+  return source_item_ptr(si);
+}
+
+//-------------------------------------------------------------------------
+HRESULT source_items_vec_builder_t::visit_child(pdb_sym_t &child)
+{
+  pdb_sym_t *cur = new pdb_sym_t(pdb_module->get_access());
+  cur->steal_data(child);
+  source_item_t *si = new_pdb_symbol_or_delete(pdb_module, cur);
+  if ( si != NULL )
+    items.push_back(source_item_ptr(si));
+  return S_OK;
 }
 
 //--------------------------------------------------------------------------

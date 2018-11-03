@@ -13,6 +13,7 @@
  2.5    Handle spaces in exe name
  2.6    Autoremove .exp (and .lib) files in VC mode
  2.8    Serialize calls to bcc linker
+ 2.9    Added support for /STACK
 
 */
 
@@ -37,14 +38,19 @@ bool verbose  = true;
 bool isbor    = false;        // borland style
 bool isvc     = false;        // visual studio style
 bool isce     = false;        // windows ce
+bool x64      = false;
+
+bool use_ulink = false;       // use ulink.exe as linker
 
 HANDLE ilink32_mutex;
 
 static char rspname[4096] = "rsptmp";
 
 static void permutate(char *ptr, const char *user);
-static int prc1(const char *file, const char *user); /* Process indirect file */
+static int prc1(const char *file, const char *user, char *cmdline); /* Process indirect file */
 static int run(char *line, bool isvc);
+static int extract_words(const char *ptr, char **words, int maxwords);
+#define MAX_WORDS 1024
 /*------------------------------------------------------------------------*/
 static char *strrpl(char *out, size_t outsize, const char *in, char s1, char s2)
 {
@@ -82,6 +88,22 @@ inline char *dospath(char *out, const char *in, size_t outsize)
 }
 
 /*------------------------------------------------------------------------*/
+const char *qbasename(const char *path)
+{
+  if ( path != NULL && path[0] != '\0' )
+  {
+    const char *file = strrchr(path, '/');
+    if ( file == NULL )
+      file = strrchr(path, '\\');
+    if ( file != NULL )
+      return file+1;
+    if ( path[1] == ':' )
+      return path+2;
+  }
+  return path;
+}
+
+/*------------------------------------------------------------------------*/
 inline bool requires_quotes(const char *fname)
 {
   if ( strchr(fname, ' ') != NULL )
@@ -116,12 +138,128 @@ static void copy_exe_name(const char *libexe)
 }
 
 /*------------------------------------------------------------------------*/
+static char *map_option(char *out, const char *in, size_t outsize, char *cmdline)
+{
+  if ( !use_ulink )
+    return qstpncpy(out, in, outsize);
+
+  char *buf = out;
+  char *end = out + outsize;
+  if ( strnicmp(in, "/BASE:", 6) == 0 )
+  {
+    buf = qstpncpy(buf, "-b:", end-buf);
+    buf = qstpncpy(buf, &in[6], end-buf);
+    buf = qstpncpy(buf, " ", end-buf);    // need place for /DYNAMICBASE option
+  }
+  else if ( strnicmp(in, "/OUT:", 5) == 0 )
+  {
+    buf = qstpncpy(buf, "-ZO:", end-buf);
+    buf = dospath(buf, &in[5], end-buf);
+  }
+  else if ( strnicmp(in, "/MAP:", 5) == 0 )
+  {
+    buf = qstpncpy(buf, "-ZM:", end-buf);
+    buf = dospath(buf, &in[5], end-buf);
+  }
+  else if ( stricmp(in, "/DLL") == 0 )
+  {
+    buf = qstpncpy(buf, x64?"-Tpd+":"-Tpd", end-buf);
+  }
+  else if ( strnicmp(in, "/DEF:", 5) == 0 )
+  {
+    const char *inp_def = &in[5];
+    buf = qstpncpy(buf, "-ZD:", end-buf);
+    // add suffix 'u' to ulink.exe DEF-file name
+    char *p = buf;
+    buf = qstpncpy(buf, inp_def, end-buf);
+    p = strrchr(p, '.');
+    if ( p != NULL )
+      buf = p;
+    buf = qstpncpy(buf, "u", end-buf);
+    const char *q = strrchr(inp_def, '.');
+    if ( q != NULL )
+      buf = qstpncpy(buf, q, end-buf);
+  }
+  else if ( stricmp(in, "/LARGEADDRESSAWARE") == 0 )
+  {
+    buf = qstpncpy(buf, "-GF:LARGEADDRESSAWARE", end-buf);
+  }
+  else if ( stricmp(in, "/MANIFEST") == 0 )
+  {
+    buf = qstpncpy(buf, "-ZF~i", end-buf);
+  }
+  else if ( stricmp(in, "/DYNAMICBASE") == 0 )
+  {
+    char *p = strstr(cmdline, "-b:");
+    if ( p != NULL )
+    {
+      p = strchr(p, ' ');
+      if ( p != NULL )
+      {
+        *p = '*';
+      }
+      else
+      {
+        fprintf(stderr, "ld: change order of the /BASE:... and /DYNAMICBASE options\n");
+        abort();
+      }
+    }
+    else
+    {
+      buf = qstpncpy(buf, "-b*", end-buf);
+    }
+  }
+  else if ( strnicmp(in, "/LIBPATH:", 9) == 0 )
+  {
+    buf = qstpncpy(buf, "-L", end-buf);
+    buf = dospath(buf, &in[9], end-buf);
+  }
+  else if ( strnicmp(in, "/STUB:", 6) == 0 )
+  {
+    buf = qstpncpy(buf, "-ZX", end-buf);
+    buf = dospath(buf, &in[6], end-buf);
+  }
+  else if ( stricmp(in, "/INCREMENTAL:NO") == 0 )
+  {
+  }
+  else if ( stricmp(in, "/OPT:REF") == 0 )
+  { // /OPT:REF eliminates functions and data that are never referenced
+    // default for ulink.exe
+  }
+  else if ( stricmp(in, "/OPT:ICF") == 0 )
+  { // Use /OPT:ICF[=iterations] to perform identical COMDAT folding
+    // default for ulink.exe
+  }
+  else if ( strnicmp(in, "/INCLUDE:", 9) == 0 )
+  {
+    buf = qstpncpy(buf, "-i", end-buf);
+    buf = dospath(buf, &in[9], end-buf);
+  }
+  else if ( strnicmp(in, "/IMPLIB:", 8) == 0 )
+  {
+    buf = qstpncpy(buf, "-ZI", end-buf);
+    buf = dospath(buf, &in[8], end-buf);
+  }
+  else if ( strnicmp(in, "/STACK:", 7) == 0 )
+  {
+    buf = qstpncpy(buf, "-S:", end-buf);
+    buf = dospath(buf, &in[7], end-buf);
+  }
+  else
+  {
+    fprintf(stderr, "ld: non-convertible option '%s'\n", in);
+    abort();
+  }
+  return buf;
+}
+
+/*------------------------------------------------------------------------*/
 static void remove_exp_and_lib(char *nargv[])
 {
   char *opath = NULL;
   bool isdll = false;
   char *p;
-  for( int i = 0; (p=nargv[i]) != NULL; i++ )
+  for ( int i = 0; (p=nargv[i]) != NULL; i++ )
   {
     if ( *p == '-' || *p == '/' )
     {
@@ -191,26 +329,28 @@ int main(int argc, char *argv[])
 
   while ( argc > 1 && *argv[1] == SW_CHAR )
   {
-    switch( argv[1][1] )
+    switch ( argv[1][1] )
     {
       case 'b':
-        isbor   = true;
-        linker  = "tlink";
+        isbor = true;
+        linker = "tlink";
         break;
       case 'c':
-        isce    = true;
-        isvc    = true;
-        linker  = "link";
+        isce = true;
+        isvc = true;
+        linker = "link";
         break;
       case 'l':
         linker = &argv[1][2];
+        use_ulink = strcmp(qbasename(linker), "ulink.exe") == 0;
         break;
       case 'k':
-        keep    = true;
+        keep = true;
         break;
       case 'u':
-        user    = &argv[1][2];
-        if ( user[0] != '\0' ) break;
+        user = &argv[1][2];
+        if ( user[0] != '\0' )
+          break;
         goto usage;
       case 'v':
         isvc    = true;
@@ -227,6 +367,9 @@ int main(int argc, char *argv[])
         }
         toend = &argv[1][2];
         break;
+      case 'x':
+        x64 = true;
+        break;
       default:
 usage:
         fprintf(stderr, "ld: illegal switch '%c'\n", argv[1][1]);
@@ -238,7 +381,7 @@ usage:
 
   if ( argc < 2 )
   {
-    printf("ld version 2.8\n"
+    printf("ld version 2.9\n"
            "\tUsage: ld [%cl##] [%cb] [%cu...] ...\n"
            "\t %cv - visual studio style\n"
            "\t %cb - borland style\n"
@@ -247,8 +390,10 @@ usage:
            "\t %cu - user data\n"
            "\t %ca - append argument to end of command\n"
            "\t %ck - keep temporary file\n"
-           "\t %cq - do not show command line\n",
+           "\t %cq - do not show command line\n"
+           "\t %cx - link for 64-bit\n",
            SW_CHAR, SW_CHAR, SW_CHAR,
+           SW_CHAR,
            SW_CHAR,
            SW_CHAR,
            SW_CHAR,
@@ -275,10 +420,10 @@ usage:
         return 1;
       }
       first = 0;
-      code = prc1(&argv[i][1], user);
+      code = prc1(&argv[i][1], user, line);
       if ( code != 0 )
         return code;
-      ptr = qstpncpy(ptr, " @", end-ptr);
+      ptr = qstpncpy(ptr, use_ulink ? " @+" : " @", end-ptr);
       ptr = dospath(ptr, rspname, end-ptr);
       continue;
     }
@@ -290,7 +435,7 @@ usage:
       quoted = true;
     }
     if ( argv[i][0] == '/' )
-      ptr = qstpncpy(ptr, argv[i], end-ptr);    // command line switch
+      ptr = map_option(ptr, argv[i], end-ptr, line);  // command line switch
     else
       ptr = dospath(ptr, argv[i], end-ptr);     // file name
     if ( quoted )
@@ -344,7 +489,7 @@ usage:
 static char fl[4096];
 
 /*------------------------------------------------------------------------*/
-static int prc1(const char *file, const char *user) /* Process indirect file */
+static int prc1(const char *file, const char *user, char *cmdline) /* Process indirect file */
 {
   FILE *fpo;
   FILE *fp = fopen(file, "r");
@@ -355,6 +500,7 @@ static int prc1(const char *file, const char *user) /* Process indirect file */
   }
 
   itoa(getpid(), strchr(rspname,0), 10);
+  strcat(rspname, ".rsp");
   fpo = fopen(rspname, "w");
   if ( fpo == 0 )
   {
@@ -362,6 +508,11 @@ static int prc1(const char *file, const char *user) /* Process indirect file */
     fclose(fp);
     return 1;
   }
+  char fileslibs[4096];
+  char *buf = fileslibs;
+  char *buf_end = fileslibs + sizeof(fileslibs);
+  *buf = '\0';
+  bool do_map_option = use_ulink;
   while ( fgets(fl, sizeof(fl), fp) )
   {
     if ( strncmp(fl, "noperm", 6) == 0 )
@@ -379,11 +530,40 @@ static int prc1(const char *file, const char *user) /* Process indirect file */
         ptr++;
       if ( user != NULL )
         permutate(ptr, user);
-      fputs(ptr, fpo);
+      if ( !do_map_option )
+        fputs(ptr, fpo);
+      else
+        buf = strrpl(buf, buf_end-buf, ptr, '\n', ' ');
       continue;
+    }
+    if ( do_map_option )
+    {
+      char *words[MAX_WORDS];
+      int n = extract_words(fl, words, MAX_WORDS);
+      char *ptr = fl;
+      char *end = fl + sizeof(fl);
+      *ptr = '\0';
+      for ( int i=0; i < n; ++i )
+      {
+        if ( i != 0 )
+          ptr = qstpncpy(ptr, " ", end-ptr);
+        if ( words[i][0] == '/' )
+          ptr = map_option(ptr, words[i], end-ptr, cmdline);
+        else
+          ptr = qstpncpy(ptr, words[i], end-ptr);
+        free(words[i]);
+      }
+      if ( fl[0] == '\0' )
+        continue;
+      qstpncpy(ptr, "\n", end-ptr);
     }
     if ( !isbor )
       fputs(fl, fpo);
+  }
+  if ( do_map_option && fileslibs[0] != '\0' )
+  {
+    qstpncpy(buf, "\n", buf_end-buf);
+    fputs(fileslibs, fpo);
   }
   fclose(fp);
   fclose(fpo);
@@ -475,7 +655,6 @@ static int extract_words(const char *ptr, char **words, int maxwords)
 static void permutate(char *ptr, const char *user)
 {
   int i;
-#define MAX_WORDS 1024
   char *words[MAX_WORDS];
   int n = extract_words(ptr, words, MAX_WORDS);
 

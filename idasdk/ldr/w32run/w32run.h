@@ -1,7 +1,8 @@
 #ifndef __W32RUN_H__
 #define __W32RUN_H__
 
-struct w32_hdr {
+struct w32_hdr
+{
   uint32   ident;
   uint32   beg_fileoff;
   uint32   read_size;

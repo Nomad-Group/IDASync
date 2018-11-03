@@ -14,8 +14,7 @@
 #include <funcs.hpp>
 #include <ua.hpp>
 #include <bitrange.hpp>
-
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
+#include <config.hpp>
 
 /*! \file idp.hpp
 
@@ -31,31 +30,14 @@
 
 typedef int help_t; ///< help screen number
 
+struct outctx_t;
+struct regval_t;
+struct simd_info_t;
+
 /// The interface version number.
-/// It must match the version number on the IDA modules.
-/// \note This will not change anymore. Use #IDA_SDK_VERSION from pro.h
-#define IDP_INTERFACE_VERSION 76
+/// \note see also #IDA_SDK_VERSION from pro.h
 
-/// Size of the output array for processor_t::calc_next_eas.
-#define NEXTEAS_ANSWER_SIZE 32
-
-//-----------------------------------------------------------------------
-/// AbstractRegister is deprecated
-struct AbstractRegister
-{
-  virtual uval_t idaapi value(void) const = 0;
-  virtual bool idaapi isDef(void) const = 0;
-};
-
-/// This structure is used only when detailed
-/// information on processor register is needed.
-/// Actually is used only for 80x86 processors.
-struct rginfo
-{
-  AbstractRegister *low;
-  AbstractRegister *high;
-  AbstractRegister *word;
-};
+#define IDP_INTERFACE_VERSION 700
 
 //-----------------------------------------------------------------------
 /// Structure used to describe byte streams
@@ -65,100 +47,6 @@ struct bytes_t
   uchar len;
   const uchar *bytes;
 };
-
-//-----------------------------------------------------------------------
-/// \defgroup IDPOPT_T Option value types
-/// Passed as 'value_type' parameter to ::set_options_t callbacks
-//@{
-#define IDPOPT_STR 1    ///< string constant (char *)
-#define IDPOPT_NUM 2    ///< number (uval_t *)
-#define IDPOPT_BIT 3    ///< bit, yes/no (int *)
-#define IDPOPT_FLT 4    ///< float (double *)
-#define IDPOPT_I64 5    ///< 64bit number (int64 *)
-#define IDPOPT_CST 6    ///< Custom type, starting with a '{'.
-                        ///< Values of this type should be handled by
-                        ///< ::set_options_t callbacks. E.g.,:
-                        ///< \code
-                        ///< ERROR_STRINGS =
-                        ///< {
-                        ///<   {0, "Unknown error"},
-                        ///<   {1, "Missing filename"},
-                        ///<   {5, "Out-of-memory"}
-                        ///< }
-                        ///< \endcode
-                        ///< For values of this type, the data that will
-                        ///< be passed as the callback's 'value' parameter
-                        ///< is the lexer_t instance that is being used
-                        ///< to parse the configuration file.
-//@}
-
-/// \defgroup IDPOPT_RET Option result codes
-/// Return values for ::set_options_t callbacks
-//@{
-#define IDPOPT_OK       NULL            ///< ok
-#define IDPOPT_BADKEY   ((char*)1)      ///< illegal keyword
-#define IDPOPT_BADTYPE  ((char*)2)      ///< illegal type of value
-#define IDPOPT_BADVALUE ((char*)3)      ///< illegal value (bad range, for example)
-//@}
-
-
-/// Callback - called when a config directive is processed in IDA.
-/// Also see read_user_config_file() and processor_t::set_idp_options
-/// \param keyword     keyword encountered in IDA.CFG file.
-///                    if NULL, then a dialog form should be displayed
-/// \param value_type  type of value of the keyword - one of \ref IDPOPT_T
-/// \param value       pointer to value
-/// \return one of \ref IDPOPT_RET, otherwise a pointer to an error message
-
-typedef const char *(idaapi set_options_t)(
-        const char *keyword,
-        int value_type,
-        const void *value);
-
-/// \defgroup IDAOPT_PRIO Option priority
-/// Not used yet in processor modules but is used in debugger (idd.hpp).
-/// Normally default priority option does not overwrite existing value whereas
-/// high priority one does.
-/// High priority options may be stored in the database to be available
-/// in the next session
-//@{
-#define IDPOPT_PRI_DEFAULT 1  ///< default priority - taken from config file
-#define IDPOPT_PRI_HIGH    2  ///< high priority - received from UI or script func
-//@}
-
-
-/// Read any config file in the cfg subdirectory
-
-idaman bool ida_export read_user_config_file(
-        const char *file,
-        set_options_t *callback,
-        const char *macroname = NULL);
-
-
-/// Get one of config parameters defined by CC_PARMS in ida.cfg.
-/// All parameters for all compilers are stored in local map during last read
-/// of ida.cfg - this function just returns previously stored parameter value for
-/// given compiler (NULL if no such parameter)
-
-idaman const char *ida_export cfg_get_cc_parm(comp_t compid, const char *name);
-
-
-/// Get header path config parameter from ida.cfg.
-/// Also see cfg_get_cc_parm()
-
-inline const char *cfg_get_cc_header_path(comp_t compid)
-{
-  return cfg_get_cc_parm(compid, "HEADER_PATH");
-}
-
-
-/// Get predefined macros config parameter from ida.cfg.
-/// Also see cfg_get_cc_parm()
-
-inline const char *cfg_get_cc_predefined_macros(comp_t compid)
-{
-  return cfg_get_cc_parm(compid, "PREDEFINED_MACROS");
-}
 
 //-----------------------------------------------------------------------
 /// Internal representation of processor instructions.
@@ -197,104 +85,114 @@ struct instruc_t
 
 /// Does the specified instruction have the specified feature?
 
-idaman bool ida_export InstrIsSet(int icode,int bit);
+idaman bool ida_export has_insn_feature(int icode,int bit);
 
 
-/// Is the instruction at the specified address a "call"?
 
-idaman bool ida_export is_call_insn(ea_t ea);
+/// Is the instruction a "call"?
 
-
-/// Is the instruction at the specified address a "return"?
-
-idaman bool ida_export is_ret_insn(ea_t ea, bool strict=true);
+idaman bool ida_export is_call_insn(const insn_t &insn);
 
 
-/// Is the instruction at the specified address an indirect jump?
+/// Is the instruction a "return"?
 
-idaman bool ida_export is_indirect_jump_insn(ea_t ea);
+idaman bool ida_export is_ret_insn(const insn_t &insn, bool strict=true);
 
 
-/// Is the current instruction (::cmd) the end of a basic block?
+/// Is the instruction an indirect jump?
 
-idaman bool ida_export is_basic_block_end(bool call_insn_stops_block);
+idaman bool ida_export is_indirect_jump_insn(const insn_t &insn);
 
-//-----------------------------------------------------------------------
-// Structures related to checkarg_dispatch()
 
-/// This structure is used as a parameter for ::chkarg_preline.
-/// It contains pointers to output buffers.
-/// All buffers are initialized with empty strings before
-/// calling ::chkarg_preline.
-struct s_preline
+/// Is the instruction the end of a basic block?
+
+idaman bool ida_export is_basic_block_end(const insn_t &insn, bool call_insn_stops_block);
+
+
+//--------------------------------------------------------------------------
+/// Callback provided to hook_to_notification_point().
+/// A plugin can hook to a notification point and receive notifications
+/// of all major events in IDA. The callback function will be called
+/// for each event.
+/// \param user_data          data supplied in call to hook_to_notification_point()
+/// \param notification_code  processor_t::event_t or ::ui_notification_t, depending on
+///                           the hook type
+/// \param va                 additional parameters supplied with the notification.
+///                           see the event descriptions for information
+/// \retval 0    ok, the event should be processed further
+/// \retval !=0  the event is blocked and should be discarded.
+///              in the case of processor modules, the returned value is used
+///              as the return value of processor_t::notify()
+
+typedef ssize_t idaapi hook_cb_t(void *user_data, int notification_code, va_list va);
+
+/// Types of events that be hooked to with hook_to_notification_point()
+enum hook_type_t
 {
-    char  *iaflg;   ///< flag of indirect addressing ([] in x86 or ()/@ in pdp11)
-                    ///< This is not an array but a single byte.
-                    ///< 0-no indirection, 1-operand uses indirection
-    char  *prefix;  ///< place for all prefixes (near, far, word ptr, etc.)
-    char  *seg;     ///< place for segment descriptor substring (e.g. 'es:')
-    char  *reg;     ///< place for register's part (e.g. eax*8+edx)
-    char  *offset;  ///< place for all others (label names, constant, etc.)
-#define PRELINE_SIZE 100 ///< all output arrays are 100 bytes long
+  HT_IDP,         ///< Hook to the processor module.
+                  ///< The callback will receive all processor_t::event_t events.
+  HT_UI,          ///< Hook to the user interface.
+                  ///< The callback will receive all ::ui_notification_t events.
+  HT_DBG,         ///< Hook to the debugger.
+                  ///< The callback will receive all ::dbg_notification_t events.
+  HT_IDB,         ///< Hook to the database events.
+                  ///< These events are separated from the ::HT_IDP group
+                  ///< to speed things up (there are too many plugins and
+                  ///< modules hooking to the ::HT_IDP). Some essential events
+                  ///< are still generated in th ::HT_IDP group:
+                  ///< make_code, make_data
+                  ///< This list is not exhaustive.
+                  ///< A common trait of all events in this group: the kernel
+                  ///< does not expect any reaction to the event and does not
+                  ///< check the return code. For event names, see ::idb_event.
+  HT_DEV,         ///< Internal debugger events.
+                  ///< Not stable and undocumented for the moment
+  HT_VIEW,        ///< Custom/IDA views notifications.
+                  ///< Refer to ::view_notification_t
+                  ///< for notification codes
+  HT_OUTPUT,      ///< Output window notifications.
+                  ///< Refer to ::msg_notification_t
+                  ///< (::view_notification_t)
+  HT_GRAPH,       ///< Handling graph operations
+                  ///< (::graph_notification_t)
+  HT_LAST
 };
+
+
+/// Register a callback for a class of events in IDA
+
+idaman bool ida_export hook_to_notification_point(
+        hook_type_t hook_type,
+        hook_cb_t *cb,
+        void *user_data = NULL);
+
+
+/// Unregister a callback (also see hook_to_notification_point()).
+/// A plugin should unhook before being unloaded
+/// (preferably in its termination function).
+/// If different callbacks have the same callback function pointer
+/// and user_data is not NULL, only the callback whose associated
+/// user defined data matches will be removed.
+/// \return number of unhooked functions.
+
+idaman int ida_export unhook_from_notification_point(
+        hook_type_t hook_type,
+        hook_cb_t *cb,
+        void *user_data = NULL);
+
+
+/// Generate event notification.
+/// \param hook_type hook type
+/// \param code      event code
+/// \param va        additional arguments
+/// \return !=0: event processed
+
+idaman ssize_t ida_export invoke_callbacks(hook_type_t hook_type, int code, va_list va);
+
 
 #ifdef __BORLANDC__
 #pragma option push -b-
 #endif
-
-/// Operation binary codes.
-/// The kernel replaces all operations in the operand by binary code
-/// from the following enumeration.
-/// The order of operations is FIXED!
-enum ca_operation_t ENUM_SIZE(char)
-{
-  ca_lev_on   = 020,  ///< (
-  ca_lev_off  = 1,    ///< )
-  ca_not      = 2,    ///< ~              (NOT in x86 assembler)
-  ca_minus    = 3,    ///< --
-  ca_plus     = 4,    ///< +
-#define CA_PLUS_STR     "\4"
-  ca_mod      = 5,    ///< %              (MOD in x86 assembler)
-  ca_div_u    = 6,    ///< / (unsigned)   (not implemented in x86 assembler)
-  ca_div      = 7,    ///< /
-  ca_mul      = 010,  ///< *
-  ca_and      = 011,  ///< &
-  ca_or       = 012,  ///< |
-  ca_xor      = 013,  ///< ^
-  ca_shl      = 014,  ///< <<
-  ca_shr      = 015,  ///< >>
-        // end of current implementation of 'operdim' table
-//  ca_RESERVED_1 = 016,
-//  ca_RESERVED_2 = 017,
-  ca_UN_MSK   = 020,                    ///< mask
-  ca_not_UN   = ca_UN_MSK | ca_not,     ///< 022
-  ca_minus_UN = ca_UN_MSK | ca_minus,   ///< 023
-  ca_h_delim  = 037,                    ///< delimeter for holerite constant
-};
-
-/// Command codes for \ash{checkarg_dispatch()}
-enum _chkarg_cmd ENUM_SIZE(uchar)
-{
-  chkarg_atomprefix = 1,   ///< Scan the operand for special prefixes like SEG, OFFSET, SIZE (see \ref CA_PRF_).
-                           ///< arguments: char **operand, char *flgoff
-/// \defgroup CA_PRF_ Operand prefixes
-/// Used with ::chkarg_atomprefix
-//@{
-#define CA_PRF_NONE       0   ///< operand has no prefixes (unknown)
-#define CA_PRF_SEG        -1  ///< is segment reference (x86: seg arg)
-#define CA_PRF_OFFSET     1   ///< is offset to (x86: offset arg)
-#define CA_PRF_SIZE       2   ///< request size of (x86: SIZE name)
-//@}
-  chkarg_preline    = 2,   ///< Parse operand string to and fill the ::s_preline structure
-                           ///< arguments: char *operstr, ::s_preline *S
-  chkarg_operseg    = 3,   ///< Get the default segment for the specified operand
-                           ///< arguments: char *outseg, int opernum
-  chkarg_cmpseg     = 4,   ///< Check if the selectors are interchangeable
-                           ///< arguments: ::sel_t sel1, ::sel_t sel2
-  chkarg_gettable   = 5    ///< Request the operation mnemonic table
-                           ///< arguments: NULL, char * const **outptr
-                           ///< This callback must be implemented
-};
 
 #ifdef __BORLANDC__
 #pragma option pop
@@ -319,7 +217,7 @@ struct asm_t
 #define AS_NCHRE      0x00000010L       ///< char constants are: 'x
 #define AS_N2CHR      0x00000020L       ///< can't have 2 byte char consts
 
-                                        // ASCII directives:
+                                        // String literals:
 #define AS_1TEXT      0x00000040L       ///<   1 text per line, no bytes
 #define AS_NHIAS      0x00000080L       ///<   no characters with high bit
 #define AS_NCMAS      0x00000100L       ///<   no commas in ascii directives
@@ -360,7 +258,6 @@ struct asm_t
 #define AS_RELSUP     0x01000000L       ///< Checkarg: 'and','or','xor' operations with addresses are possible
 #define AS_LALIGN     0x02000000L       ///< Labels at "align" keyword are supported.
 #define AS_NOCODECLN  0x04000000L       ///< don't create colons after code names
-#define AS_NOTAB      0x08000000L       ///< Disable tabulation symbols during the output file generation
 #define AS_NOSPACE    0x10000000L       ///< No spaces in expressions
 #define AS_ALIGN2     0x20000000L       ///< .align directive expects an exponent rather than a power of 2
                                         ///< (.align 5 means to align at 32byte boundary)
@@ -374,19 +271,16 @@ struct asm_t
   help_t help;                          ///< Help screen number, 0 - no help
   const char *const *header;            ///< array of automatically generated header lines
                                         ///< they appear at the start of disassembled text
-  const uint16 *badworks;               ///< array of unsupported instructions
-                                        ///< (array of \cmd{itype}, zero terminated)
   const char *origin;                   ///< org directive
   const char *end;                      ///< end directive
   const char *cmnt;                     ///< comment string (see also cmnt2)
-  char ascsep;                          ///< ASCII string delimiter
-  char accsep;                          ///< ASCII char constant delimiter
-  const char *esccodes;                 ///< ASCII special chars
-                                        ///< (they can't appear in character and
-                                        ///< ascii constants)
+  char ascsep;                          ///< string literal delimiter
+  char accsep;                          ///< char constant delimiter
+  const char *esccodes;                 ///< special chars that can not appear
+                                        ///< as is in string and char literals
 
   // Data representation (db,dw,...):
-  const char *a_ascii;                  ///< ASCII string directive
+  const char *a_ascii;                  ///< string literal directive
   const char *a_byte;                   ///< byte directive
   const char *a_word;                   ///< word directive
   const char *a_dword;                  ///< NULL if not allowed
@@ -411,37 +305,27 @@ struct asm_t
   const char *a_equ;                    ///< 'equ' Used if AS_UNEQU is set
   const char *a_seg;                    ///< 'seg ' prefix (example: push seg seg001)
 
-  /// Pointer to checkarg_dispatch function. If NULL, checkarg won't be called.
-  bool (idaapi* checkarg_dispatch)(void *a1, void *a2, uchar cmd);
-  void *_UNUSED1_was_atomprefix;
-  void *_UNUSED2_was_checkarg_operations;
-
-  /// Translation to use in character and string constants.
-  /// Usually 1:1, i.e. trivial translation (may specify NULL)
-  /// If specified, must be 256 chars long
-  const uchar *XlatAsciiOutput;
-
   const char *a_curip;                  ///< current IP (instruction pointer) symbol in assembler
 
   /// Generate function header lines.
   /// If NULL, then function headers are displayed as normal lines
-  void (idaapi *func_header)(func_t *);
+  void (idaapi *out_func_header)(outctx_t &ctx, func_t *);
 
   /// Generate function footer lines.
   /// If NULL, then a comment line is displayed
-  void (idaapi *func_footer)(func_t *);
+  void (idaapi *out_func_footer)(outctx_t &ctx, func_t *);
 
-  const char *a_public;                 ///< "public" name keyword. NULL-gen default, ""-do not generate
-  const char *a_weak;                   ///< "weak"   name keyword. NULL-gen default, ""-do not generate
+  const char *a_public;                 ///< "public" name keyword. NULL-use default, ""-do not generate
+  const char *a_weak;                   ///< "weak"   name keyword. NULL-use default, ""-do not generate
   const char *a_extrn;                  ///< "extern" name keyword
   const char *a_comdef;                 ///< "comm" (communal variable)
 
   /// Get name of type of item at ea or id.
   /// (i.e. one of: byte,word,dword,near,far,etc...)
-  ssize_t (idaapi *get_type_name)(flags_t flag,
-                                  ea_t ea_or_id,
-                                  char *buf,
-                                  size_t bufsize);
+  ssize_t (idaapi *get_type_name)(
+        qstring *buf,
+        flags_t flag,
+        ea_t ea_or_id);
 
   const char *a_align;                  ///< "align" keyword
 
@@ -491,18 +375,24 @@ struct asm_t
                                         ///< in the verbose (multiline) form then display the name
                                         ///< as printf(a_strucname_fmt, typename)
                                         ///< (for asms with type checking, e.g. tasm ideal)
-  const char *a_3byte;                  ///< 3-byte data
   const char *a_rva;                    ///< 'rva' keyword for image based offsets
                                         ///< (see #REFINFO_RVAOFF)
   const char *a_yword;                  ///< 32-byte (256-bit) data; NULL if not allowed
                                         ///< requires #AS2_YWORD
 };
 
-#ifdef NO_OBSOLETE_FUNCS
-#define OBSOLETE(event) obsolete_ ## event
-#else
-#define OBSOLETE(event) event
-#endif
+// forward declarations for notification helpers
+struct proc_def_t;
+struct extlang_t;
+class qflow_chart_t;
+struct libfunc_t;
+struct fixup_data_t;
+struct idd_opinfo_t;
+class argloc_t;
+struct func_type_data_t;
+struct regobjs_t;
+class callregs_t;
+struct funcarg_t;
 
 //=====================================================================
 /// Describes a processor module (IDP).
@@ -510,9 +400,9 @@ struct asm_t
 /// The kernel will copy it to ::ph structure and use ::ph.
 struct processor_t
 {
-  int version;                    ///< Expected kernel version,
+  int32 version;                  ///< Expected kernel version,
                                   ///<   should be #IDP_INTERFACE_VERSION
-  int id;                         ///< one of \ref PLFM_
+  int32 id;                       ///< one of \ref PLFM_
 /// \defgroup PLFM_ Processor IDs
 /// Used by processor_t::id.
 /// Numbers above 0x8000 are reserved for the third-party modules
@@ -584,6 +474,7 @@ struct processor_t
 #define PLFM_UNSP       64        ///< SunPlus unSP
 #define PLFM_TMS320C28  65        ///< Texas Instruments TMS320C28x
 #define PLFM_DSP96K     66        ///< Motorola DSP96000
+#define PLFM_SPC700     67        ///< Sony SPC700
 //@}
 
   uint32 flag;                    ///< \ref PR_
@@ -606,7 +497,7 @@ struct processor_t
 #define PR_WORD_INS   0x000100    ///< instruction codes are grouped 2bytes in binary line prefix
 #define PR_NOCHANGE   0x000200    ///< The user can't change segments and code/data attributes
                                   ///< (display only)
-#define PR_ASSEMBLE   0x000400    ///< Module has a built-in assembler and understands IDP_ASSEMBLE
+#define PR_ASSEMBLE   0x000400    ///< Module has a built-in assembler and will react to ev_assemble
 #define PR_ALIGN      0x000800    ///< All data items should be aligned properly
 #define PR_TYPEINFO   0x001000    ///< the processor module supports type information callbacks
                                   ///< ALL OF THEM SHOULD BE IMPLEMENTED!
@@ -618,16 +509,17 @@ struct processor_t
                                   ///< The kernel will not ask the user to specify the RAM/ROM sizes
 #define PR_SEGTRANS   0x020000    ///< the processor module supports the segment translation feature
                                   ///< (meaning it calculates the code
-                                  ///< addresses using the codeSeg() function)
+                                  ///< addresses using the map_code_ea() function)
 #define PR_CHK_XREF   0x040000    ///< don't allow near xrefs between segments with different bases
 #define PR_NO_SEGMOVE 0x080000    ///< the processor module doesn't support move_segm()
                                   ///< (i.e. the user can't move segments)
-#define PR_FULL_HIFXP 0x100000    ///< ::REF_VHIGH operand value contains full operand
-                                  ///< (not only the high bits) Meaningful if \ph{high_fixup_bits}
-#define PR_USE_ARG_TYPES 0x200000 ///< use \ph{use_arg_types3} callback
+//#define PR_FULL_HIFXP 0x100000  // ::REF_VHIGH operand value contains full operand
+//                                // (not only the high bits) Meaningful if \ph{high_fixup_bits}
+#define PR_USE_ARG_TYPES 0x200000 ///< use \ph{use_arg_types} callback
 #define PR_SCALE_STKVARS 0x400000 ///< use \ph{get_stkvar_scale} callback
 #define PR_DELAYED    0x800000    ///< has delayed jumps and calls
-                                  ///< if this flag is set, \ph{is_basic_block_end} should be implemented
+                                  ///< if this flag is set, \ph{is_basic_block_end}, \ph{has_delay_slot}
+                                  ///< should be implemented
 #define PR_ALIGN_INSN 0x1000000   ///< allow ida to create alignment instructions arbitrarily.
                                   ///< Since these instructions might lead to other wrong instructions
                                   ///< and spoil the listing, IDA does not create them by default anymore
@@ -635,15 +527,27 @@ struct processor_t
 #define PR_CNDINSNS   0x4000000   ///< has conditional instructions
 #define PR_USE_TBYTE  0x8000000   ///< ::BTMT_SPECFLT means _TBYTE type
 #define PR_DEFSEG64  0x10000000   ///< segments are 64-bit by default
-#define PR_TINFO     0x20000000   ///< has support for ::tinfo_t
+#define PR_OUTER     0x20000000   ///< has outer operands (currently only mc68k)
 //@}
-  bool has_segregs(void) const  { return (flag & PR_SEGS)     != 0; }          ///< #PR_SEGS
+
+  uint32 flag2;                   ///< \ref PR2_
+/// \defgroup PR2_ Processor additional feature bits
+/// Used by processor_t::flag2
+//@{
+#define PR2_MAPPINGS  0x000001    ///< the processor module uses memory mapping
+#define PR2_IDP_OPTS  0x000002    ///< the module has processor-specific configuration options
+#define PR2_REALCVT   0x000004    ///< the module has 'realcvt' event implementation
+//@}
+
+  bool has_idp_opts(void) const { return (flag2 & PR2_IDP_OPTS)       != 0; }  ///< #PR_IDP_OPTS
+  bool has_realcvt(void) const  { return (flag2 & PR2_REALCVT)        != 0; }  ///< #PR_REALCVT
+  bool has_segregs(void) const  { return (flag & PR_SEGS)             != 0; }  ///< #PR_SEGS
   bool use32(void) const        { return (flag & (PR_USE64|PR_USE32)) != 0; }  ///< #PR_USE64 or #PR_USE32
-  bool use64(void) const        { return (flag & PR_USE64)    != 0; }          ///< #PR_USE64
-  bool ti(void) const           { return (flag & PR_TYPEINFO) != 0; }          ///< #PR_TYPEINFO
-  bool ti2(void) const          { return (flag & PR_TINFO) != 0; }             ///< #PR_TINFO
-  bool stkup(void) const        { return (flag & PR_STACK_UP) != 0; }          ///< #PR_STACK_UP
-  bool use_tbyte(void) const    { return (flag & PR_USE_TBYTE) != 0; }         ///< #PR_USE_TBYTE
+  bool use64(void) const        { return (flag & PR_USE64)            != 0; }  ///< #PR_USE64
+  bool ti(void) const           { return (flag & PR_TYPEINFO)         != 0; }  ///< #PR_TYPEINFO
+  bool stkup(void) const        { return (flag & PR_STACK_UP)         != 0; }  ///< #PR_STACK_UP
+  bool use_tbyte(void) const    { return (flag & PR_USE_TBYTE)        != 0; }  ///< #PR_USE_TBYTE
+  bool use_mappings(void) const { return (flag2 & PR2_MAPPINGS) != 0; }        ///< #PR2_MAPPINGS
 
 
   /// Get segment bitness
@@ -653,10 +557,10 @@ struct processor_t
 
   int get_segm_bitness(void) const { return (flag & PR_DEFSEG64) != 0 ? 2 : (flag & PR_DEFSEG32) != 0; }
 
-  int cnbits;                     ///< Number of bits in a byte
+  int32 cnbits;                   ///< Number of bits in a byte
                                   ///< for code segments (usually 8).
                                   ///< IDA supports values up to 32 bits
-  int dnbits;                     ///< Number of bits in a byte
+  int32 dnbits;                   ///< Number of bits in a byte
                                   ///< for non-code segments (usually 8).
                                   ///< IDA supports values up to 32 bits
 
@@ -685,12 +589,17 @@ struct processor_t
 
 /// Custom instruction codes defined by processor extension plugins
 /// must be greater than or equal to this
-#define CUSTOM_CMD_ITYPE 0x8000
+#define CUSTOM_INSN_ITYPE 0x8000
 
-
-/// processor_t::use_regarg_type3 uses this bit in the return value
+/// processor_t::use_regarg_type uses this bit in the return value
 /// to indicate that the register value has been spoiled
 #define REG_SPOIL 0x80000000L
+
+  typedef const regval_t &(idaapi regval_getter_t)(
+        const char *name,
+        const regval_t *regvalues);
+
+  //<hookgen IDP>
 
   /// Callback notification codes.
   ///
@@ -703,85 +612,186 @@ struct processor_t
   ///
   /// If you are developing a processor module, your notify() function
   /// must implement the desired behavior when called with a given code.
-  enum idp_notify
+  enum event_t
   {
-        init,                   ///< The IDP module is just loaded.
+     ev_init,                   ///< The IDP module is just loaded.
                                 ///< \param idp_modname  (const char *) processor module name
-                                ///< \return 0 on failure
+                                ///< \return <0 on failure
 
-        term,                   ///< The IDP module is being unloaded
+     ev_term,                   ///< The IDP module is being unloaded
 
-        newprc,                 ///< Before changing processor type.
+     ev_newprc,                 ///< Before changing processor type.
                                 ///< \param pnum  (int) processor number in the array of processor names
+                                ///< \param keep_cfg (bool) true: do not modify kernel configuration
                                 ///< \retval 1  ok
-                                ///< \retval 0  prohibit
+                                ///< \retval <0  prohibit
 
-        newasm,                 ///< Before setting a new assembler.
+     ev_newasm,                 ///< Before setting a new assembler.
                                 ///< \param asmnum  (int)
 
-        newfile,                ///< A new file is loaded (already).
+     ev_newfile,                ///< A new file has been loaded.
                                 ///< \param fname  (char *) input file name
 
-        oldfile,                ///< An old file is loaded (already).
+     ev_oldfile,                ///< An old file has been loaded.
                                 ///< \param fname  (char *) input file name
 
-        newbinary,              ///< Before loading a binary file.
+     ev_newbinary,              ///< IDA is about to load a binary file.
                                 ///< \param filename  (char *)   binary file name
-                                ///< \param fileoff   (::uint32) offset in the file
+                                ///< \param fileoff   (::qoff64_t) offset in the file
                                 ///< \param basepara  (::ea_t)   base loading paragraph
                                 ///< \param binoff    (::ea_t)   loader offset
-                                ///< \param nbytes    (::uint32) number of bytes to load
+                                ///< \param nbytes    (::uint64) number of bytes to load
 
-        endbinary,              ///< After loading a binary file.
+     ev_endbinary,              ///< IDA has loaded a binary file.
                                 ///< \param ok  (bool) file loaded successfully?
 
-        newseg,                 ///< A new segment is about to be created.
-                                ///< \param seg  (::segment_t *)
-                                ///< \retval 1  ok
-                                ///< \retval <=0  segment should not be created
+     ev_set_idp_options,        ///< Set IDP-specific configuration option
+                                ///< Also see set_options_t above
+                                ///< \param keyword     (const char *)
+                                ///< \param value_type  (int)
+                                ///< \param value       (const void *)
+                                ///< \param errbuf      (const char **) - a error message will be returned here (can be NULL)
+                                ///< \return  1  ok
+                                ///< \return  0  not implemented
+                                ///< \return -1  error (and message in errbuf)
 
-        assemble,               ///< Assemble an instruction.
-                                ///< (display a warning if an error is found).
-                                ///< \param ea     (::ea_t) linear address of instruction
-                                ///< \param cs     (::ea_t) cs of instruction
-                                ///< \param ip     (::ea_t) ip of instruction
-                                ///< \param use32  (bool) is 32bit segment?
-                                ///< \param line   (const char *) line to assemble
-                                ///< \param bin    (::uchar *) pointer to output opcode buffer
-                                ///< \return size of the instruction in bytes
+     ev_set_proc_options,       ///< Called if the user specified an option string in the command line:
+                                ///<  -p<processor name>:<options>.
+                                ///< Can be used for setting a processor subtype.
+                                ///< Also called if option string is passed to set_processor_type()
+                                ///< and IDC's SetProcessorType().
+                                ///< \param options     (const char *)
+                                ///< \param confidence  (int)
+                                ///<          0: loader's suggestion
+                                ///<          1: user's decision
+                                ///< \return < 0 if bad option string
 
-        obsolete_makemicro,     ///< Generate microcode for the instruction in 'cmd' structure.
-                                ///< \param block  (mblock_t *)
-                                ///< \return MICRO_... error codes
+     ev_ana_insn,               ///< Analyze one instruction and fill 'out' structure.
+                                ///< This function shouldn't change the database, flags or anything else.
+                                ///< All these actions should be performed only by emu_insn() function.
+                                ///< \insn_t{ea} contains address of instruction to analyze.
+                                ///< \param out           (::insn_t *)
+                                ///< \return length of the instruction in bytes, 0 if instruction can't be decoded.
+                                ///< \return 0 if instruction can't be decoded.
 
-        outlabel,               ///< The kernel is going to generate an instruction
-                                ///< label line or a function header.
-                                ///< \param ea            (::ea_t)
-                                ///< \param colored_name  (const char *)
-                                ///< \return <=0 if the kernel should not generate the label
+     ev_emu_insn,               ///< Emulate instruction, create cross-references, plan to analyze
+                                ///< subsequent instructions, modify flags etc. Upon entrance to this function,
+                                ///< all information about the instruction is in 'insn' structure.
+                                ///< \param insn          (const ::insn_t *)
+                                ///< \return  1 ok
+                                ///< \return -1 the kernel will delete the instruction
 
-        rename,                 ///< The kernel is going to rename a byte.
-                                ///< \param ea       (::ea_t)
-                                ///< \param new_name (const char *)
-                                ///< \param flags    (int) \ref SN_
-                                ///< \return <=0 if the kernel should not rename it.
-                                ///<         also see \idpcode{renamed}
-
-        may_show_sreg,          ///< The kernel wants to display the segment registers
-                                ///< in the messages window.
-                                ///< \param current_ea  (::ea_t)
-                                ///< \return <=0 if the kernel should not show the segment registers.
-                                ///< (assuming that the module has done it)
-
-        closebase,              ///< The database will be closed now
-
-        load_idasgn,            ///< FLIRT signature has been loaded
-                                ///< for normal processing (not for
-                                ///< recognition of startup sequences).
-                                ///< \param short_sig_name  (const char *)
+     ev_out_header,             ///< Function to produce start of disassembled text
+                                ///< \param outctx        (::outctx_t *)
                                 ///< \return void
 
-        coagulate,              ///< Try to define some unexplored bytes.
+     ev_out_footer,             ///< Function to produce end of disassembled text
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \return void
+
+     ev_out_segstart,           ///< Function to produce start of segment
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \param seg           (::segment_t *)
+                                ///< \return 1 ok
+                                ///< \return 0 not implemented
+
+     ev_out_segend,             ///< Function to produce end of segment
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \param seg           (::segment_t *)
+                                ///< \return 1 ok
+                                ///< \return 0 not implemented
+
+     ev_out_assumes,            ///< Function to produce assume directives
+                                ///< when segment register value changes.
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \return 1 ok
+                                ///< \return 0 not implemented
+
+     ev_out_insn,               ///< Generate text representation of an instruction in 'ctx.insn'
+                                ///< outctx_t provides functions to output the generated text.
+                                ///< This function shouldn't change the database, flags or anything else.
+                                ///< All these actions should be performed only by emu_insn() function.
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \return void
+
+     ev_out_mnem,               ///< Generate instruction mnemonics.
+                                ///< This callback should append the colored mnemonics to ctx.outbuf
+                                ///< Optional notification, if absent, out_mnem will be called.
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \return 1 if appended the mnemonics
+                                ///< \return 0 not implemented
+
+     ev_out_operand,            ///< Generate text representation of an instruction operand
+                                ///< outctx_t provides functions to output the generated text.
+                                ///< All these actions should be performed only by emu_insn() function.
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \param op            (const ::op_t *)
+                                ///< \return  1 ok
+                                ///< \return -1 operand is hidden
+
+     ev_out_data,               ///< Generate text representation of data items
+                                ///< This function may change the database and create cross-references
+                                ///< if analyze_only is set
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \param analyze_only  (bool)
+                                ///< \return 1 ok
+                                ///< \return 0 not implemented
+
+     ev_out_label,              ///< The kernel is going to generate an instruction
+                                ///< label line or a function header.
+                                ///< \param outctx        (::outctx_t *)
+                                ///< \param colored_name  (const char *)
+                                ///< \return <0 if the kernel should not generate the label
+                                ///< \return 0 not implemented or continue
+
+     ev_out_special_item,       ///< Generate text representation of an item in a special segment
+                                ///< i.e. absolute symbols, externs, communal definitions etc
+                                ///< \param outctx  (::outctx_t *)
+                                ///< \param segtype (uchar)
+                                ///< \return  1  ok
+                                ///< \return  0  not implemented
+                                ///< \return -1  overflow
+
+     ev_gen_stkvar_def,         ///< Generate stack variable definition line
+                                ///< Default line is
+                                ///<             varname = type ptr value,
+                                ///< where 'type' is one of byte,word,dword,qword,tbyte
+                                ///< \param outctx   (::outctx_t *)
+                                ///< \param mptr     (const ::member_t *)
+                                ///< \param v        (sval_t)
+                                ///< \return 1 - ok
+                                ///< \return 0 - not implemented
+
+     ev_gen_regvar_def,         ///< Generate register variable definition line.
+                                ///< \param outctx  (::outctx_t *)
+                                ///< \param v       (::regvar_t *)
+                                ///< \retval >0  ok, generated the definition text
+                                ///< \return 0 - not implemented
+
+     ev_gen_src_file_lnnum,     ///< Callback: generate analog of:
+                                ///<
+                                ///< #line "file.c" 123
+                                ///<
+                                ///< directive.
+                                ///< \param outctx  (::outctx_t *) output context
+                                ///< \param file    (const char *) source file (may be NULL)
+                                ///< \param lnnum   (size_t) line number
+                                ///< \retval 1 directive has been generated
+                                ///< \return 0 - not implemented
+
+     ev_creating_segm,          ///< A new segment is about to be created.
+                                ///< \param seg  (::segment_t *)
+                                ///< \retval 1  ok
+                                ///< \retval <0  segment should not be created
+
+     ev_moving_segm,            ///< May the kernel move the segment?
+                                ///< \param seg    (::segment_t *) segment to move
+                                ///< \param to     (::ea_t) new segment start address
+                                ///< \param flags  (int) combination of \ref MSF_
+                                ///< \retval 0   yes
+                                ///< \retval <0  the kernel should stop
+
+     ev_coagulate,              ///< Try to define some unexplored bytes.
                                 ///< This notification will be called if the
                                 ///< kernel tried all possibilities and could
                                 ///< not find anything more useful than to
@@ -789,253 +799,401 @@ struct processor_t
                                 ///< The module can help the kernel and convert
                                 ///< the bytes into something more useful.
                                 ///< \param start_ea  (::ea_t)
-                                ///< \return number of converted bytes + 1
+                                ///< \return number of converted bytes
 
-        auto_empty,             ///< Info: all analysis queues are empty.
-                                ///< This callback is called once when the
-                                ///< initial analysis is finished. If the queue is
-                                ///< not empty upon the return from this callback,
-                                ///< it will be called later again.
-                                ///< See also \idpcode{auto_empty_finally}.
-                                ///< \param none
-                                ///< \return void
+     ev_undefine,               ///< An item in the database (insn or data) is being deleted.
+                                ///< \param ea  (ea_t)
+                                ///< \return 1 do not delete srranges at the item end
+                                ///< \return 0 srranges can be deleted
 
-        auto_queue_empty,       ///< One analysis queue is empty.
-                                ///< This callback can be called many times, so
-                                ///< only the autoMark() functions can be used from it
-                                ///< (other functions may work but it is not tested).
-                                ///< \param type  (::atype_t)
-                                ///< \retval 1    yes, keep the queue empty
-                                ///< \retval <=0  no, the queue is not empty anymore
+     ev_treat_hindering_item,   ///< An item hinders creation of another item.
+                                ///< \param hindering_item_ea  (::ea_t)
+                                ///< \param new_item_flags     (::flags_t)  (0 for code)
+                                ///< \param new_item_ea        (::ea_t)
+                                ///< \param new_item_length    (::asize_t)
+                                ///< \retval 0   no reaction
+                                ///< \retval !=0 the kernel may delete the hindering item
 
-        func_bounds,            ///< find_func_bounds() finished its work.
+     ev_rename,                 ///< The kernel is going to rename a byte.
+                                ///< \param ea       (::ea_t)
+                                ///< \param new_name (const char *)
+                                ///< \param flags    (int) \ref SN_
+                                ///< \return <0 if the kernel should not rename it.
+                                ///< \return 2 to inhibit the notification. I.e.,
+                                ///<           the kernel should not rename, but
+                                ///<           'set_name()' should return 'true'.
+                                ///<         also see \idpcode{renamed}
+                                ///< the return value is ignored when kernel is going to delete name
+
+     ev_is_far_jump,            ///< is indirect far jump or call instruction?
+                                ///< meaningful only if the processor has 'near' and 'far' reference types
+                                ///< \param icode (int)
+                                ///< \return  0  not implemented
+                                ///< \return  1  yes
+                                ///< \return -1  no
+
+     ev_is_sane_insn,           ///< Is the instruction sane for the current file type?.
+                                ///< \param insn      (const ::insn_t*) the instruction
+                                ///< \param no_crefs  (int)
+                                ///<   1: the instruction has no code refs to it.
+                                ///<      ida just tries to convert unexplored bytes
+                                ///<      to an instruction (but there is no other
+                                ///<      reason to convert them into an instruction)
+                                ///<   0: the instruction is created because
+                                ///<      of some coderef, user request or another
+                                ///<      weighty reason.
+                                ///< \retval >=0  ok
+                                ///< \retval <0   no, the instruction isn't
+                                ///<              likely to appear in the program
+
+     ev_is_cond_insn,           ///< Is conditional instruction?
+                                ///< \param insn (const ::insn_t *)    instruction address
+                                ///< \retval  1 yes
+                                ///< \retval -1 no
+                                ///< \retval  0 not implemented or not instruction
+
+     ev_is_call_insn,           ///< Is the instruction a "call"?
+                                ///< \param insn (const ::insn_t *) instruction
+                                ///< \retval 0  unknown
+                                ///< \retval <0 no
+                                ///< \retval 1  yes
+
+     ev_is_ret_insn,            ///< Is the instruction a "return"?
+                                ///< \param insn    (const ::insn_t *) instruction
+                                ///< \param strict  (bool)
+                                ///<          1: report only ret instructions
+                                ///<          0: include instructions like "leave"
+                                ///<             which begins the function epilog
+                                ///< \retval 0  unknown
+                                ///< \retval <0 no
+                                ///< \retval 1  yes
+
+     ev_may_be_func,            ///< Can a function start here?
+                                ///< \param insn  (const ::insn_t*) the instruction
+                                ///< \param state (int)  autoanalysis phase
+                                ///<   0: creating functions
+                                ///<   1: creating chunks
+                                ///< \return probability 0..100
+
+     ev_is_basic_block_end,     ///< Is the current instruction end of a basic block?.
+                                ///< This function should be defined for processors
+                                ///< with delayed jump slots.
+                                ///< \param insn                   (const ::insn_t*) the instruction
+                                ///< \param call_insn_stops_block  (bool)
+                                ///< \retval  0  unknown
+                                ///< \retval <0  no
+                                ///< \retval  1  yes
+
+     ev_is_indirect_jump,       ///< Determine if instruction is an indirect jump.
+                                ///< If #CF_JUMP bit can not describe all jump types
+                                ///< jumps, please define this callback.
+                                ///< \param insn (const ::insn_t*) the instruction
+                                ///< \retval 0  use #CF_JUMP
+                                ///< \retval 1  no
+                                ///< \retval 2  yes
+
+     ev_is_insn_table_jump,     ///< Determine if instruction is a table jump or call.
+                                ///< If #CF_JUMP bit can not describe all kinds of table
+                                ///< jumps, please define this callback.
+                                ///< It will be called for insns with #CF_JUMP bit set.
+                                ///< \param insn (const ::insn_t*) the instruction
+                                ///< \retval 0   yes
+                                ///< \retval <0  no
+
+     ev_is_switch,              ///< Find 'switch' idiom.
+                                ///< It will be called for instructions marked with #CF_JUMP.
+                                ///< \param si   (switch_info_t *), out
+                                ///< \param insn (const ::insn_t *) instruction possibly belonging to a switch
+                                ///< \retval 1 switch is found, 'si' is filled
+                                ///< \retval 0 no switch found or not implemented
+
+     ev_calc_switch_cases,      ///< Calculate case values and targets for a custom jump table.
+                                ///< \param casevec  (::casevec_t *) vector of case values (may be NULL)
+                                ///< \param targets  (::eavec_t *) corresponding target addresses (my be NULL)
+                                ///< \param insn_ea  (::ea_t) address of the 'indirect jump' instruction
+                                ///< \param si       (::switch_info_t *) switch information
+                                ///< \retval 1    ok
+                                ///< \retval <=0  failed
+
+     ev_create_switch_xrefs,    ///< Create xrefs for a custom jump table.
+                                ///< \param jumpea   (::ea_t) address of the jump insn
+                                ///< \param si       (const ::switch_info_t *) switch information
+                                ///< \return must return 1
+                                ///< Must be implemented if module uses custom jump tables, \ref SWI_CUSTOM
+
+     ev_is_align_insn,          ///< Is the instruction created only for alignment purposes?.
+                                /// Do not directly call this function, use ::is_align_insn()
+                                ///< \param ea (ea_t) - instruction address
+                                ///< \retval number of bytes in the instruction
+
+     ev_is_alloca_probe,        ///< Does the function at 'ea' behave as __alloca_probe?
+                                ///< \param ea  (::ea_t)
+                                ///< \retval 1  yes
+                                ///< \retval 0  no
+
+     ev_delay_slot_insn,        ///< Get delay slot instruction
+                                ///< \param ea    (::ea_t *) instruction address in question,
+                                ///<                         if answer is positive then set 'ea' to
+                                ///<                         the delay slot insn address
+                                ///< \param bexec (bool *)   execute slot if jumping,
+                                ///<                         initially set to 'true'
+                                ///< \param fexec (bool *)   execute slot if not jumping,
+                                ///<                         initally set to 'true'
+                                ///< \retval 1   positive answer
+                                ///< \retval <=0 ordinary insn
+                                ///< \note Input 'ea' may point to the instruction with a delay slot or
+                                ///<       to the delay slot instruction itself.
+
+     ev_is_sp_based,            ///< Check whether the operand is relative to stack pointer or frame pointer
+                                ///< This event is used to determine how to output a stack variable
+                                ///< If not implemented, then all operands are sp based by default.
+                                ///< Implement this event only if some stack references use frame pointer
+                                ///< instead of stack pointer.
+                                ///< \param mode  (int *) out, combination of \ref OP_FP_SP
+                                ///< \param insn  (const insn_t *)
+                                ///< \param op    (const op_t *)
+                                ///< \return 0  not implemented
+                                ///< \return 1  ok
+
+     ev_can_have_type,          ///< Can the operand have a type as offset, segment, decimal, etc?
+                                ///< (for example, a register AX can't have a type, meaning that the user can't
+                                ///< change its representation. see bytes.hpp for information about types and flags)
+                                ///< \param op    (const ::op_t *)
+                                ///< \retval 0  unknown
+                                ///< \retval <0 no
+                                ///< \retval 1  yes
+
+     ev_cmp_operands,           ///< Compare instruction operands
+                                ///< \param op1      (const ::op_t*)
+                                ///< \param op2      (const ::op_t*)
+                                ///< \retval  1  equal
+                                ///< \retval -1  not equal
+                                ///< \retval  0  not implemented
+
+     ev_adjust_refinfo,         ///< Called from apply_fixup before converting operand to reference.
+                                ///< Can be used for changing the reference info.
+                                ///< \param ri      (refinfo_t *)
+                                ///< \param ea      (::ea_t) instruction address
+                                ///< \param n       (int) operand number
+                                ///< \param fd      (const fixup_data_t *)
+                                ///< \return < 0 - do not create an offset
+                                ///< \return 0   - not implemented or refinfo adjusted
+
+     ev_get_operand_string,     ///< Request text string for operand (cli, java, ...).
+                                ///< \param buf    (qstring *)
+                                ///< \param insn   (const ::insn_t*) the instruction
+                                ///< \param opnum  (int) operand number, -1 means any string operand
+                                ///< \return  0  no string (or empty string)
+                                ///<         >0  original string length without terminating zero
+
+     ev_get_reg_name,           ///< Generate text representation of a register.
+                                ///< Most processor modules do not need to implement this callback.
+                                ///< It is useful only if \ph{reg_names}[reg] does not provide
+                                ///< the correct register name.
+                                ///< \param buf     (qstring *) output buffer
+                                ///< \param reg     (int) internal register number as defined in the processor module
+                                ///< \param width   (size_t) register width in bytes
+                                ///< \param reghi   (int) if not -1 then this function will return the register pair
+                                ///< \return -1 if error, strlen(buf) otherwise
+
+     ev_str2reg,                ///< Convert a register name to a register number.
+                                ///< The register number is the register index in the \ph{reg_names} array
+                                ///< Most processor modules do not need to implement this callback
+                                ///< It is useful only if \ph{reg_names}[reg] does not provide
+                                ///< the correct register names
+                                ///< \param regname  (const char *)
+                                ///< \return register number + 1
+                                ///< \return 0 not implemented or could not be decoded
+
+     ev_get_autocmt,            ///< Callback: get dynamic auto comment.
+                                ///< Will be called if the autocomments are enabled
+                                ///< and the comment retrieved from ida.int starts with
+                                ///< '$!'. 'insn' contains valid info.
+                                ///< \param buf     (qstring *) output buffer
+                                ///< \param insn    (const ::insn_t*) the instruction
+                                ///< \retval 1  new comment has been generated
+                                ///< \retval 0  callback has not been handled.
+                                ///<            the buffer must not be changed in this case
+
+     ev_get_bg_color,           ///< Get item background color.
+                                ///< Plugins can hook this callback to color disassembly lines dynamically
+                                ///< \param color  (::bgcolor_t *), out
+                                ///< \param ea     (::ea_t)
+                                ///< \retval 0  not implemented
+                                ///< \retval 1  color set
+
+     ev_is_jump_func,           ///< Is the function a trivial "jump" function?.
+                                ///< \param pfn           (::func_t *)
+                                ///< \param jump_target   (::ea_t *)
+                                ///< \param func_pointer  (::ea_t *)
+                                ///< \retval <0  no
+                                ///< \retval 0  don't know
+                                ///< \retval 1  yes, see 'jump_target' and 'func_pointer'
+
+     ev_func_bounds,            ///< find_func_bounds() finished its work.
                                 ///< The module may fine tune the function bounds
-                                ///< \param possible_return_code  (int *)
+                                ///< \param possible_return_code  (int *), in/out
                                 ///< \param pfn                   (::func_t *)
                                 ///< \param max_func_end_ea       (::ea_t) (from the kernel's point of view)
                                 ///< \return void
 
-        may_be_func,            ///< Can a function start here?.
-                                ///< the instruction is in 'cmd',
-                                ///< the idp module is allowed to modify 'cmd'
-                                ///< \param state (int)  autoanalysis phase
-                                ///<   - 0: creating functions
-                                ///<   - 1: creating chunks
-                                ///< \return probability 0..100
+     ev_verify_sp,              ///< All function instructions have been analyzed.
+                                ///< Now the processor module can analyze the stack pointer
+                                ///< for the whole function
+                                ///< \param pfn  (::func_t *)
+                                ///< \retval 0  ok
+                                ///< \retval <0 bad stack pointer
 
-        is_sane_insn,           ///< Is the instruction sane for the current file type?.
-                                ///< The instruction is in 'cmd'.
-                                ///< \param no_crefs  (int)
-                                ///<   - 1: the instruction has no code refs to it.
-                                ///<        ida just tries to convert unexplored bytes
-                                ///<        to an instruction (but there is no other
-                                ///<        reason to convert them into an instruction)
-                                ///<   - 0: the instruction is created because
-                                ///<        of some coderef, user request or another
-                                ///<        weighty reason.
-                                ///< \retval 1    ok
-                                ///< \retval <=0  no, the instruction isn't
-                                ///<              likely to appear in the program
+     ev_verify_noreturn,        ///< The kernel wants to set 'noreturn' flags for a function.
+                                ///< \param pfn  (::func_t *)
+                                ///< \return 0: ok. any other value: do not set 'noreturn' flag
 
-        is_jump_func,           ///< Is the function a trivial "jump" function?.
-                                ///< \param pfn           (::func_t *)
-                                ///< \param jump_target   (::ea_t *)
-                                ///< \param func_pointer  (::ea_t *)
-                                ///< \retval <=0  no
-                                ///< \retval 1  don't know
-                                ///< \retval 2  yes, see 'jump_target' and 'func_pointer'
+     ev_create_func_frame,      ///< Create a function frame for a newly created function
+                                ///< Set up frame size, its attributes etc
+                                ///< \param pfn      (::func_t *)
+                                ///< \return  1  ok
+                                ///< \return  0  not implemented
 
-        gen_regvar_def,         ///< Generate register variable definition line.
-                                ///< \param v  (::regvar_t *)
-                                ///< \retval <=0  ok, generated the definition text
+     ev_get_frame_retsize,      ///< Get size of function return address in bytes
+                                ///< If this eveny is not implemented, the kernel will assume
+                                ///<  - 8 bytes for 64-bit function
+                                ///<  - 4 bytes for 32-bit function
+                                ///<  - 2 bytes otherwise
+                                ///< If this eveny is not implemented, the kernel will assume
+                                ///< \param frsize   (int *) frame size (out)
+                                ///< \param pfn      (const ::func_t *), can't be NULL
+                                ///< \return  1  ok
+                                ///< \return  0  not implemented
 
-        setsgr,                 ///< The kernel has changed a segment register value.
-                                ///< \param startEA    (::ea_t)
-                                ///< \param endEA      (::ea_t)
-                                ///< \param regnum     (int)
-                                ///< \param value      (::sel_t)
-                                ///< \param old_value  (::sel_t)
-                                ///< \param tag        (::uchar) \ref SR_
-                                ///< \return success
-
-        set_compiler,           ///< The kernel has changed the compiler information.
-                                ///< (\inf{cc} structure)
-
-        is_basic_block_end,     ///< Is the current instruction end of a basic block?.
-                                ///< This function should be defined for processors
-                                ///< with delayed jump slots. The current instruction
-                                ///< is stored in ::cmd
-                                ///< \param call_insn_stops_block  (bool)
-                                ///< \retval 1  unknown
-                                ///< \retval <=0  no
-                                ///< \retval 2  yes
-
-        reglink,                ///< IBM PC only, ignore it
-
-        get_vxd_name,           ///< IBM PC only, ignore it.
-                                ///< Get Vxd function name
-                                ///< \param vxdnum   (int)
-                                ///< \param funcnum  (int)
-                                ///< \param outbuf   (char *)
-                                ///< \return void
-
-        // PROCESSOR EXTENSION NOTIFICATIONS - TODO: get this in the doxygen output
-        // They are used to add support of new instructions
-        // to the existing processor modules.
-        // They should be processed only in notification callbacks
-        // set by hook_to_notification_point(HK_IDP,...)
-
-        custom_ana,             ///< \param none the address to analyze is in \cmd{ea}.
-                                ///<   - \cmd{ip} and \cmd{cs} are initialized too
-                                ///<   - \cmd{itype} must be set >= 0x8000
-                                ///<   - \cmd{size} must be set to the instruction length
-                                ///<
-                                ///< (a good plugin would fill the whole ::cmd including the operand fields)
-                                ///< in the case of error the cmd structure should be kept intact
-                                ///< \return 1 + \cmd{size}
-
-        custom_out,             ///< Generate instruction text using the printf_line() function.
-                                ///< Optional notification (depends on the processor module)
-                                ///< \param none (::cmd structure contains information about the instruction)
-                                ///< \return 2
-
-        custom_emu,             ///< \param none (cmd structure contains information about the instruction)
-                                ///<
-                                ///< Optional notification. if absent,
-                                ///< the instruction is supposed to be an regular one
-                                ///< the kernel will proceed to the analysis of the next instruction
-                                ///< \return 2
-
-        custom_outop,           ///< \param op  (::op_t *)
-                                ///
-                                ///< Optional notification to generate operand text. if absent,
-                                ///<   the standard operand output function will be called.
-                                ///<   the output buffer is inited with init_output_buffer()
-                                ///<   and this notification may use out_...() functions from ua.hpp
-                                ///<   to form the operand text
-                                ///< \return 2
-
-        custom_mnem,            ///< \param outbuffer  (char *)
-                                ///< \param bufsize    (size_t)
-                                ///<
-                                ///< ::cmd structure contains information about the instruction.
-                                ///< Optional notification. if absent,
-                                ///<   the IDC function GetMnem() won't work.
-                                ///< At least one of \idpcode{custom_out} or \idpcode{custom_mnem}
-                                ///< should be implemented. \idpcode{custom_ana} should always be
-                                ///< implemented. These custom_... callbacks will be
-                                ///< called for all instructions. It is the responsibility
-                                ///< of the plugin to ignore the undesired callbacks
-                                ///< \return 2
-
-        // END OF PROCESSOR EXTENSION NOTIFICATIONS
-
-        undefine,               ///< An item in the database (insn or data) is being deleted.
-                                ///< \param ea  (ea_t)
-                                ///< \return >0-ok, <=0-the kernel should stop.
-                                ///< if the return value is positive:
-                                ///< - bit0  ignored
-                                ///< - bit1  do not delete srareas at the item end
-
-        make_code,              ///< An instruction is being created.
-                                ///< \param ea    (::ea_t)
-                                ///< \param size  (::asize_t)
-                                ///< \retval 1    ok
-                                ///< \retval <=0  the kernel should stop
-
-        make_data,              ///< A data item is being created.
-                                ///< \param ea     (::ea_t)
-                                ///< \param flags  (::flags_t)
-                                ///< \param tid    (::tid_t)
-                                ///< \param len    (::asize_t)
-                                ///< \retval 1    ok
-                                ///< \retval <=0  the kernel should stop
-
-        moving_segm,            ///< May the kernel move the segment?
-                                ///< \param seg    (::segment_t) segment to move
-                                ///< \param to     (::ea_t) new segment start address
-                                ///< \param flags  (int) combination of \ref MSF_
-                                ///< \retval 1    yes
-                                ///< \retval <=0  the kernel should stop
-
-        move_segm,              ///< A segment is moved.
-                                ///< Fix processor dependent address sensitive information
-                                ///< \param from  (::ea_t) old segment address
-                                ///< \param seg   (::segment_t *) moved segment
-                                ///< \return void
-
-        is_call_insn,           ///< Is the instruction a "call"?
-                                ///< \param ea  (::ea_t) instruction address
-                                ///< \retval 1   unknown
-                                ///< \retval <=0 no
-                                ///< \retval 2   yes
-
-        is_ret_insn,            ///< Is the instruction a "return"?
-                                ///< \param ea      (::ea_t) instruction address
-                                ///< \param strict  (bool)
-                                ///<                  - 1: report only ret instructions
-                                ///<                  - 0: include instructions like "leave"
-                                ///<                       which begins the function epilog
-                                ///< \retval 1   unknown
-                                ///< \retval <=0 no
-                                ///< \retval 2   yes
-
-        get_stkvar_scale_factor,///< Should stack variable references be multiplied by
+     ev_get_stkvar_scale_factor,///< Should stack variable references be multiplied by
                                 ///< a coefficient before being used in the stack frame?.
                                 ///< Currently used by TMS320C55 because the references into
                                 ///< the stack should be multiplied by 2
                                 ///< \note #PR_SCALE_STKVARS should be set to use this callback
-                                ///< \return scaling factor
+                                ///< \return scaling factor, 0-not implemented
 
-        create_flat_group,      ///< Create special segment representing the flat group.
-                                ///< (to use for PC mainly)
-                                ///< \param image_base  (::ea_t)
-                                ///< \param bitness     (int)
-                                ///< \param dataseg_sel (::sel_t)
+     ev_demangle_name,          ///< Demangle a C++ (or another language) name into a user-readable string.
+                                ///< This event is called by demangle_name()
+                                ///< \param res     (int32 *) value to return from demangle_name()
+                                ///< \param out     (::qstring *) output buffer. may be NULL
+                                ///< \param name    (const char *) mangled name
+                                ///< \param disable_mask  (uint32) flags to inhibit parts of output or compiler info/other (see MNG_)
+                                ///< \param demreq  (demreq_type_t) operation to perform
+                                ///< \return: 1 if success, 0-not implemented
+                                ///< \note if you call demangle_name() from the handler, protect against recursion!
 
-        kernel_config_loaded,   ///< This callback is called when ida.cfg is parsed.
-                                ///< \param none
-                                ///< \return void
+        // the following 5 events are very low level
+        // take care of possible recursion
+     ev_add_cref,               ///< A code reference is being created.
+                                ///< \param from  (::ea_t)
+                                ///< \param to    (::ea_t)
+                                ///< \param type  (::cref_t)
+                                ///< \return < 0 - cancel cref creation
+                                ///< \return 0 - not implemented or continue
 
-        might_change_sp,        ///< Does the instruction at 'ea' modify the stack pointer?
-                                ///< (not used yet).
-                                ///< \param ea  (::ea_t)
-                                ///< \retval 1   yes
-                                ///< \retval <=0 no
+     ev_add_dref,               ///< A data reference is being created.
+                                ///< \param from  (::ea_t)
+                                ///< \param to    (::ea_t)
+                                ///< \param type  (::dref_t)
+                                ///< \return < 0 - cancel dref creation
+                                ///< \return 0 - not implemented or continue
 
-        is_alloca_probe,        ///< Does the function at 'ea' behave as __alloca_probe?
-                                ///< \param ea  (::ea_t)
-                                ///< \retval 2  yes
-                                ///< \retval 1  no
+     ev_del_cref,               ///< A code reference is being deleted.
+                                ///< \param from    (::ea_t)
+                                ///< \param to      (::ea_t)
+                                ///< \param expand  (bool)
+                                ///< \return < 0 - cancel cref deletion
+                                ///< \return 0 - not implemented or continue
 
-        out_3byte,              ///< Generate text representation of 3byte data.
-                                ///< init_output_buffer() is called before this function
-                                ///< and all Out... function can be used.
-                                ///< ::uFlag contains the flags.
-                                ///< This callback might be implemented by the processor
-                                ///< module to generate custom representation of 3byte data.
-                                ///< \param dataea       (::ea_t) address of the data item
-                                ///< \param value        (::uint32) value value to output
-                                ///< \param analyze_only (bool) only create xrefs if necessary.
-                                ///<                            do not generate text representation
-                                ///< \retval 2  success
-                                ///< \retval 1  failed
+     ev_del_dref,               ///< A data reference is being deleted.
+                                ///< \param from    (::ea_t)
+                                ///< \param to      (::ea_t)
+                                ///< \return < 0 - cancel dref deletion
+                                ///< \return 0 - not implemented or continue
 
-        get_reg_name,           ///< Generate text representation of a register.
-                                ///< Most processor modules do not need to implement this callback.
-                                ///< It is useful only if \ph{regNames}[reg] does not provide
-                                ///< the correct register name.
-                                ///< \param reg     (int) internal register number as defined in the processor module
-                                ///< \param width   (size_t) register width in bytes
-                                ///< \param buf     (char *) output buffer
-                                ///< \param bufsize (size_t) size of output buffer
-                                ///< \param reghi   (int) if not -1 then this function will return the register pair
-                                ///< \return -1 if error, strlen(buf)+2 otherwise
+     ev_coagulate_dref,         ///< Data reference is being analyzed.
+                                ///< plugin may correct 'code_ea' (e.g. for thumb mode refs, we clear the last bit)
+                                ///< \param from        (::ea_t)
+                                ///< \param to          (::ea_t)
+                                ///< \param may_define  (bool)
+                                ///< \param code_ea     (::ea_t *)
+                                ///< \return < 0 - cancel dref analysis
+                                ///< \return 0 - not implemented or continue
 
-        savebase,               ///< The database is being saved. Processor module should
-                                ///< save its local data
+     ev_may_show_sreg,          ///< The kernel wants to display the segment registers
+                                ///< in the messages window.
+                                ///< \param current_ea  (::ea_t)
+                                ///< \return <0 if the kernel should not show the segment registers.
+                                ///< (assuming that the module has done it)
+                                ///< \return 0 - not implemented
 
-        gen_asm_or_lst,         ///< Callback: generating asm or lst file.
+     ev_loader_elf_machine,     ///< ELF loader machine type checkpoint.
+                                ///< A plugin check of the 'machine_type'. If it is the desired one,
+                                ///< the the plugin fills 'p_procname' with the processor name
+                                ///< (one of the names present in \ph{psnames}).
+                                ///< 'p_pd' is used to handle relocations, otherwise can be left untouched.
+                                ///< This event occurs for each newly loaded ELF file
+                                ///< \param li            (linput_t *)
+                                ///< \param machine_type  (int)
+                                ///< \param p_procname    (const char **)
+                                ///< \param p_pd          (proc_def_t **) (see ldr\elf.h)
+                                ///< \return  e_machine value (if it is different from the
+                                ///<          original e_machine value, procname and 'p_pd' will be ignored
+                                ///<          and the new value will be used)
+
+     ev_auto_queue_empty,       ///< One analysis queue is empty.
+                                ///< \param type  (::atype_t)
+                                ///< \retval >=0  yes, keep the queue empty (default)
+                                ///< \retval <0   no, the queue is not empty anymore
+                                ///< see also \ref idb_event::auto_empty_finally
+
+     ev_validate_flirt_func,    ///< Flirt has recognized a library function.
+                                ///< This callback can be used by a plugin or proc module
+                                ///< to intercept it and validate such a function.
+                                ///< \param start_ea  (::ea_t)
+                                ///< \param funcname  (const char *)
+                                ///< \retval -1  do not create a function,
+                                ///< \retval  0  function is validated
+
+     ev_adjust_libfunc_ea,      ///< Called when a signature module has been matched against
+                                ///< bytes in the database. This is used to compute the
+                                ///< offset at which a particular module's libfunc should
+                                ///< be applied.
+                                ///< \param sig     (const idasgn_t *)
+                                ///< \param libfun  (const libfunc_t *)
+                                ///< \param ea      (::ea_t *) \note 'ea' initially contains the ea_t of the
+                                ///<                                 start of the pattern match
+                                ///< \retval 1   the ea_t pointed to by the third argument was modified.
+                                ///< \retval <=0 not modified. use default algorithm.
+
+     ev_assemble,               ///< Assemble an instruction.
+                                ///< (display a warning if an error is found).
+                                ///< \param bin    (::uchar *) pointer to output opcode buffer
+                                ///< \param ea     (::ea_t) linear address of instruction
+                                ///< \param cs     (::ea_t) cs of instruction
+                                ///< \param ip     (::ea_t) ip of instruction
+                                ///< \param use32  (bool) is 32bit segment?
+                                ///< \param line   (const char *) line to assemble
+                                ///< \return size of the instruction in bytes
+
+     ev_extract_address,        ///< Extract address from a string.
+                                ///< \param  out_ea    (ea_t *), out
+                                ///< \param  screen_ea (ea_t)
+                                ///< \param  string    (const char *)
+                                ///< \param  position  (size_t)
+                                ///< \retval  1 ok
+                                ///< \retval  0 kernel should use the standard algorithm
+                                ///< \retval -1 error
+
+     ev_realcvt,                ///< Floating point -> IEEE conversion
+                                ///< \param m    (void *)   pointer to data
+                                ///< \param e    (uint16 *) internal IEEE format data
+                                ///< \param swt  (uint16)   operation (see realcvt() in ieee.h)
+                                ///< \return  0  not implemented
+                                ///< \return  1  ok
+                                ///< \return  \ref REAL_ERROR_ on error
+
+     ev_gen_asm_or_lst,         ///< Callback: generating asm or lst file.
                                 ///< The kernel calls this callback twice, at the beginning
                                 ///< and at the end of listing generation. The processor
                                 ///< module can intercept this event and adjust its output
@@ -1048,384 +1206,131 @@ struct processor_t
                                 ///<                  used by the kernel to output the generated lines
                                 ///< \return void
 
-        out_src_file_lnnum,     ///< Callback: generate analog of:
-                                ///<
-                                ///< #line "file.c" 123
-                                ///<
-                                ///< directive.
-                                ///< \param file   (const char *) source file (may be NULL)
-                                ///< \param lnnum  (size_t) line number
-                                ///< \retval 2 directive has been generated
+     ev_gen_map_file,           ///<  Generate map file. If not implemented
+                                ///< the kernel itself will create the map file.
+                                ///< \param nlines (int *) number of lines in map file (-1 means write error)
+                                ///< \param fp     (FILE *) output file
+                                ///< \return  0  not implemented
+                                ///< \return  1  ok
+                                ///< \retval -1  write error
 
-        get_autocmt,            ///< Callback: get dynamic auto comment.
-                                ///< Will be called if the autocomments are enabled
-                                ///< and the comment retrieved from ida.int starts with
-                                ///< '$!'. ::cmd contains valid info.
-                                ///< \param buf     (char *) output buffer
-                                ///< \param bufsize (size_t) output buffer size
-                                ///< \retval 2  new comment has been generated
-                                ///< \retval 1  callback has not been handled.
-                                ///<            the buffer must not be changed in this case
+     ev_create_flat_group,      ///< Create special segment representing the flat group.
+                                ///< \param image_base  (::ea_t)
+                                ///< \param bitness     (int)
+                                ///< \param dataseg_sel (::sel_t)
+                                ///< return value is ignored
 
-        is_insn_table_jump,     ///< Callback: determine if instruction is a table jump or call.
-                                ///< If #CF_JUMP bit can not describe all kinds of table
-                                ///< jumps, please define this callback.
-                                ///< It will be called for insns with #CF_JUMP bit set.
-                                ///< \param none  ::cmd structure contains the current instruction
-                                ///< \retval 1    yes
-                                ///< \retval <=0  no
+     ev_getreg,                 ///< IBM PC only internal request,
+                                ///< should never be used for other purpose
+                                ///< Get register value by internal index
+                                ///< \param regval   (uval_t *), out
+                                ///< \param regnum   (int)
+                                ///< \return  1 ok
+                                ///< \return  0 not implemented
+                                ///< \return -1 failed (undefined value or bad regnum)
 
-        auto_empty_finally,     ///< Info: all analysis queues are empty definitively.
-                                ///< This callback is called only once.
-                                ///< See also \idpcode{auto_empty}.
-                                ///< \param none
-                                ///< \return void
+     ev_last_cb_before_debugger,///< START OF DEBUGGER CALLBACKS
 
-        loader_finished,        ///< Event: external file loader finished its work.
-                                ///< Use this event to augment the existing loader functionality.
-                                ///< \param li            (linput_t *)
-                                ///< \param neflags       (::uint16) \ref NEF_
-                                ///< \param filetypename  (const char *)
-
-        loader_elf_machine,     ///< Event: ELF loader machine type checkpoint.
-                                ///< A plugin check of the 'machine_type'. If it is the desired one,
-                                ///< the the plugin fills 'p_procname' with the processor name
-                                ///< (one of the names present in \ph{psnames}).
-                                ///< 'p_pd' is used to handle relocations, otherwise can be left untouched.
-                                ///< 'set_reloc' can be later used by the plugin to specify relocations.
-                                ///< This event occurs for each newly loaded ELF file
-                                ///< \param li            (linput_t *)
-                                ///< \param machine_type  (int)
-                                ///< \param p_procname    (const char **)
-                                ///< \param p_pd          (proc_def **) (see ldr\elf.h)
-                                ///< \param set_reloc     (set_elf_reloc_t *)
-                                ///< \return  e_machine value (if it is different from the
-                                ///<          original e_machine value, procname and 'p_pd' will be ignored
-                                ///<          and the new value will be used)
-
-        is_indirect_jump,       ///< Callback: determine if instruction is an indirect jump.
-                                ///< If #CF_JUMP bit can not describe all jump types
-                                ///< jumps, please define this callback.
-                                ///< \param none  ::cmd structure contains the current instruction
-                                ///< \retval 1  use #CF_JUMP
-                                ///< \retval 2  no
-                                ///< \retval 3  yes
-
-        verify_noreturn,        ///< The kernel wants to set 'noreturn' flags for a function.
-                                ///< \param pfn  (::func_t)
-                                ///< \return 1: ok. any other value: do not set 'noreturn' flag
-
-        verify_sp,              ///< All function instructions have been analyzed.
-                                ///< Now the processor module can analyze the stack pointer
-                                ///< for the whole function
-                                ///< \param pfn  (::func_t *)
-                                ///< \retval 1   ok
-                                ///< \retval <=0 bad stack pointer
-
-        renamed,                ///< The kernel has renamed a byte.
-                                ///< See also the \idpcode{rename} event
-                                ///< \param ea          (::ea_t)
-                                ///< \param new_name    (const char *)
-                                ///< \param local_name  (bool)
-                                ///< \return void
-
-        add_func,               ///< The kernel has added a function.
-                                ///< \param pfn  (::func_t *)
-                                ///< \return void
-
-        del_func,               ///< The kernel is about to delete a function.
-                                ///< \param pfn  (::func_t *)
-                                ///< \retval 1    ok
-                                ///< \retval <=0  do not delete
-
-        set_func_start,         ///< Function chunk start address will be changed.
-                                ///< \param pfn        (::func_t *)
-                                ///< \param new_start  (::ea_t)
-                                ///< \retval 1    ok
-                                ///< \retval <=0  do not change
-
-        set_func_end,           ///< Function chunk end address will be changed.
-                                ///< \param pfn      (::func_t *)
-                                ///< \param new_end  (::ea_t)
-                                ///< \retval 1    ok
-                                ///< \retval <=0  do not change
-
-        treat_hindering_item,   ///< An item hinders creation of another item.
-                                ///< \param hindering_item_ea  (::ea_t)
-                                ///< \param new_item_flags     (::flags_t)  (0 for code)
-                                ///< \param new_item_ea        (::ea_t)
-                                ///< \param new_item_length    (::asize_t)
-                                ///< \retval 1    no reaction
-                                ///< \retval <=0  the kernel may delete the hindering item
-
-        str2reg,                ///< Convert a register name to a register number.
-                                ///< The register number is the register index in the \ph{regNames} array
-                                ///< Most processor modules do not need to implement this callback
-                                ///< It is useful only if \ph{regNames}[reg] does not provide
-                                ///< the correct register names
-                                ///< \param regname  (const char *)
-                                ///< \return register number + 2
-
-        create_switch_xrefs,    ///< Create xrefs for a custom jump table.
-                                ///< \param jumpea   (::ea_t) address of the jump insn
-                                ///< \param si       (::switch_info_ex_t *) switch information
-                                ///< \return must return 2
-
-        calc_switch_cases,      ///< Calculate case values and targets for a custom jump table.
-                                ///< \param insn_ea  (::ea_t) address of the 'indirect jump' instruction
-                                ///< \param si       (::switch_info_ex_t *) switch information
-                                ///< \param casevec  (::casevec_t *) vector of case values (may be NULL)
-                                ///< \param targets  (::eavec_t *) corresponding target addresses (my be NULL)
-                                ///< \retval 2   ok
-                                ///< \retval 1  failed
-
-        determined_main,        ///< The main() function has been determined.
-                                ///< \param main (::ea_t) address of the main() function
-                                ///< \return void
-
-        preprocess_chart,       ///< Gui has retrieved a function flow chart.
-                                ///< Plugins may modify the flow chart in this callback.
-                                ///< \param fc  (qflow_chart_t *)
-                                ///< \return void
-
-        get_bg_color,           ///< Get item background color.
-                                ///< Plugins can hook this callback to color disassembly lines dynamically
-                                ///< \param ea     (::ea_t)
-                                ///< \param color  (::bgcolor_t)
-                                ///< \retval 1  not implemented
-                                ///< \retval 2  color set
-
-        validate_flirt_func,    ///< Flirt has recognized a library function.
-                                ///< This callback can be used by a plugin or proc module
-                                ///< to intercept it and validate such a function.
-                                ///< The idp module is allowed to modify ::cmd
-                                ///< \param start_ea  (::ea_t)
-                                ///< \param funcname  (const char *)
-                                ///< \retval -1  do not create a function,
-                                ///< \retval  1  function is validated
-
-        get_operand_string,     ///< Request text string for operand (cli, java, ...).
-                                ///< (::cmd structure must contain info for the desired insn)
-                                ///< \param opnum  (int) operand number, -1 means any string operand
-                                ///< \param buf    (char *)
-                                ///< \param buflen (size_t)
-                                ///< \return  1  no string (or empty string)
-                                ///<         >1  original string length with terminating zero
-
-        // the following 5 events are very low level
-        // take care of possible recursion
-        add_cref,               ///< A code reference is being created.
-                                ///< \param from  (::ea_t)
-                                ///< \param to    (::ea_t)
-                                ///< \param type  (::cref_t)
-                                ///< \return < 0 - cancel cref creation
-        add_dref,               ///< A data reference is being created.
-                                ///< \param from  (::ea_t)
-                                ///< \param to    (::ea_t)
-                                ///< \param type  (::dref_t)
-                                ///< \return < 0 - cancel dref creation
-        del_cref,               ///< A code reference is being deleted.
-                                ///< \param from    (::ea_t)
-                                ///< \param to      (::ea_t)
-                                ///< \param expand  (bool)
-                                ///< \return < 0 - cancel cref deletion
-        del_dref,               ///< A data reference is being deleted.
-                                ///< \param from    (::ea_t)
-                                ///< \param to      (::ea_t)
-                                ///< \return < 0 - cancel dref deletion
-        coagulate_dref,         ///< Data reference is being analyzed.
-                                ///< plugin may correct 'code_ea' (e.g. for thumb mode refs, we clear the last bit)
-                                ///< \param from        (::ea_t)
-                                ///< \param to          (::ea_t)
-                                ///< \param may_define  (bool)
-                                ///< \param code_ea     (::ea_t *)
-                                ///< \return < 0 - cancel dref analysis
-
-        register_custom_fixup,  ///< Request to register a new custom fixup type.
-                                ///< \param name  (const char *)
-                                ///< \return fixup id + 1
-
-        custom_refinfo,         ///< Called from get_offset_expr, when ::refinfo_t
-                                ///< contains flag #REFINFO_CUSTOM. Normally this
-                                ///< notification used in a combination with custom_fixup
-                                ///< \param ea          (::ea_t)
-                                ///< \param numop       (int)
-                                ///< \param opval       (::ea_t *)
-                                ///< \param ri          (const ::refinfo_t*)
-                                ///< \param buf         (char *)
-                                ///< \param bufsize     (size_t)
-                                ///< \param target      (::ea_t *)
-                                ///< \param fullvalue   (::ea_t *)
-                                ///< \param from        (::ea_t)
-                                ///< \param getn_flags  (int)
-                                ///< \retval 2      buf filled as simple expression
-                                ///< \retval 3      buf filled as complex expression
-                                ///< \retval 4      apply standard processing (with possible changed values)
-                                ///< \retval other  can't convert to offset expression
-
-        set_proc_options,       ///< Called if the user specified an option string in the command line:
-                                ///<  -p<processor name>:<options>.
-                                ///< Can be used for setting a processor subtype.
-                                ///< Also called if option string is passed to set_processor_type()
-                                ///< and IDC's SetProcessorType().
-                                ///< \param options  (const char *)
-                                ///< \return < 0 if bad option string
-
-        adjust_libfunc_ea,      ///< Called when a signature module has been matched against
-                                ///< bytes in the database. This is used to compute the
-                                ///< offset at which a particular module's libfunc should
-                                ///< be applied.
-                                ///< \param sig     (const idasgn_t *)
-                                ///< \param libfun  (const libfunc_t *)
-                                ///< \param ea      (::ea_t *) \note 'ea' initially contains the ea_t of the
-                                ///<                                 start of the pattern match
-                                ///< \retval 2      the ea_t pointed to by the third argument was modified.
-                                ///< \retval other  not modified. use default algorithm.
-
-        extlang_changed,        ///< The list of extlangs or the default extlang was changed.
-                                ///< \param kind  (int)
-                                ///<        - 0: extlang installed
-                                ///<        - 1: extlang removed
-                                ///<        - 2: default extlang changed
-                                ///< \param el (const ::extlang_t *) pointer to the extlang affected
-                                ///< \return void
-
-        last_cb_before_debugger,///< START OF DEBUGGER CALLBACKS
-
-        obsolete_get_operand_info = 100,
-                                ///< Get operand information.
-                                ///< same as \idpcode{get_operand_info} (below), but uses
-                                ///< idd_opinfo_old_t* as the last argument (less info)
-
-        OBSOLETE(get_reg_info), // the same as get_reg_info2 but the
-                                // position and size of the subvalue is defined
-                                // by uint64 (not bitrange_t) and
-                                // the 3d argument is uint64 *mask (0-no mask)
-                                // example: "ah" returns main_regname="eax" and mask=0xFF00
-#ifdef NO_OBSOLETE_FUNCS
-        next_exec_insn,         ///< Get next address to be executed
-#else                           ///<
-        get_jump_target,        ///< Get jump target (old name)
-#endif                          ///<
+     ev_next_exec_insn = 1000,  ///< Get next address to be executed
                                 ///< This function must return the next address to be executed.
                                 ///< If the instruction following the current one is executed, then it must return #BADADDR
                                 ///< Usually the instructions to consider are: jumps, branches, calls, returns.
                                 ///< This function is essential if the 'single step' is not supported in hardware.
+                                ///< \param target     (::ea_t *), out: pointer to the answer
                                 ///< \param ea         (::ea_t) instruction address
                                 ///< \param tid        (int) current therad id
-                                ///< \param getreg     (const ::regval_t &(#idaapi *)(const char *name,
-                                ///<                                  const ::regval_t *regvalues))
-                                ///<                   function to get register values
+                                ///< \param getreg     (::processor_t::regval_getter_t *) function to get register values
                                 ///< \param regvalues  (const ::regval_t *) register values array
-                                ///< \param target     (::ea_t *) pointer to the answer
-                                ///< \retval 1   unimplemented
-                                ///< \retval <=0 implemented
+                                ///< \retval 0 unimplemented
+                                ///< \retval 1 implemented
 
-        calc_step_over,         ///< Calculate the address of the instruction which will be
+     ev_calc_step_over,         ///< Calculate the address of the instruction which will be
                                 ///< executed after "step over". The kernel will put a breakpoint there.
                                 ///< If the step over is equal to step into or we can not calculate
                                 ///< the address, return #BADADDR.
-                                ///< \param ip      (::ea_t) instruction address
                                 ///< \param target  (::ea_t *) pointer to the answer
-                                ///< \retval 1   unimplemented
-                                ///< \retval <=0 implemented
+                                ///< \param ip      (::ea_t) instruction address
+                                ///< \retval 0 unimplemented
+                                ///< \retval 1 implemented
 
-        get_macro_insn_head,    ///< Calculate the start of a macro instruction.
+     ev_calc_next_eas,          ///< Calculate list of addresses the instruction in 'insn'
+                                ///< may pass control to.
+                                ///< This callback is required for source level debugging.
+                                ///< \param res       (::eavec_t *), out: array for the results.
+                                ///< \param insn      (const ::insn_t*) the instruction
+                                ///< \param over      (bool) calculate for step over (ignore call targets)
+                                ///< \retval  <0 incalculable (indirect jumps, for example)
+                                ///< \retval >=0 number of addresses of called functions in the array.
+                                ///<             They must be put at the beginning of the array (0 if over=true)
+
+     ev_get_macro_insn_head,    ///< Calculate the start of a macro instruction.
                                 ///< This notification is called if IP points to the middle of an instruction
+                                ///< \param head  (::ea_t *), out: answer, #BADADDR means normal instruction
                                 ///< \param ip    (::ea_t) instruction address
-                                ///< \param head  (::ea_t *) answer, #BADADDR means normal instruction
-                                ///< \retval 1   unimplemented
-                                ///< \retval <=0 implemented
+                                ///< \retval 0 unimplemented
+                                ///< \retval 1 implemented
 
-        get_dbr_opnum,          ///< Get the number of the operand to be displayed in the
+     ev_get_dbr_opnum,          ///< Get the number of the operand to be displayed in the
                                 ///< debugger reference view (text mode).
-                                ///< \param ea     (::ea_t) instruction address
                                 ///< \param opnum  (int *) operand number (out, -1 means no such operand)
-                                ///< \retval 1   unimplemented
-                                ///< \retval <=0 implemented
+                                ///< \param insn   (const ::insn_t*) the instruction
+                                ///< \retval 0 unimplemented
+                                ///< \retval 1 implemented
 
-        insn_reads_tbit,        ///< Check if insn will read the TF bit.
-                                ///< \param ea         (::ea_t) instruction address
-                                ///< \param getreg     (const ::regval_t &(#idaapi *)(const char *name,
-                                ///<                                  const ::regval_t *regvalues))
-                                ///<                   function to get register values
+     ev_insn_reads_tbit,        ///< Check if insn will read the TF bit.
+                                ///< \param insn       (const ::insn_t*) the instruction
+                                ///< \param getreg     (::processor_t::regval_getter_t *) function to get register values
                                 ///< \param regvalues  (const ::regval_t *) register values array
-                                ///< \retval 3  yes, will generate 'step' exception
-                                ///< \retval 2  yes, will store the TF bit in memory
-                                ///< \retval 1  no
+                                ///< \retval 2  yes, will generate 'step' exception
+                                ///< \retval 1  yes, will store the TF bit in memory
+                                ///< \retval 0  no
 
-        get_operand_info,       ///< Get operand information.
+     ev_clean_tbit,             ///< Clear the TF bit after an insn like pushf stored it in memory.
+                                ///< \param ea  (::ea_t) instruction address
+                                ///< \param getreg     (::processor_t::regval_getter_t *) function to get register values
+                                ///< \param regvalues  (const ::regval_t *) register values array
+                                ///< \retval 1  ok
+                                ///< \retval 0  failed
+
+     ev_get_idd_opinfo,         ///< Get operand information.
                                 ///< This callback is used to calculate the operand
                                 ///< value for double clicking on it, hints, etc.
+                                ///< \param opinf      (::idd_opinfo_t *) the output buffer
                                 ///< \param ea         (::ea_t) instruction address
                                 ///< \param n          (int) operand number
                                 ///< \param thread_id  (int) current thread id
-                                ///< \param getreg     (const ::regval_t &(#idaapi *)(const char *name,
-                                ///<                                  const ::regval_t *regvalues))
-                                ///<                   function to get register values
+                                ///< \param getreg     (::processor_t::regval_getter_t *) function to get register values
                                 ///< \param regvalues  (const ::regval_t *) register values array
-                                ///< \param opinf      (::idd_opinfo_t *) the output buffer
-                                ///< \return <=0-ok, otherwise failed
+                                ///< \return 1-ok, 0-failed
 
-        calc_next_eas,          ///< Calculate list of addresses the instruction in ::cmd
-                                ///< may pass control to.
-                                ///< This callback is required for source level debugging.
-                                ///< \param over      (bool) calculate for step over (ignore call targets)
-                                ///< \param res       (::ea_t *) array for the results.
-                                ///<                  this array has #NEXTEAS_ANSWER_SIZE elements.
-                                ///< \param nsubcalls (int *) number of addresses of called functions
-                                ///<                  in the above array. they must be put
-                                ///<                  at the beginning of the array.
-                                ///<                  if over=true, this answer will be zero.
-                                ///< \return number of calculated addresses+1.
-                                ///< If there are too many addresses or they are
-                                ///< incalculable (indirect jumps, for example), return -1.
-
-        clean_tbit,             ///< Clear the TF bit after an insn like pushf stored it in memory.
-                                ///< \param ea  (::ea_t) instruction address
-                                ///< \param getreg     (const ::regval_t &(#idaapi *)(const char *name,
-                                ///<                                  const ::regval_t *regvalues))
-                                ///<                   function to get register values
-                                ///< \param regvalues  (const ::regval_t *) register values array
-                                ///< \retval 2  ok
-                                ///< \retval 1  failed
-
-        get_reg_info2,          ///< Get register information by its name.
+     ev_get_reg_info,           ///< Get register information by its name.
                                 ///< example: "ah" returns:
                                 ///<   - main_regname="eax"
                                 ///<   - bitrange_t = { offset==8, nbits==8 }
                                 ///<
                                 ///< This callback may be unimplemented if the register
-                                ///< names are all present in \ph{regNames} and they all have
+                                ///< names are all present in \ph{reg_names} and they all have
                                 ///< the same size
+                                ///< \param main_regname  (const char **), out
+                                ///< \param bitrange      (::bitrange_t *), out: position and size of the value within 'main_regname' (empty bitrange == whole register)
                                 ///< \param regname       (const char *)
-                                ///< \param main_regname  (const char **) (NULL-failed)
-                                ///< \param bitrange      (::bitrange_t *) position and size of the value within 'main_regname' (empty bitrange == whole register)
-                                ///< \retval 1  unimplemented
-                                ///< \retval 2  implemented
+                                ///< \retval  1  ok
+                                ///< \retval -1  failed (not found)
+                                ///< \retval  0  unimplemented
 
         // END OF DEBUGGER CALLBACKS
 
         // START OF TYPEINFO CALLBACKS TODO: get this into doxygen output
         // The codes below will be called only if #PR_TYPEINFO is set.
-        // The codes based_ptr, max_ptr_size, get_default_enum_size MUST be implemented.
+        // The codes ev_max_ptr_size, ev_get_default_enum_size MUST be implemented.
         // (other codes are optional but still require for normal
-        // operation of the type system. without calc_arglocs3,
+        // operation of the type system. without calc_arglocs,
         // for example, ida will not know about the argument
         // locations for function calls.
 
-        OBSOLETE(decorate_name)=500,
-                                // Decorate/undecorate a C symbol name
-                                // const til_t *ti    - pointer to til
-                                // const char *name   - name of symbol
-                                // const type_t *type - type of symbol. If NULL then it will try to guess.
-                                // char *outbuf       - output buffer
-                                // size_t bufsize     - size of the output buffer
-                                // bool mangle        - true-mangle, false-unmangle
-                                // cm_t cc            - real calling convention for VOIDARG functions
-                                // returns: true if success
+     ev_last_cb_before_type_callbacks,
 
-        setup_til,              ///< Setup default type libraries. (called after loading
+     ev_setup_til = 2000,       ///< Setup default type libraries. (called after loading
                                 ///< a new file into the database).
                                 ///< The processor module may load tils, setup memory
                                 ///< model and perform other actions required to set up
@@ -1434,108 +1339,123 @@ struct processor_t
                                 ///< \param none
                                 ///< \return void
 
-        based_ptr,              ///< Get prefix and size of 'segment based' ptr
-                                ///< type. (something like char _ss *ptr,
-                                ///< see based_ptr_name_and_size())
-                                ///< \param ptrt     (unsigned)
-                                ///< \param ptrname  (const char **)
-                                ///< \return size of type
+     ev_get_abi_info,           ///< Get all possible ABI names and optional extensions for given compiler
+                                ///< abiname/option is a string entirely consisting of letters, digits and underscore
+                                ///< \param abi_names (qstrvec_t *) - all possible ABis each in form abiname-opt1-opt2-...
+                                ///< \param abi_opts  (qstrvec_t *) - array of all possible options in form "opt:description" or opt:hint-line#description
+                                ///< \param comp      (comp_t) - compiler ID
+                                ///< \retval 0 not implemented
+                                ///< \retval 1 ok
 
-        max_ptr_size,           ///< Get maximal size of a pointer in bytes.
+     ev_max_ptr_size,           ///< Get maximal size of a pointer in bytes.
                                 ///< \param none
-                                ///< \return max possible size of a pointer plus 1
+                                ///< \return max possible size of a pointer
 
-        get_default_enum_size,  ///< Get default enum size.
+     ev_get_default_enum_size,  ///< Get default enum size.
                                 ///< \param cm  (::cm_t)
                                 ///< \returns sizeof(enum)
 
-        OBSOLETE(calc_arglocs),
-        OBSOLETE(use_stkarg_type),
-        OBSOLETE(use_regarg_type),
-        OBSOLETE(use_arg_types),
-        OBSOLETE(get_fastcall_regs),
-        OBSOLETE(get_thiscall_regs),
-        OBSOLETE(calc_cdecl_purged_bytes),
-        OBSOLETE(get_stkarg_offset),
-        OBSOLETE(calc_purged_bytes),
-        OBSOLETE(calc_arglocs2),
-        OBSOLETE(calc_retloc),
-        OBSOLETE(calc_varglocs),
-        OBSOLETE(get_varcall_regs),
-        OBSOLETE(use_regarg_type2),
-        OBSOLETE(use_arg_types2),
-        OBSOLETE(get_fastcall_regs2),
-        OBSOLETE(get_thiscall_regs2),
-        OBSOLETE(get_varcall_regs2),
+     ev_get_cc_regs,            ///< Get register allocation convention for given calling convention
+                                ///< \param regs  (::callregs_t *), out
+                                ///< \param cc    (::cm_t)
+                                ///< \return 1
+                                ///< \return 0 - not implemented
 
-        calc_cdecl_purged_bytes2,
-                                ///< Calculate number of purged bytes after call.
-                                ///< param ea  (::ea_t) address of the call instruction
-                                ///< \returns number of purged bytes+2 (usually add sp, N)
-
-        get_stkarg_offset2,     ///< Get offset from SP to the first stack argument.
+     ev_get_stkarg_offset,      ///< Get offset from SP to the first stack argument.
                                 ///< For example: pc: 0, hppa: -0x34, ppc: 0x38
                                 ///< \param none
-                                ///< \returns the offset + 2
+                                ///< \returns the offset
 
-        til_for_file,           ///< Internal notification, do not use
+     ev_shadow_args_size,       ///< Get size of shadow args in bytes.
+                                ///< \param[out] shadow_args_size  (int *)
+                                ///< \param pfn                    (::func_t *) (may be NULL)
+                                ///< \return 1 if filled *shadow_args_size
+                                ///< \return 0 - not implemented
 
-        equal_reglocs,          ///< Are 2 register arglocs the same?.
-                                ///< We need this callback for the pc module.
-                                ///< \param a1  (::argloc_t *)
-                                ///< \param a2  (::argloc_t *)
-                                ///< \retval  1  not implemented
-                                ///< \retval  2  yes
-                                ///< \retval -1  no
+     ev_get_simd_types,         ///< Get SIMD-related types according to given attributes ant/or argument location
+                                ///< \param out (::simd_info_vec_t *)
+                                ///< \param simd_attrs (const ::simd_info_t *), may be NULL
+                                ///< \param argloc (const ::argloc_t *), may be NULL
+                                ///< \param create_tifs (bool) return valid tinfo_t objects, create if neccessary
+                                ///< \return number of found types, -1-error
+                                ///< If name==NULL, initialize all SIMD types
 
-        decorate_name3,         ///< Decorate/undecorate a C symbol name.
-                                ///< The kernel uses this callback only if #PR_TINFO is set.
-                                ///< \param outbuf  (::qstring *) output buffer
-                                ///< \param name    (const char *) name of symbol
-                                ///< \param mangle  (bool) true-mangle, false-unmangle
-                                ///< \param cc      (::cm_t) calling convention
-                                ///< \returns 2 if success
+     ev_calc_cdecl_purged_bytes,
+                                ///< Calculate number of purged bytes after call.
+                                ///< \param ea  (::ea_t) address of the call instruction
+                                ///< \returns number of purged bytes (usually add sp, N)
 
-        calc_retloc3,           ///< Calculate return value location.
-                                ///< The kernel uses this callback only if #PR_TINFO is set.
+     ev_calc_purged_bytes,      ///< Calculate number of purged bytes by the given function type.
+                                ///< \param[out] p_purged_bytes  (int *) ptr to output
+                                ///< \param fti                  (const ::func_type_data_t *) func type details
+                                ///< \return 1
+                                ///< \return 0 - not implemented
+
+     ev_calc_retloc,            ///< Calculate return value location.
+                                ///< \param[out] retloc  (::argloc_t *)
                                 ///< \param rettype      (const tinfo_t *)
                                 ///< \param cc           (::cm_t)
-                                ///< \param[out] retloc  (::argloc_t *)
-                                ///< \return  1  not implemented
-                                ///< \return  2  ok,
+                                ///< \return  0  not implemented
+                                ///< \return  1  ok,
                                 ///< \return -1  error
 
-        calc_varglocs3,         ///< Calculate locations of the arguments that correspond to '...'.
-                                ///< The kernel uses this callback only if #PR_TINFO is set.
-                                ///< \param ftd      (const ::func_type_data_t *) info about all arguments (including varargs)
-                                ///< \param regs     (::regobjs_t *) buffer for register values
-                                ///< \param stkargs  (::relobj_t *) stack arguments
-                                ///< \param nfixed   (int) number of fixed arguments
-                                ///< \retval  1  not implemented
-                                ///< \retval  2  ok
-                                ///< \retval -1  error
-
-        calc_arglocs3,          ///< Calculate function argument locations.
+     ev_calc_arglocs,           ///< Calculate function argument locations.
                                 ///< This callback should fill retloc, all arglocs, and stkargs.
                                 ///< This callback supersedes calc_argloc2.
                                 ///< This callback is never called for ::CM_CC_SPECIAL functions.
-                                ///< The kernel uses this callback only if #PR_TINFO is set.
                                 ///< \param fti  (::func_type_data_t *) points to the func type info
-                                ///< \retval  1  not implemented
-                                ///< \retval  2  ok
+                                ///< \retval  0  not implemented
+                                ///< \retval  1  ok
                                 ///< \retval -1  error
 
-        use_stkarg_type3,       ///< Use information about a stack argument.
-                                ///< The kernel uses this callback only if #PR_TINFO is set.
+     ev_calc_varglocs,          ///< Calculate locations of the arguments that correspond to '...'.
+                                ///< \param ftd      (::func_type_data_t *), inout: info about all arguments (including varargs)
+                                ///< \param regs     (::regobjs_t *) buffer for register values
+                                ///< \param stkargs  (::relobj_t *) stack arguments
+                                ///< \param nfixed   (int) number of fixed arguments
+                                ///< \retval  0  not implemented
+                                ///< \retval  1  ok
+                                ///< \retval -1  error
+
+     ev_adjust_argloc,          ///< Adjust argloc according to its type/size
+                                ///< and platform endianess
+                                ///< \param argloc  (argloc_t *), inout
+                                ///< \param type    (const tinfo_t *), may be NULL
+                                ///<   NULL means primitive type of given size
+                                ///< \param size    (int)
+                                ///<   'size' makes no sense if type != NULL
+                                ///<   (type->get_size() should be used instead)
+                                ///< \retval  0  not implemented
+                                ///< \retval  1  ok
+                                ///< \retval -1  error
+
+     ev_lower_func_type,        ///< Get function arguments which should be converted to pointers when lowering function prototype.
+                                ///<  Processor module can also modify 'fti' in
+                                ///< order to make a non-standard convertion for some of the arguments.
+                                ///< \param argnums (intvec_t *), out - numbers of arguments to be converted to pointers in acsending order
+                                ///< \param fti     (::func_type_data_t *), inout func type details
+                                ///< (special values -1/-2 for return value - position of hidden 'retstr' argument: -1 - at the beginning, -2 - at the end)
+                                ///< \retval 0 not implemented
+                                ///< \retval 1 argnums was filled
+                                ///< \retval 2 argnums was filled and made substantial changes to fti
+
+     ev_equal_reglocs,          ///< Are 2 register arglocs the same?.
+                                ///< We need this callback for the pc module.
+                                ///< \param a1  (::argloc_t *)
+                                ///< \param a2  (::argloc_t *)
+                                ///< \retval  1  yes
+                                ///< \retval -1  no
+                                ///< \retval  0  not implemented
+
+     ev_use_stkarg_type,        ///< Use information about a stack argument.
                                 ///< \param ea  (::ea_t) address of the push instruction which
                                 ///<                     pushes the function argument into the stack
                                 ///< \param arg  (const ::funcarg_t *) argument info
-                                ///< \retval true   ok
-                                ///< \retval false  failed, the kernel will create a comment with the
-                                ///<                argument name or type for the instruction
+                                ///< \retval 1   ok
+                                ///< \retval <=0 failed, the kernel will create a comment with the
+                                ///<             argument name or type for the instruction
 
-        use_regarg_type3,       ///< Use information about register argument.
-                                ///< The kernel uses this callback only if #PR_TINFO is set.
+     ev_use_regarg_type,        ///< Use information about register argument.
                                 ///< \param[out] idx (int *) pointer to the returned value, may contain:
                                 ///<                         - idx of the used argument, if the argument is defined
                                 ///<                           in the current instruction, a comment will be applied by the kernel
@@ -1545,141 +1465,197 @@ struct processor_t
                                 ///< \param ea       (::ea_t) address of the instruction
                                 ///< \param rargs    (const ::funcargvec_t *) vector of register arguments
                                 ///<                               (including regs extracted from scattered arguments)
-                                ///< \return 2
+                                ///< \return 1
+                                ///< \return 0  not implemented
 
-        use_arg_types3,         ///< Use information about callee arguments.
-                                ///< The kernel uses this callback only if #PR_TINFO and #PR_USE_ARG_TYPES are set.
+     ev_use_arg_types,          ///< Use information about callee arguments.
                                 ///< \param ea     (::ea_t) address of the call instruction
                                 ///< \param fti    (::func_type_data_t *) info about function type
                                 ///< \param rargs  (::funcargvec_t *) array of register arguments
-                                ///< \return 2 (and removes handled arguments from fti and rargs)
+                                ///< \return 1 (and removes handled arguments from fti and rargs)
+                                ///< \return 0  not implemented
 
-        calc_purged_bytes3,     ///< Calculate number of purged bytes by the given function type.
-                                ///< The kernel uses this callback only if #PR_TINFO is set.
-                                ///< \param[out] p_purged_bytes  (int *) ptr to output
-                                ///< \param fti                  (const ::func_type_data_t *) func type details
-                                ///< \return 2
+     ev_arg_addrs_ready,        ///< Argument address info is ready.
+                                ///< \param caller  (::ea_t)
+                                ///< \param n       (int) number of formal arguments
+                                ///< \param tif     (tinfo_t *) call prototype
+                                ///< \param addrs   (::ea_t *) argument intilization addresses
+                                ///< \return <0: do not save into idb; other values mean "ok to save"
 
-        shadow_args_size,       ///< Get size of shadow args in bytes.
-                                ///< \param[out] shadow_args_size  (int *)
-                                ///< \param pfn                    (::func_t *) (may be NULL)
-                                ///< \return 2 if filled *shadow_args_size
+     ev_decorate_name,          ///< Decorate/undecorate a C symbol name.
+                                ///< \param outbuf  (::qstring *) output buffer
+                                ///< \param name    (const char *) name of symbol
+                                ///< \param mangle  (bool) true-mangle, false-unmangle
+                                ///< \param cc      (::cm_t) calling convention
+                                ///< \param type    (const ::tinfo_t *) name type (NULL-unknown)
+                                ///< \return 1 if success
+                                ///< \return 0 not implemented or failed
 
-        get_varcall_regs3,      ///< Get register allocation convention used in the ellipsis (...) calling convention.
-                                ///< \param regs  (::callregs_t *)
-                                ///< \return max_possible_number_of_varcall_regs+2
-
-        get_fastcall_regs3,     ///< Get register allocation convention used in the fastcall calling convention.
-                                ///< \param regs  (::callregs_t *)
-                                ///< \return max_possible_number_of_fastcall_regs+2
-
-        get_thiscall_regs3,     ///< Get register allocation convention used in the thiscall calling convention.
-                                ///< \param regs  (::callregs_t *)
-                                ///< \return max_possible_number_of_fastcall_regs+2
         // END OF TYPEINFO CALLBACKS
 
-        loader=1000,            ///< This code and higher ones are reserved
+     ev_loader=3000,            ///< This code and higher ones are reserved
                                 ///< for the loaders.
                                 ///< The arguments and the return values are
                                 ///< defined by the loaders
   };
 
-  /// Various notifications for the idp
-  int (idaapi *notify)(idp_notify msgid, ...);
+  /// Event notification handler
+  hook_cb_t *_notify;
+  ssize_t notify(event_t event_code, ...)
+  {
+    va_list va;
+    va_start(va, event_code);
+    ssize_t code = invoke_callbacks(HT_IDP, event_code, va);
+    va_end(va);
+    return code;
+  }
+
+  // Notification helpers, should be used instead of direct ph.notify(...) calls
+  inline int init(const char *idp_modname);
+  inline int term();
+  inline int newprc(int pnum, bool keep_cfg);
+  inline int newasm(int asmnum);
+  inline int newfile(const char *fname);
+  inline int oldfile(const char *fname);
+  inline int newbinary(const char *filename, qoff64_t fileoff, ea_t basepara, ea_t binoff, uint64 nbytes);
+  inline int endbinary(bool ok);
+  inline int creating_segm(segment_t *seg);
+  inline int assemble(uchar *_bin, ea_t ea, ea_t cs, ea_t ip, bool _use32, const char *line);
+  inline int ana_insn(insn_t *out);
+  inline int emu_insn(const insn_t &insn);
+  inline int out_header(outctx_t &ctx);
+  inline int out_footer(outctx_t &ctx);
+  inline int out_segstart(outctx_t &ctx, segment_t *seg);
+  inline int out_segend(outctx_t &ctx, segment_t *seg);
+  inline int out_assumes(outctx_t &ctx);
+  inline int out_insn(outctx_t &ctx);
+  inline int out_mnem(outctx_t &ctx);
+  inline int out_operand(outctx_t &ctx, const op_t &op);
+  inline int out_data(outctx_t &ctx, bool analyze_only);
+  inline int out_label(outctx_t &ctx, const char *colored_name);
+  inline int out_special_item(outctx_t &ctx, uchar segtype);
+  inline int gen_stkvar_def(outctx_t &ctx, const class member_t *mptr, sval_t v);
+  inline int gen_regvar_def(outctx_t &ctx, regvar_t *v);
+  inline int gen_src_file_lnnum(outctx_t &ctx, const char *file, size_t lnnum);
+  inline int rename(ea_t ea, const char *new_name, int flags);
+  inline int may_show_sreg(ea_t current_ea);
+  inline int coagulate(ea_t start_ea);
+  inline int auto_queue_empty(/*atype_t*/ int type);
+  inline int func_bounds(int *possible_return_code, func_t *pfn, ea_t max_func_end_ea);
+  inline int may_be_func(const insn_t &insn, int state);
+  inline int is_sane_insn(const insn_t &insn, int no_crefs);
+  inline int cmp_operands(const op_t &op1, const op_t &op2);
+  inline int is_jump_func(func_t *pfn, ea_t *jump_target, ea_t *func_pointer);
+  inline int is_basic_block_end(const insn_t &insn, bool call_insn_stops_block);
+  inline int getreg(uval_t *rv, int regnum);
+  inline int undefine(ea_t ea);
+  inline int moving_segm(segment_t *seg, ea_t to, int flags);
+  inline int is_sp_based(const insn_t &insn, const op_t &x);
+  inline int is_far_jump(int icode);
+  inline int is_call_insn(const insn_t &insn);
+  inline int is_ret_insn(const insn_t &insn, bool strict);
+  inline int is_align_insn(ea_t ea);
+  inline int can_have_type(const op_t &op);
+  inline int get_stkvar_scale_factor();
+  inline int create_flat_group(ea_t image_base, int bitness, sel_t dataseg_sel);
+  inline int is_alloca_probe(ea_t ea);
+  inline int get_reg_name(qstring *buf, int reg, size_t width, int reghi);
+  inline int gen_asm_or_lst(bool starting, FILE *fp, bool is_asm, int flags, /*gen_outline_t ** */ void *outline);
+  inline int gen_map_file(int *nlines, FILE *fp);
+  inline int get_autocmt(qstring *buf, const insn_t &insn);
+  inline int is_insn_table_jump(const insn_t &insn);
+  inline int loader_elf_machine(linput_t *li, int machine_type, const char **p_procname, proc_def_t **p_pd);
+  inline int is_indirect_jump(const insn_t &insn);
+  inline int verify_noreturn(func_t *pfn);
+  inline int verify_sp(func_t *pfn);
+  inline int create_func_frame(func_t *pfn);
+  inline int get_frame_retsize(int *retsize, const func_t *pfn);
+  inline int treat_hindering_item(ea_t hindering_item_ea, flags_t new_item_flags, ea_t new_item_ea, asize_t new_item_length);
+  inline int extract_address(ea_t *out_ea, ea_t screen_ea, const char *string, size_t x);
+  inline int str2reg(const char *regname);
+  inline int is_switch(switch_info_t *si, const insn_t &insn);
+  inline int create_switch_xrefs(ea_t jumpea, const switch_info_t &si);
+  inline int calc_switch_cases(/*casevec_t * */void *casevec, eavec_t *targets, ea_t insn_ea, const switch_info_t &si);
+  inline int get_bg_color(bgcolor_t *color, ea_t ea);
+  inline int validate_flirt_func(ea_t start_ea, const char *funcname);
+  inline int get_operand_string(qstring *buf, const insn_t &insn, int opnum);
+  inline int add_cref(ea_t from, ea_t to, cref_t type);
+  inline int add_dref(ea_t from, ea_t to, dref_t type);
+  inline int del_cref(ea_t from, ea_t to, bool expand);
+  inline int del_dref(ea_t from, ea_t to);
+  inline int coagulate_dref(ea_t from, ea_t to, bool may_define, ea_t *code_ea);
+  inline const char *set_idp_options(const char *keyword, int vtype, const void *value);
+  inline int set_proc_options(const char *options, int confidence);
+  inline int adjust_libfunc_ea(const idasgn_t &sig, const libfunc_t &libfun, ea_t *ea);
+  inline int realcvt(void *m, unsigned short *e, unsigned short swt);
+  inline int delay_slot_insn(ea_t *ea, bool *bexec, bool *fexec);
+  inline int adjust_refinfo(refinfo_t *ri, ea_t ea, int n, const fixup_data_t &fd);
+  inline int is_cond_insn(const insn_t &insn);
+  inline int next_exec_insn(ea_t *target, ea_t ea, int tid, regval_getter_t *_getreg, const regval_t &regvalues);
+  inline int calc_step_over(ea_t *target, ea_t ip);
+  inline int get_macro_insn_head(ea_t *head, ea_t ip);
+  inline int get_dbr_opnum(int *opnum, const insn_t &insn);
+  inline int insn_reads_tbit(const insn_t &insn, regval_getter_t *_getreg, const regval_t &regvalues);
+  inline int get_idd_opinfo(idd_opinfo_t *opinf, ea_t ea, int n, int thread_id, regval_getter_t *_getreg, const regval_t &regvalues);
+  inline int calc_next_eas(eavec_t *res, const insn_t &insn, bool over);
+  inline int clean_tbit(ea_t ea, regval_getter_t *_getreg, const regval_t &regvalues);
+  inline int get_reg_info(const char **main_regname, bitrange_t *bitrange, const char *regname);
+  inline int setup_til();
+  inline int max_ptr_size();
+  inline int get_default_enum_size(cm_t cm);
+  inline int calc_cdecl_purged_bytes(ea_t ea);
+  inline int get_stkarg_offset();
+  inline int equal_reglocs(const argloc_t &a1, const argloc_t &a2);
+  inline int decorate_name(qstring *outbuf, const char *name, bool mangle, cm_t cc, const tinfo_t &type);
+  inline int calc_retloc(argloc_t *retloc, const tinfo_t &rettype, cm_t cc);
+  inline int calc_varglocs(func_type_data_t *ftd, regobjs_t *regs, relobj_t *stkargs, int nfixed);
+  inline int calc_arglocs(func_type_data_t *fti);
+  inline int use_stkarg_type(ea_t ea, const funcarg_t &arg);
+  inline int use_regarg_type(int *idx, ea_t ea, /*const funcargvec_t * */void *rargs);
+  inline int use_arg_types(ea_t ea, func_type_data_t *fti, /*funcargvec_t * */void *rargs);
+  inline int calc_purged_bytes(int *p_purged_bytes, const func_type_data_t &fti);
+  inline int shadow_args_size(int *shadow_size, func_t *pfn);
+  inline int get_cc_regs(callregs_t *regs, cm_t cc);
+  inline int get_simd_types(/*simd_info_vec_t * */void *out, const simd_info_t *simd_attrs, const argloc_t *argloc, bool create_tifs);
+  inline int arg_addrs_ready(ea_t caller, int n, const tinfo_t &tif, ea_t *addrs);
+  inline int adjust_argloc(argloc_t *argloc, const tinfo_t *type, int size);
+  inline int lower_func_type(intvec_t *argnums, func_type_data_t *fti);
+  inline int get_abi_info(qstrvec_t *abi_names, qstrvec_t *abi_opts, comp_t comp);
+/// \defgroup OP_FP_SP SP/FP operand flags
+/// Return values for processor_t::is_sp_based()
+//@{
+#define OP_FP_BASED  0x00000000 ///< operand is FP based
+#define OP_SP_BASED  0x00000001 ///< operand is SP based
+#define OP_SP_ADD    0x00000000 ///< operand value is added to the pointer
+#define OP_SP_SUB    0x00000002 ///< operand value is subtracted from the pointer
+//@}
 
   /// Get the stack variable scaling factor.
   /// Useful for processors who refer to the stack with implicit scaling factor.
   /// TMS320C55 for example: SP(#1) really refers to (SP+2)
   int get_stkvar_scale(void)
-    { return (flag & PR_SCALE_STKVARS) ? notify(get_stkvar_scale_factor) : 1; }
-
-  /// \name Disassembly sections
-  /// The following functions generate portions of the disassembled text.
-  //@{
-  void  (idaapi *header)(void);        ///< Function to produce start of disassembled text
-  void  (idaapi *footer)(void);        ///< Function to produce end of disassembled text
-
-  void  (idaapi *segstart)(ea_t ea);   ///< Function to produce start of segment
-  void  (idaapi *segend)  (ea_t ea);   ///< Function to produce end of segment
-
-  void  (idaapi *assumes) (ea_t ea);   ///< Function to produce assume directives
-                                       ///< when segment register value changes.
-                                       ///< If your processor has no segment
-                                       ///< registers, you may define it as NULL
-  //@}
-
-  /// Analyze one instruction and fill 'cmd' structure.
-  /// This function shouldn't change the database, flags or anything else.
-  /// All these actions should be performed only by u_emu() function.
-  /// \cmd{ea} contains address of instruction to analyze.
-  /// \return length of the instruction in bytes, 0 if instruction can't be decoded.
-  int   (idaapi *u_ana)   (void);
-
-  /// Emulate instruction, create cross-references, plan to analyze
-  /// subsequent instructions, modify flags etc. Upon entrance to this function,
-  /// all information about the instruction is in ::cmd structure.
-  /// If zero is returned, the kernel will delete the instruction.
-  int   (idaapi *u_emu)   (void);
-
-  /// Generate text representation of an instruction in ::cmd structure.
-  /// This function shouldn't change the database, flags or anything else.
-  /// All these actions should be performed only by u_emu() function.
-  void  (idaapi *u_out)   (void);
-
-  /// Generate text representation of an instruction operand.
-  /// This function shouldn't change the database, flags or anything else.
-  /// All these actions should be performed only by u_emu() function.
-  /// The output text is placed in the output buffer initialized with init_output_buffer()
-  /// This function uses out_...() functions from ua.hpp to generate the operand text
-  /// \retval 1  ok
-  /// \retval 0  operand is hidden.
-  bool  (idaapi *u_outop) (op_t &op);
-
-
-  /// Generate text representation of data items.
-  /// This function MAY change the database and create cross-references, etc.
-  void  (idaapi *d_out)   (ea_t ea);          // disassemble data
-
-  /// Compare instruction operands.
-  /// This pointer may be NULL.
-  /// \retval 1  equal
-  /// \retval 0  not equal
-  bool  (idaapi *cmp_opnd)(const op_t &op1, const op_t &op2);
-
-  /// Can the operand have a type as offset, segment, decimal, etc.
-  /// (for example, a register AX can't have a type, meaning that the user can't
-  /// change its representation. see bytes.hpp for information about types and flags)
-  /// This pointer may be NULL.
-  bool  (idaapi *can_have_type)(op_t &op);
-
-
+    {
+      if ( (flag & PR_SCALE_STKVARS) == 0 )
+        return 1;
+      int scale = notify(ev_get_stkvar_scale_factor);
+      if ( scale == 0 )
+        error("Request ph.get_stkvar_scale_factor should be implemented");
+      else if ( scale <= 0 )
+        error("Invalid return code from ph.get_stkvar_scale_factor request");
+      return scale;
+    }
 
   //  Processor register information:
-  int   regsNum;                        ///< number of registers
-  const char *const *regNames;          ///< array of register names
-
-  /// \name Warning
-  /// The following pointers should be NULL:
-  //@{
-  const AbstractRegister *(idaapi *getreg)(int regnum);
-                                        ///< Get register value.
-                                        ///< If specified, will be
-                                        ///< used in the determining predefined
-                                        ///< comment based on the register value
-
-  int   rFiles;                         ///< number of register files
-  const char *const *rFnames;           ///< register names for files
-  const rginfo *rFdescs;                ///< description of registers
-  const class WorkReg *CPUregs;         ///< pointer to CPU registers
-  //@}
+  const char *const *reg_names;         ///< array of register names
+  int32 regs_num;                       ///< number of registers
 
   /// \name Segment registers
   /// Segment register information (use virtual CS and DS registers if your
   /// processor doesn't have segment registers):
   //@{
-  int   regFirstSreg;                   ///< number of first segment register
-  int   regLastSreg;                    ///< number of last segment register
-  int   segreg_size;                    ///< size of a segment register in bytes
+  int32 reg_first_sreg;                 ///< number of first segment register
+  int32 reg_last_sreg;                  ///< number of last segment register
+  int32 segreg_size;                    ///< size of a segment register in bytes
   //@}
 
   /// \name Virtual segment registers
@@ -1687,8 +1663,8 @@ struct processor_t
   /// you should define 2 virtual segment registers for CS and DS.
   /// Let's call them rVcs and rVds.
   //@{
-  int   regCodeSreg;                    ///< number of CS register
-  int   regDataSreg;                    ///< number of DS register
+  int32 reg_code_sreg;                  ///< number of CS register
+  int32 reg_data_sreg;                  ///< number of DS register
   //@}
 
 
@@ -1713,8 +1689,8 @@ struct processor_t
 
   /// \name Instruction set
   //@{
-  int   instruc_start;                  ///< icode of the first instruction
-  int   instruc_end;                    ///< icode of the last instruction + 1
+  int32 instruc_start;                  ///< icode of the first instruction
+  int32 instruc_end;                    ///< icode of the last instruction + 1
 
   /// Does the given value specify a valid instruction for this instruction set?.
   /// See #instruc_start and #instruc_end
@@ -1723,29 +1699,9 @@ struct processor_t
   const instruc_t *instruc;             ///< Array of instructions
   //@}
 
-  /// is indirect far jump or call instruction?.
-  /// meaningful only if the processor has 'near' and 'far' reference types
-  int   (idaapi *is_far_jump)(int icode);
-
-  /// Translation function for offsets.
-  /// Currently used in the offset display functions
-  /// to calculate the referenced address
-  ea_t (idaapi *translate)(ea_t base, adiff_t offset);
-
   /// Size of long double (tbyte) for this processor
   /// (meaningful only if \ash{a_tbyte} != NULL)
   size_t tbyte_size;
-
-/// \defgroup REAL_ERROR_ Floating point/IEEE Conversion codes
-/// Return values for processor_t::realcvt()
-//@{
-#define REAL_ERROR_FORMAT  -1 ///< not supported format for current .idp
-#define REAL_ERROR_RANGE   -2 ///< number too big (small) for store (mem NOT modified)
-#define REAL_ERROR_BADDATA -3 ///< illegal real data for load (IEEE data not filled)
-//@}
-  /// Floating point -> IEEE conversion function.
-  /// \return \ref REAL_ERROR_ on error
-  int (idaapi *realcvt)(void *m, uint16 *e, uint16 swt);
 
   /// Number of digits in floating numbers after the decimal point.
   /// If an element of this array equals 0, then the corresponding
@@ -1759,91 +1715,19 @@ struct processor_t
   /// Example: IBM PC module has { 0,7,15,19 }
   char real_width[4];
 
-  /// Find 'switch' idiom.
-  /// This function may use (and modify) ::cmd
-  /// (you can assume cmd is correct).
-  /// It will be called for instructions marked with #CF_JUMP.
-  /// \retval 1  switch is found, 'si' is filled
-  /// \retval 0  switch is not found
-  bool (idaapi *is_switch)(switch_info_ex_t *si);
-
-  /// Generate map file. If this pointer is NULL, the kernel itself
-  /// will create the map file.
-  /// \retval 0      empty file
-  /// \retval -1     write error
-  /// \retval other  number of lines in output file
-  int32 (idaapi *gen_map_file)(FILE *fp);
-
-  /// Extract address from a string.
-  /// \retval BADADDR    if can't extract.
-  /// \retval BADADDR-1  if kernel should use standard algorithm.
-  ea_t (idaapi *extract_address)(ea_t ea,const char *string,int x);
-
-/// \defgroup OP_FP_SP SP/FP operand flags
-/// Return values for processor_t::is_sp_based()
-//@{
-#define OP_FP_BASED  0x00000000 ///< operand is FP based
-#define OP_SP_BASED  0x00000001 ///< operand is SP based
-#define OP_SP_ADD    0x00000000 ///< operand value is added to the pointer
-#define OP_SP_SUB    0x00000002 ///< operand value is subtracted from the pointer
-//@}
-  /// Check whether the operand is relative to stack pointer or frame pointer.
-  /// This function is used to determine how to output a stack variable
-  /// This function may be absent. If it is absent, then all operands
-  /// are sp based by default.
-  /// Define this function only if some stack references use frame pointer
-  /// instead of stack pointer.
-  /// \return combination of \ref OP_FP_SP
-  int (idaapi *is_sp_based)(const op_t &x);
-
-  /// Create a function frame for a newly created function.
-  /// Set up frame size, its attributes etc.
-  /// This function may be absent.
-  bool (idaapi *create_func_frame)(func_t *pfn);
-
-  /// Get size of function return address in bytes.
-  /// If this function is absent, the kernel will assume
-  ///   - 4 bytes for 32-bit function
-  ///   - 2 bytes otherwise
-  /// \param pfn  pointer to function structure, can't be NULL
-  int (idaapi *get_frame_retsize)(func_t *pfn);
-
-  /// Generate stack variable definition line.
-  /// If this function is NULL, then the kernel will create this line itself.
-  /// Default line is
-  ///             varname = type ptr value,
-  /// where 'type' is one of byte,word,dword,qword,tbyte
-  void (idaapi *gen_stkvar_def)(char *buf,
-                                 size_t bufsize,
-                                 const class member_t *mptr,
-                                 sval_t v);
-
-  /// Generate text representation of an item in a special segment.
-  /// i.e. absolute symbols, externs, communal definitions etc.
-  /// \retval 1  overflow
-  /// \retval 0  ok
-  bool (idaapi *u_outspec)(ea_t ea,uchar segtype);
-
   /// Icode of return instruction. It is ok to give any of possible return instructions
-  int icode_return;
-
-  /// Set IDP-specific option
-  set_options_t *set_idp_options;
-
-  /// Is the instruction created only for alignment purposes?.
-  /// Do not directly call this function, use ::is_align_insn()
-  /// returns: number of bytes in the instruction
-  int (idaapi *is_align_insn)(ea_t ea);
+  int32 icode_return;
 
   /// Reserved, currently equals to NULL
   void *unused_slot;
-
-  /// If the #FIXUP_VHIGH and #FIXUP_VLOW fixup types are supported
-  /// then the number of bits in the HIGH part. For example,
-  /// SPARC will have here 22 because it has HIGH22 and LOW10 relocations.
-  /// See also: the description of #PR_FULL_HIFXP bit
-  int high_fixup_bits;
 };
+
+#ifdef __X64__
+CASSERT(sizeof(processor_t) == 144);
+#else
+CASSERT(sizeof(processor_t) == 104);
+#endif
+
 
 // The following two structures contain information about the current
 // processor and assembler.
@@ -1851,7 +1735,453 @@ struct processor_t
 idaman processor_t ida_export_data ph;   ///< current processor
 idaman asm_t ida_export_data ash;        ///< current assembler
 
-idaman int ida_export str2regf(const char *p);    ///< Get word reg number (-1 on error)
+
+inline int processor_t::init(const char *idp_modname)
+{
+  return notify(ev_init, idp_modname);
+}
+inline int processor_t::term()
+{
+  return notify(ev_term);
+}
+inline int processor_t::newprc(int pnum, bool keep_cfg)
+{
+  return notify(ev_newprc, pnum, keep_cfg);
+}
+inline int processor_t::newasm(int asmnum)
+{
+  return notify(ev_newasm, asmnum);
+}
+inline int processor_t::newfile(const char *fname)
+{
+  return notify(ev_newfile, fname);
+}
+inline int processor_t::oldfile(const char *fname)
+{
+  return notify(ev_oldfile, fname);
+}
+inline int processor_t::newbinary(const char *filename, qoff64_t fileoff, ea_t basepara, ea_t binoff, uint64 nbytes)
+{
+  return notify(ev_newbinary, filename, fileoff, basepara, binoff, nbytes);
+}
+inline int processor_t::endbinary(bool ok)
+{
+  return notify(ev_endbinary, ok);
+}
+inline int processor_t::creating_segm(segment_t *seg)
+{
+  return notify(ev_creating_segm, seg);
+}
+inline int processor_t::assemble(uchar *_bin, ea_t ea, ea_t cs, ea_t ip, bool _use32, const char *line)
+{
+  return notify(ev_assemble, _bin, ea, cs, ip, _use32, line, _bin);
+}
+inline int processor_t::ana_insn(insn_t *out)
+{
+  return notify(ev_ana_insn, out);
+}
+inline int processor_t::emu_insn(const insn_t &insn)
+{
+  return notify(ev_emu_insn, &insn);
+}
+inline int processor_t::out_header(outctx_t &ctx)
+{
+  return notify(ev_out_header, &ctx);
+}
+inline int processor_t::out_footer(outctx_t &ctx)
+{
+  return notify(ev_out_footer, &ctx);
+}
+inline int processor_t::out_segstart(outctx_t &ctx, segment_t *seg)
+{
+  return notify(ev_out_segstart, &ctx, seg);
+}
+inline int processor_t::out_segend(outctx_t &ctx, segment_t *seg)
+{
+  return notify(ev_out_segend, &ctx, seg);
+}
+inline int processor_t::out_assumes(outctx_t &ctx)
+{
+  return notify(ev_out_assumes, &ctx);
+}
+inline int processor_t::out_insn(outctx_t &ctx)
+{
+  return notify(ev_out_insn, &ctx);
+}
+inline int processor_t::out_mnem(outctx_t &ctx)
+{
+  return notify(ev_out_mnem, &ctx);
+}
+inline int processor_t::out_operand(outctx_t &ctx, const op_t &op)
+{
+  return notify(ev_out_operand, &ctx, &op);
+}
+inline int processor_t::out_data(outctx_t &ctx, bool analyze_only)
+{
+  return notify(ev_out_data, &ctx, analyze_only);
+}
+inline int processor_t::out_label(outctx_t &ctx, const char *colored_name)
+{
+  return notify(ev_out_label, &ctx, colored_name);
+}
+inline int processor_t::out_special_item(outctx_t &ctx, uchar segtype)
+{
+  return notify(ev_out_special_item, &ctx, segtype);
+}
+inline int processor_t::gen_stkvar_def(outctx_t &ctx, const class member_t *mptr, sval_t v)
+{
+  return notify(ev_gen_stkvar_def, &ctx, mptr, v);
+}
+inline int processor_t::gen_regvar_def(outctx_t &ctx, regvar_t *v)
+{
+  return notify(ev_gen_regvar_def, &ctx, v);
+}
+inline int processor_t::gen_src_file_lnnum(outctx_t &ctx, const char *file, size_t lnnum)
+{
+  return notify(ev_gen_src_file_lnnum, &ctx, file, lnnum);
+}
+inline int processor_t::rename(ea_t ea, const char *new_name, int flags)
+{
+  return notify(ev_rename, ea, new_name, flags);
+}
+inline int processor_t::may_show_sreg(ea_t current_ea)
+{
+  return notify(ev_may_show_sreg, current_ea);
+}
+inline int processor_t::coagulate(ea_t start_ea)
+{
+  return notify(ev_coagulate, start_ea);
+}
+inline int processor_t::auto_queue_empty(/*atype_t*/ int type)
+{
+  return notify(ev_auto_queue_empty, type);
+}
+inline int processor_t::func_bounds(int *possible_return_code, func_t *pfn, ea_t max_func_end_ea)
+{
+  return notify(ev_func_bounds, possible_return_code, pfn, max_func_end_ea);
+}
+inline int processor_t::may_be_func(const insn_t &insn, int state)
+{
+  return notify(ev_may_be_func, &insn, state);
+}
+inline int processor_t::is_sane_insn(const insn_t &insn, int no_crefs)
+{
+  return notify(ev_is_sane_insn, &insn, no_crefs);
+}
+inline int processor_t::cmp_operands(const op_t &op1, const op_t &op2)
+{
+  return notify(ev_cmp_operands, &op1, &op2);
+}
+inline int processor_t::is_jump_func(func_t *pfn, ea_t *jump_target, ea_t *func_pointer)
+{
+  return notify(ev_is_jump_func, pfn, jump_target, func_pointer);
+}
+inline int processor_t::is_basic_block_end(const insn_t &insn, bool call_insn_stops_block)
+{
+  return notify(ev_is_basic_block_end, &insn, call_insn_stops_block);
+}
+inline int processor_t::getreg(uval_t *rv, int regnum)
+{
+  return notify(ph.ev_getreg, rv, regnum);
+}
+inline int processor_t::undefine(ea_t ea)
+{
+  return notify(ev_undefine, ea);
+}
+inline int processor_t::moving_segm(segment_t *seg, ea_t to, int flags)
+{
+  return notify(ev_moving_segm, seg, to, flags);
+}
+inline int processor_t::is_sp_based(const insn_t &insn, const op_t &x)
+{
+  int mode;
+  int code = notify(ev_is_sp_based, &mode, &insn, &x);
+  return code == 0 ? OP_SP_BASED : mode;
+}
+inline int processor_t::is_far_jump(int icode)
+{
+  return notify(ev_is_far_jump, icode);
+}
+inline int processor_t::is_call_insn(const insn_t &insn)
+{
+  return notify(ev_is_call_insn, &insn);
+}
+inline int processor_t::is_ret_insn(const insn_t &insn, bool strict)
+{
+  return notify(ev_is_ret_insn, &insn, strict);
+}
+inline int processor_t::is_align_insn(ea_t ea)
+{
+  return notify(ev_is_align_insn, ea);
+}
+inline int processor_t::can_have_type(const op_t &op)
+{
+  return notify(ev_can_have_type, &op);
+}
+inline int processor_t::get_stkvar_scale_factor()
+{
+  return notify(ev_get_stkvar_scale_factor);
+}
+inline int processor_t::create_flat_group(ea_t image_base, int bitness, sel_t dataseg_sel)
+{
+  return notify(ev_create_flat_group, image_base, bitness, dataseg_sel);
+}
+inline int processor_t::is_alloca_probe(ea_t ea)
+{
+  return notify(ev_is_alloca_probe, ea);
+}
+inline int processor_t::get_reg_name(qstring *buf, int reg, size_t width, int reghi)
+{
+  return notify(ev_get_reg_name, buf, reg, width, reghi);
+}
+inline int processor_t::gen_asm_or_lst(bool starting, FILE *fp, bool is_asm, int flags, /*gen_outline_t ** */ void *outline)
+{
+  return notify(ev_gen_asm_or_lst, starting, fp, is_asm, flags, outline);
+}
+inline int processor_t::gen_map_file(int *nlines, FILE *fp)
+{
+  return notify(ev_gen_map_file, nlines, fp);
+}
+inline int processor_t::get_autocmt(qstring *buf, const insn_t &insn)
+{
+  return notify(ev_get_autocmt, buf, &insn);
+}
+inline int processor_t::is_insn_table_jump(const insn_t &insn)
+{
+  return notify(ev_is_insn_table_jump, &insn);
+}
+inline int processor_t::loader_elf_machine(linput_t *li, int machine_type, const char **p_procname, proc_def_t **p_pd)
+{
+  return notify(ev_loader_elf_machine, li, machine_type, p_procname, p_pd);
+}
+inline int processor_t::is_indirect_jump(const insn_t &insn)
+{
+  return notify(ev_is_indirect_jump, &insn);
+}
+inline int processor_t::verify_noreturn(func_t *pfn)
+{
+  return notify(ev_verify_noreturn, pfn);
+}
+inline int processor_t::verify_sp(func_t *pfn)
+{
+  return notify(ev_verify_sp, pfn);
+}
+inline int processor_t::create_func_frame(func_t *pfn)
+{
+  return notify(ev_create_func_frame, pfn);
+}
+inline int processor_t::get_frame_retsize(int *retsize, const func_t *pfn)
+{
+  return notify(ev_get_frame_retsize, retsize, pfn);
+}
+inline int processor_t::treat_hindering_item(ea_t hindering_item_ea, flags_t new_item_flags, ea_t new_item_ea, asize_t new_item_length)
+{
+  return notify(ev_treat_hindering_item, hindering_item_ea, new_item_flags, new_item_ea, new_item_length);
+}
+inline int processor_t::extract_address(ea_t *out_ea, ea_t screen_ea, const char *string, size_t x)
+{
+  return notify(ev_extract_address, out_ea, screen_ea, string, x);
+}
+inline int processor_t::str2reg(const char *regname)
+{
+  return notify(ev_str2reg, regname);
+}
+inline int processor_t::is_switch(switch_info_t *si, const insn_t &insn)
+{
+  return notify(ev_is_switch, si, &insn);
+}
+inline int processor_t::create_switch_xrefs(ea_t jumpea, const switch_info_t &si)
+{
+  return notify(ev_create_switch_xrefs, jumpea, &si);
+}
+inline int processor_t::calc_switch_cases(/*casevec_t * */void *casevec, eavec_t *targets, ea_t insn_ea, const switch_info_t &si)
+{
+  return notify(ev_calc_switch_cases, casevec, targets, insn_ea, &si);
+}
+inline int processor_t::get_bg_color(bgcolor_t *color, ea_t ea)
+{
+  return notify(ev_get_bg_color, color, ea);
+}
+inline int processor_t::validate_flirt_func(ea_t start_ea, const char *funcname)
+{
+  return notify(ev_validate_flirt_func, start_ea, funcname);
+}
+inline int processor_t::get_operand_string(qstring *buf, const insn_t &insn, int opnum)
+{
+  return notify(ev_get_operand_string, buf, &insn, opnum);
+}
+inline int processor_t::add_cref(ea_t from, ea_t to, cref_t type)
+{
+  return notify(ev_add_cref, from, to, type);
+}
+inline int processor_t::add_dref(ea_t from, ea_t to, dref_t type)
+{
+  return notify(ev_add_dref, from, to, type);
+}
+inline int processor_t::del_cref(ea_t from, ea_t to, bool expand)
+{
+  return notify(ev_del_cref, from, to, expand);
+}
+inline int processor_t::del_dref(ea_t from, ea_t to)
+{
+  return notify(ev_del_dref, from, to);
+}
+inline int processor_t::coagulate_dref(ea_t from, ea_t to, bool may_define, ea_t *code_ea)
+{
+  return notify(ev_coagulate_dref, from, to, may_define, code_ea);
+}
+inline const char *processor_t::set_idp_options(const char *keyword, int vtype, const void *value)
+{
+  const char *errmsg;
+  int code = notify(ev_set_idp_options, keyword, vtype, value, &errmsg);
+  return code == 1 ? IDPOPT_OK : code == 0 ? IDPOPT_BADKEY : errmsg;
+}
+inline int processor_t::set_proc_options(const char *options, int confidence)
+{
+  return notify(ev_set_proc_options, options, confidence);
+}
+inline int processor_t::adjust_libfunc_ea(const idasgn_t &sig, const libfunc_t &libfun, ea_t *ea)
+{
+  return notify(ev_adjust_libfunc_ea, &sig, &libfun, ea);
+}
+inline int processor_t::realcvt(void *m, unsigned short *e, unsigned short swt)
+{
+  return notify(ev_realcvt, m, e, swt);
+}
+inline int processor_t::delay_slot_insn(ea_t *ea, bool *bexec, bool *fexec)
+{
+  return notify(ev_delay_slot_insn, ea, bexec, fexec);
+}
+inline int processor_t::adjust_refinfo(refinfo_t *ri, ea_t ea, int n, const fixup_data_t &fd)
+{
+  return notify(ev_adjust_refinfo, ri, ea, n, &fd);
+}
+inline int processor_t::is_cond_insn(const insn_t &insn)
+{
+  return notify(ev_is_cond_insn, &insn);
+}
+inline int processor_t::next_exec_insn(ea_t *target, ea_t ea, int tid, regval_getter_t *_getreg, const regval_t &regvalues)
+{
+  return notify(ev_next_exec_insn, target, ea, tid, _getreg, &regvalues);
+}
+inline int processor_t::calc_step_over(ea_t *target, ea_t ip)
+{
+  return notify(ev_calc_step_over, target, ip);
+}
+inline int processor_t::get_macro_insn_head(ea_t *head, ea_t ip)
+{
+  return notify(ev_get_macro_insn_head, head, ip);
+}
+inline int processor_t::get_dbr_opnum(int *opnum, const insn_t &insn)
+{
+  return notify(ev_get_dbr_opnum, opnum, &insn);
+}
+inline int processor_t::insn_reads_tbit(const insn_t &insn, regval_getter_t *_getreg, const regval_t &regvalues)
+{
+  return notify(ev_insn_reads_tbit, &insn, _getreg, &regvalues);
+}
+inline int processor_t::get_idd_opinfo(idd_opinfo_t *opinf, ea_t ea, int n, int thread_id, regval_getter_t *_getreg, const regval_t &regvalues)
+{
+  return notify(ev_get_idd_opinfo, opinf, ea, n, thread_id, _getreg, &regvalues);
+}
+inline int processor_t::calc_next_eas(eavec_t *res, const insn_t &insn, bool over)
+{
+  return notify(ev_calc_next_eas, res, &insn, over);
+}
+inline int processor_t::clean_tbit(ea_t ea, regval_getter_t *_getreg, const regval_t &regvalues)
+{
+  return notify(ev_clean_tbit, ea, _getreg, &regvalues);
+}
+inline int processor_t::get_reg_info(const char **main_regname, bitrange_t *bitrange, const char *regname)
+{
+  return notify(ev_get_reg_info, main_regname, bitrange, regname);
+}
+inline int processor_t::setup_til()
+{
+  return notify(ev_setup_til);
+}
+inline int processor_t::max_ptr_size()
+{
+  return notify(ev_max_ptr_size);
+}
+inline int processor_t::get_default_enum_size(cm_t cm)
+{
+  return ti() ? notify(ev_get_default_enum_size, cm) : -1;
+}
+inline int processor_t::calc_cdecl_purged_bytes(ea_t ea)
+{
+  return notify(ev_calc_cdecl_purged_bytes, ea);
+}
+inline int processor_t::get_stkarg_offset()
+{
+  return ti() ? notify(ev_get_stkarg_offset) : 0;
+}
+inline int processor_t::equal_reglocs(const argloc_t &a1, const argloc_t &a2)
+{
+  return notify(ev_equal_reglocs, &a1, &a2);
+}
+inline int processor_t::decorate_name(qstring *outbuf, const char *name, bool mangle, cm_t cc, const tinfo_t &type)
+{
+  return notify(ev_decorate_name, outbuf, name, mangle, cc, &type);
+}
+inline int processor_t::calc_retloc(argloc_t *retloc, const tinfo_t &rettype, cm_t cc)
+{
+  return notify(ev_calc_retloc, retloc, &rettype, cc);
+}
+inline int processor_t::calc_varglocs(func_type_data_t *ftd, regobjs_t *regs, relobj_t *stkargs, int nfixed)
+{
+  return notify(ev_calc_varglocs, ftd, regs, stkargs, nfixed);
+}
+inline int processor_t::calc_arglocs(func_type_data_t *fti)
+{
+  return notify(ev_calc_arglocs, fti);
+}
+inline int processor_t::use_stkarg_type(ea_t ea, const funcarg_t &arg)
+{
+  return notify(ev_use_stkarg_type, ea, &arg);
+}
+inline int processor_t::use_regarg_type(int *idx, ea_t ea, /*const funcargvec_t * */void *rargs)
+{
+  return notify(ev_use_regarg_type, idx, ea, rargs);
+}
+inline int processor_t::use_arg_types(ea_t ea, func_type_data_t *fti, /*funcargvec_t * */void *rargs)
+{
+  return notify(ev_use_arg_types, ea, fti, rargs);
+}
+inline int processor_t::calc_purged_bytes(int *p_purged_bytes, const func_type_data_t &fti)
+{
+  return notify(ev_calc_purged_bytes, p_purged_bytes, &fti);
+}
+inline int processor_t::shadow_args_size(int *shadow_size, func_t *pfn)
+{
+  return notify(ev_shadow_args_size, shadow_size, pfn);
+}
+inline int processor_t::get_cc_regs(callregs_t *regs, cm_t cc)
+{
+  return notify(ev_get_cc_regs, regs, cc);
+}
+inline int processor_t::get_simd_types(/*simd_info_vec_t * */void *out, const simd_info_t *simd_attrs, const argloc_t *argloc, bool create_tifs)
+{
+  return notify(ev_get_simd_types, out, simd_attrs, argloc, create_tifs);
+}
+inline int processor_t::arg_addrs_ready(ea_t caller, int n, const tinfo_t &tif, ea_t *addrs)
+{
+  return notify(ev_arg_addrs_ready, caller, n, &tif, addrs);
+}
+inline int processor_t::adjust_argloc(argloc_t *argloc, const tinfo_t *type, int size)
+{
+  return notify(ev_adjust_argloc, argloc, type, size);
+}
+inline int processor_t::lower_func_type(intvec_t *argnums, func_type_data_t *fti)
+{
+  return notify(ev_lower_func_type, argnums, fti);
+}
+inline int processor_t::get_abi_info(qstrvec_t *abi_names, qstrvec_t *abi_opts, comp_t comp)
+{
+  return notify(ev_get_abi_info, abi_names, abi_opts, comp);
+}
+
+
 idaman int ida_export str2reg(const char *p);     ///< Get any reg number (-1 on error)
 
 
@@ -1862,44 +2192,36 @@ idaman int ida_export is_align_insn(ea_t ea);
 
 
 /// Get text representation of a register.
-/// For most processors this function will just return \ph{regNames}[reg].
+/// For most processors this function will just return \ph{reg_names}[reg].
 /// If the processor module has implemented processor_t::get_reg_name, it will be
 /// used instead
+/// \param buf      output buffer
 /// \param reg      internal register number as defined in the processor module
 /// \param width    register width in bytes
-/// \param buf      output buffer
-/// \param bufsize  size of output buffer
 /// \param reghi    if specified, then this function will return the register pair
 /// \return length of register name in bytes or -1 if failure
 
-idaman ssize_t ida_export get_reg_name(int reg, size_t width, char *buf, size_t bufsize, int reghi=-1);
+idaman ssize_t ida_export get_reg_name(qstring *buf, int reg, size_t width, int reghi = -1);
 
 
 /// Get register information - useful for registers like al, ah, dil, etc.
 /// \return NULL no such register
 
-inline const char *get_reg_info2(const char *regname, bitrange_t *bitrange)
+inline const char *get_reg_info(const char *regname, bitrange_t *bitrange)
 {
   const char *r2;
-  if ( ph.notify != NULL )
+  int code = ph.notify(ph.ev_get_reg_info, &r2, bitrange, regname);
+  if ( code == 0 )  // not implemented?
   {
-    if ( ph.notify(ph.get_reg_info2, regname, &r2, bitrange) == 2 )
-      return r2;
-    uint64 mask;
-    if ( ph.notify(ph.OBSOLETE(get_reg_info), regname, &r2, &mask) == 0 )
-    {
-      if ( bitrange != NULL )
-        bitrange->assign_max_nonzero(mask);
-      return r2;
-    }
     if ( str2reg(regname) != -1 )
     {
       if ( bitrange != NULL )
         bitrange->reset();
       return regname;
     }
+    return NULL;
   }
-  return NULL;
+  return code == 1 ? r2 : NULL;
 }
 
 /// Get register number and size from register name
@@ -1921,11 +2243,11 @@ typedef qvector<reg_info_t> reginfovec_t; ///< vector of register info objects
 
 
 /// Get register info by name.
-/// \param regname  name of register
 /// \param[out] ri  result
+/// \param regname  name of register
 /// \return success
 
-idaman bool ida_export parse_reg_name(const char *regname, reg_info_t *ri);
+idaman bool ida_export parse_reg_name(reg_info_t *ri, const char *regname);
 
 
 inline bool insn_t::is_canon_insn(void) const // see ::insn_t in ua.hpp
@@ -1948,50 +2270,31 @@ inline uint32 insn_t::get_canon_feature(void) const // ::insn_t in ua.hpp
 
 inline size_t sizeof_ldbl(void)
 {
-  return inf.size_ldbl ? inf.size_ldbl : ph.tbyte_size;
+  return inf.cc.size_ldbl ? inf.cc.size_ldbl : ph.tbyte_size;
 }
 
-
-idaman void ida_export intel_data(ea_t ea);
-                                        ///< Kernel function to display data items
-                                        ///< and undefined bytes.
-                                        ///< This function should be used to
-                                        ///< display data.
-idaman bool ida_export gen_spcdef(ea_t ea,uchar segtype);
-                                        ///< Generate declaration for item
-                                        ///< in a special segment.
-                                        ///< \retval 1  overflow
-                                        ///< \retval 0  ok
-idaman bool ida_export gen_extern(ea_t ea,const char *name);
-                                        ///< Generate declaration of extern symbol.
-                                        ///< \retval 1  overflow
-                                        ///< \retval 0  ok
-idaman bool ida_export gen_abssym(ea_t ea,const char *name);
-                                        ///< Generate declaration of absolute symbol.
-                                        ///< \retval 1  overflow
-                                        ///< \retval 0  ok
-idaman bool ida_export gen_comvar(ea_t ea,const char *name);
-                                        ///< Generate declaration of communal variable
-                                        ///< \retval 1  overflow
-                                        ///< \retval 0  ok
-
-/// \defgroup SETPROC_ Set processor levels
 /// Flags passed as 'level' parameter to set_processor_type()
-//@{
-#define SETPROC_COMPAT  0     ///< search for the processor type in the current module
-#define SETPROC_ALL     1     ///< search for the processor type in all modules,
-                              ///< only if there were not calls with #SETPROC_USER
-#define SETPROC_USER    2     ///< search for the processor type in all modules
-                              ///< and prohibit level #SETPROC_USER
-#define SETPROC_FATAL   0x80  ///< if the processor can't be set, IDA should display
-                              ///< an error message and exit (can be combined with previous bits)
-//@}
+enum setproc_level_t
+{
+  SETPROC_IDB = 0,    ///< set processor type for old idb
+  SETPROC_LOADER = 1, ///< set processor type for new idb;
+                      ///< if the user has specified a compatible processor,
+                      ///< return success without changing it.
+                      ///< if failure, call loader_failure()
+  SETPROC_LOADER_NON_FATAL = 2, ///< the same as SETPROC_LOADER but non-fatal failures.
+  SETPROC_USER = 3,   ///< set user-specified processor
+                      ///< used for -p and manual processor change at later time
+};
+
 /// Set target processor type.
+/// Once a processor module is loaded, it can not be replaced until we close the idb.
 /// \param procname  name of processor type (one of names present in \ph{psnames})
 /// \param level     \ref SETPROC_
-/// \return NULL if failed, otherwise path of file with processor module
+/// \return success
 
-idaman char *ida_export set_processor_type(const char *procname,int level);
+idaman bool ida_export set_processor_type(
+        const char *procname,
+        setproc_level_t level);
 
 
 /// Get name of the current processor module.
@@ -1999,7 +2302,8 @@ idaman char *ida_export set_processor_type(const char *procname,int level);
 /// For example, for IBM PC the module is named "pc.w32" (windows version),
 /// then the module name is "PC" (uppercase).
 /// If no processor module is loaded, this function will return NULL
-/// \param buf  the output buffer, should be at least #QMAXFILE length
+/// \param buf          the output buffer, should be at least #QMAXFILE length
+/// \param bufsize      size of output buffer
 
 idaman char *ida_export get_idp_name(char *buf, size_t bufsize);
 
@@ -2011,15 +2315,25 @@ idaman char *ida_export get_idp_name(char *buf, size_t bufsize);
 idaman bool ida_export set_target_assembler(int asmnum);
 
 
-/// Helper function to register a custom fixup. It is can be called by
-/// the file loader and the processor module will receive the processor_t::register_custom_fixup
-/// event. It returns the custom format id (<=0 if failed)
-
-inline int create_custom_fixup(const char *name)
+/// Helper function to get the delay slot instruction
+inline bool delay_slot_insn(ea_t *ea, bool *bexec, bool *fexec)
 {
-  return ph.notify(processor_t::register_custom_fixup, name) - 1;
+  bool ok = (ph.flag & PR_DELAYED) != 0;
+  if ( ok )
+  {
+    bool be = true;
+    bool fe = true;
+    ok = ph.delay_slot_insn(ea, &be, &fe) == 1;
+    if ( ok )
+    {
+      if ( bexec != NULL )
+        *bexec = be;
+      if ( fexec != NULL )
+        *fexec = fe;
+    }
+  }
+  return ok;
 }
-
 
 /// IDB event group. Some events are still in the processor group, so you will
 /// need to hook to both groups. These events do not return anything.
@@ -2028,91 +2342,269 @@ inline int create_custom_fixup(const char *name)
 /// Use the hook_to_notification_point() function to install your callback.
 namespace idb_event
 {
+  //<hookgen IDB>
+
   /// IDB event codes
   enum event_code_t
   {
-    byte_patched,           ///< A byte has been patched.
-                            ///< \param ea         (::ea_t)
-                            ///< \param old_value  (::uint32)
+    closebase,              ///< The database will be closed now
 
-    cmt_changed,            ///< An item comment has been changed.
-                            ///< \param ea              (::ea_t)
-                            ///< \param repeatable_cmt  (bool)
+    savebase,               ///< The database is being saved
+
+    upgraded,               ///< The database has been upgraded
+                            ///< and the receiver can upgrade its info as well
+                            ///< \param from (int) - old IDB version
+
+    auto_empty,             ///< Info: all analysis queues are empty.
+                            ///< This callback is called once when the
+                            ///< initial analysis is finished. If the queue is
+                            ///< not empty upon the return from this callback,
+                            ///< it will be called later again.
+
+    auto_empty_finally,     ///< Info: all analysis queues are empty definitively.
+                            ///< This callback is called only once.
+
+    determined_main,        ///< The main() function has been determined.
+                            ///< \param main (::ea_t) address of the main() function
+    local_types_changed,    ///< Local types have been changed
+
+    extlang_changed,        ///< The list of extlangs or the default extlang was changed.
+                            ///< \param kind  (int)
+                            ///<          0: extlang installed
+                            ///<          1: extlang removed
+                            ///<          2: default extlang changed
+                            ///< \param el (::extlang_t *) pointer to the extlang affected
+                            ///< \param idx (int) extlang index
+
+    idasgn_loaded,          ///< FLIRT signature has been loaded
+                            ///< for normal processing (not for
+                            ///< recognition of startup sequences).
+                            ///< \param short_sig_name  (const char *)
+
+    kernel_config_loaded,   ///< This event is issued when ida.cfg is parsed.
+                            ///< \param none
+
+    loader_finished,        ///< External file loader finished its work.
+                            ///< Use this event to augment the existing loader functionality.
+                            ///< \param li            (linput_t *)
+                            ///< \param neflags       (::uint16) \ref NEF_
+                            ///< \param filetypename  (const char *)
+
+    flow_chart_created,     ///< Gui has retrieved a function flow chart.
+                            ///< Plugins may modify the flow chart in this callback.
+                            ///< \param fc  (qflow_chart_t *)
+
+    compiler_changed,       ///< The kernel has changed the compiler information.
+                            ///< (\inf{cc} structure; \ref get_abi_name)
+
+    changing_ti,            ///< An item typestring (c/c++ prototype) is to be changed.
+                            ///< \param ea          (::ea_t)
+                            ///< \param new_type    (const ::type_t *)
+                            ///< \param new_fnames  (const ::p_list *)
 
     ti_changed,             ///< An item typestring (c/c++ prototype) has been changed.
                             ///< \param ea      (::ea_t)
                             ///< \param type    (const ::type_t *)
                             ///< \param fnames  (const ::p_list *)
 
+    changing_op_ti,         ///< An operand typestring (c/c++ prototype) is to be changed.
+                            ///< \param ea          (::ea_t)
+                            ///< \param n           (int)
+                            ///< \param new_type    (const ::type_t *)
+                            ///< \param new_fnames  (const ::p_list *)
     op_ti_changed,          ///< An operand typestring (c/c++ prototype) has been changed.
                             ///< \param ea (::ea_t)
                             ///< \param n  (int)
                             ///< \param type (const ::type_t *)
                             ///< \param fnames (const ::p_list *)
 
+    changing_op_type,       ///< An operand type (offset, hex, etc...) is to be changed.
+                            ///< \param ea  (::ea_t)
+                            ///< \param n   (int) eventually or'ed with OPND_OUTER
+                            ///< \param opinfo (const opinfo_t *) additional operand info
     op_type_changed,        ///< An operand type (offset, hex, etc...) has been set or deleted.
                             ///< \param ea  (::ea_t)
-                            ///< \param n   (int)
+                            ///< \param n   (int) eventually or'ed with OPND_OUTER
 
     enum_created,           ///< An enum type has been created.
                             ///< \param id  (::enum_t)
 
+    deleting_enum,          ///< An enum type is to be deleted.
+                            ///< \param id  (::enum_t)
     enum_deleted,           ///< An enum type has been deleted.
                             ///< \param id  (::enum_t)
 
-    enum_bf_changed,        ///< An enum type 'bitfield' attribute has been changed.
-                            ///< \param id  (::enum_t)
-
+    renaming_enum,          ///< An enum or enum member is to be renamed.
+                            ///< \param id       (::tid_t)
+                            ///< \param is_enum  (bool)
+                            ///< \param newname  (const char *)
     enum_renamed,           ///< An enum or member has been renamed.
                             ///< \param id  (::tid_t)
 
+    changing_enum_bf,       ///< An enum type 'bitfield' attribute is to be changed.
+                            ///< \param id      (::enum_t)
+                            ///< \param new_bf  (bool)
+    enum_bf_changed,        ///< An enum type 'bitfield' attribute has been changed.
+                            ///< \param id  (::enum_t)
+
+    changing_enum_cmt,      ///< An enum or member type comment is to be changed.
+                            ///< \param id          (::tid_t)
+                            ///< \param repeatable  (bool)
+                            ///< \param newcmt      (const char *)
     enum_cmt_changed,       ///< An enum or member type comment has been changed.
                             ///< \param id          (::tid_t)
                             ///< \param repeatable  (bool)
-#ifndef NO_OBSOLETE_FUNCS
-    enum_const_created,
-    enum_const_deleted,
-#else
+
     enum_member_created,    ///< An enum member has been created.
                             ///< \param id   (::enum_t)
                             ///< \param cid  (::const_t)
 
+    deleting_enum_member,   ///< An enum member is to be deleted.
+                            ///< \param id   (::enum_t)
+                            ///< \param cid  (::const_t)
     enum_member_deleted,    ///< An enum member has been deleted.
                             ///< \param id   (::enum_t)
                             ///< \param cid  (::const_t)
-#endif
+
     struc_created,          ///< A new structure type has been created.
                             ///< \param struc_id  (::tid_t)
 
+    deleting_struc,         ///< A structure type is to be deleted.
+                            ///< \param sptr  (::struc_t *)
     struc_deleted,          ///< A structure type has been deleted.
                             ///< \param struc_id  (::tid_t)
 
+    changing_struc_align,   ///< A structure type is being changed (the struct alignment).
+                            ///< \param sptr  (::struc_t *)
+    struc_align_changed,    ///< A structure type has been changed (the struct alignment).
+                            ///< \param sptr  (::struc_t *)
+
+    renaming_struc,         ///< A structure type is to be renamed.
+                            ///< \param id       (::tid_t)
+                            ///< \param oldname  (const char *)
+                            ///< \param newname  (const char *)
     struc_renamed,          ///< A structure type has been renamed.
                             ///< \param sptr (::struc_t *)
 
+    expanding_struc,        ///< A structure type is to be expanded/shrunk.
+                            ///< \param sptr    (::struc_t *)
+                            ///< \param offset  (::ea_t)
+                            ///< \param delta   (::adiff_t)
     struc_expanded,         ///< A structure type has been expanded/shrank.
                             ///< \param sptr (::struc_t *)
-
-    struc_cmt_changed,      ///< A structure type comment has been changed.
-                            ///< \param struc_id        (::tid_t)
-                            ///< \param repeatable_cmt  (bool)
 
     struc_member_created,   ///< A structure member has been created.
                             ///< \param sptr  (::struc_t *)
                             ///< \param mptr  (::member_t *)
 
+    deleting_struc_member,  ///< A structure member is to be deleted.
+                            ///< \param sptr  (::struc_t *)
+                            ///< \param mptr  (::member_t *)
     struc_member_deleted,   ///< A structure member has been deleted.
                             ///< \param sptr       (::struc_t *)
                             ///< \param member_id  (::tid_t)
                             ///< \param offset     (::ea_t)
 
+    renaming_struc_member,  ///< A structure member is to be renamed.
+                            ///< \param sptr     (::struc_t *)
+                            ///< \param mptr     (::member_t *)
+                            ///< \param newname  (const char *)
     struc_member_renamed,   ///< A structure member has been renamed.
                             ///< \param sptr  (::struc_t *)
                             ///< \param mptr  (::member_t *)
 
+    changing_struc_member,  ///< A structure member is to be changed.
+                            ///< \param sptr    (::struc_t *)
+                            ///< \param mptr    (::member_t *)
+                            ///< \param flag    (::flags_t)
+                            ///< \param ti      (const ::opinfo_t *)
+                            ///< \param nbytes  (::asize_t)
     struc_member_changed,   ///< A structure member has been changed.
                             ///< \param sptr  (::struc_t *)
                             ///< \param mptr  (::member_t *)
+
+    changing_struc_cmt,     ///< A structure type comment is to be changed.
+                            ///< \param struc_id    (::tid_t)
+                            ///< \param repeatable  (bool)
+                            ///< \param newcmt      (const char *)
+    struc_cmt_changed,      ///< A structure type comment has been changed.
+                            ///< \param struc_id        (::tid_t)
+                            ///< \param repeatable_cmt  (bool)
+
+    segm_added,             ///< A new segment has been created.
+                            ///< \param s  (::segment_t *)
+
+    deleting_segm,          ///< A segment is to be deleted.
+                            ///< \param start_ea  (::ea_t)
+    segm_deleted,           ///< A segment has been deleted.
+                            ///< \param start_ea  (::ea_t)
+                            ///< \param end_ea    (::ea_t)
+
+    changing_segm_start,    ///< Segment start address is to be changed.
+                            ///< \param s             (::segment_t *)
+                            ///< \param new_start     (::ea_t)
+                            ///< \param segmod_flags  (int)
+    segm_start_changed,     ///< Segment start address has been changed.
+                            ///< \param s        (::segment_t *)
+                            ///< \param oldstart (::ea_t)
+
+    changing_segm_end,      ///< Segment end address is to be changed.
+                            ///< \param s             (::segment_t *)
+                            ///< \param new_end       (::ea_t)
+                            ///< \param segmod_flags  (int)
+    segm_end_changed,       ///< Segment end address has been changed.
+                            ///< \param s      (::segment_t *)
+                            ///< \param oldend (::ea_t)
+
+    changing_segm_name,     ///< Segment name is being changed.
+                            ///< \param s        (::segment_t *)
+                            ///< \param oldname  (const char *)
+    segm_name_changed,      ///< Segment name has been changed.
+                            ///< \param s        (::segment_t *)
+                            ///< \param name     (const char *)
+
+    changing_segm_class,    ///< Segment class is being changed.
+                            ///< \param s  (::segment_t *)
+    segm_class_changed,     ///< Segment class has been changed.
+                            ///< \param s        (::segment_t *)
+                            ///< \param sclass   (const char *)
+
+    segm_attrs_updated,     ///< Segment attributes has been changed.
+                            ///< \param s        (::segment_t *)
+                            ///< This event is generated for secondary segment
+                            ///< attributes (examples: color, permissions, etc)
+
+    segm_moved,             ///< Segment has been moved.
+                            ///< \param from    (::ea_t)
+                            ///< \param to      (::ea_t)
+                            ///< \param size    (::asize_t)
+                            ///< \param changed_netmap (bool)
+                            ///< See also \ref idb_event::allsegs_moved
+
+    allsegs_moved,          ///< Program rebasing is complete.
+                            ///< This event is generated after series of
+                            ///< segm_moved events
+                            ///< \param info     (::segm_move_infos_t *)
+
+    func_added,             ///< The kernel has added a function.
+                            ///< \param pfn  (::func_t *)
+
+    func_updated,           ///< The kernel has updated a function.
+                            ///< \param pfn  (::func_t *)
+
+    set_func_start,         ///< Function chunk start address will be changed.
+                            ///< \param pfn        (::func_t *)
+                            ///< \param new_start  (::ea_t)
+
+    set_func_end,           ///< Function chunk end address will be changed.
+                            ///< \param pfn      (::func_t *)
+                            ///< \param new_end  (::ea_t)
+
+    deleting_func,          ///< The kernel is about to delete a function.
+                            ///< \param pfn  (::func_t *)
+                            //
+    frame_deleted,          ///< The kernel has deleted a function frame.
+                            ///< \param pfn  (::func_t *)
 
     thunk_func_created,     ///< A thunk bit has been set for a function.
                             ///< \param pfn  (::func_t *)
@@ -2121,7 +2613,11 @@ namespace idb_event
                             ///< \param pfn   (::func_t *)
                             ///< \param tail  (::func_t *)
 
-    func_tail_removed,      ///< A function tail chunk has been removed.
+    deleting_func_tail,     ///< A function tail chunk is to be removed.
+                            ///< \param pfn   (::func_t *)
+                            ///< \param tail  (const ::range_t *)
+
+    func_tail_deleted,      ///< A function tail chunk has been removed.
                             ///< \param pfn      (::func_t *)
                             ///< \param tail_ea  (::ea_t)
 
@@ -2133,178 +2629,76 @@ namespace idb_event
     func_noret_changed,     ///< #FUNC_NORET bit has been changed.
                             ///< \param pfn  (::func_t *)
 
-    segm_added,             ///< A new segment has been created.
-                            ///< \param s  (::segment_t *)
+    stkpnts_changed,        ///< Stack change points have been modified.
+                            ///< \param pfn  (::func_t *)
 
-    segm_deleted,           ///< A segment has been deleted.
-                            ///< \param startEA  (::ea_t)
-                            ///< \param endEA    (::ea_t)
+    updating_tryblks,       ///< About to update tryblk information
+                            ///< \param tbv      (const ::tryblks_t *)
+    tryblks_updated,        ///< Updated tryblk information
+                            ///< \param tbv      (const ::tryblks_t *)
 
-    segm_start_changed,     ///< Segment start address has been changed.
-                            ///< \param s  (::segment_t *)
+    deleting_tryblks,       ///< About to delete tryblk information in given range
+                            ///< \param range    (const ::range_t *)
+                            //
+    sgr_changed,            ///< The kernel has changed a segment register value.
+                            ///< \param start_ea    (::ea_t)
+                            ///< \param end_ea      (::ea_t)
+                            ///< \param regnum     (int)
+                            ///< \param value      (::sel_t)
+                            ///< \param old_value  (::sel_t)
+                            ///< \param tag        (::uchar) \ref SR_
 
-    segm_end_changed,       ///< Segment end address has been changed.
-                            ///< \param s  (::segment_t *)
+    make_code,              ///< An instruction is being created.
+                            ///< \param insn    (const ::insn_t*)
 
-    segm_moved,             ///< Segment has been moved.
-                            ///< \param from  (::ea_t)
-                            ///< \param to    (::ea_t)
-                            ///< \param size  (::asize_t)
-
-    area_cmt_changed,       ///< Area comment has been changed.
-                            ///< \param cb          (::areacb_t *) may be: &funcs, &segs, etc.
-                            ///< \param a           (const ::area_t *)
-                            ///< \param cmt         (const char *)
-                            ///< \param repeatable  (bool)
-
-                            // Events that happen before database modifications
-                            // IDA may not to call the corresponding ...changed event
-                            // if there are any errors.
-
-    changing_cmt,           ///< An item comment is to be changed.
-                            ///< \param ea              (::ea_t)
-                            ///< \param repeatable_cmt  (bool)
-                            ///< \param newcmt          (const char *)
-
-    changing_ti,            ///< An item typestring (c/c++ prototype) is to be changed.
-                            ///< \param ea          (::ea_t)
-                            ///< \param new_type    (const ::type_t *)
-                            ///< \param new_fnames  (const ::p_list *)
-
-    changing_op_ti,         ///< An operand typestring (c/c++ prototype) is to be changed.
-                            ///< \param ea          (::ea_t)
-                            ///< \param n           (int)
-                            ///< \param new_type    (const ::type_t *)
-                            ///< \param new_fnames  (const ::p_list *)
-
-    changing_op_type,       ///< An operand type (offset, hex, etc...) is to be changed.
-                            ///< \param ea  (::ea_t)
-                            ///< \param n   (int)
-
-    deleting_enum,          ///< An enum type is to be deleted.
-                            ///< \param id  (::enum_t)
-
-    changing_enum_bf,       ///< An enum type 'bitfield' attribute is to be changed.
-                            ///< \param id      (::enum_t)
-                            ///< \param new_bf  (bool)
-
-    renaming_enum,          ///< An enum or enum member is to be renamed.
-                            ///< \param id       (::tid_t)
-                            ///< \param is_enum  (bool)
-                            ///< \param newname  (const char *)
-
-    changing_enum_cmt,      ///< An enum or member type comment is to be changed.
-                            ///< \param id          (::tid_t)
-                            ///< \param repeatable  (bool)
-                            ///< \param newcmt      (const char *)
-#ifndef NO_OBSOLETE_FUNCS
-    deleting_enum_const,
-#else
-    deleting_enum_member,   ///< An enum member is to be deleted.
-                            ///< \param id   (::enum_t)
-                            ///< \param cid  (::const_t)
-#endif
-    deleting_struc,         ///< A structure type is to be deleted.
-                            ///< \param sptr  (::struc_t *)
-
-    renaming_struc,         ///< A structure type is to be renamed.
-                            ///< \param id       (::tid_t)
-                            ///< \param oldname  (const char *)
-                            ///< \param newname  (const char *)
-
-    expanding_struc,        ///< A structure type is to be expanded/shrunk.
-                            ///< \param sptr    (::struc_t *)
-                            ///< \param offset  (::ea_t)
-                            ///< \param delta   (::adiff_t)
-
-    changing_struc_cmt,     ///< A structure type comment is to be changed.
-                            ///< \param struc_id    (::tid_t)
-                            ///< \param repeatable  (bool)
-                            ///< \param newcmt      (const char *)
-
-    deleting_struc_member,  ///< A structure member is to be deleted.
-                            ///< \param sptr  (::struc_t *)
-                            ///< \param mptr  (::member_t *)
-
-    renaming_struc_member,  ///< A structure member is to be renamed.
-                            ///< \param sptr     (::struc_t *)
-                            ///< \param mptr     (::member_t *)
-                            ///< \param newname  (const char *)
-
-    changing_struc_member,  ///< A structure member is to be changed.
-                            ///< \param sptr    (::struc_t *)
-                            ///< \param mptr    (::member_t *)
-                            ///< \param flag    (::flags_t)
-                            ///< \param ti      (const ::opinfo_t *)
-                            ///< \param nbytes  (::asize_t)
-
-    removing_func_tail,     ///< A function tail chunk is to be removed.
-                            ///< \param pfn   (::func_t *)
-                            ///< \param tail  (const ::area_t *)
-
-    deleting_segm,          ///< A segment is to be deleted.
-                            ///< \param startEA  (::ea_t)
-
-    changing_segm_start,    ///< Segment start address is to be changed.
-                            ///< \param s             (::segment_t *)
-                            ///< \param new_start     (::ea_t)
-                            ///< \param segmod_flags  (int)
-
-    changing_segm_end,      ///< Segment end address is to be changed.
-                            ///< \param s             (::segment_t *)
-                            ///< \param new_end       (::ea_t)
-                            ///< \param segmod_flags  (int)
-
-    changing_area_cmt,      ///< Area comment is to be changed.
-                            ///< \param cb          (::areacb_t *)
-                            ///< \param a           (const ::area_t *)
-                            ///< \param cmt         (const char *)
-                            ///< \param repeatable  (bool)
-
-    changing_segm_name,     ///< Segment name is being changed.
-                            ///< \param s        (::segment_t *)
-                            ///< \param oldname  (const char *)
-
-    changing_segm_class,    ///< Segment class is being changed.
-                            ///< \param s  (::segment_t *)
-
-    segm_name_changed,      ///< Segment name has been changed.
-                            ///< \param s        (::segment_t *)
-                            ///< \param name     (const char *)
-
-    segm_class_changed,     ///< Segment class has been changed.
-                            ///< \param s        (::segment_t *)
-                            ///< \param sclass   (const char *)
+    make_data,              ///< A data item is being created.
+                            ///< \param ea     (::ea_t)
+                            ///< \param flags  (::flags_t)
+                            ///< \param tid    (::tid_t)
+                            ///< \param len    (::asize_t)
 
     destroyed_items,        ///< Instructions/data have been destroyed in [ea1,ea2).
                             ///< \param ea1                 (::ea_t)
                             ///< \param ea2                 (::ea_t)
                             ///< \param will_disable_range  (bool)
 
-    changed_stkpnts,        ///< Stack change points have been modified.
-                            ///< \param pfn  (::func_t *)
+    renamed,                ///< The kernel has renamed a byte.
+                            ///< See also the \idpcode{rename} event
+                            ///< \param ea          (::ea_t)
+                            ///< \param new_name    (const char *)
+                            ///< \param local_name  (bool)
+
+    byte_patched,           ///< A byte has been patched.
+                            ///< \param ea         (::ea_t)
+                            ///< \param old_value  (::uint32)
+
+    changing_cmt,           ///< An item comment is to be changed.
+                            ///< \param ea              (::ea_t)
+                            ///< \param repeatable_cmt  (bool)
+                            ///< \param newcmt          (const char *)
+    cmt_changed,            ///< An item comment has been changed.
+                            ///< \param ea              (::ea_t)
+                            ///< \param repeatable_cmt  (bool)
+
+    changing_range_cmt,     ///< Range comment is to be changed.
+                            ///< \param kind        (::range_kind_t)
+                            ///< \param a           (const ::range_t *)
+                            ///< \param cmt         (const char *)
+                            ///< \param repeatable  (bool)
+    range_cmt_changed,      ///< Range comment has been changed.
+                            ///< \param kind        (::range_kind_t)
+                            ///< \param a           (const ::range_t *)
+                            ///< \param cmt         (const char *)
+                            ///< \param repeatable  (bool)
 
     extra_cmt_changed,      ///< An extra comment has been changed.
                             ///< \param ea        (::ea_t)
                             ///< \param line_idx  (int)
                             ///< \param cmt       (const char *)
-
-    changing_struc,         ///< A structure type is being changed (the struct alignment).
-                            ///< \param sptr  (::struc_t *)
-
-    changed_struc,          ///< A structure type has been changed (the struct alignment).
-                            ///< \param sptr  (::struc_t *)
-
-    local_types_changed,    ///< Local types have been changed
-
-    segm_attrs_changed,     ///< Segment attributes has been changed.
-                            ///< \param s        (::segment_t *)
-                            ///< This event is generated for secondary segment
-                            ///< attributes (examples: color, permissions, etc)
   };
 }
 
 
 
-#pragma pack(pop)
+
 #endif // _IDP_HPP

@@ -30,7 +30,7 @@
 
 //
 // IDA TMS320C1X processor module.
-//     TMS320C1X assembler types and implementations 
+//     TMS320C1X assembler types and implementations
 //
 #include "../idaidp.hpp"
 
@@ -39,66 +39,63 @@
 //////////////////////////////////////////////////////////////////////////////
 // TI Assembler
 //////////////////////////////////////////////////////////////////////////////
-asm_t tiAssembler = {
-                           // Assembler features:
-        AS_ASCIIC|         //   ASCII directive support C escape sequences
-        AS_ASCIIZ|         //   ASCII directive appends implicit null character
-        ASH_HEXF3|         //   Hexidecimal constant format: 0x<nn...>
-        ASD_DECF0|         //   Decimal constant format    : 34    
-        ASO_OCTF1|         //   Octal format               : 0<nn..>
-        ASB_BINF0|         //   Binary format              : <nn...>b
-        AS_ONEDUP,         //   One array directive per line
-        0,                 // Assembler-defined flags (for local use)   
-        "TI",              // Assembler name
-        0,                 // Help screen number
-        NULL,              // Array of automatically generated header lines
-        NULL,              // Array of unsupported instructions (cmd.itype values)
-        ".org",            // Origin directive
-        NULL,              // End directive
-        ";",               // Comment string
-        '"',               // ASCII string delimiter
-        '\'',              // ASCII character constant delimiter
-        "\"",              // Characters that cannot appear inside a string
-        ".asciiz",         // ASCII string     directive
-        ".byte",           // Byte (8-bit)     directive
-        ".short",          // Word (16-bit)    directive
-        ".word",           // Dword (32-bit)   directive
-        ".quad",           // Qword (64-bit)   directive
-        NULL,              // Oword (128-bit)  directive
-        ".float",          // IEEE single      directive
-        ".double",         // IEEE double      directive
-        NULL,              // IEEE tbyte       directive
-        NULL,              // IEEE packed-real directive
-        ".fill #d, #sb, #v",// Array (dup) directive
-        ".bss",            // BSS directive
-        NULL,              // EQU directive to use if AS_UNEQU is set
-        NULL,              // Segment operand keyword
-        NULL,              // 'checkarg_preline()' function
-        NULL,              // 'checkarg_atomprefix()' function
-        NULL,              // Array of checkarg operations
-        NULL,              // Translation table for ASCII constants
-        ".",               // Symbol for current assembly location
-        NULL,              // Function header generating function
-        NULL,              // Function footer generating function
-        ".global",         // Public name keyword
-        NULL,              // Weak keyword
-        ".extern",         // Extern keyword
-        ".comm",           // Communal keyword
-        NULL,              // 'get_type_name()' function
-        ".align",          // Align keyword
-        '(',               // Left delimiter for complex expressions
-        ')',               // Right delimiter for complex expressions
-        "%",               // Remainder (MOD) operator
-        "&",               // Bit-wise   AND  operator
-        "|",               // Bit-wise   OR   operator
-        "^",               // Bit-wise   XOR  operator
-        "~",               // Bit-wise   NOT  operator
-        "<<",              // Left shift operator
-        ">>",              // Right shift operator
-        NULL,              // Sizeof() keyword
+asm_t tiAssembler =
+{
+                     // Assembler features:
+  AS_ASCIIC|         //   ASCII directive support C escape sequences
+  AS_ASCIIZ|         //   ASCII directive appends implicit null character
+  ASH_HEXF3|         //   Hexidecimal constant format: 0x<nn...>
+  ASD_DECF0|         //   Decimal constant format    : 34
+  ASO_OCTF1|         //   Octal format               : 0<nn..>
+  ASB_BINF0|         //   Binary format              : <nn...>b
+  AS_ONEDUP,         //   One array directive per line
+  0,                 // Assembler-defined flags (for local use)
+  "TI",              // Assembler name
+  0,                 // Help screen number
+  NULL,              // Array of automatically generated header lines
+  ".org",            // Origin directive
+  NULL,              // End directive
+  ";",               // Comment string
+  '"',               // ASCII string delimiter
+  '\'',              // ASCII character constant delimiter
+  "\"",              // Characters that cannot appear inside a string
+  ".asciiz",         // ASCII string     directive
+  ".byte",           // Byte (8-bit)     directive
+  ".short",          // Word (16-bit)    directive
+  ".word",           // Dword (32-bit)   directive
+  ".quad",           // Qword (64-bit)   directive
+  NULL,              // Oword (128-bit)  directive
+  ".float",          // IEEE single      directive
+  ".double",         // IEEE double      directive
+  NULL,              // IEEE tbyte       directive
+  NULL,              // IEEE packed-real directive
+  ".fill #d, #sb, #v",// Array (dup) directive
+  ".bss",            // BSS directive
+  NULL,              // EQU directive to use if AS_UNEQU is set
+  NULL,              // Segment operand keyword
+  ".",               // Symbol for current assembly location
+  NULL,              // Function header generating function
+  NULL,              // Function footer generating function
+  ".global",         // Public name keyword
+  NULL,              // Weak keyword
+  ".extern",         // Extern keyword
+  ".comm",           // Communal keyword
+  NULL,              // 'get_type_name()' function
+  ".align",          // Align keyword
+  '(',               // Left delimiter for complex expressions
+  ')',               // Right delimiter for complex expressions
+  "%",               // Remainder (MOD) operator
+  "&",               // Bit-wise   AND  operator
+  "|",               // Bit-wise   OR   operator
+  "^",               // Bit-wise   XOR  operator
+  "~",               // Bit-wise   NOT  operator
+  "<<",              // Left shift operator
+  ">>",              // Right shift operator
+  NULL,              // Sizeof() keyword
 };
 
-asm_t *tms320c1x_Assemblers[] = {
-        &tiAssembler,
-        NULL
+asm_t *tms320c1x_Assemblers[] =
+{
+  &tiAssembler,
+  NULL
 };

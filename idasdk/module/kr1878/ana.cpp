@@ -5,7 +5,7 @@
 
 struct funcdesc_t
 {
-  bool (*func)(int);
+  bool (*func)(const insn_t &insn, int);
   int mask;
   int shift;
 };
@@ -22,25 +22,25 @@ struct opcode
 static op_t *op;       // current operand
 
 //----------------------------------------------------------------------
-inline uint32 ua_16bits(void)
+inline uint32 ua_16bits(const insn_t &insn)
 {
-  return get_full_byte(cmd.ea);
+  return get_wide_byte(insn.ea);
 }
 
 
 //----------------------------------------------------------------------
 inline void opreg(uint16 reg)
 {
-  op->type = o_reg;
-  op->dtyp = dt_word;
-  op->reg  = reg;
+  op->type  = o_reg;
+  op->dtype = dt_word;
+  op->reg   = reg;
 }
 
 //----------------------------------------------------------------------
-static void make_o_mem(void)
+static void make_o_mem(const insn_t &insn)
 {
 
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case KR1878_jmp:
     case KR1878_jsr:
@@ -51,19 +51,19 @@ static void make_o_mem(void)
     case KR1878_jnc:
     case KR1878_jc:
       op->type   = o_near;
-      op->dtyp   = dt_code;
+      op->dtype  = dt_code;
       return;
   }
   op->type   = o_mem;
-  op->dtyp   = dt_byte;
+  op->dtype  = dt_byte;
 }
 
 
 //----------------------------------------------------------------------
-static bool D_ddddd(int value)
+static bool D_ddddd(const insn_t &, int value)
 {
   op->type   = o_phrase;
-  op->dtyp   = dt_byte;
+  op->dtype  = dt_byte;
   op->reg    = (value >> 3) & 0x03;
   op->value  = value & 7;
 
@@ -71,9 +71,9 @@ static bool D_ddddd(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_ddddd(int value)
+static bool S_ddddd(const insn_t &insn, int value)
 {
-  if ( D_ddddd(value) )
+  if ( D_ddddd(insn, value) )
   {
     op++;
     return true;
@@ -82,19 +82,19 @@ static bool S_ddddd(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_SR(int value)
+static bool D_SR(const insn_t &, int value)
 {
-  op->type = o_reg;
-  op->dtyp = dt_word;
-  op->reg  = uint16(SR0 + value);
+  op->type  = o_reg;
+  op->dtype = dt_word;
+  op->reg   = uint16(SR0 + value);
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_SR(int value)
+static bool S_SR(const insn_t &insn, int value)
 {
-  if ( D_SR(value) )
+  if ( D_SR(insn, value) )
   {
     op++;
     return true;
@@ -103,31 +103,31 @@ static bool S_SR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_Imm(int value)
+static bool D_Imm(const insn_t &, int value)
 {
   op->type = o_imm;
-  op->dtyp = dt_word;
+  op->dtype = dt_word;
   op->value = value & 0xffff;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_pImm(int value)
+static bool D_pImm(const insn_t &insn, int value)
 {
 
   if ( value & 0x10 )
-    D_Imm((value & 0x0f) << 4);
+    D_Imm(insn, (value & 0x0f) << 4);
   else
-    D_Imm(value & 0x0f);
+    D_Imm(insn, value & 0x0f);
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_EA(int value)
+static bool D_EA(const insn_t &insn, int value)
 {
   op->addr = value;
-  make_o_mem();
+  make_o_mem(insn);
   return true;
 }
 
@@ -166,8 +166,8 @@ static opcode table[] =
   { KR1878_pop,   "0000000000011nnn", {{D_SR,    0x07}} },
   { KR1878_sst,   "000000011000bbbb", {{D_Imm,   0x0f}} },
   { KR1878_cst,   "000000011100bbbb", {{D_Imm,   0x0f}} },
-  { KR1878_tof,   "0000000000000100"},
-  { KR1878_tdc,   "0000000000000101"},
+  { KR1878_tof,   "0000000000000100" },
+  { KR1878_tdc,   "0000000000000101" },
   { KR1878_jmp,   "100000aaaaaaaaaa", {{D_EA,    0x3ff}} },
   { KR1878_jsr,   "100100aaaaaaaaaa", {{D_EA,    0x3ff}} },
   { KR1878_jnz,   "101100aaaaaaaaaa", {{D_EA,    0x3ff}} },
@@ -176,27 +176,26 @@ static opcode table[] =
   { KR1878_js,    "110100aaaaaaaaaa", {{D_EA,    0x3ff}} },
   { KR1878_jnc,   "111000aaaaaaaaaa", {{D_EA,    0x3ff}} },
   { KR1878_jc,    "111100aaaaaaaaaa", {{D_EA,    0x3ff}} },
-  { KR1878_ijmp,  "0000000000000011"},
-  { KR1878_ijsr,  "0000000000000111"},
-  { KR1878_rts,   "0000000000001100"},
+  { KR1878_ijmp,  "0000000000000011" },
+  { KR1878_ijsr,  "0000000000000111" },
+  { KR1878_rts,   "0000000000001100" },
   { KR1878_rtsc,  "000000000000111c", {{D_Imm,   0x01}}  },
-  { KR1878_rti,   "0000000000001101"},
-  { KR1878_nop,   "0000000000000000"},
-  { KR1878_wait,  "0000000000000001"},
-  { KR1878_stop,  "0000000000001000"},
-  { KR1878_reset, "0000000000000010"},
-  { KR1878_sksp,  "0000000000000110"},
+  { KR1878_rti,   "0000000000001101" },
+  { KR1878_nop,   "0000000000000000" },
+  { KR1878_wait,  "0000000000000001" },
+  { KR1878_stop,  "0000000000001000" },
+  { KR1878_reset, "0000000000000010" },
+  { KR1878_sksp,  "0000000000000110" },
 };
 
 
 //----------------------------------------------------------------------
 static void make_masks(void)
 {
-  int i, j, b;
-
-  for(i = 0; i < sizeof(table)/ sizeof(struct opcode); i++)
+  for ( int i = 0; i < qnumber(table); i++ )
   {
-    for(b = 0; b < strlen(table[i].recog); b++)
+    int bmax = strlen(table[i].recog);
+    for ( int b = 0; b < bmax; b++ )
     {
       table[i].value <<= 1;
       table[i].mask <<= 1;
@@ -208,11 +207,11 @@ static void make_masks(void)
         table[i].value++;
     }
 
-    for(j = 0; j < FUNCS_COUNT; j++)
+    for ( int j = 0; j < FUNCS_COUNT; j++ )
     {
-      if ( table[i].funcs[j].func )
+      if ( table[i].funcs[j].func != NULL )
       {
-        for(b = 0; b < 16; b++)
+        for ( int b = 0; b < 16; b++ )
         {
           if ( table[i].funcs[j].mask & (1 << b) )
             break;
@@ -233,49 +232,48 @@ void init_analyzer(void)
 }
 
 //----------------------------------------------------------------------
-static bool use_table(uint32 code, int entry, int start, int end)
+static bool use_table(const insn_t &insn, uint32 code, int entry, int start, int end)
 {
   opcode &ptr = table[entry];
-  for(int j = start; j <= end; j++)
+  for ( int j = start; j <= end; j++ )
   {
-    if ( !ptr.funcs[j].func ) break;
-    int value = code & ptr.funcs[j].mask;
-    value   >>=        ptr.funcs[j].shift;
-    if ( !ptr.funcs[j].func(value) )
+    if ( ptr.funcs[j].func == NULL )
+      break;
+    int value = (code & ptr.funcs[j].mask) >> ptr.funcs[j].shift;
+    if ( !ptr.funcs[j].func(insn, value) )
       return false;
   }
   return true;
 }
 
 //----------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
-  uint code = ua_16bits();
-  op = &cmd.Op1;
+  insn_t &insn = *_insn;
+  uint code = ua_16bits(insn);
+  op = &insn.Op1;
 
   for ( int i = 0; i < qnumber(table); i++ )
   {
     if ( (code & table[i].mask) == table[i].value )
     {
-      cmd.itype = table[i].itype;
-      cmd.size = 1;
+      insn.itype = table[i].itype;
+      insn.size = 1;
 
-      if ( !use_table(code, i, 0, FUNCS_COUNT - 1) )
+      if ( !use_table(insn, code, i, 0, FUNCS_COUNT - 1) )
         continue;
 
-      return cmd.size;
+      return insn.size;
     }
   }
   return 0;
 }
 
 //--------------------------------------------------------------------------
-void interr(const char *module)
+void interr(const insn_t &insn, const char *module)
 {
   const char *name = NULL;
-  if ( cmd.itype < KR1878_last )
-    name = Instructions[cmd.itype].name;
-  else
-    cmd.itype = KR1878_null;
-  warning("%a(%s): internal error in %s", cmd.ea, name, module);
+  if ( insn.itype < KR1878_last )
+    name = Instructions[insn.itype].name;
+  warning("%a(%s): internal error in %s", insn.ea, name, module);
 }

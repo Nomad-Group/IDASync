@@ -10,11 +10,10 @@
 
 #include <nalt.hpp>
 #include <lines.hpp>
-#include <area.hpp>
-#pragma pack(push, 1)   // IDA uses 1 byte alignments!
+#include <range.hpp>
 
 typedef tid_t enum_t;   // #include <enum.hpp>
-
+class insn_t;
 
 /*! \file bytes.hpp
 
@@ -35,62 +34,66 @@ typedef tid_t enum_t;   // #include <enum.hpp>
 /// Allocate flags for address range.
 /// This function does not change the storage type of existing ranges.
 /// Exit with an error message if not enough disk space.
-/// \param startEA  should be lower than endEA.
-/// \param endEA    does not belong to the range.
+/// \param start_ea  should be lower than end_ea.
+/// \param end_ea    does not belong to the range.
+/// \param stt      ::storage_type_t
 /// \return 0 if ok, otherwise an error code
 
-idaman error_t ida_export enable_flags(ea_t startEA, ea_t endEA, storage_type_t stt);
+idaman error_t ida_export enable_flags(ea_t start_ea, ea_t end_ea, storage_type_t stt);
 
 
 /// Deallocate flags for address range.
 /// Exit with an error message if not enough disk space (this may occur too).
-/// \param startEA  should be lower than endEA.
-/// \param endEA    does not belong to the range.
+/// \param start_ea  should be lower than end_ea.
+/// \param end_ea    does not belong to the range.
 /// \return 0 if ok, otherwise return error code
 
-idaman error_t ida_export disable_flags(ea_t startEA, ea_t endEA);
+idaman error_t ida_export disable_flags(ea_t start_ea, ea_t end_ea);
 
 
 /// Change flag storage type for address range.
+/// \param start_ea  should be lower than end_ea.
+/// \param end_ea    does not belong to the range.
+/// \param stt      ::storage_type_t
 /// \return error code
 
-idaman error_t ida_export change_storage_type(ea_t startEA, ea_t endEA, storage_type_t stt);
+idaman error_t ida_export change_storage_type(ea_t start_ea, ea_t end_ea, storage_type_t stt);
 
 
 /// Get next address in the program (i.e. next address which has flags).
 /// \return #BADADDR if no such address exist.
 
-idaman ea_t ida_export nextaddr(ea_t ea);
+idaman ea_t ida_export next_addr(ea_t ea);
 
 
 /// Get previous address in the program.
 /// \return #BADADDR if no such address exist.
 
-idaman ea_t ida_export prevaddr(ea_t ea);
+idaman ea_t ida_export prev_addr(ea_t ea);
 
 
 /// Get the first address of next contiguous chunk in the program.
 /// \return #BADADDR if next chunk doesn't exist.
 
-idaman ea_t ida_export nextchunk(ea_t ea);
+idaman ea_t ida_export next_chunk(ea_t ea);
 
 
 /// Get the last address of previous contiguous chunk in the program.
 /// \return #BADADDR if previous chunk doesn't exist.
 
-idaman ea_t ida_export prevchunk(ea_t ea);
+idaman ea_t ida_export prev_chunk(ea_t ea);
 
 
 /// Get start of the contiguous address block containing 'ea'.
 /// \return #BADADDR if 'ea' doesn't belong to the program.
 
-idaman ea_t ida_export chunkstart(ea_t ea);
+idaman ea_t ida_export chunk_start(ea_t ea);
 
 
 /// Get size of the contiguous address block containing 'ea'.
 /// \return 0 if 'ea' doesn't belong to the program.
 
-idaman asize_t ida_export chunksize(ea_t ea);
+idaman asize_t ida_export chunk_size(ea_t ea);
 
 
 /// Search for a hole in the addressing space of the program.
@@ -102,56 +105,58 @@ idaman asize_t ida_export chunksize(ea_t ea);
 ///                only when the hole is too small.
 /// \return start of the hole or #BADADDR
 
-idaman ea_t ida_export freechunk(ea_t bottom, asize_t size, int32 step);
+idaman ea_t ida_export free_chunk(ea_t bottom, asize_t size, int32 step);
 
 
-/// Flag tester - see nextthat(), prevthat()
+/// Flag tester - see next_that(), prev_that()
 typedef bool idaapi testf_t(flags_t flags, void *ud);
 
 
 /// Find next address with a flag satisfying the function 'testf'.
-/// \note do not pass f_isUnknown() to this function to find unexplored bytes.
+/// \note do not pass is_unknown() to this function to find unexplored bytes.
 /// It will fail under the debugger. To find unexplored bytes, use next_unknown().
 /// \param ea     start searching at this address + 1
 /// \param maxea  not included in the search range.
+/// \param testf  test function to find next address
 /// \param ud     user data - may point to anything. it will be passed to testf.
 /// \return the found address or #BADADDR.
 
-idaman ea_t ida_export nextthat(
+idaman ea_t ida_export next_that(
         ea_t ea,
         ea_t maxea,
         testf_t *testf,
-        void *ud);
+        void *ud=NULL);
 
 
-/// Similar to nextthat(), but will find the next address that is unexplored
+/// Similar to next_that(), but will find the next address that is unexplored
 
 inline ea_t idaapi next_unknown(ea_t ea, ea_t maxea)
 {
-  return nextthat(ea, maxea, NULL, NULL);
+  return next_that(ea, maxea, NULL);
 }
 
 
 /// Find previous address with a flag satisfying the function 'testf'.
-/// \note do not pass f_isUnknown() to this function to find unexplored bytes
+/// \note do not pass is_unknown() to this function to find unexplored bytes
 /// It will fail under the debugger. To find unexplored bytes, use prev_unknown().
 /// \param ea     start searching from this address - 1.
 /// \param minea  included in the search range.
+/// \param testf  test function to find previous address
 /// \param ud     user data - may point to anything. it will be passed to testf.
 /// \return the found address or #BADADDR.
 
-idaman ea_t ida_export prevthat(
+idaman ea_t ida_export prev_that(
         ea_t ea,
         ea_t minea,
         testf_t *testf,
-        void *ud);
+        void *ud=NULL);
 
 
-/// Similar to prevthat(), but will find the previous address that is unexplored
+/// Similar to prev_that(), but will find the previous address that is unexplored
 
 inline ea_t idaapi prev_unknown(ea_t ea, ea_t minea)
 {
-  return prevthat(ea, minea, NULL, NULL);
+  return prev_that(ea, minea, NULL);
 }
 
 
@@ -247,8 +252,8 @@ idaman ea_t ida_export calc_max_item_end(ea_t ea, int how=15);
 #define ITEM_END_FIXUP  0x0001          ///< stop at the first fixup
 #define ITEM_END_INITED 0x0002          ///< stop when initialization changes
                                         ///< i.e.
-                                        ///<  - if  isLoaded(ea): stop if uninitialized byte is encountered
-                                        ///<  - if !isLoaded(ea): stop if   initialized byte is encountered
+                                        ///<  - if  is_loaded(ea): stop if uninitialized byte is encountered
+                                        ///<  - if !is_loaded(ea): stop if   initialized byte is encountered
 #define ITEM_END_NAME   0x0004          ///< stop at the first named location
 #define ITEM_END_XREF   0x0008          ///< stop at the first referenced location
 //@}
@@ -267,26 +272,26 @@ void flush_flags(void);
 
 /// Is the specified address 'ea' present in the program?
 
-idaman bool ida_export isEnabled(ea_t ea);
+idaman bool ida_export is_mapped(ea_t ea);
 
 
 /// Get flags for the specified address, extended form
 
 idaman flags_t ida_export get_flags_ex(ea_t ea, int how);
 
-#define GFE_NOVALUE 0x0001      ///< get flags without #FF_IVL & #MS_VAL.
-                                ///< It is much faster under remote debugging
-                                ///< because the kernel does not need to check
-                                ///< if the memory is available and readable
+#define GFE_VALUE 0x0001  ///< get flags with #FF_IVL & #MS_VAL.
+                          ///< It is much slower under remote debugging
+                          ///< because the kernel needs to read
+                          ///< the process memory.
 
-/// \copydoc GFE_NOVALUE
-inline flags_t idaapi get_flags_novalue(ea_t ea) { return get_flags_ex(ea, GFE_NOVALUE); }
+/// \copydoc GFE_VALUE
+inline flags_t idaapi get_flags(ea_t ea) { return get_flags_ex(ea, 0); }
 
 
 /// Get flags value for address 'ea'.
 /// \return 0 if address is not present in the program
 
-inline flags_t idaapi getFlags(ea_t ea) { return get_flags_ex(ea, 0); }
+inline flags_t idaapi get_full_flags(ea_t ea) { return get_flags_ex(ea, GFE_VALUE); }
 
 
 /// Get flag of the item at 'ea' even if it is a tail byte of some
@@ -302,25 +307,6 @@ inline flags_t idaapi getFlags(ea_t ea) { return get_flags_ex(ea, 0); }
 idaman flags_t ida_export get_item_flag(ea_t from, int n, ea_t ea, bool appzero);
 
 
-/// Modify flags value for address 'ea' (ONLY KERNEL MAY USE THIS FUNCTION!).
-/// This function never changes #FF_IVL and #MS_VAL fields
-
-idaman void ida_export setFlags(ea_t ea, flags_t flags);
-
-
-/// Set the specified bits of flags (ONLY KERNEL MAY USE THIS FUNCTION!).
-/// This function never changes #FF_IVL and #MS_VAL fields
-/// \return true if any new bits have been set
-
-idaman bool ida_export setFlbits(ea_t EA, flags_t bits);
-
-
-/// Clear the specified bits of flags (ONLY KERNEL MAY USE THIS FUNCTION!).
-/// This function never changes #FF_IVL and #MS_VAL fields
-/// \return true if any new bits have been cleared
-
-idaman bool ida_export clrFlbits(ea_t EA, flags_t bits);
-
 //--------------------------------------------------------------------------
 /// \defgroup FF_ Flags structure
 /// Here we define the organization of ::flags_t values.
@@ -333,19 +319,18 @@ idaman bool ida_export clrFlbits(ea_t EA, flags_t bits);
 
 /// Do flags contain byte value?
 
-inline bool idaapi hasValue(flags_t F)  { return (F & FF_IVL) != 0; }
-inline bool idaapi f_hasValue(flags_t f, void *) { return hasValue(f); } ///< \copydoc hasValue()
+inline bool idaapi has_value(flags_t F)  { return (F & FF_IVL) != 0; }
 
 
 /// Delete byte value from flags. The corresponding byte becomes
 /// uninitialized.
 
-idaman void ida_export delValue(ea_t ea);
+idaman void ida_export del_value(ea_t ea);
 
 
 /// Does the specified address have a byte value (is initialized?)
 
-idaman bool ida_export isLoaded(ea_t ea);
+idaman bool ida_export is_loaded(ea_t ea);
 
 
 /// Get number of bits in a byte at the given address.
@@ -377,28 +362,21 @@ idaman uchar ida_export get_db_byte(ea_t ea);
 
 
 /// Get one word (16-bit) of the program at 'ea'.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// This function works only for 8bit byte processors.
 
 idaman ushort ida_export get_word(ea_t ea);
 
 
-/// Get one 3byte (24-bit) of the program at 'ea'.
-/// This function takes into account order of bytes specified in \inf{tribyte_order}
-/// This function works only for 8bit byte processors.
-
-idaman uint32 ida_export get_3byte(ea_t ea);
-
-
 /// Get one dword (32-bit) of the program at 'ea'.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// This function works only for 8bit byte processors.
 
-idaman uint32 ida_export get_long(ea_t ea);
+idaman uint32 ida_export get_dword(ea_t ea);
 
 
 /// Get one qword (64-bit) of the program at 'ea'.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// This function works only for 8bit byte processors.
 
 idaman uint64 ida_export get_qword(ea_t ea);
@@ -408,24 +386,24 @@ idaman uint64 ida_export get_qword(ea_t ea);
 /// Some processors may access more than 8bit quantity at an address.
 /// These processors have 32-bit byte organization from the IDA's point of view.
 
-idaman uint32 ida_export get_full_byte(ea_t ea);
+idaman uint32 ida_export get_wide_byte(ea_t ea);
 
 
 /// Get one wide word (2 'byte') of the program at 'ea'.
 /// Some processors may access more than 8bit quantity at an address.
 /// These processors have 32-bit byte organization from the IDA's point of view.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 
-idaman uint64 ida_export get_full_word(ea_t ea);
+idaman uint64 ida_export get_wide_word(ea_t ea);
 
 
 /// Get two wide words (4 'bytes') of the program at 'ea'.
 /// Some processors may access more than 8bit quantity at an address.
 /// These processors have 32-bit byte organization from the IDA's point of view.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// \note this function works incorrectly if \ph{nbits} > 16
 
-idaman uint64 ida_export get_full_long(ea_t ea);
+idaman uint64 ida_export get_wide_dword(ea_t ea);
 
 
 /// Get 8 bits of the program at 'ea'.
@@ -434,20 +412,20 @@ idaman uint64 ida_export get_full_long(ea_t ea);
 /// \code
 ///      uint32 v;
 ///      int nbit = 0;
-///      for ( .... ) {
-///        uchar byte = get_8bit(ea,v,nbit);
+///      for ( ... ) {
+///        uchar byte = get_8bit(&ea, &v, &nbit);
 ///        ...
 ///      }
 /// \endcode
 /// 'ea' is incremented each time when a new byte is read.
 /// In the above example, it will be incremented in the first loop iteration.
 
-idaman uchar ida_export get_8bit(ea_t &ea, uint32 &v, int &nbit);
+idaman uchar ida_export get_8bit(ea_t *ea, uint32 *v, int *nbit);
 
 
 /// Like get_8bit(), but takes into account #AS2_BYTE1CHAR
 
-uchar get_ascii_char(ea_t &ea, uint32 &v, int &nb); // takes into account
+uchar get_ascii_char(ea_t *ea, uint32 *v, int *nb);
 
 
 /// Get 16bits of the program at 'ea'.
@@ -459,9 +437,9 @@ idaman uint32 ida_export get_16bit(ea_t ea);
 
 /// Get not more than 32bits of the program at 'ea'.
 /// \return 32 bit value, depending on \ph{nbits}:
-///   - if ( nbits <= 8 ) return get_long(ea);
-///   - if ( nbits <= 16) return get_full_word(ea);
-///   - return get_full_byte(ea);
+///   - if ( nbits <= 8 ) return get_dword(ea);
+///   - if ( nbits <= 16) return get_wide_word(ea);
+///   - return get_wide_byte(ea);
 
 idaman uint32 ida_export get_32bit(ea_t ea);
 
@@ -469,8 +447,8 @@ idaman uint32 ida_export get_32bit(ea_t ea);
 /// Get not more than 64bits of the program at 'ea'.
 /// \return 64 bit value, depending on \ph{nbits}:
 ///   - if ( nbits <= 8 ) return get_qword(ea);
-///   - if ( nbits <= 16) return get_full_long(ea);
-///   - return get_full_byte(ea);
+///   - if ( nbits <= 16) return get_wide_dword(ea);
+///   - return get_wide_byte(ea);
 
 idaman uint64 ida_export get_64bit(ea_t ea);
 
@@ -478,13 +456,13 @@ idaman uint64 ida_export get_64bit(ea_t ea);
 /// Get the value at of the item at 'ea'.
 /// This function works with entities up to sizeof(ea_t)
 /// (bytes, word, etc)
-/// \param ea    linear address
 /// \param v     pointer to the result. may be NULL
+/// \param ea    linear address
 /// \param size  size of data to read. If 0, then the item
 ///              type at 'ea' will be used
 /// \return success
 
-idaman bool ida_export get_data_value(ea_t ea, uval_t *v, asize_t size);
+idaman bool ida_export get_data_value(uval_t *v, ea_t ea, asize_t size);
 
 
 /// Visit all the patched bytes one byte at a time.
@@ -498,10 +476,10 @@ idaman bool ida_export get_data_value(ea_t ea, uval_t *v, asize_t size);
 ///             if the enumeration was completed.
 
 idaman int ida_export visit_patched_bytes(
-  ea_t ea1,
-  ea_t ea2,
-  int (idaapi *cb)(ea_t ea, int32 fpos, uint32 o, uint32 v, void *ud),
-  void *ud = NULL);
+        ea_t ea1,
+        ea_t ea2,
+        int (idaapi *cb)(ea_t ea, qoff64_t fpos, uint32 o, uint32 v, void *ud),
+        void *ud = NULL);
 
 
 /// Get original byte value (that was before patching).
@@ -512,21 +490,21 @@ idaman uint32 ida_export get_original_byte(ea_t ea);
 
 /// Get original word value (that was before patching).
 /// This function works for wide byte processors too.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 
 idaman uint64 ida_export get_original_word(ea_t ea);
 
 
-/// Get original long value (that was before patching)
+/// Get original dword (that was before patching)
 /// This function works for wide byte processors too.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 
-idaman uint64 ida_export get_original_long(ea_t ea);
+idaman uint64 ida_export get_original_dword(ea_t ea);
 
 
 /// Get original qword value (that was before patching)
 /// This function DOESN'T work for wide byte processors too.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 
 idaman uint64 ida_export get_original_qword(ea_t ea);
 
@@ -547,7 +525,7 @@ idaman bool ida_export put_byte(ea_t ea, uint32 x);
 
 
 /// Set value of one word of the program.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// This function works for wide byte processors too.
 /// \note The original value of the word is completely lost and can't
 /// be recovered by the get_original_word() function.
@@ -558,18 +536,18 @@ idaman void ida_export put_word(ea_t ea, uint64 x);
 
 
 /// Set value of one dword of the program.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// This function works for wide byte processors too.
 /// \param ea  linear address
 /// \param x   dword value
 /// \note the original value of the dword is completely lost and can't
-/// be recovered by the get_original_long() function.
+/// be recovered by the get_original_dword() function.
 
-idaman void ida_export put_long(ea_t ea, uint64 x);
+idaman void ida_export put_dword(ea_t ea, uint64 x);
 
 
 /// Set value of one qword (8 bytes) of the program.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// This function DOESN'T works for wide byte processors.
 /// \param ea  linear address
 /// \param x   qword value
@@ -592,7 +570,7 @@ idaman bool ida_export patch_byte(ea_t ea, uint32 x);
 /// Patch a word of the program. The original value of the word is saved
 /// and can be obtained by get_original_word().
 /// This function works for wide byte processors too.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// \retval true   the database has been modified,
 /// \retval false  the debugger is running and the process' memory
 ///                has value 'x' at address 'ea', or
@@ -603,22 +581,22 @@ idaman bool ida_export patch_word(ea_t ea, uint64 x);
 
 
 /// Patch a dword of the program. The original value of the dword is saved
-/// and can be obtained by get_original_long().
+/// and can be obtained by get_original_dword().
 /// This function DOESN'T work for wide byte processors.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// \retval true   the database has been modified,
 /// \retval false  the debugger is running and the process' memory
 ///                has value 'x' at address 'ea', or
 ///                the debugger is not running, and the IDB
 ///                has value 'x' at address 'ea already.
 
-idaman bool ida_export patch_long(ea_t ea, uint64 x);
+idaman bool ida_export patch_dword(ea_t ea, uint64 x);
 
 
 /// Patch a qword of the program. The original value of the qword is saved
 /// and can be obtained by get_original_qword().
 /// This function DOESN'T work for wide byte processors.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// \retval true   the database has been modified,
 /// \retval false  the debugger is running and the process' memory
 ///                has value 'x' at address 'ea', or
@@ -626,6 +604,12 @@ idaman bool ida_export patch_long(ea_t ea, uint64 x);
 ///                has value 'x' at address 'ea already.
 
 idaman bool ida_export patch_qword(ea_t ea, uint64 x);
+
+
+/// Revert patched byte
+/// \retval true   byte was patched before and reverted now
+
+idaman bool ida_export revert_byte(ea_t ea);
 
 
 /// Add a value to one byte of the program.
@@ -638,7 +622,7 @@ idaman void ida_export add_byte(ea_t ea, uint32 value);
 
 /// Add a value to one word of the program.
 /// This function works for wide byte processors too.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// \param ea     linear address
 /// \param value  byte value
 
@@ -647,17 +631,17 @@ idaman void ida_export add_word(ea_t ea, uint64 value);
 
 /// Add a value to one dword of the program.
 /// This function works for wide byte processors too.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// \note this function works incorrectly if \ph{nbits} > 16
 /// \param ea     linear address
 /// \param value  byte value
 
-idaman void ida_export add_long(ea_t ea, uint64 value);
+idaman void ida_export add_dword(ea_t ea, uint64 value);
 
 
 /// Add a value to one qword of the program.
 /// This function does not work for wide byte processors.
-/// This function takes into account order of bytes specified in \inf{mf}
+/// This function takes into account order of bytes specified in \inf{is_be()}
 /// \param ea     linear address
 /// \param value  byte value
 
@@ -668,58 +652,58 @@ idaman void ida_export add_qword(ea_t ea, uint64 value);
 /// The returned set includes only big zero initialized ranges (at least >1KB).
 /// Some zero initialized byte ranges may be not included.
 /// Only zero bytes that use the sparse storage method (STT_MM) are reported.
-/// \param zareas  pointer to the return value. can not be NULL
-/// \param range   the range of addresses to verify. can be NULL - means all areas
+/// \param zranges  pointer to the return value. can not be NULL
+/// \param range   the range of addresses to verify. can be NULL - means all ranges
 /// \return true if the result is a non-empty set
 
-idaman bool ida_export get_zero_areas(areaset_t *zareas, const area_t *range);
+idaman bool ida_export get_zero_ranges(rangeset_t *zranges, const range_t *range);
 
 
 /// Get the specified number of bytes of the program into the buffer.
 /// If mask was specified it will contain a bitmap of initialized / uninitialized
 /// database bytes.
 /// \param ea    linear address
-/// \param buf   buffer to hold bytes (may be NULL)
-/// \param size  size of buffer in normal 8-bit bytes (sizeof(buf))
-/// \param mask  bitmap of initialize/uninitialized bytes (must be at least (size+7)/8)
-/// \retval -1   user cancelled
-/// \retval  0   partial read
-/// \retval  1   success
-
-idaman int ida_export get_many_bytes_ex(ea_t ea, void *buf, ssize_t size, void *mask);
-
-
-/// Get the specified number of bytes of the program into the buffer.
-/// \param ea    linear address
 /// \param buf   buffer to hold bytes
 /// \param size  size of buffer in normal 8-bit bytes (sizeof(buf))
-/// \retval 1  ok
-///         0  failure (out of program address space or uninited bytes, for example)
+/// \param gmb_flags combination of \ref GMB_ bits
+/// \param mask  bitmap of initialize/uninitialized bytes
+///              (may be NULL; must be at least (size+7)/8)
+/// \return if the user cancelled, return -1; otherwise number of read bytes.
 
-idaman bool ida_export get_many_bytes(ea_t ea, void *buf, ssize_t size);
+idaman ssize_t ida_export get_bytes(
+        void *buf,
+        ssize_t size,
+        ea_t ea,
+        int gmb_flags=0,
+        void *mask=NULL);
+
+/// \defgroup GMB_ flags for get_bytes()
+//@{
+#define GMB_READALL 0x01       ///< try to read all bytes
+                               ///< if this bit is not set, fail at first uninited byte
+#define GMB_WAITBOX 0x02       ///< show wait box (may return -1 in this case)
+///@}
 
 
 /// Modify the specified number of bytes of the program.
 /// This function does not save the original values of bytes.
-/// \note This function is for the kernel only.
-/// See also patch_many_bytes().
+/// See also patch_bytes().
 /// \param ea    linear address
 /// \param buf   buffer with new values of bytes
 /// \param size  size of buffer in normal 8-bit bytes (sizeof(buf))
 
-idaman void ida_export put_many_bytes(ea_t ea, const void *buf, size_t size);
+idaman void ida_export put_bytes(ea_t ea, const void *buf, size_t size);
 
 
 /// Patch the specified number of bytes of the program.
 /// Original values of bytes are saved and are available with get_original...()
 /// functions.
-/// \note this function is for the kernel only
-/// See also put_many_bytes().
+/// See also put_bytes().
 /// \param ea    linear address
 /// \param buf   buffer with new values of bytes
 /// \param size  size of buffer in normal 8-bit bytes (sizeof(buf))
 
-idaman void ida_export patch_many_bytes(ea_t ea, const void *buf, size_t size);
+idaman void ida_export patch_bytes(ea_t ea, const void *buf, size_t size);
 
 //-------------------------------------------------------------------------
 /// \defgroup FF_states States
@@ -751,71 +735,78 @@ idaman void ida_export patch_many_bytes(ea_t ea, const void *buf, size_t size);
 
 /// Does flag denote start of an instruction?
 
-inline bool idaapi isCode(flags_t F)  { return (F & MS_CLS) == FF_CODE; }
-inline bool idaapi f_isCode(flags_t F, void *) { return isCode(F); }        ///< \copydoc isCode()
+inline bool idaapi is_code(flags_t F)  { return (F & MS_CLS) == FF_CODE; }
+inline bool idaapi f_is_code(flags_t F, void *) { return is_code(F); }        ///< \copydoc is_code()
 
 
 /// Does flag denote start of data?
 
-inline bool idaapi isData(flags_t F)  { return (F & MS_CLS) == FF_DATA; }
-inline bool idaapi f_isData(flags_t F, void *) { return isData(F); }        ///< \copydoc isData()
+inline bool idaapi is_data(flags_t F)  { return (F & MS_CLS) == FF_DATA; }
+inline bool idaapi f_is_data(flags_t F, void *) { return is_data(F); }        ///< \copydoc is_data()
 
 
 /// Does flag denote tail byte?
 
-inline bool idaapi isTail(flags_t F)    { return (F & MS_CLS) == FF_TAIL; }
-inline bool idaapi f_isTail(flags_t F, void *) { return isTail(F); }        ///< \copydoc isTail()
-inline bool idaapi isNotTail(flags_t F) { return !isTail(F); }              ///< \copydoc isTail()
-inline bool idaapi f_isNotTail(flags_t F, void *) { return isNotTail(F); }  ///< \copydoc isTail()
+inline bool idaapi is_tail(flags_t F)    { return (F & MS_CLS) == FF_TAIL; }
+inline bool idaapi f_is_tail(flags_t F, void *) { return is_tail(F); }        ///< \copydoc is_tail()
+inline bool idaapi is_not_tail(flags_t F) { return !is_tail(F); }              ///< \copydoc is_tail()
+inline bool idaapi f_is_not_tail(flags_t F, void *) { return is_not_tail(F); }  ///< \copydoc is_tail()
 
 
 /// Does flag denote unexplored byte?
 
-inline bool idaapi isUnknown(flags_t F){return (F & MS_CLS) == FF_UNK;  }
+inline bool idaapi is_unknown(flags_t F) { return (F & MS_CLS) == FF_UNK; }
 
 
 /// Does flag denote start of instruction OR data?
 
-inline bool idaapi isHead(flags_t F)  { return (F & FF_DATA) != 0; }
-inline bool idaapi f_isHead(flags_t F, void *) { return isHead(F); }        ///< \copydoc isHead()
+inline bool idaapi is_head(flags_t F)  { return (F & FF_DATA) != 0; }
+inline bool idaapi f_is_head(flags_t F, void *) { return is_head(F); }        ///< \copydoc is_head()
 
 //@} FF_statefuncs
 //@} FF_states
 
+/// del_items' callback function
+typedef bool idaapi may_destroy_cb_t(ea_t);
 
 /// Convert item (instruction/data) to unexplored bytes.
 /// The whole item (including the head and tail bytes) will be destroyed.
 /// It is allowed to pass any address in the item to this function
-/// \param ea     any address within the item to delete
-/// \param flags  combination of \ref DOUNK_
-/// \return success
+/// \param ea     any address within the first item to delete
+/// \param flags  combination of \ref DELIT_
+/// \param nbytes number of bytes in the range to be undefined
+/// \param may_destroy optional routine invoked before deleting a head
+///                    item. If callback returns false then item has not to
+///                    be deleted and operation fails
+/// \return true on sucessful operation, otherwise false
 
-idaman bool ida_export do_unknown(ea_t ea, int flags);
+idaman bool ida_export del_items(
+        ea_t ea,
+        int flags=0,
+        asize_t nbytes=1,
+        may_destroy_cb_t *may_destroy=NULL);
 
-/// \defgroup DOUNK_ Unexplored byte conversion flags
-/// passed as 'flags' parameter to do_unknown(), do_unknown_range()
+/// \defgroup DELIT_ Unexplored byte conversion flags
+/// passed as 'flags' parameter to del_items()
 //@{
-#define DOUNK_SIMPLE    0x0000  ///< simply undefine the specified item
-#define DOUNK_EXPAND    0x0001  ///< propagate undefined items; for example
+#define DELIT_SIMPLE    0x0000  ///< simply undefine the specified item(s)
+#define DELIT_EXPAND    0x0001  ///< propagate undefined items; for example
                                 ///< if removing an instruction removes all
                                 ///< references to the next instruction, then
                                 ///< plan to convert to unexplored the next
                                 ///< instruction too.
-#define DOUNK_DELNAMES  0x0002  ///< delete any names at the specified
+#define DELIT_DELNAMES  0x0002  ///< delete any names at the specified
                                 ///< address range (except for the starting
-                                ///< address). this bit is valid only for
-                                ///< do_unknown_range()
-#define DOUNK_NOTRUNC   0x0004  ///< don't truncate the current function
-                                ///< even if #AF2_TRFUNC is set
+                                ///< address). this bit is valid if nbytes > 1
+#define DELIT_NOTRUNC   0x0004  ///< don't truncate the current function
+                                ///< even if #AF_TRFUNC is set
+#define DELIT_NOUNAME   0x0008  ///< reject to delete if a user name is
+                                ///< in address range (except for the starting
+                                ///< address). this bit is valid if nbytes > 1
+#define DELIT_NOCMT     0x0010  ///< reject to delete if a comment is
+                                ///< in address range (except for the starting
+                                ///< address). this bit is valid if nbytes > 1
 //@}
-
-/// Convert range of addresses to unexplored bytes.
-/// The whole items (including the head and tail bytes) will be destroyed.
-/// \param ea     starting linear address
-/// \param size   number of bytes in the area to be undefined
-/// \param flags  combination of \ref DOUNK_
-
-idaman void ida_export do_unknown_range(ea_t ea, size_t size, int flags);
 
 
 //-------------------------------------------------------------------------
@@ -829,15 +820,11 @@ idaman bool ida_export is_manual_insn(ea_t ea);        // Is the instruction ove
 
 
 /// Retrieve the user-specified string for the manual instruction.
+/// \param buf      output buffer
 /// \param ea       linear address of the instruction or data item
-/// \param buf      the input buffer for the string.
-///                 if NULL, the buffer will be allocated in heap
-/// \param bufsize  size of the buffer if buf != NULL.
-///                 otherwise bufsize should be 0
-/// \return NULL if no user-specified string
+/// \return size of manual instruction or -1
 
-idaman char *ida_export get_manual_insn(ea_t ea,char *buf, size_t bufsize);
-                                // Get the user-specified instruction string
+idaman ssize_t ida_export get_manual_insn(qstring *buf, ea_t ea);
 
 
 /// Set manual instruction string.
@@ -845,7 +832,7 @@ idaman char *ida_export get_manual_insn(ea_t ea,char *buf, size_t bufsize);
 /// \param manual_insn  ""   - delete manual string.
 ///                     NULL - do nothing
 
-idaman void ida_export set_manual_insn(ea_t ea,const char *manual_insn); // Set user-specified string
+idaman void ida_export set_manual_insn(ea_t ea, const char *manual_insn); // Set user-specified string
 
 
 //-------------------------------------------------------------------------
@@ -856,16 +843,16 @@ idaman void ida_export set_manual_insn(ea_t ea,const char *manual_insn); // Set 
   transitions between different states.
 */
 //@{
-#define MS_COMM  0x000FF800LU            ///< Mask of common bits
-#define FF_COMM  0x00000800LU            ///< Has comment ?
-#define FF_REF   0x00001000LU            ///< has references
-#define FF_LINE  0x00002000LU            ///< Has next or prev lines ?
-#define FF_NAME  0x00004000LU            ///< Has name ?
-#define FF_LABL  0x00008000LU            ///< Has dummy name?
-#define FF_FLOW  0x00010000LU            ///< Exec flow from prev instruction
-#define FF_SIGN  0x00020000LU            ///< Inverted sign of operands
-#define FF_BNOT  0x00040000LU            ///< Bitwise negation of operands
-#define FF_VAR   0x00080000LU            ///< is variable byte?
+#define MS_COMM  0x000FF800            ///< Mask of common bits
+#define FF_COMM  0x00000800            ///< Has comment ?
+#define FF_REF   0x00001000            ///< has references
+#define FF_LINE  0x00002000            ///< Has next or prev lines ?
+#define FF_NAME  0x00004000            ///< Has name ?
+#define FF_LABL  0x00008000            ///< Has dummy name?
+#define FF_FLOW  0x00010000            ///< Exec flow from prev instruction
+#define FF_SIGN  0x00020000            ///< Inverted sign of operands
+#define FF_BNOT  0x00040000            ///< Bitwise negation of operands
+#define FF_UNUSED 0x00080000           ///< unused bit (was used for variable bytes)
 //@}
 
 /// \defgroup FF_statespecf Functions: examine specific state information
@@ -874,18 +861,12 @@ idaman void ida_export set_manual_insn(ea_t ea,const char *manual_insn); // Set 
 
 /// Does the previous instruction exist and pass execution flow to the current byte?
 
-inline bool idaapi isFlow(flags_t F)     { return (F & FF_FLOW) != 0; }
-
-
-/// Is the current byte marked as variable?. (this is not used by IDA itself and
-/// may become obsolete, please don't use it)
-
-inline bool idaapi isVar(flags_t F)      { return (F & FF_VAR ) != 0; }
+inline bool idaapi is_flow(flags_t F)     { return (F & FF_FLOW) != 0; }
 
 
 /// Does the current byte have additional anterior or posterior lines?
 
-inline bool idaapi hasExtra(flags_t F)   { return (F & FF_LINE) != 0; }
+inline bool idaapi has_extra_cmts(flags_t F)   { return (F & FF_LINE) != 0; }
 
 
 /// Does the current byte have an indented comment?
@@ -895,8 +876,8 @@ inline bool idaapi has_cmt(flags_t F)    { return (F & FF_COMM) != 0; }
 
 /// Does the current byte have cross-references to it?
 
-inline bool idaapi hasRef(flags_t F)     { return (F & FF_REF)  != 0; }
-inline bool idaapi f_hasRef(flags_t f, void *) { return hasRef(f); }                    ///< \copydoc hasRef()
+inline bool idaapi has_xref(flags_t F)     { return (F & FF_REF)  != 0; }
+inline bool idaapi f_has_xref(flags_t f, void *) { return has_xref(f); }                    ///< \copydoc has_xref()
 
 
 /// Does the current byte have non-trivial (non-dummy) name?
@@ -910,24 +891,24 @@ inline bool idaapi f_has_name(flags_t f, void *) { return has_name(f); }        
 
 /// Does the current byte have dummy (auto-generated, with special prefix) name?
 
-inline bool idaapi has_dummy_name(flags_t F){ return (F & FF_ANYNAME) == FF_LABL; }
+inline bool idaapi has_dummy_name(flags_t F) { return (F & FF_ANYNAME) == FF_LABL; }
 inline bool idaapi f_has_dummy_name(flags_t f, void *) { return has_dummy_name(f); }    ///< \copydoc has_dummy_name()
 
 
 /// Does the current byte have auto-generated (no special prefix) name?
 
-inline bool idaapi has_auto_name(flags_t F){ return (F & FF_ANYNAME) == FF_ANYNAME; }
+inline bool idaapi has_auto_name(flags_t F) { return (F & FF_ANYNAME) == FF_ANYNAME; }
 
 
 /// Does the current byte have any name?
 
-inline bool idaapi has_any_name(flags_t F){ return (F & FF_ANYNAME) != 0; }
+inline bool idaapi has_any_name(flags_t F) { return (F & FF_ANYNAME) != 0; }
 
 
 /// Does the current byte have user-specified name?
 
-inline bool idaapi has_user_name(flags_t F){ return (F & FF_ANYNAME) == FF_NAME; }
-inline bool idaapi f_has_user_name(flags_t F, void *){ return has_user_name(F); }       ///< \copydoc has_user_name()
+inline bool idaapi has_user_name(flags_t F) { return (F & FF_ANYNAME) == FF_NAME; }
+inline bool idaapi f_has_user_name(flags_t F, void *) { return has_user_name(F); }       ///< \copydoc has_user_name()
 
 // signness deals with the form of operands of the current instruction/data.
 // inverted sign means the following:
@@ -968,7 +949,7 @@ idaman bool ida_export set_lzero(ea_t ea, int n);         ///< Set toggle lzero 
 idaman bool ida_export clr_lzero(ea_t ea, int n);         ///< Clear lzero bit
 inline bool idaapi toggle_lzero(ea_t ea, int n)           ///< Toggle lzero bit
 {
-  return (is_lzero(ea,n) ? clr_lzero : set_lzero)(ea,n);
+  return (is_lzero(ea, n) ? clr_lzero : set_lzero)(ea, n);
 }
 
 //@} FF_statespecf
@@ -977,15 +958,6 @@ inline bool idaapi toggle_lzero(ea_t ea, int n)           ///< Toggle lzero bit
 /// Check if leading zeroes are important
 
 idaman bool ida_export leading_zero_important(ea_t ea, int n);
-
-
-/// Set the variableness of an address.
-/// The variable addresses are marked with '*' in the disassembly
-/// \param ea     linear address
-/// \param isvar  0: clear 'variable' mark
-///               1: set 'variable' mark
-
-idaman void ida_export doVar(ea_t ea,bool isvar=true);
 
 
 //-------------------------------------------------------------------------
@@ -997,7 +969,7 @@ idaman void ida_export doVar(ea_t ea,bool isvar=true);
 ///   - representation of the first operand
 ///   - representation of other operands (we will call this
 ///     'representation of second operand'
-///     although it is also applied to third, fourth,etc operands too)
+///     although it is also applied to third, fourth, etc operands too)
 ///
 /// For data bytes, only the first bitmask is used (i.e. all elements of
 /// an array have the same type).
@@ -1043,102 +1015,102 @@ idaman void ida_export doVar(ea_t ea,bool isvar=true);
 
 /// Is the first operand defined? Initially operand has no defined representation
 
-inline bool idaapi isDefArg0(flags_t F) { return (F & MS_0TYPE) != FF_0VOID; }
+inline bool idaapi is_defarg0(flags_t F) { return (F & MS_0TYPE) != FF_0VOID; }
 
 
 /// Is the second operand defined? Initially operand has no defined representation
 
-inline bool idaapi isDefArg1(flags_t F) { return (F & MS_1TYPE) != FF_1VOID; }
+inline bool idaapi is_defarg1(flags_t F) { return (F & MS_1TYPE) != FF_1VOID; }
 
 
 /// Is the first operand offset? (example: push offset xxx)
 
-inline bool idaapi isOff0(flags_t F)    { return (F & MS_0TYPE) == FF_0OFF;  }
+inline bool idaapi is_off0(flags_t F)    { return (F & MS_0TYPE) == FF_0OFF;  }
 
 
 /// Is the second operand offset? (example: mov ax, offset xxx)
 
-inline bool idaapi isOff1(flags_t F)    { return (F & MS_1TYPE) == FF_1OFF;  }
+inline bool idaapi is_off1(flags_t F)    { return (F & MS_1TYPE) == FF_1OFF;  }
 
 
 /// Is the first operand character constant? (example: push 'a')
 
-inline bool idaapi isChar0(flags_t F)   { return (F & MS_0TYPE) == FF_0CHAR; }
+inline bool idaapi is_char0(flags_t F)   { return (F & MS_0TYPE) == FF_0CHAR; }
 
 
 /// Is the second operand character constant? (example: mov al, 'a')
 
-inline bool idaapi isChar1(flags_t F)   { return (F & MS_1TYPE) == FF_1CHAR; }
+inline bool idaapi is_char1(flags_t F)   { return (F & MS_1TYPE) == FF_1CHAR; }
 
 
 /// Is the first operand segment selector? (example: push seg seg001)
 
-inline bool idaapi isSeg0(flags_t F)    { return (F & MS_0TYPE) == FF_0SEG;  }
+inline bool idaapi is_seg0(flags_t F)    { return (F & MS_0TYPE) == FF_0SEG;  }
 
 
 /// Is the second operand segment selector? (example: mov dx, seg dseg)
 
-inline bool idaapi isSeg1(flags_t F)    { return (F & MS_1TYPE) == FF_1SEG;  }
+inline bool idaapi is_seg1(flags_t F)    { return (F & MS_1TYPE) == FF_1SEG;  }
 
 
 /// Is the first operand a symbolic constant (enum member)?
 
-inline bool idaapi isEnum0(flags_t F)   { return (F & MS_0TYPE) == FF_0ENUM;  }
+inline bool idaapi is_enum0(flags_t F)   { return (F & MS_0TYPE) == FF_0ENUM;  }
 
 
 /// Is the second operand a symbolic constant (enum member)?
 
-inline bool idaapi isEnum1(flags_t F)   { return (F & MS_1TYPE) == FF_1ENUM;  }
+inline bool idaapi is_enum1(flags_t F)   { return (F & MS_1TYPE) == FF_1ENUM;  }
 
 
 /// Is the first operand an offset within a struct?
 
-inline bool idaapi isStroff0(flags_t F) { return (F & MS_0TYPE) == FF_0STRO;  }
+inline bool idaapi is_stroff0(flags_t F) { return (F & MS_0TYPE) == FF_0STRO;  }
 
 
 /// Is the second operand an offset within a struct?
 
-inline bool idaapi isStroff1(flags_t F) { return (F & MS_1TYPE) == FF_1STRO;  }
+inline bool idaapi is_stroff1(flags_t F) { return (F & MS_1TYPE) == FF_1STRO;  }
 
 
 /// Is the first operand a stack variable?
 
-inline bool idaapi isStkvar0(flags_t F) { return (F & MS_0TYPE) == FF_0STK;  }
+inline bool idaapi is_stkvar0(flags_t F) { return (F & MS_0TYPE) == FF_0STK;  }
 
 
 /// Is the second operand a stack variable?
 
-inline bool idaapi isStkvar1(flags_t F) { return (F & MS_1TYPE) == FF_1STK;  }
+inline bool idaapi is_stkvar1(flags_t F) { return (F & MS_1TYPE) == FF_1STK;  }
 
 
 /// Is the first operand a floating point number?
 
-inline bool idaapi isFloat0(flags_t F) { return (F & MS_0TYPE) == FF_0FLT;  }
+inline bool idaapi is_float0(flags_t F) { return (F & MS_0TYPE) == FF_0FLT;  }
 
 
 /// Is the second operand a floating point number?
 
-inline bool idaapi isFloat1(flags_t F) { return (F & MS_1TYPE) == FF_1FLT;  }
+inline bool idaapi is_float1(flags_t F) { return (F & MS_1TYPE) == FF_1FLT;  }
 
 
 /// Does the first operand use a custom data representation?
 
-inline bool idaapi isCustFmt0(flags_t F) { return (F & MS_0TYPE) == FF_0CUST; }
+inline bool idaapi is_custfmt0(flags_t F) { return (F & MS_0TYPE) == FF_0CUST; }
 
 
 /// Does the second operand use a custom data representation?
 
-inline bool idaapi isCustFmt1(flags_t F) { return (F & MS_1TYPE) == FF_1CUST; }
+inline bool idaapi is_custfmt1(flags_t F) { return (F & MS_1TYPE) == FF_1CUST; }
 
 
-/// Is the first operand a number (i.e. binary,octal,decimal or hex?)
+/// Is the first operand a number (i.e. binary, octal, decimal or hex?)
 
-idaman bool ida_export isNum0(flags_t F);
+idaman bool ida_export is_numop0(flags_t F);
 
 
-/// Is the second operand a number (i.e. binary,octal,decimal or hex?)
+/// Is the second operand a number (i.e. binary, octal, decimal or hex?)
 
-idaman bool ida_export isNum1(flags_t F);
+idaman bool ida_export is_numop1(flags_t F);
 
 
 /// Get flags for first operand
@@ -1157,8 +1129,8 @@ inline flags_t get_optype_flags1(flags_t F) { return F & MS_1TYPE; }
 //      The following 2 masks are used with operand numbers
 //
 #define OPND_OUTER      0x80            ///< outer offset base (combined with operand number).
-                                        ///< used only in set,get,del_offset() functions
-#define OPND_MASK       0x07            ///< mask for operand number
+                                        ///< used only in set, get, del_offset() functions
+#define OPND_MASK       0x0F            ///< mask for operand number
 #define OPND_ALL        OPND_MASK       ///< all operands
 
 /*! \defgroup FF_opfuncs2 Functions: examine operand flags (arbitrary operand)
@@ -1169,18 +1141,18 @@ inline flags_t get_optype_flags1(flags_t F) { return F & MS_1TYPE; }
                   OR the second operand satisfies the condition
 */
 //@{
-idaman bool ida_export isDefArg(flags_t F,int n);          ///< is defined?
-idaman bool ida_export isOff(flags_t F,int n);             ///< is offset?
-idaman bool ida_export isChar(flags_t F,int n);            ///< is character constant?
-idaman bool ida_export isSeg(flags_t F,int n);             ///< is segment?
-idaman bool ida_export isEnum(flags_t F,int n);            ///< is enum?
-idaman bool ida_export isFop(flags_t F,int n);             ///< is forced operand? (use is_forced_operand())
-idaman bool ida_export isStroff(flags_t F,int n);          ///< is struct offset?
-idaman bool ida_export isStkvar(flags_t F,int n);          ///< is stack variable?
-idaman bool ida_export isFltnum(flags_t F,int n);          ///< is floating point number?
-idaman bool ida_export isCustFmt(flags_t F,int n);         ///< is custom data format?
-idaman bool ida_export isNum(flags_t F,int n);             ///< is number (bin,oct,dec,hex)?
-idaman bool ida_export isVoid(ea_t ea,flags_t F,int n);    ///< is 'void' operand?
+idaman bool ida_export is_defarg(flags_t F, int n);        ///< is defined?
+idaman bool ida_export is_off(flags_t F, int n);           ///< is offset?
+idaman bool ida_export is_char(flags_t F, int n);          ///< is character constant?
+idaman bool ida_export is_seg(flags_t F, int n);           ///< is segment?
+idaman bool ida_export is_enum(flags_t F, int n);          ///< is enum?
+idaman bool ida_export is_manual(flags_t F, int n);        ///< is forced operand? (use is_forced_operand())
+idaman bool ida_export is_stroff(flags_t F, int n);        ///< is struct offset?
+idaman bool ida_export is_stkvar(flags_t F, int n);        ///< is stack variable?
+idaman bool ida_export is_fltnum(flags_t F, int n);        ///< is floating point number?
+idaman bool ida_export is_custfmt(flags_t F, int n);       ///< is custom data format?
+idaman bool ida_export is_numop(flags_t F, int n);         ///< is number (bin, oct, dec, hex)?
+idaman bool ida_export is_suspop(ea_t ea, flags_t F, int n); ///< is suspicious operand?
 //@}
 
 /// Should processor module create xrefs from the operand?.
@@ -1191,9 +1163,9 @@ idaman bool ida_export op_adds_xrefs(flags_t F, int n);
 
 /// (internal function) change representation of operand(s).
 /// \param ea    linear address
-/// \param type  new flag value (should be obtained from charflag(), numflag() and
+/// \param type  new flag value (should be obtained from char_flag(), num_flag() and
 ///              similar functions)
-/// \param n     number of operand (0,1,-1)
+/// \param n     number of operand (0, 1, -1)
 /// \retval 1 ok
 /// \retval 0 failed (applied to a tail byte)
 
@@ -1203,89 +1175,94 @@ idaman bool ida_export set_op_type(ea_t ea, flags_t type, int n);
 /// Set operand representation to be 'segment'.
 /// If applied to unexplored bytes, converts them to 16/32bit word data
 /// \param ea  linear address
-/// \param n   number of operand (0,1,-1)
+/// \param n   number of operand (0, 1, -1)
 /// \return success
 
-idaman bool ida_export op_seg(ea_t ea,int n);
+idaman bool ida_export op_seg(ea_t ea, int n);
 
 
 /// Set operand representation to be 'enum_t'.
 /// If applied to unexplored bytes, converts them to 16/32bit word data
 /// \param ea      linear address
-/// \param n       number of operand (0,1,-1)
+/// \param n       number of operand (0, 1, -1)
 /// \param id      id of enum
 /// \param serial  the serial number of the constant in the enumeration,
 ///                usually 0. the serial numbers are used if the enumeration
 ///                contains several constants with the same value
 /// \return success
 
-idaman bool ida_export op_enum(ea_t ea,int n,enum_t id, uchar serial);
+idaman bool ida_export op_enum(ea_t ea, int n, enum_t id, uchar serial);
 
 
 /// Get enum id of 'enum' operand.
 /// \param ea      linear address
-/// \param n       number of operand (0,1,-1)
+/// \param n       number of operand (0, 1, -1)
 /// \param serial  pointer to variable to hold the serial number of the
 ///                constant in the enumeration
 /// \return id of enum or #BADNODE
 
-idaman enum_t ida_export get_enum_id(ea_t ea,int n, uchar *serial);
+idaman enum_t ida_export get_enum_id(uchar *serial, ea_t ea, int n);
 
 
 /// Set operand representation to be 'struct offset'.
 /// If applied to unexplored bytes, converts them to 16/32bit word data
-/// \param ea        linear address
-/// \param n         number of operand (0,1,-1)
+/// \param insn      the instruction
+/// \param n         number of operand (0, 1, -1)
 /// \param path      structure path (strpath). see nalt.hpp for more info.
 /// \param path_len  length of the structure path
 /// \param delta     struct offset delta. usually 0. denotes the difference
 ///                  between the structure base and the pointer into the structure.
 /// \return success
 
-idaman bool ida_export op_stroff(ea_t ea, int n, const tid_t *path, int path_len, adiff_t delta);
+idaman bool ida_export op_stroff(
+        const insn_t &insn,
+        int n,
+        const tid_t *path,
+        int path_len,
+        adiff_t delta);
 
 
 /// Get struct path of operand.
-/// \param  ea     linear address
-/// \param  n      number of operand (0,1,-1)
 /// \param  path   buffer for structure path (strpath). see nalt.hpp for more info.
 /// \param  delta  struct offset delta
+/// \param  ea     linear address
+/// \param  n      number of operand (0, 1, -1)
 /// \return length of strpath
 
-idaman int ida_export get_stroff_path(ea_t ea, int n, tid_t *path, adiff_t *delta);
+idaman int ida_export get_stroff_path(tid_t *path, adiff_t *delta, ea_t ea, int n);
 
 /// Set operand representation to be 'stack variable'.
 /// Should be applied to an instruction within a function.
-/// Should be applied after creating a stack var using ua_stkvar().
+/// Should be applied after creating a stack var using
+/// insn_t::create_stkvar().
 /// \param ea  linear address
-/// \param n   number of operand (0,1,-1)
+/// \param n   number of operand (0, 1, -1)
 /// \return success
 
-idaman bool ida_export op_stkvar(ea_t ea,int n);
+idaman bool ida_export op_stkvar(ea_t ea, int n);
 
 
 /// Set forced operand.
 /// \param ea  linear address
-/// \param n   number of operand (0,1,2)
+/// \param n   number of operand (0, 1, 2)
 /// \param op  text of operand
 /// \return success
 
-idaman bool ida_export set_forced_operand(ea_t ea,int n,const char *op);
+idaman bool ida_export set_forced_operand(ea_t ea, int n, const char *op);
 
 
 /// Get forced operand.
-/// \param ea       linear address
-/// \param n        number of operand (0,1,2)
 /// \param buf      output buffer, may be NULL
-/// \param bufsize  size of output buffer
+/// \param ea       linear address
+/// \param n        number of operand (0, 1, 2)
 /// \return size of forced operand or -1
 
-idaman ssize_t ida_export get_forced_operand(ea_t ea, int n, char *buf, size_t bufsize);
+idaman ssize_t ida_export get_forced_operand(qstring *buf, ea_t ea, int n);
 
 
 /// Is operand manually defined?.
 /// \param ea  linear address
-/// \param n   number of operand (0,1,2)
+/// \param n   number of operand (0, 1, 2)
 
 idaman bool ida_export is_forced_operand(ea_t ea, int n);
 
@@ -1295,20 +1272,21 @@ idaman bool ida_export is_forced_operand(ea_t ea, int n);
   Values of these functions are used as input to set_op_type() function
 */
 //@{
-inline flags_t idaapi charflag(void) { return FF_1CHAR|FF_0CHAR; }      ///< see \ref FF_opbits
-inline flags_t idaapi offflag (void) { return FF_1OFF |FF_0OFF ; }      ///< see \ref FF_opbits
-inline flags_t idaapi enumflag(void) { return FF_1ENUM|FF_0ENUM; }      ///< see \ref FF_opbits
-inline flags_t idaapi stroffflag(void) { return FF_1STRO|FF_0STRO; }    ///< see \ref FF_opbits
-inline flags_t idaapi stkvarflag(void) { return FF_1STK|FF_0STK; }      ///< see \ref FF_opbits
-inline flags_t idaapi fltflag(void)  { return FF_1FLT |FF_0FLT;  }      ///< see \ref FF_opbits
-inline flags_t idaapi custfmtflag(void)  { return FF_1CUST |FF_0CUST; } ///< see \ref FF_opbits
-inline flags_t idaapi segflag (void) { return FF_1SEG |FF_0SEG;  }      ///< see \ref FF_opbits
-idaman flags_t ida_export numflag(void); ///< Get number of default base (bin,oct,dec,hex)
-/// Get number flag of the base, regardless of current processor - better to use numflag()
-inline flags_t idaapi hexflag (void) { return FF_1NUMH|FF_0NUMH; }
-inline flags_t idaapi decflag (void) { return FF_1NUMD|FF_0NUMD; } ///< \copydoc hexflag()
-inline flags_t idaapi octflag (void) { return FF_1NUMO|FF_0NUMO; } ///< \copydoc hexflag()
-inline flags_t idaapi binflag (void) { return FF_1NUMB|FF_0NUMB; } ///< \copydoc hexflag()
+inline flags_t idaapi char_flag(void)    { return FF_1CHAR|FF_0CHAR; } ///< see \ref FF_opbits
+inline flags_t idaapi off_flag(void)     { return FF_1OFF |FF_0OFF;  } ///< see \ref FF_opbits
+inline flags_t idaapi enum_flag(void)    { return FF_1ENUM|FF_0ENUM; } ///< see \ref FF_opbits
+inline flags_t idaapi stroff_flag(void)  { return FF_1STRO|FF_0STRO; } ///< see \ref FF_opbits
+inline flags_t idaapi stkvar_flag(void)  { return FF_1STK |FF_0STK;  } ///< see \ref FF_opbits
+inline flags_t idaapi flt_flag(void)     { return FF_1FLT |FF_0FLT;  } ///< see \ref FF_opbits
+inline flags_t idaapi custfmt_flag(void) { return FF_1CUST|FF_0CUST; } ///< see \ref FF_opbits
+inline flags_t idaapi seg_flag(void)     { return FF_1SEG |FF_0SEG;  } ///< see \ref FF_opbits
+
+idaman flags_t ida_export num_flag(void); ///< Get number of default base (bin, oct, dec, hex)
+/// Get number flag of the base, regardless of current processor - better to use num_flag()
+inline flags_t idaapi hex_flag(void)     { return FF_1NUMH|FF_0NUMH; }
+inline flags_t idaapi dec_flag(void)     { return FF_1NUMD|FF_0NUMD; } ///< \copydoc hex_flag()
+inline flags_t idaapi oct_flag(void)     { return FF_1NUMO|FF_0NUMO; } ///< \copydoc hex_flag()
+inline flags_t idaapi bin_flag(void)     { return FF_1NUMB|FF_0NUMB; } ///< \copydoc hex_flag()
 //@}
 
 /*! \defgroup FF_opfuncs4 Functions: set operand representation
@@ -1318,17 +1296,17 @@ inline flags_t idaapi binflag (void) { return FF_1NUMB|FF_0NUMB; } ///< \copydoc
     - 16bit segment : to 16bit word data
     - 32bit segment : to dword
   \param ea  linear address
-  \param n   number of operand (0,1,-1)
+  \param n   number of operand (0, 1, -1)
   \return success
 */
 //@{
-inline bool idaapi op_chr(ea_t ea,int n) { return set_op_type(ea,charflag(),n); } ///< set op type to charflag()
-inline bool idaapi op_num(ea_t ea,int n) { return set_op_type(ea,numflag (),n); } ///< set op type to numflag()
-inline bool idaapi op_hex(ea_t ea,int n) { return set_op_type(ea,hexflag (),n); } ///< set op type to hexflag()
-inline bool idaapi op_dec(ea_t ea,int n) { return set_op_type(ea,decflag (),n); } ///< set op type to decflag()
-inline bool idaapi op_oct(ea_t ea,int n) { return set_op_type(ea,octflag (),n); } ///< set op type to octflag()
-inline bool idaapi op_bin(ea_t ea,int n) { return set_op_type(ea,binflag (),n); } ///< set op type to binflag()
-inline bool idaapi op_flt(ea_t ea,int n) { return set_op_type(ea,fltflag (),n); } ///< set op type to fltflag()
+inline bool idaapi op_chr(ea_t ea, int n) { return set_op_type(ea, char_flag(), n); } ///< set op type to char_flag()
+inline bool idaapi op_num(ea_t ea, int n) { return set_op_type(ea, num_flag(), n); } ///< set op type to num_flag()
+inline bool idaapi op_hex(ea_t ea, int n) { return set_op_type(ea, hex_flag(), n); } ///< set op type to hex_flag()
+inline bool idaapi op_dec(ea_t ea, int n) { return set_op_type(ea, dec_flag(), n); } ///< set op type to dec_flag()
+inline bool idaapi op_oct(ea_t ea, int n) { return set_op_type(ea, oct_flag(), n); } ///< set op type to oct_flag()
+inline bool idaapi op_bin(ea_t ea, int n) { return set_op_type(ea, bin_flag(), n); } ///< set op type to bin_flag()
+inline bool idaapi op_flt(ea_t ea, int n) { return set_op_type(ea, flt_flag(), n); } ///< set op type to flt_flag()
 //@}
 
 /// Set custom data format for operand (fid-custom data format id)
@@ -1339,109 +1317,99 @@ idaman bool ida_export op_custfmt(ea_t ea, int n, int fid);
 /// Remove operand representation information.
 /// (set operand representation to be 'undefined')
 /// \param  ea  linear address
-/// \param  n   number of operand (0,1,-1)
-/// \return 1
+/// \param  n   number of operand (0, 1, -1)
+/// \return success
 
-idaman bool ida_export noType(ea_t ea,int n);
+idaman bool ida_export clr_op_type(ea_t ea, int n);
 
 
 /// Get default base of number for the current processor.
-/// \return 2,8,10,16
+/// \return 2, 8, 10, 16
 
-idaman int ida_export getDefaultRadix(void);
+idaman int ida_export get_default_radix(void);
 
 
 /// Get radix of the operand, in: flags.
-/// If the operand is not a number, returns getDefaultRadix()
+/// If the operand is not a number, returns get_default_radix()
 /// \param F  flags
-/// \param n  number of operand (0,1,-1)
-/// \return 2,8,10,16
+/// \param n  number of operand (0, 1, -1)
+/// \return 2, 8, 10, 16
 
-idaman int ida_export getRadix(flags_t F,int n);
-
-
-/// Get radix of the operand, in: address.
-/// If the operand is not a number, returns getDefaultRadix()
-/// \param ea  linear address
-/// \param n   number of operand (0,1,-1)
-/// \return 2,8,10,16
-
-idaman int ida_export getRadixEA(ea_t ea,int n);
-
+idaman int ida_export get_radix(flags_t F, int n);
 
 
 //-------------------------------------------------------------------------
 /// \defgroup FF_databits Bits: data bytes
 //@{
-#define DT_TYPE 0xF0000000LU             ///< Mask for DATA typing
+#define DT_TYPE 0xF0000000             ///< Mask for DATA typing
 
-#define FF_BYTE     0x00000000LU         ///< byte
-#define FF_WORD     0x10000000LU         ///< word
-#define FF_DWRD     0x20000000LU         ///< double word
-#define FF_QWRD     0x30000000LU         ///< quadro word
-#define FF_TBYT     0x40000000LU         ///< tbyte
-#define FF_ASCI     0x50000000LU         ///< ASCII ?
-#define FF_STRU     0x60000000LU         ///< Struct ?
-#define FF_OWRD     0x70000000LU         ///< octaword/xmm word (16 bytes/128 bits)
-#define FF_FLOAT    0x80000000LU         ///< float
-#define FF_DOUBLE   0x90000000LU         ///< double
-#define FF_PACKREAL 0xA0000000LU         ///< packed decimal real
-#define FF_ALIGN    0xB0000000LU         ///< alignment directive
-#define FF_3BYTE    0xC0000000LU         ///< 3-byte data (only with support from the processor module)
-#define FF_CUSTOM   0xD0000000LU         ///< custom data type
-#define FF_YWRD     0xE0000000LU         ///< ymm word (32 bytes/256 bits)
+#define FF_BYTE     0x00000000         ///< byte
+#define FF_WORD     0x10000000         ///< word
+#define FF_DWORD    0x20000000         ///< double word
+#define FF_QWORD    0x30000000         ///< quadro word
+#define FF_TBYTE    0x40000000         ///< tbyte
+#define FF_STRLIT   0x50000000         ///< string literal
+#define FF_STRUCT   0x60000000         ///< struct variable
+#define FF_OWORD    0x70000000         ///< octaword/xmm word (16 bytes/128 bits)
+#define FF_FLOAT    0x80000000         ///< float
+#define FF_DOUBLE   0x90000000         ///< double
+#define FF_PACKREAL 0xA0000000         ///< packed decimal real
+#define FF_ALIGN    0xB0000000         ///< alignment directive
+//                  0xC0000000         ///< reserved
+#define FF_CUSTOM   0xD0000000         ///< custom data type
+#define FF_YWORD    0xE0000000         ///< ymm word (32 bytes/256 bits)
+#define FF_ZWORD    0xF0000000         ///< zmm word (64 bytes/512 bits)
 //@}
 
 /// \defgroup FF_datafuncs1 Functions: examine data bits
 //@{
-inline flags_t idaapi codeflag(void) { return FF_CODE; }                  ///< #FF_CODE
-inline flags_t idaapi byteflag(void) { return FF_DATA|FF_BYTE; }          ///< Get a flags_t representing a byte
-inline flags_t idaapi wordflag(void) { return FF_DATA|FF_WORD; }          ///< Get a flags_t representing a word
-inline flags_t idaapi dwrdflag(void) { return FF_DATA|FF_DWRD; }          ///< Get a flags_t representing a double word
-inline flags_t idaapi qwrdflag(void) { return FF_DATA|FF_QWRD; }          ///< Get a flags_t representing a quad word
-inline flags_t idaapi owrdflag(void) { return FF_DATA|FF_OWRD; }          ///< Get a flags_t representing a octaword
-inline flags_t idaapi ywrdflag(void) { return FF_DATA|FF_YWRD; }          ///< Get a flags_t representing a ymm word
-inline flags_t idaapi tbytflag(void) { return FF_DATA|FF_TBYT; }          ///< Get a flags_t representing a tbyte
-inline flags_t idaapi asciflag(void) { return FF_DATA|FF_ASCI; }          ///< Get a flags_t representing ascii data
-inline flags_t idaapi struflag(void) { return FF_DATA|FF_STRU; }          ///< Get a flags_t representing a struct
-inline flags_t idaapi custflag(void) { return FF_DATA|FF_CUSTOM; }        ///< Get a flags_t representing custom type data
-inline flags_t idaapi alignflag(void) { return FF_DATA|FF_ALIGN; }        ///< Get a flags_t representing an alignment directive
-inline flags_t idaapi floatflag(void) { return FF_DATA|FF_FLOAT; }        ///< Get a flags_t representing a float
-inline flags_t idaapi doubleflag(void) { return FF_DATA|FF_DOUBLE; }      ///< Get a flags_t representing a double
-inline flags_t idaapi tribyteflag(void) { return FF_DATA|FF_3BYTE; }      ///< Get a flags_t representing 3-byte data
-inline flags_t idaapi packrealflag(void) { return FF_DATA|FF_PACKREAL; }  ///< Get a flags_t representing a packed decimal real
+inline flags_t idaapi code_flag(void)     { return FF_CODE; }              ///< #FF_CODE
+inline flags_t idaapi byte_flag(void)     { return FF_DATA|FF_BYTE; }      ///< Get a flags_t representing a byte
+inline flags_t idaapi word_flag(void)     { return FF_DATA|FF_WORD; }      ///< Get a flags_t representing a word
+inline flags_t idaapi dword_flag(void)    { return FF_DATA|FF_DWORD; }     ///< Get a flags_t representing a double word
+inline flags_t idaapi qword_flag(void)    { return FF_DATA|FF_QWORD; }     ///< Get a flags_t representing a quad word
+inline flags_t idaapi oword_flag(void)    { return FF_DATA|FF_OWORD; }     ///< Get a flags_t representing a octaword
+inline flags_t idaapi yword_flag(void)    { return FF_DATA|FF_YWORD; }     ///< Get a flags_t representing a ymm word
+inline flags_t idaapi zword_flag(void)    { return FF_DATA|FF_ZWORD; }     ///< Get a flags_t representing a zmm word
+inline flags_t idaapi tbyte_flag(void)    { return FF_DATA|FF_TBYTE; }     ///< Get a flags_t representing a tbyte
+inline flags_t idaapi strlit_flag(void)   { return FF_DATA|FF_STRLIT; }    ///< Get a flags_t representing a string literal
+inline flags_t idaapi stru_flag(void)     { return FF_DATA|FF_STRUCT; }    ///< Get a flags_t representing a struct
+inline flags_t idaapi cust_flag(void)     { return FF_DATA|FF_CUSTOM; }    ///< Get a flags_t representing custom type data
+inline flags_t idaapi align_flag(void)    { return FF_DATA|FF_ALIGN; }     ///< Get a flags_t representing an alignment directive
+inline flags_t idaapi float_flag(void)    { return FF_DATA|FF_FLOAT; }     ///< Get a flags_t representing a float
+inline flags_t idaapi double_flag(void)   { return FF_DATA|FF_DOUBLE; }    ///< Get a flags_t representing a double
+inline flags_t idaapi packreal_flag(void) { return FF_DATA|FF_PACKREAL; }  ///< Get a flags_t representing a packed decimal real
 
-inline bool idaapi isByte  (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_BYTE; }      ///< #FF_BYTE
-inline bool idaapi isWord  (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_WORD; }      ///< #FF_WORD
-inline bool idaapi isDwrd  (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_DWRD; }      ///< #FF_DWRD
-inline bool idaapi isQwrd  (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_QWRD; }      ///< #FF_QWRD
-inline bool idaapi isOwrd  (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_OWRD; }      ///< #FF_OWRD
-inline bool idaapi isYwrd  (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_YWRD; }      ///< #FF_YWRD
-inline bool idaapi isTbyt  (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_TBYT; }      ///< #FF_TBYT
-inline bool idaapi isFloat (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_FLOAT; }     ///< #FF_FLOAT
-inline bool idaapi isDouble(flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_DOUBLE; }    ///< #FF_DOUBLE
-inline bool idaapi isPackReal(flags_t F) { return isData(F) && (F & DT_TYPE) == FF_PACKREAL; }  ///< #FF_PACKREAL
-inline bool idaapi isASCII (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_ASCI; }      ///< #FF_ASCI
-inline bool idaapi isStruct(flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_STRU; }      ///< #FF_STRU
-inline bool idaapi isAlign (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_ALIGN; }     ///< #FF_ALIGN
-inline bool idaapi is3byte (flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_3BYTE; }     ///< #FF_3BYTE
-inline bool idaapi isCustom(flags_t F)   { return isData(F) && (F & DT_TYPE) == FF_CUSTOM; }    ///< #FF_CUSTOM
+inline bool idaapi is_byte(flags_t F)      { return is_data(F) && (F & DT_TYPE) == FF_BYTE; }      ///< #FF_BYTE
+inline bool idaapi is_word(flags_t F)      { return is_data(F) && (F & DT_TYPE) == FF_WORD; }      ///< #FF_WORD
+inline bool idaapi is_dword(flags_t F)     { return is_data(F) && (F & DT_TYPE) == FF_DWORD; }     ///< #FF_DWORD
+inline bool idaapi is_qword(flags_t F)     { return is_data(F) && (F & DT_TYPE) == FF_QWORD; }     ///< #FF_QWORD
+inline bool idaapi is_oword(flags_t F)     { return is_data(F) && (F & DT_TYPE) == FF_OWORD; }     ///< #FF_OWORD
+inline bool idaapi is_yword(flags_t F)     { return is_data(F) && (F & DT_TYPE) == FF_YWORD; }     ///< #FF_YWORD
+inline bool idaapi is_zword(flags_t F)     { return is_data(F) && (F & DT_TYPE) == FF_ZWORD; }     ///< #FF_ZWORD
+inline bool idaapi is_tbyte(flags_t F)     { return is_data(F) && (F & DT_TYPE) == FF_TBYTE; }     ///< #FF_TBYTE
+inline bool idaapi is_float(flags_t F)     { return is_data(F) && (F & DT_TYPE) == FF_FLOAT; }     ///< #FF_FLOAT
+inline bool idaapi is_double(flags_t F)    { return is_data(F) && (F & DT_TYPE) == FF_DOUBLE; }    ///< #FF_DOUBLE
+inline bool idaapi is_pack_real(flags_t F) { return is_data(F) && (F & DT_TYPE) == FF_PACKREAL; }  ///< #FF_PACKREAL
+inline bool idaapi is_strlit(flags_t F)    { return is_data(F) && (F & DT_TYPE) == FF_STRLIT; }    ///< #FF_STRLIT
+inline bool idaapi is_struct(flags_t F)    { return is_data(F) && (F & DT_TYPE) == FF_STRUCT; }    ///< #FF_STRUCT
+inline bool idaapi is_align(flags_t F)     { return is_data(F) && (F & DT_TYPE) == FF_ALIGN; }     ///< #FF_ALIGN
+inline bool idaapi is_custom(flags_t F)    { return is_data(F) && (F & DT_TYPE) == FF_CUSTOM; }    ///< #FF_CUSTOM
 
-inline bool idaapi f_isByte  (flags_t F, void *)   { return isByte(F); }                        ///< See isByte()
-inline bool idaapi f_isWord  (flags_t F, void *)   { return isWord(F); }                        ///< See isWord()
-inline bool idaapi f_isDwrd  (flags_t F, void *)   { return isDwrd(F); }                        ///< See isDwrd()
-inline bool idaapi f_isQwrd  (flags_t F, void *)   { return isQwrd(F); }                        ///< See isQwrd()
-inline bool idaapi f_isOwrd  (flags_t F, void *)   { return isOwrd(F); }                        ///< See isOwrd()
-inline bool idaapi f_isYwrd  (flags_t F, void *)   { return isYwrd(F); }                        ///< See isYwrd()
-inline bool idaapi f_isTbyt  (flags_t F, void *)   { return isTbyt(F); }                        ///< See isTbyt()
-inline bool idaapi f_isFloat (flags_t F, void *)   { return isFloat(F); }                       ///< See isFloat()
-inline bool idaapi f_isDouble(flags_t F, void *)   { return isDouble(F); }                      ///< See isDouble()
-inline bool idaapi f_isPackReal(flags_t F, void *) { return isPackReal(F); }                    ///< See isPackReal()
-inline bool idaapi f_isASCII (flags_t F, void *)   { return isASCII(F); }                       ///< See isASCII()
-inline bool idaapi f_isStruct(flags_t F, void *)   { return isStruct(F); }                      ///< See isStruct()
-inline bool idaapi f_isAlign (flags_t F, void *)   { return isAlign(F); }                       ///< See isAlign()
-inline bool idaapi f_is3byte (flags_t F, void *)   { return is3byte(F); }                       ///< See is3byte()
-inline bool idaapi f_isCustom(flags_t F, void *)   { return isCustom(F); }                      ///< See isCustom()
+inline bool idaapi f_is_byte(flags_t F, void *)      { return is_byte(F); }                        ///< See is_byte()
+inline bool idaapi f_is_word(flags_t F, void *)      { return is_word(F); }                        ///< See is_word()
+inline bool idaapi f_is_dword(flags_t F, void *)     { return is_dword(F); }                       ///< See is_dword()
+inline bool idaapi f_is_qword(flags_t F, void *)     { return is_qword(F); }                       ///< See is_qword()
+inline bool idaapi f_is_oword(flags_t F, void *)     { return is_oword(F); }                       ///< See is_oword()
+inline bool idaapi f_is_yword(flags_t F, void *)     { return is_yword(F); }                       ///< See is_yword()
+inline bool idaapi f_is_tbyte(flags_t F, void *)     { return is_tbyte(F); }                       ///< See is_tbyte()
+inline bool idaapi f_is_float(flags_t F, void *)     { return is_float(F); }                       ///< See is_float()
+inline bool idaapi f_is_double(flags_t F, void *)    { return is_double(F); }                      ///< See is_double()
+inline bool idaapi f_is_pack_real(flags_t F, void *) { return is_pack_real(F); }                   ///< See is_pack_real()
+inline bool idaapi f_is_strlit(flags_t F, void *)    { return is_strlit(F); }                      ///< See is_strlit()
+inline bool idaapi f_is_struct(flags_t F, void *)    { return is_struct(F); }                      ///< See is_struct()
+inline bool idaapi f_is_align(flags_t F, void *)     { return is_align(F); }                       ///< See is_align()
+inline bool idaapi f_is_custom(flags_t F, void *)    { return is_custom(F); }                      ///< See is_custom()
 
 
 /// Do the given flags specify the same data type?
@@ -1450,11 +1418,12 @@ inline bool idaapi is_same_data_type(flags_t F1, flags_t F2) { return ((F1 ^ F2)
 
 
 /// Get flags from size (in bytes).
-/// Supported sizes: 1,2,4,8,16,32.
+/// Supported sizes: 1, 2, 4, 8, 16, 32.
 /// For other sizes returns 0
 
 idaman flags_t ida_export get_flags_by_size(size_t size);
 //@} FF_datafuncs1
+
 
 /// \defgroup FF_datafuncs2 Functions: manipulate data bits
 /// \param ea      linear address
@@ -1463,10 +1432,10 @@ idaman flags_t ida_export get_flags_by_size(size_t size);
 /// \return success
 //@{
 
-/// Convert to data (byte,word,dword,etc).
+/// Convert to data (byte, word, dword, etc).
 /// This function may be used to create arrays.
 /// \param ea        linear address
-/// \param dataflag  type of data. Value of function byteflag(), wordflag(), etc.
+/// \param dataflag  type of data. Value of function byte_flag(), word_flag(), etc.
 /// \param size      size of array in bytes. should be divisible by the size of
 ///                  one item of the specified type. for variable sized items
 ///                  it can be specified as 0, and the kernel will try to calculate the size.
@@ -1474,137 +1443,181 @@ idaman flags_t ida_export get_flags_by_size(size_t size);
 ///                  then tid is structure id. Otherwise should be #BADNODE.
 /// \return success
 
-idaman bool ida_export do_data_ex(
+idaman bool ida_export create_data(
         ea_t ea,
         flags_t dataflag,
         asize_t size,
         tid_t tid);
 
-inline bool idaapi doByte(ea_t ea, asize_t length)     { return do_data_ex(ea, FF_BYTE, length, BADNODE); }      ///< Convert to byte
-inline bool idaapi doWord(ea_t ea, asize_t length)     { return do_data_ex(ea, FF_WORD, length, BADNODE); }      ///< Convert to word
-inline bool idaapi doDwrd(ea_t ea, asize_t length)     { return do_data_ex(ea, FF_DWRD, length, BADNODE); }      ///< Convert to dword
-inline bool idaapi doQwrd(ea_t ea, asize_t length)     { return do_data_ex(ea, FF_QWRD, length, BADNODE); }      ///< Convert to quadword
-inline bool idaapi doOwrd(ea_t ea, asize_t length)     { return do_data_ex(ea, FF_OWRD, length, BADNODE); }      ///< Convert to octaword/xmm word
-inline bool idaapi doYwrd(ea_t ea, asize_t length)     { return do_data_ex(ea, FF_YWRD, length, BADNODE); }      ///< Convert to ymm word
-inline bool idaapi doTbyt(ea_t ea, asize_t length)     { return do_data_ex(ea, FF_TBYT, length, BADNODE); }      ///< Convert to tbyte
-inline bool idaapi doFloat(ea_t ea, asize_t length)    { return do_data_ex(ea, FF_FLOAT, length, BADNODE); }     ///< Convert to float
-inline bool idaapi doDouble(ea_t ea, asize_t length)   { return do_data_ex(ea, FF_DOUBLE, length, BADNODE); }    ///< Convert to double
-inline bool idaapi doPackReal(ea_t ea, asize_t length) { return do_data_ex(ea, FF_PACKREAL, length, BADNODE); }  ///< Convert to packed decimal real
-inline bool idaapi doASCI(ea_t ea, asize_t length)     { return do_data_ex(ea, FF_ASCI, length, BADNODE); }      ///< Convert to ascii
-inline bool idaapi do3byte(ea_t ea, asize_t length)    { return do_data_ex(ea, FF_3BYTE, length, BADNODE); }     ///< Convert to 3-byte data
-inline bool idaapi doStruct(ea_t ea, asize_t length,tid_t tid) { return do_data_ex(ea, FF_STRU, length, tid); }  ///< Convert to struct
+inline bool idaapi create_byte(ea_t ea, asize_t length)     { return create_data(ea, FF_BYTE, length, BADNODE); }      ///< Convert to byte
+inline bool idaapi create_word(ea_t ea, asize_t length)     { return create_data(ea, FF_WORD, length, BADNODE); }      ///< Convert to word
+inline bool idaapi create_dword(ea_t ea, asize_t length)     { return create_data(ea, FF_DWORD, length, BADNODE); }      ///< Convert to dword
+inline bool idaapi create_qword(ea_t ea, asize_t length)     { return create_data(ea, FF_QWORD, length, BADNODE); }      ///< Convert to quadword
+inline bool idaapi create_oword(ea_t ea, asize_t length)     { return create_data(ea, FF_OWORD, length, BADNODE); }      ///< Convert to octaword/xmm word
+inline bool idaapi create_yword(ea_t ea, asize_t length)     { return create_data(ea, FF_YWORD, length, BADNODE); }      ///< Convert to ymm word
+inline bool idaapi create_zword(ea_t ea, asize_t length)     { return create_data(ea, FF_ZWORD, length, BADNODE); }      ///< Convert to zmm word
+inline bool idaapi create_tbyte(ea_t ea, asize_t length)     { return create_data(ea, FF_TBYTE, length, BADNODE); }      ///< Convert to tbyte
+inline bool idaapi create_float(ea_t ea, asize_t length)    { return create_data(ea, FF_FLOAT, length, BADNODE); }     ///< Convert to float
+inline bool idaapi create_double(ea_t ea, asize_t length)   { return create_data(ea, FF_DOUBLE, length, BADNODE); }    ///< Convert to double
+inline bool idaapi create_packed_real(ea_t ea, asize_t length) { return create_data(ea, FF_PACKREAL, length, BADNODE); }  ///< Convert to packed decimal real
+inline bool idaapi create_struct(ea_t ea, asize_t length, tid_t tid) { return create_data(ea, FF_STRUCT, length, tid); }  ///< Convert to struct
 /// Convert to custom data type
-inline bool idaapi doCustomData(ea_t ea, asize_t length, int dtid, int fid)
+inline bool idaapi create_custdata(ea_t ea, asize_t length, int dtid, int fid)
 {
-  return do_data_ex(ea, FF_CUSTOM, length, dtid|(fid<<16));
+  return create_data(ea, FF_CUSTOM, length, dtid|(fid<<16));
 }
 /// Alignment: 0 or 2..32. If it is 0, is will be calculated
-idaman bool ida_export doAlign(ea_t ea, asize_t length,int alignment);
-idaman int  ida_export calc_min_align( asize_t length);             ///< Returns: 1..32
+idaman bool ida_export create_align(ea_t ea, asize_t length, int alignment);
+idaman int  ida_export calc_min_align(asize_t length);              ///< Returns: 1..32
 idaman int  ida_export calc_max_align(ea_t endea);                  ///< Returns: 0..32
 idaman int  ida_export calc_def_align(ea_t ea, int mina, int maxa); ///< Calculate default alignment
-idaman bool ida_export do16bit(ea_t ea, asize_t length);            ///< Convert to 16-bit quantity (take byte size into account)
-idaman bool ida_export do32bit(ea_t ea, asize_t length);            ///< Convert to 32-bit quantity (take byte size into account)
+idaman bool ida_export create_16bit_data(ea_t ea, asize_t length);            ///< Convert to 16-bit quantity (take byte size into account)
+idaman bool ida_export create_32bit_data(ea_t ea, asize_t length);            ///< Convert to 32-bit quantity (take byte size into account)
 //@} FF_datafuncs2
 
 //@} FF_op
 
-/// \defgroup ALOPT_ ASCII length options
-/// passed as 'options' parameter to get_max_ascii_length()
+/// \defgroup ALOPT_ string literal length options
+/// passed as 'options' parameter to get_max_strlit_length()
 //@{
-#define ALOPT_IGNHEADS 0x01  ///< don't stop if another data item is encountered.
-                             ///< only the byte values will be used to determine
-                             ///< the string length.
-                             ///< if not set, a defined data item or instruction
-                             ///< will truncate the string
-#define ALOPT_IGNPRINT 0x02  ///< if set, stop only at the terminating character.
-                             ///< otherwise stop at the first non-printable character
-                             ///< (i.e. not in the AsciiStringChars array in ida.cfg)
+#define ALOPT_IGNHEADS 0x01 ///< don't stop if another data item is encountered.
+                            ///< only the byte values will be used to determine
+                            ///< the string length.
+                            ///< if not set, a defined data item or instruction
+                            ///< will truncate the string
+#define ALOPT_IGNPRINT 0x02 ///< if set, don't stop at non-printable codepoints,
+                            ///< but only at the terminating character (or not
+                            ///< unicode-mapped character (e.g., 0x8f in CP1252))
+#define ALOPT_IGNCLT   0x04 ///< if set, don't stop at codepoints that are not
+                            ///< part of the current 'culture'; accept all
+                            ///< those that are graphical (this is typically
+                            ///< used used by user-initiated actions creating
+                            ///< string literals.)
+#define ALOPT_MAX4K    0x08 ///< if string length is more than 4K, return the
+                            ///< accumulated length
+
+
 //@}
 
-/// Determine maximum length of ascii string.
+/// Determine maximum length of string literal.
 /// \param ea       starting address
-/// \param strtype  string type. one of \ref ASCSTR_
+/// \param strtype  string type. one of \ref STRTYPE_
 /// \param options  combination of \ref ALOPT_
-/// \return length of the string in bytes, including the terminating byte(s), if any
+/// \return length of the string in bytes, including the terminating character(s), if any
+///
+/// Note: 'bytes' in this context means host, 8-bit bytes
+/// (not IDB bytes, which could be larger than 8 bits)
 
-idaman size_t ida_export get_max_ascii_length(
+idaman size_t ida_export get_max_strlit_length(
         ea_t ea,
         int32 strtype,
         int options = 0);
 
-/// \defgroup ACFOPT_ ASCII conversion flags
-/// passed as 'flags' parameter to get_ascii_contents2()
+/// \defgroup STRCONV_ string conversion flags
+/// passed as 'flags' parameter to get_strlit_contents()
 //@{
-#define ACFOPT_ASCII    0x00000000 ///< convert Unicode strings to ASCII
-#define ACFOPT_UTF16    0x00000001 ///< return UTF-16 (aka wide-char) array for Unicode strings
-                                   ///< ignored for non-Unicode strings
-#define ACFOPT_UTF8     0x00000002 ///< convert Unicode strings to UTF-8
-                                   ///< ignored for non-Unicode strings
-#define ACFOPT_CONVMASK 0x0000000F
-#define ACFOPT_ESCAPE   0x00000010 ///< convert non-printable characters to C escapes (\n, \xNN, \uNNNN)
-                                   ///< (for #ACFOPT_ASCII and #ACFOPT_UTF8)
+#define STRCONV_ESCAPE   0x00000001 ///< convert non-printable characters to C escapes (\n, \xNN, \uNNNN)
+#define STRCONV_REPLCHAR 0x00000002 ///< convert non-printable characters to the Unicode replacement character (U+FFFD)
+#define STRCONV_INCLLEN  0x00000004 ///< for Pascal-style strings, include the prefixing length byte(s) as C-escaped sequence
 //@}
 
-/// Get contents of ascii string.
+/// Get contents of string literal, as UTF-8-encoded codepoints.
 /// This function returns the displayed part of the string
 /// It works even if the string has not been created in the database yet.
-/// \param ea        linear address of the string
-/// \param len       length of the string in bytes
-/// \param type      type of the string. one of \ref ASCSTR_
-/// \param buf       output buffer
-/// \param bufsize   size of output buffer
-/// \param usedsize  on exit, number of bytes in buf filled with string data
-///                  (not counting terminating zeroes)
-///                  can be NULL if not needed
-/// \param flags     combination of \ref ACFOPT_
-/// \return 1 ok
-/// \return 0 ascii string is too long and was truncated
+///
+/// If 'len' is size_t(-1), it will be computed like so:
+///  - if a string literal is present at 'ea', get_item_size() will be used
+///  - otherwise, get_max_strlit_length(..., ALOPT_IGNHEADS) will be used
+///
+/// About 'maxcps': this specifies a limit to the number of codepoints,
+/// not bytes in the UTF-8 output buffer. So for example although U+4e12
+/// will use 3 bytes in the output buffer, it still counts as only 1
+/// character -- unless STRCONV_ESCAPE is used.
+/// If 'STRCONV_ESCAPE' is used, U+4e12 will be converted to the string
+/// "\u4E12", and will use 6 bytes in the output buffer and also count
+/// as 6 codepoints.
+///
+/// If 'STRCONV_REPLCHAR', any undecodable byte will re represented
+/// as U+FFFD, occupy 3 bytes in the output buffer, and count for 1 codepoint.
+///
+/// \param[out]    utf8        output buffer
+/// \param[in]     ea          linear address of the string
+/// \param[in]     len         length of the string in bytes
+/// \param[in]     type        type of the string. one of \ref STRTYPE_
+/// \param[in, out] maxcps      maximum length of codepoints, after possible
+///                            escaping, in output buffer (not counting terminating zero)
+///                            on exit, will be set to 0 if string got truncated
+///                            can be NULL if not needed
+/// \param[in]     flags       combination of \ref STRCONV_
+/// \return length of generated text (in bytes) or -1
+///
+/// Note: 'bytes' in this context means host, 8-bit bytes
+/// (not IDB bytes, which could be larger than 8 bits)
 
-idaman bool ida_export get_ascii_contents2(
+idaman ssize_t ida_export get_strlit_contents(
+        qstring *utf8,
         ea_t ea,
         size_t len,
         int32 type,
-        void *buf,
-        size_t bufsize,
-        size_t *usedsize = NULL,
-        int flags = ACFOPT_ASCII);
+        size_t *maxcps = NULL,
+        int flags = 0);
 
-/// Convert to ascii string and give a meaningful name.
+
+
+/// Convert to string literal and give a meaningful name.
 /// 'start' may be higher than 'end', the kernel will swap them in this case
 /// \param start    starting address
 /// \param len      length of the string in bytes.
-///                 if 0, then get_max_ascii_length() will be used
+///                 if 0, then get_max_strlit_length() will be used
 ///                 to determine the length
-/// \param strtype  string type. one of \ref ASCSTR_
+/// \param strtype  string type. one of \ref STRTYPE_
 /// \return success
 
-idaman bool ida_export make_ascii_string(ea_t start, size_t len, int32 strtype);
+idaman bool ida_export create_strlit(ea_t start, size_t len, int32 strtype);
 
 
-/// Print the string type name.
-/// \param buf      the output buffer
-/// \param bufsize  sizeof(buf)
-/// \param strtype  the string type
-/// \return ptr to buf
 
-idaman char *ida_export print_ascii_string_type(
-        char *buf,
-        size_t bufsize,
-        int32 strtype);
+
+//-------------------------------------------------------------------------
+/// \defgroup PSTF_ flags for use with get_strlit_type_info
+//@{
+#define PSTF_TNORM  0   ///< use normal name
+#define PSTF_TBRIEF 1   ///< use brief name (e.g., in the 'Strings window')
+#define PSTF_TINLIN 2   ///< use 'inline' name (e.g., in the structures comments)
+#define PSTF_TMASK  3   ///< type mask
+#define PSTF_HOTKEY 0x4 ///< have hotkey markers part of the name
+#define PSTF_ENC    0x8 ///< if encoding is specified, append it
+//@}
+
+
+/// Get string type information: the string type name (possibly
+/// decorated with hotkey markers), and the tooltip.
+///
+/// \param out         the output buffer
+/// \param strtype     the string type
+/// \param out_tooltip an optional output buffer for the tooltip
+/// \param flags       or'ed PSTF_* constants
+/// \return length of generated text
+
+idaman bool ida_export print_strlit_type(
+        qstring *out,
+        int32 strtype,
+        qstring *out_tooltip = NULL,
+        int flags = 0);
 
 
 /// Get additional information about an operand representation.
+/// \param buf    buffer to receive the result. may not be NULL
 /// \param ea     linear address of item
 /// \param n      number of operand, 0 or 1
 /// \param flags  flags of the item
-/// \param buf    buffer to receive the result. may not be NULL
 /// \return NULL if no additional representation information
 
-idaman opinfo_t *ida_export get_opinfo(ea_t ea,
+idaman opinfo_t *ida_export get_opinfo(
+        opinfo_t *buf,
+        ea_t ea,
         int n,
-        flags_t flags,
-        opinfo_t *buf);
+        flags_t flags);
 
 
 /// Set additional information about an operand representation.
@@ -1613,13 +1626,15 @@ idaman opinfo_t *ida_export get_opinfo(ea_t ea,
 /// \param n      number of operand, 0 or 1
 /// \param flag   flags of the item
 /// \param ti     additional representation information
-/// \return 1 ok
-/// \return 0 ti is NULL while it shouldn't be NULL
+/// \param suppress_events do not generate changing_op_type and op_type_changed events
+/// \return success
 
-idaman bool ida_export set_opinfo(ea_t ea,
+idaman bool ida_export set_opinfo(
+        ea_t ea,
         int n,
         flags_t flag,
-        const opinfo_t *ti);
+        const opinfo_t *ti,
+        bool suppress_events=false);
 
 
 /// Delete additional information about an operand representation.
@@ -1689,8 +1704,8 @@ idaman int ida_export is_varsize_item(ea_t ea, flags_t F, const opinfo_t *ti=NUL
 ///                  1004 dw 5
 ///                  1006 dd 5
 ///                  </pre>
-///               can_define_item(1000,6,0) - false because of dw at 1004  \n
-///               can_define_item(1000,6,wordflag()) - true, word at 1004 is destroyed
+///               can_define_item(1000, 6, 0) - false because of dw at 1004  \n
+///               can_define_item(1000, 6, word_flag()) - true, word at 1004 is destroyed
 /// \return 1-yes, 0-no
 ///
 /// This function may return 0 if:
@@ -1717,36 +1732,21 @@ idaman bool ida_export can_define_item(ea_t ea, asize_t length, flags_t flags);
 /// \defgroup FF_codefuncs Functions: work with code bits
 //@{
 
-/// Convert to an instruction.
-/// (internal function, should not be used in modules, never)
-/// use create_insn() instead.
-/// \param ea      linear address
-/// \param length  length of instruction
-/// \return success
-
-bool doCode(ea_t ea,int length);
-
-
 /// Has immediate value?
 
-inline bool idaapi isImmd(flags_t F)      { return isCode(F) && (F & FF_IMMD) != 0; }
+inline bool idaapi has_immd(flags_t F)      { return is_code(F) && (F & FF_IMMD) != 0; }
 
 
 /// Is function start?
 
-inline bool idaapi isFunc(flags_t F)      { return isCode(F) && (F & FF_FUNC) != 0; }
+inline bool idaapi is_func(flags_t F)      { return is_code(F) && (F & FF_FUNC) != 0; }
 
 
 /// Set 'has immediate operand' flag.
 /// Returns true if the #FF_IMMD bit was not set and now is set
 
-idaman bool ida_export doImmd(ea_t ea);
+idaman bool ida_export set_immd(ea_t ea);
 
-
-/// Clear 'has immediate operand' flag.
-/// Returns true if the #FF_IMMD bit was set and now is cleared
-
-idaman bool ida_export noImmd(ea_t ea);
 
 //@} FF_codefuncs
 //@} FF_CODE
@@ -1792,7 +1792,6 @@ struct data_type_t
         ea_t ea,
         asize_t maxsize);
 };
-typedef qvector<const data_type_t *> data_types_t; ///< vector of data types
 
 /// Information about a data format
 struct data_format_t
@@ -1817,7 +1816,7 @@ struct data_format_t
   /// \param ud           user-defined data
   /// \param out          output buffer. may be NULL
   /// \param value        value to print. may not be NULL
-  /// \param size size    of value in bytes
+  /// \param size         size of value in 8-bit bytes
   /// \param current_ea   current address (BADADDR if unknown)
   /// \param operand_num  current operand number
   /// \param dtid         custom data type id (0-standard built-in data type)
@@ -1858,21 +1857,25 @@ struct data_format_t
         ea_t current_ea,
         int operand_num);
 };
-typedef qvector<const data_format_t *> data_formats_t; ///< vector of data formats
 
 
 /// Register a new data type.
 /// \param dtinfo  description of the new data type
-/// \return > 0 : new custom data id, < 0 : error  \n
-///         dtid 0 is reserved for built-in data types.
+/// \return > 0 : id of the new custom data type,
+///         < 0 : error when the custom data type with the same name has
+///               already been registered
+///         \note dtid 0 is reserved for built-in data types.
 
 idaman int ida_export register_custom_data_type(const data_type_t *dtinfo);
 
 
 /// Unregister a data type.
-/// When the idb is closed, all custom data types are automatically unregistered,
-/// but since it happens too late (plugin modules could already be unloaded)
-/// one has to unregister custom data types explicitly.
+/// When the idb is closed, all custom data types are automatically
+/// unregistered, but since it happens too late (plugin modules could
+/// already be unloaded) one has to unregister custom data types explicitly.
+/// The ids of unregistered custom data types remain allocated and when the
+/// same name is reused to register a custom data type, it will get assigned
+/// the same id.
 /// \param dtid   data type to unregister
 /// \retval true  ok
 /// \retval false no such dtid
@@ -1882,23 +1885,21 @@ idaman bool ida_export unregister_custom_data_type(int dtid);
 
 /// Register a new data format.
 /// \param dtform  description of the new data format
-/// \param dtid    data type id that can use the data format.
-///                0 means all standard data types. such data formats can be applied
-///                to any data item or instruction operands. for instruction operands,
-///                the data_format_t::value_size check is not performed by the kernel.
-/// \return >= 0 : new custom format id, < 0 : error
+/// \return > 0 : id of the new custom data format,
+///         < 0 : error when the custom data format with the same name has
+///               already been registered to the data type
+///         \note dfid 0 is unused.
 
-idaman int ida_export register_custom_data_format(int dtid, const data_format_t *dtform);
+idaman int ida_export register_custom_data_format(const data_format_t *dtform);
 
 
 /// Unregister a data format.
-/// Unregistering a custom data type unregisters all attached data formats,
-/// no need to unregister them explicitly.
-/// \param fid  data format id to unregister
-/// \retval true   ok
-/// \retval false  no such dtform
+/// \sa unregister_custom_data_type()
+/// \param dfid   data format to unregister
+/// \retval true  ok
+/// \retval false no such dfid
 
-idaman bool ida_export unregister_custom_data_format(int dtid, int fid);
+idaman bool ida_export unregister_custom_data_format(int dfid);
 
 
 /// Get definition of a registered custom data type.
@@ -1909,13 +1910,43 @@ idaman const data_type_t *ida_export get_custom_data_type(int dtid);
 
 
 /// Get definition of a registered custom data format.
-/// \param dtid  data type id. -1 means any data type,
-///              0 means data formats for built-in data types
-/// \param fid   data format id
+/// \param dfid  data format id
 /// \return data format definition or NULL
 
-idaman const data_format_t *ida_export get_custom_data_format(int dtid, int fid);
+idaman const data_format_t *ida_export get_custom_data_format(int dfid);
 
+
+/// Attach the data format to the data type.
+/// \param dtid  data type id that can use the data format.
+///              0 means all standard data types. Such data formats can be
+///              applied to any data item or instruction operands. For
+///              instruction operands, the data_format_t::value_size check
+///              is not performed by the kernel.
+/// \param dfid  data format id
+/// \retval true  ok
+/// \retval false no such `dtid', or no such `dfid', or the data format has
+///               already been attached to the data type
+
+idaman bool ida_export attach_custom_data_format(int dtid, int dfid);
+
+
+/// Detach the data format from the data type.
+/// Unregistering a custom data type detaches all attached data formats,
+/// no need to detach them explicitly. You still need unregister them.
+/// Unregistering a custom data format detaches it from all attached data
+/// types.
+/// \param dtid  data type id to detach data format from
+/// \param dfid  data format id to detach
+/// \retval true  ok
+/// \retval false no such `dtid', or no such `dfid', or the data format was
+///               not attached to the data type
+
+idaman bool ida_export detach_custom_data_format(int dtid, int dfid);
+
+
+///
+
+idaman bool ida_export is_attached_custom_data_format(int dtid, int dfid);
 
 /// Get list of registered custom data type ids.
 /// \param  out       buffer for the output. may be NULL
@@ -1929,7 +1960,7 @@ idaman int ida_export get_custom_data_types(
         asize_t max_size=BADADDR);
 
 
-/// Get list of registered custom data formats for the specified data type.
+/// Get list of attached custom data formats for the specified data type.
 /// \param out    buffer for the output. may be NULL
 /// \param dtid   data type id
 /// \return number of returned custom data formats. if error, returns -1
@@ -1952,7 +1983,7 @@ idaman int ida_export find_custom_data_format(const char *name);
 
 
 //--------------------------------------------------------------------------
-//      I N D E N T E D  C O M M E N T S
+//      I N D E N T E D   C O M M E N T S
 //--------------------------------------------------------------------------
 
 /// Set an indented comment.
@@ -1965,35 +1996,36 @@ idaman bool ida_export set_cmt(ea_t ea, const char *comm, bool rptble);
 
 
 /// Get an indented comment.
+/// \param buf      output buffer, may be NULL
 /// \param ea       linear address. may point to tail byte, the function
 ///                 will find start of the item
 /// \param rptble   get repeatable comment?
-/// \param buf      output buffer, may be NULL
-/// \param bufsize  size of output buffer
 /// \return size of comment or -1
 
-idaman ssize_t ida_export get_cmt(ea_t ea, bool rptble, char *buf, size_t bufsize);
+idaman ssize_t ida_export get_cmt(qstring *buf, ea_t ea, bool rptble);
 
 
 /// Get a repeatable comment of any type (indented or function comment).
 /// This function is used to display an indented comment if no regular
 /// (non-repeatable) comment is present.
+/// \param buf buffer for the comment
 /// \param ea  linear address. may point to tail byte, the function
 ///            will find start of the item
-/// \return comment or NULL. The caller must qfree() the result.
+/// \return size of comment or -1
 
-char *get_repeatable_cmt(ea_t ea);
+ssize_t get_repeatable_cmt(qstring *buf, ea_t ea);
 
 
 /// Get any indented comment (regular or repeatable indented or function).
 /// This function is used to display an indented comment for an item.
 /// It looks for a regular comment and calls get_repeatable_cmt() if it is not found.
+/// \param buf      buffer for the comment
 /// \param ea       linear address
 /// \param cmttype  will contain color of the comment. The color depends on
 ///                 the type of the comment.
-/// \return comment or NULL. The caller must qfree() the result.
+/// \return size of comment or -1
 
-char *get_any_indented_cmt(ea_t ea, color_t *cmttype);
+ssize_t get_any_indented_cmt(qstring *buf, ea_t ea, color_t *cmttype);
 
 
 /// Append to an indented comment.
@@ -2013,8 +2045,22 @@ idaman bool ida_export append_cmt(ea_t ea, const char *str, bool rptble);
 extern bool del_code_comments;
 
 
+//--------------------------------------------------------------------
+//      P R E D E F I N E D   C O M M E N T S
+//--------------------------------------------------------------------
+
+/// Get predefined comment.
+/// \param buf      buffer for the comment
+/// \param ins      current instruction information
+/// \return size of comment or -1
+
+idaman ssize_t ida_export get_predef_insn_cmt(
+        qstring *buf,
+        const insn_t &ins);
+
+
 //--------------------------------------------------------------------------
-//      S E A R C H  F U N C T I O N S
+//      S E A R C H   F U N C T I O N S
 //--------------------------------------------------------------------------
 /// Find forward a byte with the specified value (only 8-bit value from the database).
 /// example: ea=4 size=3 will inspect addresses 4, 5, and 6
@@ -2029,7 +2075,7 @@ idaman ea_t ida_export find_byte(ea_t sEA, asize_t size, uchar value, int bin_se
 
 /// Find reverse a byte with the specified value (only 8-bit value from the database).
 /// example: ea=4 size=3 will inspect addresses 6, 5, and 4
-/// \param sEA                linear address
+/// \param sEA                the lower address of the search range
 /// \param size               number of bytes to inspect
 /// \param value              value to find
 /// \param bin_search_flags   combination of \ref BIN_SEARCH_
@@ -2039,8 +2085,8 @@ idaman ea_t ida_export find_byter(ea_t sEA, asize_t size, uchar value, int bin_s
 
 
 /// Search for a string in the program.
-/// \param startEA  linear address, start of area to search
-/// \param endEA    linear address, end of area to search (exclusive)
+/// \param start_ea  linear address, start of range to search
+/// \param end_ea    linear address, end of range to search (exclusive)
 /// \param image    stream of bytes to search
 /// \param mask     array of 1/0 bytes, it's length is 'len'. 1 means to perform
 ///                 the comparison of the corresponding byte. 0 means not to perform.
@@ -2051,13 +2097,13 @@ idaman ea_t ida_export find_byter(ea_t sEA, asize_t size, uchar value, int bin_s
 /// \return #BADADDR (if pressed Ctrl-Break or not found) or string address.
 
 idaman ea_t ida_export bin_search(
-                 ea_t startEA,
-                 ea_t endEA,
-                 const uchar *image,
-                 const uchar *mask,
-                 size_t len,
-                 int step,
-                 int flags);
+        ea_t start_ea,
+        ea_t end_ea,
+        const uchar *image,
+        const uchar *mask,
+        size_t len,
+        int step,
+        int flags);
 /// \defgroup BIN_SEARCH_FB Search directions
 /// passed as 'step' parameter to bin_search()
 //@{
@@ -2071,18 +2117,40 @@ idaman ea_t ida_export bin_search(
 #define BIN_SEARCH_CASE         0x01 ///< case sensitive
 #define BIN_SEARCH_NOCASE       0x00 ///< case insensitive
 #define BIN_SEARCH_NOBREAK      0x02 ///< don't check for Ctrl-Break
+#define BIN_SEARCH_INITED       0x04 ///< find_byte, find_byter: any initilized value
+#define BIN_SEARCH_NOSHOW       0x08 ///< don't show search progress or update screen
 //@}
 
+
+/// Find the next initialized address
+
+inline ea_t idaapi next_inited(ea_t ea, ea_t maxea)
+{
+  if ( ea >= maxea )
+    return BADADDR;
+  ++ea;
+  return find_byte(ea, maxea-ea, 0, BIN_SEARCH_INITED);
+}
+
+/// Find the previous initialized address
+
+inline ea_t idaapi prev_inited(ea_t ea, ea_t minea)
+{
+  if ( ea <= minea )
+    return BADADDR;
+  --ea;
+  return find_byter(minea, ea-minea, 0, BIN_SEARCH_INITED);
+}
 
 /// Compare 'len' bytes of the program starting from 'ea' with 'image'.
 /// \param ea          linear address
 /// \param image       bytes to compare with
-/// \param len         length of block to compare in bytes.
-/// \param sense_case  case-sensitive comparison?
 /// \param mask        array of 1/0 bytes, it's length is 'len'. 1 means to perform
 ///                    the comparison of the corresponding byte. 0 means not to perform.
 ///                    if mask == NULL, then all bytes of 'image' will be compared.
 ///                    if mask == #SKIP_FF_MASK then 0xFF bytes will be skipped
+/// \param len         length of block to compare in bytes.
+/// \param sense_case  case-sensitive comparison?
 /// \retval 1 equal
 /// \retval 0 not equal
 
@@ -2098,98 +2166,157 @@ idaman bool ida_export equal_bytes(
 
 
 //------------------------------------------------------------------------
-//      H I D D E N  A R E A S
+//      H I D D E N   A R E A S
 //------------------------------------------------------------------------
 
-/// Hidden areas - address ranges which can be replaced by their descriptions.
+/// Hidden ranges - address ranges which can be replaced by their descriptions.
 /// There is also a possibility to hide individual items completely (nalt.hpp, hide_item)
-/// \note After modifying any of this struct's fields please call update_hidden_area()
+/// \note After modifying any of this struct's fields please call update_hidden_range()
 
-struct hidden_area_t : public area_t
+struct hidden_range_t : public range_t
 {
-  char *description;    ///< description to display if the area is collapsed
-  char *header;         ///< header lines to display if the area is expanded
-  char *footer;         ///< footer lines to display if the area is expanded
-  bool visible;         ///< the area state
-  bgcolor_t color;      ///< area color
+  char *description;    ///< description to display if the range is collapsed
+  char *header;         ///< header lines to display if the range is expanded
+  char *footer;         ///< footer lines to display if the range is expanded
+  bool visible;         ///< the range state
+  bgcolor_t color;      ///< range color
 };
 
-idaman areacb_t ida_export_data hidden_areas;
+/// Update hidden range information in the database.
+/// You can not use this function to change the range boundaries
+/// \param ha  range to update
+/// \return success
+
+idaman bool ida_export update_hidden_range(const hidden_range_t *ha);
+
 
 /// Mark a range of addresses as hidden.
-/// The area will be created in the invisible state with the default color
+/// The range will be created in the invisible state with the default color
 /// \param  ea1                        linear address of start of the address range
 /// \param  ea2                        linear address of end of the address range
-/// \param  description,header,footer  area parameters
+/// \param  description, header, footer  range parameters
 /// \return success
 
-idaman bool ida_export add_hidden_area(ea_t ea1,
-                                       ea_t ea2,
-                                       const char *description,
-                                       const char *header,
-                                       const char *footer,
-                                       bgcolor_t color);
+idaman bool ida_export add_hidden_range(
+        ea_t ea1,
+        ea_t ea2,
+        const char *description,
+        const char *header,
+        const char *footer,
+        bgcolor_t color);
 
 
-/// Get pointer to hidden area structure, in: linear address.
-/// \param ea  any address in the hidden area
+/// Get pointer to hidden range structure, in: linear address.
+/// \param ea  any address in the hidden range
 
-inline hidden_area_t *idaapi get_hidden_area(ea_t ea)
-  { return (hidden_area_t *)hidden_areas.get_area(ea); }
-
-
-/// Get pointer to hidden area structure, in: number of hidden area.
-/// \param n  number of hidden area, is in range 0..get_hidden_area_qty()-1
-
-inline hidden_area_t *idaapi getn_hidden_area(int n)
-  { return (hidden_area_t *)hidden_areas.getn_area(n); }
+idaman hidden_range_t *ida_export get_hidden_range(ea_t ea);
 
 
-/// Get number of hidden areas
+/// Get pointer to hidden range structure, in: number of hidden range.
+/// \param n  number of hidden range, is in range 0..get_hidden_range_qty()-1
 
-inline int idaapi get_hidden_area_qty(void)
-  { return hidden_areas.get_area_qty(); }
-
-
-/// Get number of a hidden area.
-/// \param ea  any address in the hidden area
-/// \return number of hidden area (0..get_hidden_area_qty()-1)
-
-inline int idaapi get_hidden_area_num(ea_t ea)
-  { return hidden_areas.get_area_num(ea); }
+idaman hidden_range_t *ida_export getn_hidden_range(int n);
 
 
-/// Get pointer to previous hidden area.
+/// Get number of hidden ranges
+
+idaman int ida_export get_hidden_range_qty(void);
+
+
+/// Get number of a hidden range.
+/// \param ea  any address in the hidden range
+/// \return number of hidden range (0..get_hidden_range_qty()-1)
+
+idaman int ida_export get_hidden_range_num(ea_t ea);
+
+
+/// Get pointer to previous hidden range.
 /// \param ea  any address in the program
-/// \return ptr to hidden area or NULL if previous hidden area doesn't exist
+/// \return ptr to hidden range or NULL if previous hidden range doesn't exist
 
-inline hidden_area_t *idaapi get_prev_hidden_area(ea_t ea)
-  { return getn_hidden_area(hidden_areas.get_prev_area(ea)); }
+idaman hidden_range_t *ida_export get_prev_hidden_range(ea_t ea);
 
 
-/// Get pointer to next hidden area.
+/// Get pointer to next hidden range.
 /// \param ea  any address in the program
-/// \return ptr to hidden area or NULL if next hidden area doesn't exist
+/// \return ptr to hidden range or NULL if next hidden range doesn't exist
 
-inline hidden_area_t *idaapi get_next_hidden_area(ea_t ea)
-  { return getn_hidden_area(hidden_areas.get_next_area(ea)); }
+idaman hidden_range_t *ida_export get_next_hidden_range(ea_t ea);
 
 
-/// Delete hidden area.
-/// \param ea  any address in the hidden area
+/// Get pointer to the first hidden range.
+/// \return ptr to hidden range or NULL
+
+idaman hidden_range_t *ida_export get_first_hidden_range(void);
+
+
+/// Get pointer to the last hidden range.
+/// \return ptr to hidden range or NULL
+
+idaman hidden_range_t *ida_export get_last_hidden_range(void);
+
+
+/// Delete hidden range.
+/// \param ea  any address in the hidden range
 /// \return success
 
-inline bool idaapi del_hidden_area(ea_t ea)
-  { return hidden_areas.del_area(ea); }
+idaman bool ida_export del_hidden_range(ea_t ea);
 
 
 //--------------------------------------------------------------------------
 inline ea_t idaapi get_item_head(ea_t ea)
 {
-  if ( isTail(get_flags_novalue(ea)) )
+  if ( is_tail(get_flags(ea)) )
     ea = prev_not_tail(ea);
   return ea;
 }
+
+//------------------------------------------------------------------------
+//      M E M O R Y   M A P P I N G
+//------------------------------------------------------------------------
+
+/// IDA supports memory mapping. References to the addresses from
+/// the mapped range use data and meta-data from the mapping range.
+/// \note You should set flag PR2_MAPPING in ph.flag2 to use memory mapping
+
+
+/// Add memory mapping range.
+/// \param  from start of the mapped range (nonexistent address)
+/// \param  to   start of the mapping range (existent address)
+/// \param  size size of the range
+/// \return success
+
+idaman bool ida_export add_mapping(ea_t from, ea_t to, asize_t size);
+
+
+/// Delete memory mapping range.
+/// \param ea any address in the mapped range
+
+idaman void ida_export del_mapping(ea_t ea);
+
+
+/// Translate address according to current mappings.
+/// \param  ea address to translate
+/// \return translated address
+
+idaman ea_t ida_export use_mapping(ea_t ea);
+
+/// Get number of mappings.
+
+idaman size_t ida_export get_mappings_qty(void);
+
+/// Get memory mapping range by its number.
+/// \param  from start of the mapped range
+/// \param  to   start of the mapping range
+/// \param  size size of the range
+/// \param  n    number of mapping range (0..get_mappings_qty()-1)
+/// \return false if the specified range doesn't exist,
+///         otherwise returns `from', `to', `size'
+idaman bool ida_export get_mapping(
+        ea_t *from,
+        ea_t *to,
+        asize_t *size,
+        size_t n);
 
 
 
@@ -2211,7 +2338,6 @@ inline ea_t idaapi get_item_head(ea_t ea)
 #undef FF_FLOW
 #undef FF_SIGN
 #undef FF_BNOT
-#undef FF_VAR
 #undef MS_0TYPE
 #undef FF_0VOID
 #undef FF_0NUMH
@@ -2245,18 +2371,18 @@ inline ea_t idaapi get_item_head(ea_t ea)
 #undef DT_TYPE
 #undef FF_BYTE
 #undef FF_WORD
-#undef FF_DWRD
-#undef FF_QWRD
-#undef FF_OWRD
-#undef FF_YWRD
+#undef FF_DWORD
+#undef FF_QWORD
+#undef FF_OWORD
+#undef FF_YWORD
+#undef FF_ZWORD
 #undef FF_FLOAT
 #undef FF_DOUBLE
-#undef FF_TBYT
+#undef FF_TBYTE
 #undef FF_PACKREAL
-#undef FF_ASCI
-#undef FF_STRU
+#undef FF_STRLIT
+#undef FF_STRUCT
 #undef FF_ALIGN
-#undef FF_3BYTE
 #undef FF_CUSTOM
 #undef MS_CODE
 #undef FF_FUNC
@@ -2268,21 +2394,16 @@ inline ea_t idaapi get_item_head(ea_t ea)
 #undef MAX_TOFF
 #endif // BYTES_SOURCE
 
-#ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED asize_t ida_export get_data_type_size(flags_t F, const opinfo_t *ti);
-#define get_data_type_size_by_flags get_data_elsize
-inline DEPRECATED bool idaapi f_isUnknown(flags_t F, void *) { return isUnknown(F); }
-idaman DEPRECATED const uint32 ida_export_data power2[32];    // Powers of 2, from 2^0 to 2^31
-idaman DEPRECATED const uint32 ida_export_data lowbits[33];   // Low-order bits, from 0 to 32
-idaman DEPRECATED error_t ida_export FlagsEnable(ea_t startEA, ea_t endEA);
-idaman DEPRECATED error_t ida_export FlagsDisable(ea_t startEA, ea_t endEA);
-idaman DEPRECATED opinfo_t *ida_export get_typeinfo(ea_t ea, int n, flags_t flags, opinfo_t *buf);
-idaman DEPRECATED bool ida_export set_typeinfo(ea_t ea, int n, flags_t flag, const opinfo_t *ti);
-// same as get_ascii_contents2, but always convert Unicode to ASCII
-idaman DEPRECATED bool ida_export get_ascii_contents(ea_t ea, size_t len, int32 type, char *buf, size_t bufsize);
-#endif
+// byte array to hex string
+inline ssize_t get_hex_string(char *buf, size_t bufsize, const uchar *bytes, size_t len)
+{
+  const char *const start = buf;
+  const char *const end   = buf + bufsize;
+  for ( size_t i = 0; i < len; i++ )
+    buf += ::qsnprintf(buf, end - buf, "%02X", *bytes++);
+  return buf - start;
+}
 
 
 
-#pragma pack(pop)
 #endif // BYTES_HPP

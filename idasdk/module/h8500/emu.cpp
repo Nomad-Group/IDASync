@@ -12,18 +12,19 @@
 
 static bool flow;
 //------------------------------------------------------------------------
-static void process_immediate_number(int n)
+static void process_immediate_number(const insn_t &insn, int n)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag,n) ) return;
-  switch ( cmd.itype )
+  set_immd(insn.ea);
+  if ( is_defarg(get_flags(insn.ea), n) )
+    return;
+  switch ( insn.itype )
   {
     case H8500_add_q:
     case H8500_bclr:
     case H8500_bnot:
     case H8500_bset:
     case H8500_btst:
-      op_dec(cmd.ea, n);
+      op_dec(insn.ea, n);
       break;
     case H8500_and:
     case H8500_or:
@@ -31,7 +32,7 @@ static void process_immediate_number(int n)
     case H8500_andc:
     case H8500_orc:
     case H8500_xorc:
-      op_num(cmd.ea, n);
+      op_num(insn.ea, n);
       break;
   }
 }
@@ -48,25 +49,25 @@ inline bool isbp(int x)
 }
 
 //----------------------------------------------------------------------
-int idaapi is_sp_based(const op_t &x)
+int idaapi is_sp_based(const insn_t &, const op_t &x)
 {
   return OP_SP_ADD
        | ((x.type == o_displ || x.type == o_phrase) && issp(x.phrase)
-         ? OP_SP_BASED
-         : OP_FP_BASED);
+        ? OP_SP_BASED
+        : OP_FP_BASED);
 }
 
 //----------------------------------------------------------------------
-static void add_stkpnt(sval_t value)
+static void add_stkpnt(const insn_t &insn, sval_t value)
 {
-  func_t *pfn = get_func(cmd.ea);
+  func_t *pfn = get_func(insn.ea);
   if ( pfn == NULL )
     return;
 
   if ( value & 1 )
     value++;
 
-  add_auto_stkpnt2(pfn, cmd.ea+cmd.size, value);
+  add_auto_stkpnt(pfn, insn.ea+insn.size, value);
 }
 
 //----------------------------------------------------------------------
@@ -76,7 +77,7 @@ inline bool is_mov(int itype)
 }
 
 //----------------------------------------------------------------------
-static bool get_op_value(op_t &x, int *value)
+static bool get_op_value(const insn_t &insn, const op_t &x, int *value)
 {
   if ( x.type == o_imm )
   {
@@ -87,17 +88,16 @@ static bool get_op_value(op_t &x, int *value)
   if ( x.type == o_reg )
   {
     int reg = x.reg;
-    insn_t saved = cmd;
-    if ( decode_prev_insn(cmd.ea) != BADADDR
-      && is_mov(cmd.itype)
-      && cmd.Op1.type == o_imm
-      && cmd.Op2.type == o_reg
-      && cmd.Op2.reg  == reg )
+    insn_t movi;
+    if ( decode_prev_insn(&movi, insn.ea) != BADADDR
+      && is_mov(movi.itype)
+      && movi.Op1.type == o_imm
+      && movi.Op2.type == o_reg
+      && movi.Op2.reg  == reg )
     {
-      *value = (int)cmd.Op1.value;
+      *value = (int)movi.Op1.value;
       ok = true;
     }
-    cmd = saved;
   }
   return ok;
 }
@@ -107,7 +107,8 @@ static int calc_reglist_count(int regs)
 {
   int count = 0;
   for ( int i=0; i < 8; i++,regs>>=1 )
-    if ( regs & 1 ) count++;
+    if ( regs & 1 )
+      count++;
   return count;
 }
 
@@ -130,60 +131,60 @@ inline bool is_sp_inc(const op_t &x)
 }
 
 //----------------------------------------------------------------------
-static void trace_sp(void)
+static void trace_sp(const insn_t &insn)
 {
   // @sp++
-  if ( is_sp_inc(cmd.Op1) )
+  if ( is_sp_inc(insn.Op1) )
   {
     int size = 2;
-    if ( cmd.Op2.type == o_reglist )
-      size *= calc_reglist_count(cmd.Op2.reg);
-    add_stkpnt(size);
+    if ( insn.Op2.type == o_reglist )
+      size *= calc_reglist_count(insn.Op2.reg);
+    add_stkpnt(insn, size);
     return;
   }
 
   // @--sp
-  if ( is_sp_dec(cmd.Op2) )
+  if ( is_sp_dec(insn.Op2) )
   {
     int size = 2;
-    if ( cmd.Op1.type == o_reglist )
-      size *= calc_reglist_count(cmd.Op1.reg);
-    add_stkpnt(-size);
+    if ( insn.Op1.type == o_reglist )
+      size *= calc_reglist_count(insn.Op1.reg);
+    add_stkpnt(insn, -size);
     return;
   }
   // xxx @--sp
-  if ( is_sp_dec(cmd.Op1) )
+  if ( is_sp_dec(insn.Op1) )
   {
-    add_stkpnt(-2);
+    add_stkpnt(insn, -2);
     return;
   }
 
   int v;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case H8500_add_g:
     case H8500_add_q:
     case H8500_adds:
-      if ( issp(cmd.Op2.reg) && get_op_value(cmd.Op1, &v) )
-        add_stkpnt(v);
+      if ( issp(insn.Op2.reg) && get_op_value(insn, insn.Op1, &v) )
+        add_stkpnt(insn, v);
       break;
     case H8500_sub:
     case H8500_subs:
-      if ( issp(cmd.Op2.reg) && get_op_value(cmd.Op1, &v) )
-        add_stkpnt(-v);
+      if ( issp(insn.Op2.reg) && get_op_value(insn, insn.Op1, &v) )
+        add_stkpnt(insn, -v);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-static sval_t calc_func_call_delta(ea_t callee)
+static sval_t calc_func_call_delta(const insn_t &insn, ea_t callee)
 {
   sval_t delta;
   func_t *pfn = get_func(callee);
   if ( pfn != NULL )
   {
     delta = pfn->argsize;
-    if ( (pfn->flags & FUNC_FAR) != 0 && cmd.Op1.type == o_near )
+    if ( (pfn->flags & FUNC_FAR) != 0 && insn.Op1.type == o_near )
       delta += 2; // function will pop the code segment
   }
   else
@@ -201,32 +202,32 @@ static sval_t calc_func_call_delta(ea_t callee)
 // returns:
 //      true  - the called function returns to the caller
 //      false - the called function doesn't return to the caller
-static bool handle_function_call(ea_t callee)
+static bool handle_function_call(const insn_t &insn, ea_t callee)
 {
   bool funcflow = true;
   if ( !func_does_return(callee) )
     funcflow = false;
   if ( should_trace_sp() )
   {
-    func_t *caller = get_func(cmd.ea);
-    if ( func_contains(caller, cmd.ea+cmd.size) )
+    func_t *caller = get_func(insn.ea);
+    if ( func_contains(caller, insn.ea+insn.size) )
     {
-      sval_t delta = calc_func_call_delta(callee);
+      sval_t delta = calc_func_call_delta(insn, callee);
       if ( delta != 0 )
-        add_stkpnt(delta);
+        add_stkpnt(insn, delta);
     }
   }
   return funcflow;
 }
 
 //----------------------------------------------------------------------
-inline ea_t find_callee(void)
+inline ea_t find_callee(const insn_t &insn)
 {
-  return get_first_fcref_from(cmd.ea);
+  return get_first_fcref_from(insn.ea);
 }
 
 //----------------------------------------------------------------------
-static void process_operand(op_t &x,int isAlt,int isload)
+static void handle_operand(const insn_t &insn, const op_t &x, bool is_forced, bool isload)
 {
   switch ( x.type )
   {
@@ -235,36 +236,36 @@ static void process_operand(op_t &x,int isAlt,int isload)
       return;
     case o_imm:
       QASSERT(10090, isload);
-      process_immediate_number(x.n);
-      if ( op_adds_xrefs(uFlag, x.n) )
-        ua_add_off_drefs2(x, dr_O, calc_opimm_flags());
+      process_immediate_number(insn, x.n);
+      if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
+        insn.add_off_drefs(x, dr_O, calc_opimm_flags(insn));
       break;
     case o_phrase:
     case o_displ:
-      process_immediate_number(x.n);
-      if ( isAlt ) break;
-      if ( op_adds_xrefs(uFlag, x.n) )
       {
-        ea_t ea = ua_add_off_drefs2(x, isload ? dr_R : dr_W, calc_opdispl_flags());
-        if ( ea != BADADDR )
+        process_immediate_number(insn, x.n);
+        if ( is_forced )
+          break;
+        flags_t F = get_flags(insn.ea);
+        if ( op_adds_xrefs(F, x.n) )
         {
-          ua_dodata2(x.offb, ea, x.dtyp);
-          if ( !isload )
-            doVar(ea);
+          ea_t ea = insn.add_off_drefs(x, isload ? dr_R : dr_W, calc_opdispl_flags(insn));
+          if ( ea != BADADDR )
+            insn.create_op_data(ea, x);
         }
-      }
-      // create stack variables if required
-      if ( x.type == o_displ
-        && may_create_stkvars()
-        && !isDefArg(uFlag, x.n) )
-      {
-        func_t *pfn = get_func(cmd.ea);
-        if ( pfn != NULL
-          && (issp(x.phrase)
-              || isbp(x.phrase) && (pfn->flags & FUNC_FRAME) != 0) )
+        // create stack variables if required
+        if ( x.type == o_displ
+          && may_create_stkvars()
+          && !is_defarg(F, x.n) )
         {
-          if ( ua_stkvar2(x, x.addr, STKVAR_VALID_SIZE) )
-            op_stkvar(cmd.ea, x.n);
+          func_t *pfn = get_func(insn.ea);
+          if ( pfn != NULL
+            && (issp(x.phrase)
+             || isbp(x.phrase) && (pfn->flags & FUNC_FRAME) != 0) )
+          {
+            if ( insn.create_stkvar(x, x.addr, STKVAR_VALID_SIZE) )
+              op_stkvar(insn.ea, x.n);
+          }
         }
       }
       break;
@@ -272,22 +273,21 @@ static void process_operand(op_t &x,int isAlt,int isload)
     case o_far:
       {
         cref_t ftype = x.type == o_near ? fl_JN : fl_JF;
-        ea_t ea = calc_mem(x);
-        if ( InstrIsSet(cmd.itype, CF_CALL) )
+        ea_t ea = calc_mem(insn, x);
+        if ( has_insn_feature(insn.itype, CF_CALL) )
         {
           if ( !func_does_return(ea) )
             flow = false;
           ftype = x.type == o_near ? fl_CN : fl_CF;
         }
-        ua_add_cref(x.offb, ea, ftype);
+        insn.add_cref(ea, x.offb, ftype);
       }
       break;
     case o_mem:
       {
-        ea_t ea = calc_mem(x);
-        ua_add_dref(x.offb, ea, isload ? dr_R : dr_W);
-        ua_dodata2(x.offb, ea, x.dtyp);
-        if ( !isload ) doVar(ea);
+        ea_t ea = calc_mem(insn, x);
+        insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+        insn.create_op_data(ea, x);
       }
       break;
     default:
@@ -296,64 +296,65 @@ static void process_operand(op_t &x,int isAlt,int isload)
 }
 
 //----------------------------------------------------------------------
-inline bool is_far_ending(void)
+inline bool is_far_ending(const insn_t &insn)
 {
-  return cmd.itype == H8500_prts
-      || cmd.itype == H8500_prtd;
+  return insn.itype == H8500_prts
+      || insn.itype == H8500_prtd;
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+int idaapi h8500_emu(const insn_t &insn)
 {
-  uint32 Feature = cmd.get_canon_feature();
-  int flag1 = is_forced_operand(cmd.ea, 0);
-  int flag2 = is_forced_operand(cmd.ea, 1);
-  int flag3 = is_forced_operand(cmd.ea, 2);
+  uint32 Feature = insn.get_canon_feature();
+  bool flag1 = is_forced_operand(insn.ea, 0);
+  bool flag2 = is_forced_operand(insn.ea, 1);
+  bool flag3 = is_forced_operand(insn.ea, 2);
 
   flow = ((Feature & CF_STOP) == 0);
 
-  if ( Feature & CF_USE1 ) process_operand(cmd.Op1, flag1, 1);
-  if ( Feature & CF_USE2 ) process_operand(cmd.Op2, flag2, 1);
-  if ( Feature & CF_USE3 ) process_operand(cmd.Op3, flag3, 1);
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, flag1, true);
+  if ( Feature & CF_USE2 ) handle_operand(insn, insn.Op2, flag2, true);
+  if ( Feature & CF_USE3 ) handle_operand(insn, insn.Op3, flag3, true);
 
-  if ( Feature & CF_CHG1 ) process_operand(cmd.Op1, flag1, 0);
-  if ( Feature & CF_CHG2 ) process_operand(cmd.Op2, flag2, 0);
-  if ( Feature & CF_CHG3 ) process_operand(cmd.Op3, flag3, 0);
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, flag1, false);
+  if ( Feature & CF_CHG2 ) handle_operand(insn, insn.Op2, flag2, false);
+  if ( Feature & CF_CHG3 ) handle_operand(insn, insn.Op3, flag3, false);
 
 //
 //      Determine if the next instruction should be executed
 //
-  if ( segtype(cmd.ea) == SEG_XTRN )
+  if ( segtype(insn.ea) == SEG_XTRN )
      flow = false;
 
 //
 // Handle loads to segment registers
 //
   sel_t v = BADSEL;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case H8500_andc:
-      if ( cmd.Op1.value == 0 )
+      if ( insn.Op1.value == 0 )
         v = 0;
       goto SPLIT;
     case H8500_orc:
-      if ( cmd.Op1.value == 0xFF )
+      if ( insn.Op1.value == 0xFF )
         v = 0xFF;
       goto SPLIT;
     case H8500_ldc:
-      if ( cmd.Op1.type == o_imm )
-        v = cmd.Op1.value;
+      if ( insn.Op1.type == o_imm )
+        v = insn.Op1.value;
+      // fallthrough
     case H8500_xorc:
 SPLIT:
-      if ( cmd.Op2.reg >= BR && cmd.Op2.reg <= TP )
-        split_srarea(cmd.ea+cmd.size, cmd.Op2.reg, v, SR_auto);
+      if ( insn.Op2.reg >= BR && insn.Op2.reg <= TP )
+        split_sreg_range(insn.ea+insn.size, insn.Op2.reg, v, SR_auto);
       break;
   }
 
   if ( (Feature & CF_CALL) != 0 )
   {
-    ea_t callee = find_callee();
-    if ( !handle_function_call(callee) )
+    ea_t callee = find_callee(insn);
+    if ( !handle_function_call(insn, callee) )
       flow = false;
   }
 
@@ -362,26 +363,26 @@ SPLIT:
 //
   if ( may_trace_sp() )
   {
-    func_t *pfn = get_func(cmd.ea);
+    func_t *pfn = get_func(insn.ea);
     if ( pfn != NULL )
     {
       if ( (pfn->flags & FUNC_USERFAR) == 0
         && (pfn->flags & FUNC_FAR) == 0
-        && is_far_ending() )
+        && is_far_ending(insn) )
       {
         pfn->flags |= FUNC_FAR;
         update_func(pfn);
-        reanalyze_callers(pfn->startEA, 0);
+        reanalyze_callers(pfn->start_ea, 0);
       }
       if ( !flow )
-        recalc_spd(cmd.ea);     // recalculate SP register for the next insn
+        recalc_spd(insn.ea);     // recalculate SP register for the next insn
       else
-        trace_sp();
+        trace_sp(insn);
     }
   }
 
   if ( flow )
-    ua_add_cref(0, cmd.ea+cmd.size, fl_F);
+    add_cref(insn.ea, insn.ea+insn.size, fl_F);
 
   return 1;
 }
@@ -390,27 +391,24 @@ SPLIT:
 int is_jump_func(const func_t * /*pfn*/, ea_t *jump_target)
 {
   *jump_target = BADADDR;
-  return 1; // means "no"
+  return 0; // means "don't know"
 }
 
 //----------------------------------------------------------------------
-int may_be_func(void)           // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
-                                // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
+int may_be_func(const insn_t &)
 {
-//  if ( cmd.itype == H8_push && isbp(cmd.Op1.reg) ) return 100;  // push.l er6
+//  if ( insn.itype == H8_push && isbp(insn.Op1.reg) ) return 100;  // push.l er6
   return 0;
 }
 
 //----------------------------------------------------------------------
-int is_sane_insn(int /*nocrefs*/)
+int is_sane_insn(const insn_t &insn, int /*nocrefs*/)
 {
-  if ( cmd.itype == H8500_nop )
+  if ( insn.itype == H8500_nop )
   {
     for ( int i=0; i < 8; i++ )
-      if ( get_word(cmd.ea-i*2) != 0 ) return 1;
+      if ( get_word(insn.ea-i*2) != 0 )
+        return 1;
     return 0; // too many nops in a row
   }
   return 1;
@@ -419,8 +417,10 @@ int is_sane_insn(int /*nocrefs*/)
 //----------------------------------------------------------------------
 int idaapi is_align_insn(ea_t ea)
 {
-  if ( !decode_insn(ea) ) return 0;
-  switch ( cmd.itype )
+  insn_t insn;
+  if ( decode_insn(&insn, ea) < 1 )
+    return 0;
+  switch ( insn.itype )
   {
     case H8500_nop:
       break;
@@ -432,16 +432,16 @@ int idaapi is_align_insn(ea_t ea)
     case H8500_mov_s:         // B/W Move data
     case H8500_or:
     case H8500_and:
-      if ( cmd.Op1.type == cmd.Op2.type && cmd.Op1.reg == cmd.Op2.reg ) break;
+      if ( insn.Op1.type == insn.Op2.type && insn.Op1.reg == insn.Op2.reg )
+        break;
     default:
       return 0;
   }
-  return cmd.size;
+  return insn.size;
 }
 
 //----------------------------------------------------------------------
-//lint -e{818} could be declared const
-int idaapi h8500_get_frame_retsize(func_t *pfn)
+int idaapi h8500_get_frame_retsize(const func_t *pfn)
 {
   return pfn->flags & FUNC_FAR ? 4 : 2;
 }
@@ -450,24 +450,25 @@ int idaapi h8500_get_frame_retsize(func_t *pfn)
 static uval_t find_ret_purged(const func_t *pfn)
 {
   uval_t argsize = 0;
-  ea_t ea = pfn->startEA;
-  while ( ea < pfn->endEA )
+  ea_t ea = pfn->start_ea;
+  insn_t insn;
+  while ( ea < pfn->end_ea )
   {
-    decode_insn(ea);
-    if ( cmd.itype == H8500_rtd || cmd.itype == H8500_prtd )
+    decode_insn(&insn, ea);
+    if ( insn.itype == H8500_rtd || insn.itype == H8500_prtd )
     {
-      argsize = cmd.Op1.value;
+      argsize = insn.Op1.value;
       break;
     }
-    ea = nextthat(ea, pfn->endEA, f_isCode, NULL);
+    ea = next_that(ea, pfn->end_ea, f_is_code);
   }
 
   // could not find any ret instructions
   // but the function ends with a jump
-  if ( ea >= pfn->endEA
-    && (cmd.itype == H8500_jmp || cmd.itype == H8500_pjmp) )
+  if ( ea >= pfn->end_ea
+    && (insn.itype == H8500_jmp || insn.itype == H8500_pjmp) )
   {
-    ea_t target = calc_mem(cmd.Op1);
+    ea_t target = calc_mem(insn, insn.Op1);
     pfn = get_func(target);
     if ( pfn != NULL )
       argsize = pfn->argsize;
@@ -481,14 +482,15 @@ static void setup_far_func(func_t *pfn)
 {
   if ( (pfn->flags & FUNC_FAR) == 0 )
   {
-    ea_t ea1 = pfn->startEA;
-    ea_t ea2 = pfn->endEA;
+    ea_t ea1 = pfn->start_ea;
+    ea_t ea2 = pfn->end_ea;
     while ( ea1 < ea2 )
     {
-      if ( isCode(get_flags_novalue(ea1)) )
+      if ( is_code(get_flags(ea1)) )
       {
-        decode_insn(ea1);
-        if ( is_far_ending() )
+        insn_t insn;
+        decode_insn(&insn, ea1);
+        if ( is_far_ending(insn) )
         {
           pfn->flags |= FUNC_FAR;
           update_func(pfn);

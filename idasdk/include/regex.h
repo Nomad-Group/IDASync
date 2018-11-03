@@ -1,110 +1,231 @@
+/*************************************************
+*      Perl-Compatible Regular Expressions       *
+*************************************************/
 
+/* PCRE2 is a library of functions to support regular expressions whose syntax
+and semantics are as close as possible to those of the Perl 5 language.
 
-/*-
- * Copyright (c) 1992 Henry Spencer.
- * Copyright (c) 1992, 1993
- *      The Regents of the University of California.  All rights reserved.
- *
- * This code is derived from software contributed to Berkeley by
- * Henry Spencer of the University of Toronto.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *      This product includes software developed by the University of
- *      California, Berkeley and its contributors.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
- * SUCH DAMAGE.
- *
- *      @(#)regex.h     8.2 (Berkeley) 1/3/94
- */
+                       Written by Philip Hazel
+     Original API code Copyright (c) 1997-2012 University of Cambridge
+         New API code Copyright (c) 2016 University of Cambridge
+
+-----------------------------------------------------------------------------
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice,
+      this list of conditions and the following disclaimer.
+
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+
+    * Neither the name of the University of Cambridge nor the names of its
+      contributors may be used to endorse or promote products derived from
+      this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+-----------------------------------------------------------------------------
+*/
+
 
 #ifndef _REGEX_H_
 #define _REGEX_H_
+#ifdef __cplusplus
+#include <map>
+#include <kernwin.hpp>
+#endif
+
 #include <pro.h>
 
 #ifdef __GNUC__
 #undef __P
 #endif
 
-#define __P(_X) _X
-
-/* types */
 typedef off_t regoff_t;
+/* The structure representing a compiled regular expression. */
 
-typedef struct {
-        int re_magic;
-        size_t re_nsub;         /* number of parenthesized subexpressions */
-        const char *re_endp;    /* end pointer for REG_PEND */
-        struct re_guts *re_g;   /* none of your business :-) */
-} regex_t;
+struct regex_t
+{
+  int re_magic;
+  size_t re_nsub;         /* number of parenthesized subexpressions */
+  const char *re_endp;    /* end pointer for REG_PEND */
+  void *re_g;   /* none of your business :-) */
+};
 
-typedef struct {
-        regoff_t rm_so;         /* start of match */
-        regoff_t rm_eo;         /* end of match */
-} regmatch_t;
+/* The structure in which a captured offset is returned. */
 
-/* regcomp() flags */
-#define REG_BASIC       0000
-#define REG_EXTENDED    0001
-#define REG_ICASE       0002
-#define REG_NOSUB       0004
-#define REG_NEWLINE     0010
-#define REG_NOSPEC      0020
-#define REG_PEND        0040
-#define REG_DUMP        0200
+struct regmatch_t
+{
+  regoff_t rm_so;         /* start of match */
+  regoff_t rm_eo;         /* end of match */
+};
+#ifndef REG_ICASE
+/* Options, mostly defined by POSIX, but with some extras. */
 
-/* regerror() flags */
-#define REG_NOMATCH      1
-#define REG_BADPAT       2
-#define REG_ECOLLATE     3
-#define REG_ECTYPE       4
-#define REG_EESCAPE      5
-#define REG_ESUBREG      6
-#define REG_EBRACK       7
-#define REG_EPAREN       8
-#define REG_EBRACE       9
-#define REG_BADBR       10
-#define REG_ERANGE      11
-#define REG_ESPACE      12
-#define REG_BADRPT      13
-#define REG_EMPTY       14
-#define REG_ASSERT      15
-#define REG_INVARG      16
-#define REG_ATOI        255     /* convert name to number (!) */
-#define REG_ITOA        0400    /* convert number to name (!) */
+#define REG_ICASE     0x0001  /* Maps to PCRE2_CASELESS */
+#define REG_NEWLINE   0x0002  /* Maps to PCRE2_MULTILINE */
+#define REG_NOTBOL    0x0004  /* Maps to PCRE2_NOTBOL */
+#define REG_NOTEOL    0x0008  /* Maps to PCRE2_NOTEOL */
+#define REG_DOTALL    0x0010  /* NOT defined by POSIX; maps to PCRE2_DOTALL */
+#define REG_NOSUB     0x0020  /* Maps to PCRE2_NO_AUTO_CAPTURE */
+#define REG_UTF       0x0040  /* NOT defined by POSIX; maps to PCRE2_UTF */
+#define REG_STARTEND  0x0080  /* BSD feature: pass subject string by so,eo */
+#define REG_NOTEMPTY  0x0100  /* NOT defined by POSIX; maps to PCRE2_NOTEMPTY */
+#define REG_UNGREEDY  0x0200  /* NOT defined by POSIX; maps to PCRE2_UNGREEDY */
+#define REG_UCP       0x0400  /* NOT defined by POSIX; maps to PCRE2_UCP */
 
-/* regexec() flags */
-#define REG_NOTBOL      00001
-#define REG_NOTEOL      00002
-#define REG_STARTEND    00004
-#define REG_TRACE       00400   /* tracing of execution */
-#define REG_LARGE       01000   /* force large representation */
-#define REG_BACKR       02000   /* force use of backref code */
+/* This is not used by PCRE2, but by defining it we make it easier
+to slot PCRE2 into existing programs that make POSIX calls. */
 
-idaman THREAD_SAFE int    ida_export regcomp(regex_t *, const char *, int);
-idaman THREAD_SAFE size_t ida_export regerror(int, const regex_t *, char *, size_t);
-idaman THREAD_SAFE int    ida_export regexec(const regex_t *,const char *, size_t, regmatch_t [], int);
-idaman THREAD_SAFE void   ida_export regfree(regex_t *);
+#define REG_EXTENDED  0
+#define REG_TRACE 0   // unsupported by PCRE2
+
+/* Error values. Not all these are relevant or used by the wrapper. */
+
+
+enum
+{
+  REG_ASSERT = 1,  /* internal error ? */
+  REG_BADBR,       /* invalid repeat counts in {} */
+  REG_BADPAT,      /* pattern error */
+  REG_BADRPT,      /* ? * + invalid */
+  REG_EBRACE,      /* unbalanced {} */
+  REG_EBRACK,      /* unbalanced [] */
+  REG_ECOLLATE,    /* collation error - not relevant */
+  REG_ECTYPE,      /* bad class */
+  REG_EESCAPE,     /* bad escape sequence */
+  REG_EMPTY,       /* empty expression */
+  REG_EPAREN,      /* unbalanced () */
+  REG_ERANGE,      /* bad range inside [] */
+  REG_ESIZE,       /* expression too big */
+  REG_ESPACE,      /* failed to get memory */
+  REG_ESUBREG,     /* bad back reference */
+  REG_INVARG,      /* bad argument */
+  REG_NOMATCH      /* match failed */
+};
+#endif //REG_ICASE
+
+/* The functions */
+
+// compile the regular expression
+idaman THREAD_SAFE int ida_export regcomp(
+        struct regex_t *preg,
+        const char *pattern,
+        int cflags);
+
+// mapping from error codes returned by regcomp() and regexec() to a string
+idaman THREAD_SAFE size_t ida_export regerror(
+        int errcode,
+        const struct regex_t *preg,
+        char *errbuf,
+        size_t errbuf_size);
+
+// match regex against a string
+idaman THREAD_SAFE int ida_export regexec(
+        const struct regex_t *preg,
+        const char *str,
+        size_t nmatch,
+        struct regmatch_t pmatch[],
+        int eflags);
+
+// free any memory allocated by regcomp
+idaman THREAD_SAFE void ida_export regfree(struct regex_t *preg);
+
+#ifdef __cplusplus
+
+//-------------------------------------------------------------------------
+class refcnted_regex_t : public qrefcnt_obj_t
+{
+  refcnted_regex_t()
+  {
+    memset(&regex, 0, sizeof(regex));
+  }
+  virtual ~refcnted_regex_t()
+  {
+    regfree(&regex);
+  }
+  regex_t regex;
+public:
+  virtual void idaapi release(void)
+  {
+    delete this;
+  }
+  int exec(const char *string, size_t nmatch, regmatch_t pmatch[], int eflags)
+  {
+    return regexec(&regex, string, nmatch, pmatch, eflags);
+  }
+  int process_errors(int code, qstring *errmsg)
+  {
+    if ( code != 0 && errmsg != NULL )
+    {
+      char errbuf[MAXSTR];
+      regerror(code, &regex, errbuf, sizeof(errbuf));
+      *errmsg = errbuf;
+    }
+    return code;
+  }
+  static refcnted_regex_t *create(const qstring &text, bool case_insensitive, qstring *errmsg)
+  {
+    if ( text.empty() )
+      return NULL;
+    refcnted_regex_t *p = new refcnted_regex_t();
+    int rflags = REG_EXTENDED;
+    if ( case_insensitive )
+      rflags |= REG_ICASE;
+    int code = regcomp(&p->regex, text.begin(), rflags);
+    if ( p->process_errors(code, errmsg) != 0 )
+    {
+      // It is unnecessary to regfree() here: the deletion of 'p' will
+      // call regfree (but anyway, even that is unnecessary, because
+      // if we end up here, it means regcomp() failed, and when that
+      // happens, regcomp() frees the regex itself.)
+      delete p;
+      p = NULL;
+    }
+    return p;
+  }
+  size_t nsub(void)
+  {
+    /* number of parenthesized subexpressions */
+    return regex.re_nsub;
+  }
+  DECLARE_UNCOPYABLE(refcnted_regex_t);
+};
+typedef qrefcnt_t<refcnted_regex_t> regex_ptr_t;
+
+//---------------------------------------------------------------------------
+struct regex_cache_t
+{
+  regex_ptr_t &find_or_create(const qstring &str)
+  {
+    regex_cache_map_t::iterator it = cache.find(str);
+    if ( it == cache.end() )
+    {
+      qstring errmsg;
+      regex_ptr_t rx = regex_ptr_t(refcnted_regex_t::create(str, false, &errmsg));
+      if ( rx == NULL )
+        error("%s", errmsg.c_str());
+      it = cache.insert(regex_cache_map_t::value_type(str, rx)).first;
+    }
+    return it->second;
+  }
+
+private:
+  typedef std::map<qstring,regex_ptr_t> regex_cache_map_t;
+  regex_cache_map_t cache;
+};
+
+#endif //__cplusplus
 
 #endif /* !_REGEX_H_ */

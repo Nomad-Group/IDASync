@@ -4,7 +4,7 @@
 //
 
 #include <loader.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include "consts.h"
 
 bool plugin_inited;
@@ -17,7 +17,7 @@ bool debugger_inited;
   #define REGISTER_CLASSES_DEFAULT X86_RC_GENERAL
   #define READ_REGISTERS           x86_read_registers
   #define WRITE_REGISTER           x86_write_register
-  #if DEBUGGER_ID != DEBUGGER_ID_GDB_USER
+  #if DEBUGGER_ID != DEBUGGER_ID_GDB_USER && DEBUGGER_ID != DEBUGGER_ID_ARM_IPHONE_USER
     #define is_valid_bpt           is_x86_valid_bpt
   #endif
   #define BPT_CODE                 X86_BPT_CODE
@@ -29,7 +29,7 @@ bool debugger_inited;
   #define REGISTER_CLASSES_DEFAULT ARM_RC_GENERAL
   #define READ_REGISTERS           arm_read_registers
   #define WRITE_REGISTER           arm_write_register
-  #if DEBUGGER_ID != DEBUGGER_ID_GDB_USER
+  #if DEBUGGER_ID != DEBUGGER_ID_GDB_USER && DEBUGGER_ID != DEBUGGER_ID_ARM_IPHONE_USER
     #define is_valid_bpt           is_arm_valid_bpt
   #endif
   #define BPT_CODE                 ARM_BPT_CODE
@@ -61,7 +61,7 @@ int idaapi is_ok_bpt(bpttype_t type, ea_t ea, int len)
 #if DEBUGGER_ID == DEBUGGER_ID_ARM_LINUX_USER
 static int idaapi arm_update_bpts(update_bpt_info_t *bpts, int nadd, int ndel)
 {
-  // This function is called from debthread, but to use get_segreg() we must
+  // This function is called from debthread, but to use get_sreg() we must
   // switch to the mainthread
   struct ida_local arm_bptea_fixer_t : public exec_request_t
   {
@@ -72,7 +72,7 @@ static int idaapi arm_update_bpts(update_bpt_info_t *bpts, int nadd, int ndel)
     {
       for ( update_bpt_info_t *b=bpts; b != e; b++ )
       {
-        if ( b->type == BPT_SOFT && get_segreg(b->ea, ARM_T) == 1 )
+        if ( b->type == BPT_SOFT && get_sreg(b->ea, ARM_T) == 1 )
         {
           b->ea++; // odd address means that thumb bpt must be set
           thumb_mode.push_back(&b->ea);
@@ -130,12 +130,12 @@ static void idaapi stopped_at_debug_event(bool dlls_added)
 #ifndef REMOTE_DEBUGGER
 // another copy of this function (for remote debugging) is defined in rpc_server.cpp
 int send_ioctl(
-  void *,
-  int fn,
-  const void *buf,
-  size_t size,
-  void **poutbuf,
-  ssize_t *poutsize)
+        void *,
+        int fn,
+        const void *buf,
+        size_t size,
+        void **poutbuf,
+        ssize_t *poutsize)
 {
   return g_dbgmod.handle_ioctl(fn, buf, size, poutbuf, poutsize);
 }
@@ -143,18 +143,18 @@ int send_ioctl(
 
 //--------------------------------------------------------------------------
 THREAD_SAFE int debmod_t::send_debug_names_to_ida(
-      ea_t *addrs,
-      const char *const *names,
-      int qty)
+        ea_t *addrs,
+        const char *const *names,
+        int qty)
 {
   return ::send_debug_names_to_ida(addrs, names, qty);
 }
 
 //---------------------------------------------------------------------------
 THREAD_SAFE int send_debug_names_to_ida(
-      ea_t *addrs,
-      const char *const *names,
-      int qty)
+        ea_t *addrs,
+        const char *const *names,
+        int qty)
 {
   struct debug_name_handler_t : public exec_request_t
   {
@@ -175,16 +175,16 @@ THREAD_SAFE int send_debug_names_to_ida(
 
 //--------------------------------------------------------------------------
 THREAD_SAFE int debmod_t::send_debug_event_to_ida(
-      const debug_event_t *ev,
-      int rqflags)
+        const debug_event_t *ev,
+        int rqflags)
 {
   return ::send_debug_event_to_ida(ev, rqflags);
 }
 
 //---------------------------------------------------------------------------
 THREAD_SAFE int send_debug_event_to_ida(
-      const debug_event_t *ev,
-      int rqflags)
+        const debug_event_t *ev,
+        int rqflags)
 {
   return handle_debug_event(ev, rqflags);
 }
@@ -197,26 +197,36 @@ void set_arm_thumb_modes(ea_t * /*addrs*/, int /*qty*/)
 #endif
 
 //--------------------------------------------------------------------------
-static int idaapi process_get_info(int n, process_info_t *info)
+// installs or uninstalls debugger specific idc functions
+bool add_idc_funcs(const ext_idcfunc_t efuncs[], size_t nfuncs, bool reg)
 {
-  char input[QMAXFILE];
-  input[0] = '\0';
-  if ( n == 0 && !is_temp_database() )
-    dbg_get_input_path(input, sizeof(input));
-
-  return s_process_get_info(n, input, info);
+  if ( reg )
+  {
+    for ( int i=0; i < nfuncs; i++ )
+      if ( !add_idc_func(efuncs[i]) )
+        return false;
+  }
+  else
+  {
+    for ( int i=0; i < nfuncs; i++ )
+      if ( !del_idc_func(efuncs[i].name) )
+        return false;
+  }
+  return true;
 }
 
 //--------------------------------------------------------------------------
 static bool idaapi init_debugger(
-      const char *hostname,
-      int port_num,
-      const char *password)
+        const char *hostname,
+        int port_num,
+        const char *password)
 {
+  s_set_debugging((debug & IDA_DEBUG_DEBUGGER) != 0);
+
   if ( !s_open_remote(hostname, port_num, password) )
     return false;
 
-  int code = s_init((debug & IDA_DEBUG_DEBUGGER) != 0);
+  int code = s_init();
   // network error?
   if ( code <= 0 )
   {
@@ -224,8 +234,8 @@ static bool idaapi init_debugger(
     return false;
   }
 
-  debugger.process_get_info = (code & DBG_HAS_PROCGETINFO) != 0 ? process_get_info : NULL;
-  debugger.detach_process   = (code & DBG_HAS_DETACHPROC)  != 0 ? s_detach_process : NULL;
+  debugger.get_processes  = (code & DBG_HAS_PROCGETINFO) != 0 ? s_get_processes  : NULL;
+  debugger.detach_process = (code & DBG_HAS_DETACHPROC)  != 0 ? s_detach_process : NULL;
   debugger_inited = true;
 #ifdef WINCE_DEBUGGER
   slot = BADADDR;
@@ -293,13 +303,14 @@ static void idaapi term(void)
 
 //--------------------------------------------------------------------------
 // The plugin method - usually is not used for debugger plugins
-static void idaapi run(int arg)
+static bool idaapi run(size_t arg)
 {
 #ifdef HAVE_PLUGIN_RUN
-  plugin_run(arg);
+  plugin_run(int(arg));
 #else
   qnotused(arg);
 #endif
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -358,6 +369,12 @@ static void idaapi run(int arg)
 #  define S_FILETYPE 0
 #endif
 
+#ifndef HAVE_GET_SRCINFO_PATH
+#  define GET_SRCINFO_PATH NULL
+#else
+#  define GET_SRCINFO_PATH s_get_srcinfo_path
+#endif
+
 // wince has no single step mechanism (except Symbian TRK, which provides support for it)
 #if TARGET_PROCESSOR == PLFM_ARM && DEBUGGER_ID != DEBUGGER_ID_ARM_EPOC_USER
 #  define S_SET_RESUME_MODE NULL
@@ -390,7 +407,7 @@ debugger_t debugger =
   init_debugger,
   term_debugger,
 
-  NULL, // process_get_info: patched at runtime if ToolHelp functions are available
+  NULL, // get_processes: patched at runtime if ToolHelp functions are available
   s_start_process,
   s_attach_process,
   NULL, // detach_process:   patched at runtime if Windows XP/2K3
@@ -433,6 +450,7 @@ debugger_t debugger =
   s_is_tracing_enabled,
   s_rexec,
   s_get_debapp_attrs,
+  s_get_srcinfo_path,
 };
 
 //--------------------------------------------------------------------------

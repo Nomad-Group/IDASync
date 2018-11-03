@@ -2,7 +2,7 @@
  * Copyright (c) 2000-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
@@ -11,10 +11,10 @@
  * unlawful or unlicensed copies of an Apple operating system, or to
  * circumvent, violate, or enable the circumvention or violation of, any
  * terms of an Apple operating system software license agreement.
- * 
+ *
  * Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -22,7 +22,7 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
  */
 /* Copyright 1995 NeXT Computer, Inc. All rights reserved. */
@@ -202,6 +202,63 @@
 #define __restrict	restrict
 #endif
 
+#ifdef __MAC__
+
+// compile with SDK version <= 10.7
+#ifndef __has_attribute
+#define __has_attribute(X) 0
+#endif
+
+#ifndef __has_feature
+#define __has_feature(X) 0
+#endif
+
+/*
+ * __disable_tail_calls causes the compiler to not perform tail call
+ * optimization inside the marked function.
+ */
+#if __has_attribute(disable_tail_calls)
+#define __disable_tail_calls	__attribute__((__disable_tail_calls__))
+#else
+#define __disable_tail_calls
+#endif
+
+/*
+ * __not_tail_called causes the compiler to prevent tail call optimization
+ * on statically bound calls to the function.  It has no effect on indirect
+ * calls.  Virtual functions, objective-c methods, and functions marked as
+ * "always_inline" cannot be marked as __not_tail_called.
+ */
+#if __has_attribute(not_tail_called)
+#define __not_tail_called	__attribute__((__not_tail_called__))
+#else
+#define __not_tail_called
+#endif
+
+/*
+ * __result_use_check warns callers of a function that not using the function
+ * return value is a bug, i.e. dismissing malloc() return value results in a
+ * memory leak.
+ */
+#if __has_attribute(warn_unused_result)
+#define __result_use_check __attribute__((__warn_unused_result__))
+#else
+#define __result_use_check
+#endif
+
+/*
+ * __swift_unavailable causes the compiler to mark a symbol as specifically
+ * unavailable in Swift, regardless of any other availability in C.
+ */
+#if __has_feature(attribute_availability_swift)
+#define __swift_unavailable(_msg)	__attribute__((__availability__(swift, unavailable, message=_msg)))
+#else
+#define __swift_unavailable(_msg)
+#endif
+
+#endif // __MAC__
+
+
 /* Declaring inline functions within headers is error-prone due to differences
  * across various versions of the C language and extensions.  __header_inline
  * can be used to declare inline functions within system headers.  In cases
@@ -276,7 +333,7 @@
 
 /* Source compatibility only, ID string not emitted in object file */
 #ifndef __FBSDID
-#define __FBSDID(s) 
+#define __FBSDID(s)
 #endif
 
 
@@ -495,6 +552,8 @@
 #define __DARWIN_10_6_AND_LATER_ALIAS(x)	x
 #endif
 
+#define __DARWIN_NOCANCEL(sym)  	__asm("_" __STRING(sym) __DARWIN_SUF_NON_CANCELABLE)
+
 /*
  * POSIX.1 requires that the macros we test be defined before any standard
  * header file is included.  This permits us to convert values for feature
@@ -659,7 +718,7 @@
 #define _DARWIN_FEATURE_UNIX_CONFORMANCE	3
 #endif
 
-/* 
+/*
  * This macro casts away the qualifier from the variable
  *
  * Note: use at your own risk, removing qualifiers can result in
@@ -672,6 +731,6 @@
 #endif /* !_CDEFS_H_ */
 #else
 
-#include "/usr/include/sys/cdefs.h"
+#include_next <sys/cdefs.h>
 
 #endif /* !__LINUX__ */

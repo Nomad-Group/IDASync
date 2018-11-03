@@ -66,8 +66,8 @@ int is_prc_file(linput_t *li)
     return 0;
   if ( short(h.numRecords) <= 0 )
     return 0;
-  const uint32 filesize = qlsize(li);
-  const uint32 lowestpos = h.numRecords*sizeof(ResourceMapEntry) + sizeof(h);
+  const uint64 filesize = qlsize(li);
+  const uint64 lowestpos = uint64(h.numRecords)*sizeof(ResourceMapEntry) + sizeof(h);
   if ( lowestpos > filesize )
     return 0;
 

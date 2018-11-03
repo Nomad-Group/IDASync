@@ -8,7 +8,7 @@ struct varser_t
 #ifdef __NT__
   static bool serialize(bytevec_t &out, const VARIANT &var);
 #else
-  static bool deserialize(VARIANT &var, const uchar **in, const uchar * const end);
+  static bool deserialize(VARIANT &var, const uchar **in, const uchar *const end);
 #endif
 };
 
@@ -91,7 +91,7 @@ bool varser_t::serialize(bytevec_t &out, const VARIANT &var)
 }
 #else
 //-------------------------------------------------------------------------
-bool varser_t::deserialize(VARIANT &var, const uchar **in, const uchar * const end)
+bool varser_t::deserialize(VARIANT &var, const uchar **in, const uchar *const end)
 {
   var.vt = unpack_dw(in, end);
   if ( (var.vt & VT_BYREF) == VT_BYREF

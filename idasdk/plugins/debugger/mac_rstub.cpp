@@ -27,7 +27,7 @@ static const char wanted_name[] = "Remote Mac OS X debugger";
 #include <idp.hpp>
 #include <idd.hpp>
 #include <ua.hpp>
-#include <area.hpp>
+#include <range.hpp>
 #include <loader.hpp>
 #include <kernwin.hpp>
 #include "rpc_client.h"

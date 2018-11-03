@@ -556,24 +556,25 @@ static const ana_info_t c4 =
 };
 
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi st20_ana(insn_t *_insn)
 {
+  insn_t &insn = *_insn;
   const ana_info_t &a = isc4() ? c4 : c1;
   int value = 0;
   while ( 1 )
   {
-    int code = ua_next_byte();
+    int code = insn.get_next_byte();
     value |= (code & 15);
-    cmd.itype = a.primary[code>>4];
-    switch ( cmd.itype )
+    insn.itype = a.primary[code>>4];
+    switch ( insn.itype )
     {
       case ST20_j:
       case ST20_cj:
       case ST20_fcall:
       case ST20_call:
-        cmd.Op1.type = o_near;
-        cmd.Op1.dtyp = dt_code;
-        cmd.Op1.addr = uint32(cmd.ip + cmd.size + value);
+        insn.Op1.type = o_near;
+        insn.Op1.dtype = dt_code;
+        insn.Op1.addr = uint32(insn.ip + insn.size + value);
         break;
       case ST20_ldlp:
       case ST20_ldnl:
@@ -585,19 +586,20 @@ int idaapi ana(void)
       case ST20_eqc:
       case ST20_stl:
       case ST20_stnl:
-        cmd.Op1.type = o_imm;
-        cmd.Op1.dtyp = dt_dword;
-        cmd.Op1.value = value;
+        insn.Op1.type = o_imm;
+        insn.Op1.dtype = dt_dword;
+        insn.Op1.value = value;
         break;
       case ST20_nfix:
         value = ~value;
+        // fallthrough
       case ST20_pfix:
         value <<= 4;
         continue;
       case ST20_opr:
         if ( isc4() && value == 0x17C )
         {
-          cmd.itype = ST20_lddevid;
+          insn.itype = ST20_lddevid;
           break;
         }
         if ( value < 0 )
@@ -605,29 +607,27 @@ int idaapi ana(void)
           value = (~value & ~15) | (value & 15);
           if ( value >= a.nsqty )
             return 0;
-          cmd.itype = a.secondary_negative[value];
+          insn.itype = a.secondary_negative[value];
         }
         else
         {
           if ( value >= a.sqty )
             return 0;
-          cmd.itype = a.secondary[value];
+          insn.itype = a.secondary[value];
         }
         break;
     }
     break;
   }
-  return cmd.size;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
-void interr(const char *module)
+void interr(const insn_t &insn, const char *module)
 {
   const char *name = NULL;
-  if ( cmd.itype < ph.instruc_end )
-    name = Instructions[cmd.itype].name;
-  else
-    cmd.itype = uint16(ph.instruc_start);
-  warning("%a(%s): internal error in %s", cmd.ea, name, module);
+  if ( insn.itype < ph.instruc_end )
+    name = Instructions[insn.itype].name;
+  warning("%a(%s): internal error in %s", insn.ea, name, module);
 }
 

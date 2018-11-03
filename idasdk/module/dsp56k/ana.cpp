@@ -42,11 +42,12 @@
 #include "dsp56k.hpp"
 
 #define FUNCS_COUNT 5
-#define F_SWITCH ((bool(*)(int))0xffffffff)
+#define F_SWITCH ((bool(*)(insn_t &, int))-1)
+
 
 struct funcdesc_t
 {
-  bool (*func)(int);
+  bool (*func)(insn_t &, int);
   uint32 mask;
   uint32 shift;
 };
@@ -86,47 +87,36 @@ static op_t *op;       // current operand
 addargs_t aa;
 
 //----------------------------------------------------------------------
-static uint32 ua_next_24bits(void)
+static uint32 ua_next_24bits(insn_t &insn)
 {
-  uint32 x = get_full_byte(cmd.ea+cmd.size);
-  cmd.size++;
+  uint32 x = get_wide_byte(insn.ea+insn.size);
+  insn.size++;
   return x;
-//  return ((x >> 16) & 0x0000FF)   // swap 24 bits
-//       | ((x      ) & 0x00FF00)
-//       | ((x << 16) & 0xFF0000);
 }
 
 //----------------------------------------------------------------------
-static uint32 ua_32bits(void)
+static uint32 ua_32bits(const insn_t &insn)
 {
 
-  uint32 x =            ( (get_full_byte(cmd.ea)                ) & 0x0000FFFF )
-                        |       ( (get_full_byte(cmd.ea+1) << 16) & 0xFFFF0000 );
-/*
-  uint32 x =            ( (get_full_byte(cmd.ea)   >> 8 ) & 0x000000FF )
-                        |       ( (get_full_byte(cmd.ea)   << 8 ) & 0x0000FF00 )
-                        |       ( (get_full_byte(cmd.ea+1) << 8 ) & 0x00FF0000 )
-                        |       ( (get_full_byte(cmd.ea+1) << 24) & 0xFF000000 );
-
-*/
+  uint32 x = ((get_wide_byte(insn.ea)        ) & 0x0000FFFF )
+           | ((get_wide_byte(insn.ea+1) << 16) & 0xFFFF0000 );
   return x;
 }
 
 
 //----------------------------------------------------------------------
 // make sure that the additional args are good
-void fill_additional_args(void)
+void fill_additional_args(const insn_t &insn)
 {
-  if ( aa.ea != cmd.ea )
+  if ( aa.ea != insn.ea )
   {
-    ea_t ea = cmd.ea;
-    cmd.ea = BADADDR;
-    decode_insn(ea);
+    insn_t tmp;
+    decode_insn(&tmp, insn.ea);
   }
 }
 
 //----------------------------------------------------------------------
-static void switch_to_additional_args(void)
+static void switch_to_additional_args(insn_t &)
 {
   op = aa.args[aa.nargs++];
   op[0].flags = OF_SHOW;
@@ -136,19 +126,19 @@ static void switch_to_additional_args(void)
 }
 
 //----------------------------------------------------------------------
-inline void opreg(int reg)
+inline void opreg(insn_t &, int reg)
 {
   op->type = o_reg;
   op->reg  = (uint16)reg;
 }
 
 //----------------------------------------------------------------------
-static bool D_EE(int value)
+static bool D_EE(insn_t &insn, int value)
 {
   uchar reg;
   if ( is561xx() )
   {
-    static const char regs[] = {-1, MR, CCR, OMR };
+    static const char regs[] = { -1, MR, CCR, OMR };
 
     if ( value < 1 )
       return false;
@@ -164,17 +154,17 @@ static bool D_EE(int value)
 
     reg = regs[value];
   }
-  opreg(reg);
+  opreg(insn, reg);
   return true;
 }
 //----------------------------------------------------------------------
-static bool D_DDDDD(int value)
+static bool D_DDDDD(insn_t &insn, int value)
 {
   if ( is561xx() )
   {
     static const uchar regs[] =
     {
-      X0, Y0, X1, Y1, A,  B,  A0, B0,
+      X0, Y0, X1, Y1, A,  B, A0, B0,
       uchar(-1), SR, OMR,SP, A1, B1, A2, B2,
       R0, R1, R2, R3, M0, M1, M2, M3,
       SSH,SSL,LA, LC, N0, N1, N2, N3
@@ -182,7 +172,7 @@ static bool D_DDDDD(int value)
 
     if ( value >= qnumber(regs) )
       return false;
-    opreg(regs[value]);
+    opreg(insn, regs[value]);
     if ( op->reg == uchar(-1) )
       return false;
   }
@@ -191,21 +181,21 @@ static bool D_DDDDD(int value)
     static const uchar regs[] = { 0, SR, OMR, SP, SSH, SSL, LA, LC };
     if ( value < 8 )
     {
-      opreg(M0 + (value & 7));
+      opreg(insn, M0 + (value & 7));
     }
     else
     {
       value &= 7;
       if ( value == 0 )
         return false;
-      opreg(regs[value & 7]);
+      opreg(insn, regs[value & 7]);
     }
   }
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_ff(int value, int reg_bank)
+static bool D_ff(const insn_t &insn, int value, int reg_bank)
 {
   op->type = o_reg;
   switch ( value )
@@ -223,24 +213,24 @@ static bool D_ff(int value, int reg_bank)
       op->reg = B;
       break;
     default:
-      interr("D_ff");
+      interr(&insn, "D_ff");
   }
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_df(int value, int reg_bank)
+static bool D_df(insn_t &insn, int value, int reg_bank)
 {
-  opreg(value & 0x02 ? B : A);
+  opreg(insn, value & 0x02 ? B : A);
   op++;
-  opreg(reg_bank
+  opreg(insn, reg_bank
              ? (value & 1) ? X1 : X0
              : (value & 1) ? Y1 : Y0);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_xi(int value)
+static bool S_xi(insn_t &, int value)
 {
   op->type  = o_imm;
   op->value = is561xx() ? (value & 0xFF) : value;
@@ -249,20 +239,20 @@ static bool S_xi(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_ximm(int /*value*/)
+static bool D_ximm(insn_t &insn, int /*value*/)
 {
   op->type = o_imm;
-  op->value = ua_next_24bits();
-  if ( is566xx()  )
-          op->value &= 0xffff;
+  op->value = ua_next_24bits(insn);
+  if ( is566xx() )
+    op->value &= 0xffff;
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_ximm(int value)
+static bool S_ximm(insn_t &insn, int value)
 {
-  if ( D_ximm(value) )
+  if ( D_ximm(insn, value) )
   {
     op++;
     return true;
@@ -271,7 +261,7 @@ static bool S_ximm(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_sssss(int value)
+static bool S_sssss(insn_t &, int value)
 {
   static const int vals[] =
   {
@@ -292,7 +282,7 @@ static bool S_sssss(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_ssss(int value)
+static bool S_ssss(insn_t &, int value)
 {
   static const int vals[] =
   {
@@ -309,7 +299,7 @@ static bool S_ssss(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_xih(int value)
+static bool D_xih(insn_t &, int value)
 {
   op->type  = o_imm;
   op->value = (value & 0xF) << 8;
@@ -318,9 +308,9 @@ static bool D_xih(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_xih(int value)
+static bool S_xih(insn_t &insn, int value)
 {
-  if ( D_xih(value) )
+  if ( D_xih(insn, value) )
   {
     op++;
     return true;
@@ -330,25 +320,25 @@ static bool S_xih(int value)
 
 
 //----------------------------------------------------------------------
-static bool SD_d(int value)
+static bool SD_d(insn_t &insn, int value)
 {
   if ( value )
   {
-    opreg(A);
+    opreg(insn, A);
     op++;
-    opreg(B);
+    opreg(insn, B);
   }
   else
   {
-    opreg(B);
+    opreg(insn, B);
     op++;
-    opreg(A);
+    opreg(insn, A);
   }
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool SS_JJJd(int value)
+static bool SS_JJJd(insn_t &insn, int value)
 {
   static const uchar regs[] = { X0, Y0, X1, Y1 };
 
@@ -358,20 +348,20 @@ static bool SS_JJJd(int value)
   switch ( value >> 1 )
   {
     case 0:
-      return SD_d(value & 0x01);
+      return SD_d(insn, value & 0x01);
 
     default:
-      opreg(regs[(value >> 1) - 4]);
+      opreg(insn, regs[(value >> 1) - 4]);
       op++;
       break;
   }
-  opreg(value & 0x01 ? B : A);
+  opreg(insn, value & 0x01 ? B : A);
   return true;
 }
 
 
 //----------------------------------------------------------------------
-static bool SD_JJJd(int value)
+static bool SD_JJJd(insn_t &insn, int value)
 {
   static const uchar regs[] = { X, Y, X0, Y0, X1, Y1 };
   switch ( value >> 1 )
@@ -380,38 +370,38 @@ static bool SD_JJJd(int value)
       return false;
 
     case 1:
-      return SD_d(value & 0x01);
+      return SD_d(insn, value & 0x01);
 
     default:
-      opreg(regs[(value >> 1) - 2]);
+      opreg(insn, regs[(value >> 1) - 2]);
       op++;
       break;
   }
-  opreg(value & 0x01 ? B : A);
+  opreg(insn, value & 0x01 ? B : A);
   return true;
 }
 
 
 //----------------------------------------------------------------------
-static bool SD_Jd(int value)
+static bool SD_Jd(insn_t &insn, int value)
 {
-  opreg((value & 2) ? Y : X);
+  opreg(insn, (value & 2) ? Y : X);
   op++;
-  opreg((value & 1) ? B : A);
+  opreg(insn, (value & 1) ? B : A);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_d(int value)
+static bool D_d(insn_t &insn, int value)
 {
-  opreg(value ? B : A);
+  opreg(insn, value ? B : A);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_S(int value)
+static bool S_S(insn_t &insn, int value)
 {
-  if ( D_d(value) )
+  if ( D_d(insn, value) )
   {
     op++;
     return true;
@@ -420,41 +410,41 @@ static bool S_S(int value)
 }
 
 //----------------------------------------------------------------------
-static bool SD_JJd(int value)
+static bool SD_JJd(insn_t &insn, int value)
 {
   static const uchar regs[] = { X0, Y0, X1, Y1 };
-  opreg(regs[value>>1]);
+  opreg(insn, regs[value>>1]);
   op++;
-  return D_d(value & 0x01);
+  return D_d(insn, value & 0x01);
 }
 
 //----------------------------------------------------------------------
-static bool D_dddd(int value)
+static bool D_dddd(insn_t &insn, int value)
 {
-  opreg(((value & 8) ? N0 : R0) + (value & 0xF));
+  opreg(insn, ((value & 8) ? N0 : R0) + (value & 0xF));
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_ddddd(int value)
+static bool D_ddddd(insn_t &insn, int value)
 {
   static const uchar regs[] = { X0, X1, Y0, Y1, A0, B0, A2, B2, A1, B1, A, B };
 
   if ( value >= 4 )
   {
     if ( value < 16 )
-      opreg(regs[value - 4]);
+      opreg(insn, regs[value - 4]);
     else
-      opreg(((value < 24) ? R0 : N0) + (value & 7));
+      opreg(insn, ((value < 24) ? R0 : N0) + (value & 7));
     return true;
   }
   return false;
 }
 
 //----------------------------------------------------------------------
-static bool S_ddddd(int value)
+static bool S_ddddd(insn_t &insn, int value)
 {
-  if ( D_ddddd(value) )
+  if ( D_ddddd(insn, value) )
   {
     op++;
     return true;
@@ -463,21 +453,21 @@ static bool S_ddddd(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_LLL(int value)
+static bool D_LLL(insn_t &insn, int value)
 {
-  static const uchar regs[] = { A10, B10, X, Y, A, B, AB, BA};
-  opreg(regs[value]);
+  static const uchar regs[] = { A10, B10, X, Y, A, B, AB, BA };
+  opreg(insn, regs[value]);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_sss(int value)
+static bool D_sss(insn_t &insn, int value)
 {
   static const char regs[] = { -1, -1, A1, B1, X0, Y0, X1, Y1 };
 
   if ( value > 1 )
   {
-    opreg(regs[value]);
+    opreg(insn, regs[value]);
     return true;
   }
   else
@@ -485,9 +475,9 @@ static bool D_sss(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_sss(int value)
+static bool S_sss(insn_t &insn, int value)
 {
-  if ( D_sss(value) )
+  if ( D_sss(insn, value) )
   {
     op++;
     return true;
@@ -496,13 +486,13 @@ static bool S_sss(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_qqq(int value)
+static bool D_qqq(insn_t &insn, int value)
 {
   static const char regs[] = { -1, -1, A0, B0, X0, Y0, X1, Y1 };
 
   if ( value > 1 )
   {
-    opreg(regs[value]);
+    opreg(insn, regs[value]);
     return true;
   }
   else
@@ -510,9 +500,9 @@ static bool D_qqq(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_qqq(int value)
+static bool S_qqq(insn_t &insn, int value)
 {
-  if ( D_qqq(value) )
+  if ( D_qqq(insn, value) )
   {
     op++;
     return true;
@@ -521,55 +511,55 @@ static bool S_qqq(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_qq(int value)
+static bool S_qq(insn_t &insn, int value)
 {
   static const uchar regs[] = { X0, Y0, X1, Y1 };
 
-  opreg(regs[value & 0x03]);
+  opreg(insn, regs[value & 0x03]);
   op++;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_QQ(int value)
+static bool S_QQ(insn_t &insn, int value)
 {
   int idx = value & 0x03;
   if ( is561xx() )
   {
     static const uchar regs1[] = { X0, X0, X1, X1 };
     static const uchar regs2[] = { Y0, Y1, Y0, Y1 };
-    opreg(regs1[idx]);
+    opreg(insn, regs1[idx]);
     op++;
-    opreg(regs2[idx]);
+    opreg(insn, regs2[idx]);
   }
   else
   {
     static const uchar regs[] = { Y1, X0, Y0, X1 };
-    opreg(regs[idx]);
+    opreg(insn, regs[idx]);
   }
   op++;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_gggd(int value)
+static bool S_gggd(insn_t &insn, int value)
 {
-  static const uchar regs[] = {X0, Y0, X1, Y1};
+  static const uchar regs[] = { X0, Y0, X1, Y1 };
 
   if ( value < 2 )
   {
-    opreg(value == 0 ? B : A);
+    opreg(insn, value == 0 ? B : A);
   }
   else
   {
-    opreg(regs[(value>>1) & 0x03]);
+    opreg(insn, regs[(value>>1) & 0x03]);
   }
   op++;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_MMRRR(int value)
+static bool D_MMRRR(insn_t &, int value)
 {
   op->type   = o_phrase;
   op->phrase = value & 0x07;
@@ -578,9 +568,9 @@ static bool D_MMRRR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_MMRRR(int value)
+static bool S_MMRRR(insn_t &insn, int value)
 {
-  if ( D_MMRRR(value) )
+  if ( D_MMRRR(insn, value) )
   {
     op++;
     return true;
@@ -589,7 +579,7 @@ static bool S_MMRRR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_MMRRR_XY(int value)
+static bool D_MMRRR_XY(insn_t &, int value)
 {
   static const char phtypes[] =
   {
@@ -605,7 +595,7 @@ static bool D_MMRRR_XY(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_pppppp(int value)
+static bool D_pppppp(insn_t &, int value)
 {
   int base = is563xx() ? 0xFFFFC0 : 0xFFC0;
 
@@ -618,9 +608,9 @@ static bool D_pppppp(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_pppppp(int value)
+static bool S_pppppp(insn_t &insn, int value)
 {
-  if ( D_pppppp(value) )
+  if ( D_pppppp(insn, value) )
   {
     op++;
     return true;
@@ -630,7 +620,7 @@ static bool S_pppppp(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_qqqqqq(int value)
+static bool D_qqqqqq(insn_t &, int value)
 {
   int base = is563xx() ? 0xFFFF80 : 0xFF80;
 
@@ -643,9 +633,9 @@ static bool D_qqqqqq(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_qqqqqq(int value)
+static bool S_qqqqqq(insn_t &insn, int value)
 {
-  if ( D_qqqqqq(value) )
+  if ( D_qqqqqq(insn, value) )
   {
     op++;
     return true;
@@ -655,18 +645,13 @@ static bool S_qqqqqq(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_qXqqqqq(int value)
+static bool D_qXqqqqq(insn_t &insn, int value)
 {
-  if ( D_qqqqqq( (value & 0x1f) + ((value & 0x40)>>1) ) )
-  {
-    return true;
-  }
-
-  return false;
+  return D_qqqqqq(insn, (value & 0x1f) + ((value & 0x40)>>1));
 }
 
 //----------------------------------------------------------------------
-static bool D_DDDDDD(int value)
+static bool D_DDDDDD(insn_t &insn, int value)
 {
   static const char regs[] =
   {
@@ -685,16 +670,16 @@ static bool D_DDDDDD(int value)
   char r = regs[value];
   if ( r == -1 )
     return false;
-  opreg(r);
+  opreg(insn, r);
   //if ( op->reg >= SZ && !is563xx() ) return false;
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_DDDDDD(int value)
+static bool S_DDDDDD(insn_t &insn, int value)
 {
-  if ( D_DDDDDD(value) )
+  if ( D_DDDDDD(insn, value) )
   {
     op++;
     return true;
@@ -704,41 +689,41 @@ static bool S_DDDDDD(int value)
 }
 
 //----------------------------------------------------------------------
-static bool  D_DDDD(int value)
+static bool D_DDDD(insn_t &insn, int value)
 {
-  if( D_DDDDDD(value & 0x0f) )
-  {
+  if ( D_DDDDDD(insn, value & 0x0f) )
     return true;
-  }
 
   return false;
 }
 
 //----------------------------------------------------------------------
-static bool D_RRR(int value)
+static bool D_RRR(insn_t &insn, int value)
 {
-  opreg(R0 + value);
+  opreg(insn, R0 + value);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_RRR(int value)
+static bool S_RRR(insn_t &insn, int value)
 {
-  opreg(R0 + value);
+  opreg(insn, R0 + value);
   op++;
   return true;
 }
 
 //----------------------------------------------------------------------
-static void make_o_mem(void)
+//lint -e{1764} insn could be const
+static void make_o_mem(insn_t &insn)
 {
-  if ( !(op->amode & (amode_x|amode_y)) ) switch ( cmd.itype )
+  if ( !(op->amode & (amode_x|amode_y)) ) switch ( insn.itype )
   {
     case DSP56_do:
     case DSP56_do_f:
     case DSP56_dor:
     case DSP56_dor_f:
-      if ( !is561xx() ) op->addr++;
+      if ( !is561xx() )
+        op->addr++;
       // no break
     case DSP56_jcc:
     case DSP56_jclr:
@@ -757,43 +742,42 @@ static void make_o_mem(void)
     case DSP56_bsclr:
     case DSP56_bsr:
     case DSP56_bsset:
-
-      op->type   = o_near;
-      op->dtyp   = dt_code;
+      op->type  = o_near;
+      op->dtype = dt_code;
       return;
   }
   op->type = o_mem;
 }
 
 //----------------------------------------------------------------------
-static bool D_mMMMRRR(int value)
+static bool D_mMMMRRR(insn_t &insn, int value)
 {
   if ( !(value & 0x40) )
   {
     op->amode |= amode_short;   // <
-    op->addr   = value & 0x3F;
-    make_o_mem();
+    op->addr = value & 0x3F;
+    make_o_mem(insn);
     return true;
   }
 
   value &= ~0x40;
 
-  D_MMRRR(value);               // phrase
+  D_MMRRR(insn, value);               // phrase
   if ( op->phtype == 6 )
   {
     if ( value & 0x4 )
     {
       op->type = o_imm;
-      op->value = ua_next_24bits();
+      op->value = ua_next_24bits(insn);
           if ( is566xx() )
                 op->value &= 0xffff;
     }
     else
     {
-      op->addr = ua_next_24bits();
+      op->addr = ua_next_24bits(insn);
       if ( is566xx() )
                 op->addr &= 0xffff;
-      make_o_mem();
+      make_o_mem(insn);
     }
   }
   return true;
@@ -801,9 +785,9 @@ static bool D_mMMMRRR(int value)
 
 
 //----------------------------------------------------------------------
-static bool S_mMMMRRR(int value)
+static bool S_mMMMRRR(insn_t &insn, int value)
 {
-  if ( D_mMMMRRR(value) )
+  if ( D_mMMMRRR(insn, value) )
   {
     op++;
     return true;
@@ -812,9 +796,9 @@ static bool S_mMMMRRR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_aaaaaa(int value)
+static bool D_aaaaaa(insn_t &insn, int value)
 {
-  if ( D_mMMMRRR(value & 0x3f) == true )
+  if ( D_mMMMRRR(insn, value & 0x3f) == true )
   {
     return true;
   }
@@ -823,31 +807,9 @@ static bool D_aaaaaa(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_aaaaaa(int value)
+static bool S_aaaaaa(insn_t &insn, int value)
 {
-  if ( D_aaaaaa(value) )
-  {
-    op++;
-    return true;
-  }
-  return false;
-}
-
-//----------------------------------------------------------------------
-static bool D_MMMRRR(int value)
-{
-  if ( D_mMMMRRR(value | 0x40) == true )
-  {
-    return true;
-  }
-
-  return false;
-}
-
-//----------------------------------------------------------------------
-static bool S_MMMRRR(int value)
-{
-  if ( D_MMMRRR(value) )
+  if ( D_aaaaaa(insn, value) )
   {
     op++;
     return true;
@@ -856,28 +818,50 @@ static bool S_MMMRRR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool P_type(int)
+static bool D_MMMRRR(insn_t &insn, int value)
+{
+  if ( D_mMMMRRR(insn, value | 0x40) == true )
+  {
+    return true;
+  }
+
+  return false;
+}
+
+//----------------------------------------------------------------------
+static bool S_MMMRRR(insn_t &insn, int value)
+{
+  if ( D_MMMRRR(insn, value) )
+  {
+    op++;
+    return true;
+  }
+  return false;
+}
+
+//----------------------------------------------------------------------
+static bool P_type(insn_t &, int)
 {
   op->amode |= amode_p;
   return true;
 }
 
-//----------------------------------------------------------------------
-static bool X_type(int)
+//------------------------------------------------------------------
+static bool X_type(insn_t &, int)
 {
   op->amode |= amode_x;
   return true;
 }
 
-//----------------------------------------------------------------------
-static bool Y_type(int)
+//------------------------------------------------------------------
+static bool Y_type(insn_t &, int)
 {
   op->amode |= amode_y;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool mem_type(int value)
+static bool mem_type(insn_t &, int value)
 {
   if ( value == 1 )
     op->amode |= amode_y;
@@ -887,14 +871,14 @@ static bool mem_type(int value)
 }
 
 //----------------------------------------------------------------------
-static bool space(int)
+static bool space(insn_t &insn, int)
 {
-  switch_to_additional_args();
+  switch_to_additional_args(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool sign(int value)
+static bool sign(insn_t &, int value)
 {
   if ( value == 1 )
     op->amode |= amode_neg;
@@ -902,41 +886,42 @@ static bool sign(int value)
 }
 
 //----------------------------------------------------------------------
-static bool AAE(int)
+static bool AAE(insn_t &insn, int)
 {
-  op->addr = ushort(ua_next_24bits());
-  make_o_mem();
+  op->addr = ushort(ua_next_24bits(insn));
+  make_o_mem(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_PC_dispL(int value)
+static bool D_PC_dispL(insn_t &insn, int value)
 {
   if ( is561xx() )
   {
-    op->addr = cmd.ea + short(value) + 2; // +2 - PC should point to next instruction
+    op->addr = insn.ea + short(value) + 2; // +2 - PC should point to next instruction
   }
   else
   {
-    value = ua_next_24bits();
+    value = ua_next_24bits(insn);
     if ( is566xx() )
     {
-      op->addr = cmd.ea + short(value);
+      op->addr = insn.ea + short(value);
     }
     else
     {
-      if ( value & 0x00800000 ) value |= ~0x007FFFFF;
-      op->addr = cmd.ea + value;
+      if ( value & 0x00800000 )
+        value |= ~0x007FFFFF;
+      op->addr = insn.ea + value;
     }
   }
-  make_o_mem();
+  make_o_mem(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_PC_dispL(int value)
+static bool S_PC_dispL(insn_t &insn, int value)
 {
-  if ( D_PC_dispL(value) )
+  if ( D_PC_dispL(insn, value) )
   {
     op++;
     return true;
@@ -945,45 +930,44 @@ static bool S_PC_dispL(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_PC_dispS(int value)
+static bool D_PC_dispS(insn_t &insn, int value)
 {
   value = (value & 0x1f) + ((value & 0x3c0) >> 1);
 
-  if ( value & 0x100 ) {
+  if ( value & 0x100 )
+  {
     value = (value^0x1ff) + 1;
-    op->addr = cmd.ea - value;
+    op->addr = insn.ea - value;
   }
   else
-    op->addr = cmd.ea + value;
-
-  make_o_mem();
+  {
+    op->addr = insn.ea + value;
+  }
+  make_o_mem(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_PC_RRR(int value)
+static bool D_PC_RRR(insn_t &, int value)
 {
-
-//      P_type(0);
-        op->type   = o_phrase;
-        op->phrase = (uint16)value;
-        op->phtype = 8;
-
-        return true;
+  op->type   = o_phrase;
+  op->phrase = (uint16)value;
+  op->phtype = 8;
+  return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_RRR_dispL(int value)
+static bool D_RRR_dispL(insn_t &insn, int value)
 {
   op->type   = o_displ;
   op->reg    = value & 0x07;
   op->phtype = 0; // "R + displ"
 
-  value = ua_next_24bits();
-  if ( is566xx()  )
+  value = ua_next_24bits(insn);
+  if ( is566xx() )
     op->value &= 0xffff;
 
-  if ( is566xx()  )
+  if ( is566xx() )
   {
     if ( value & 0x8000 )
     {
@@ -1006,7 +990,7 @@ static bool D_RRR_dispL(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_RRR_dispS(int value)
+static bool D_RRR_dispS(insn_t &, int value)
 {
   op->type = o_displ;
   op->reg = (value >> 2) & 0x07;
@@ -1025,11 +1009,11 @@ static bool D_RRR_dispS(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_RR_dispS(int value)
+static bool S_RR_dispS(insn_t &, int value)
 {
 
   op->type   = o_displ;
-  op->reg  = (value >> 4) & 0x07;
+  op->reg    = (value >> 4) & 0x07;
   op->phtype = 0; // "R + displ"
 
   value = (value & 0x0f) + ((value & 0x380) >> 3);
@@ -1045,27 +1029,27 @@ static bool S_RR_dispS(int value)
   return true;
 }
 //----------------------------------------------------------------------
-static bool AA(int value)
+static bool AA(insn_t &, int value)
 {
   op->amode |= amode_short;
 
   op->type  = o_near;
-  op->dtyp  = dt_code;
+  op->dtype = dt_code;
   op->addr  = value;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_F(int value)
+static bool D_F(insn_t &insn, int value)
 {
-  opreg(value ? B : A);
+  opreg(insn, value ? B : A);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_F(int value)
+static bool S_F(insn_t &insn, int value)
 {
-  if ( D_F(value) )
+  if ( D_F(insn, value) )
   {
     op++;
     return true;
@@ -1074,36 +1058,36 @@ static bool S_F(int value)
 }
 
 //----------------------------------------------------------------------
-static bool CCCC(int value)
+static bool CCCC(insn_t &insn, int value)
 {
-  cmd.auxpref |= value & 0xF;
+  insn.auxpref |= value & 0xF;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool s(int value)
+static bool s(insn_t &insn, int value)
 {
-  static const char s_u[] = {s_SU, s_UU};
+  static const char s_u[] = { s_SU, s_UU };
 
-  cmd.auxpref |= s_u[value & 0x01];
+  insn.auxpref |= s_u[value & 0x01];
   return true;
 }
 
 
 //----------------------------------------------------------------------
-static bool ss(int value)
+static bool ss(insn_t &insn, int value)
 {
-  static const char s_u[] = {s_SS, s_SS, s_SU, s_UU};
+  static const char s_u[] = { s_SS, s_SS, s_SU, s_UU };
 
   int idx = is561xx()
           ? ((value & 0x08)>>2) + (value & 0x01)
           : ((value & 0x04)>>1) + (value & 0x01);
-  cmd.auxpref |= s_u[idx];
+  insn.auxpref |= s_u[idx];
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool SD_IIII(int value)
+static bool SD_IIII(insn_t &insn, int value)
 {
   //0100IIIIЧЧЧЧFЧЧЧ
   static const char regs1[] =
@@ -1111,7 +1095,7 @@ static bool SD_IIII(int value)
     X0, Y0, X1, Y1,
      A,  B, A0, B0,
     -1, -1, -1, -1,
-     A,  B,  A0, B0
+     A,  B, A0, B0
    };
 
   static const char regs2[] =
@@ -1130,14 +1114,14 @@ static bool SD_IIII(int value)
     op->type = o_reg;
     op->reg  = regs1[idx];
     op++;
-    D_F(((value & 0x08)>>3) ^ 0x01);
+    D_F(insn, ((value & 0x08)>>3) ^ 0x01);
     return true;
   }
 
   if ( ( idx == 8 ) || ( idx == 9 ) )
   {
-    S_F(((value & 0x08)>>3));
-    D_F(((value & 0x08)>>3) ^ 0x01);
+    S_F(insn, ((value & 0x08)>>3));
+    D_F(insn, ((value & 0x08)>>3) ^ 0x01);
     return true;
   }
 
@@ -1158,7 +1142,7 @@ static bool SD_IIII(int value)
   return true;
 }
 //----------------------------------------------------------------------
-static bool D_zRR(int value)
+static bool D_zRR(insn_t &, int value)
 {
   //00110zRRЧЧЧЧFЧЧЧ
 
@@ -1172,7 +1156,7 @@ static bool D_zRR(int value)
   return true;
 }
 //----------------------------------------------------------------------
-static bool D_mRR(int value)
+static bool D_mRR(insn_t &, int value)
 {
   op->type   = o_phrase;
   op->phrase = value & 0x03;
@@ -1185,22 +1169,18 @@ static bool D_mRR(int value)
   return true;
 }
 //----------------------------------------------------------------------
-static bool D_RRm(int value)
+static bool D_RRm(insn_t &insn, int value)
 {
-  if ( D_mRR( ((value & 0x06)>>1) + ((value & 0x01)<<2) ) )
-    return true;
-  return false;
+  return D_mRR(insn, ((value & 0x06)>>1) + ((value & 0x01)<<2));
 }
 
 //----------------------------------------------------------------------
-static bool D_RR11m(int value)
+static bool D_RR11m(insn_t &insn, int value)
 {
-  if ( D_mRR( ((value & 0x18)>>3) + (value <<2) ) )
-    return true;
-  return false;
+  return D_mRR(insn, ((value & 0x18)>>3) + (value <<2));
 }
 //----------------------------------------------------------------------
-static bool D_MMRR(int value)
+static bool D_MMRR(insn_t &, int value)
 {
   op->type   = o_phrase;
   op->phrase = value & 0x03;
@@ -1224,9 +1204,9 @@ static bool D_MMRR(int value)
   return true;
 }
 //----------------------------------------------------------------------
-static bool S_MMRR(int value)
+static bool S_MMRR(insn_t &insn, int value)
 {
-  if ( D_MMRR(value) )
+  if ( D_MMRR(insn, value) )
   {
     op++;
     return true;
@@ -1234,14 +1214,13 @@ static bool S_MMRR(int value)
   return false;
 }
 //----------------------------------------------------------------------
-static bool D_RR0MM(int value)
+static bool D_RR0MM(insn_t &insn, int value)
 {
-  if ( D_MMRR( ((value & 0x18)>>3) + ((value & 0x03)<<2) )  )
-    return true;
-  return false;
+  return D_MMRR(insn, ((value & 0x18)>>3) + ((value & 0x03)<<2));
 }
+
 //----------------------------------------------------------------------
-static bool D_qRR(int value)
+static bool D_qRR(insn_t &, int value)
 {
   op->type   = o_phrase;
   op->phrase = value & 0x03;
@@ -1257,10 +1236,11 @@ static bool D_qRR(int value)
   }
   return true;
 }
+
 //----------------------------------------------------------------------
-static bool D_HHH(int value)
+static bool D_HHH(insn_t &, int value)
 {
-  static const uchar regs[] = { X0, Y0, X1, Y1, A, B, A0, B0};
+  static const uchar regs[] = { X0, Y0, X1, Y1, A, B, A0, B0 };
 
   int idx = value & 0x07;
 
@@ -1271,9 +1251,9 @@ static bool D_HHH(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_HH(int value)
+static bool D_HH(insn_t &, int value)
 {
-  static const uchar regs[] = { X0, Y0, A,  B};
+  static const uchar regs[] = { X0, Y0, A,  B };
 
   int idx = value & 0x03;
 
@@ -1282,30 +1262,32 @@ static bool D_HH(int value)
 
   return true;
 }
+
 //----------------------------------------------------------------------
-static bool SD_mWRRHHH(int value)
+static bool SD_mWRRHHH(insn_t &insn, int value)
 //001001mWRRDDFHHH
 {
   if ( value & 0x0100 )
   {
-    X_type(0);
-    D_mRR( ((value & 0xc0)>>6) + ((value & 0x200)>>7) );
+    X_type(insn, 0);
+    D_mRR(insn, ((value & 0xc0)>>6) + ((value & 0x200)>>7));
     op++;
-    D_HHH( value & 0x07);
+    D_HHH(insn, value & 0x07);
   }
   else
   {
-    D_HHH( value & 0x07);
+    D_HHH(insn, value & 0x07);
     op++;
-    X_type(0);
-    D_mRR( ((value & 0xc0)>>6) + ((value & 0x200)>>7) );
+    X_type(insn, 0);
+    D_mRR(insn, ((value & 0xc0)>>6) + ((value & 0x200)>>7));
   }
   return true;
 }
+
 //----------------------------------------------------------------------
-static bool S_FJJJ(int value)
+static bool S_FJJJ(insn_t &insn, int value)
 {
-  static const char regs[] = { -1, -1, X, Y, X0, Y0, X1, Y1};
+  static const char regs[] = { -1, -1, X, Y, X0, Y0, X1, Y1 };
 
   int idx = value & 0x07;
 
@@ -1318,7 +1300,7 @@ static bool S_FJJJ(int value)
     }
     else
     {
-      opreg((value & 0x08) ? A : B);
+      opreg(insn, (value & 0x08) ? A : B);
     }
     op++;
     return true;
@@ -1329,14 +1311,14 @@ static bool S_FJJJ(int value)
   }
 }
 //----------------------------------------------------------------------
-static bool S_QQQ(int value)
+static bool S_QQQ(insn_t &, int value)
 {
   int idx = value & 0x07;
 
   if ( is561xx() )
   {
-    static const uchar regs1_61[] = { X0, X1, A1, B1, Y0, Y1, Y0, Y1};
-    static const uchar regs2_61[] = { X0, X0, Y0, X0, X0, X0, X1, X1};
+    static const uchar regs1_61[] = { X0, X1, A1, B1, Y0, Y1, Y0, Y1 };
+    static const uchar regs2_61[] = { X0, X0, Y0, X0, X0, X0, X1, X1 };
     op->type = o_reg;
     op->reg  = regs1_61[idx];
     op++;
@@ -1359,24 +1341,25 @@ static bool S_QQQ(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_QQ2(int value)
+static bool S_QQ2(insn_t &, int value)
 {
-        static const uchar regs1[] = { Y0, Y1, Y0, Y1};
-        static const uchar regs2[] = { X0, X0, X1, X1};
+  static const uchar regs1[] = { Y0, Y1, Y0, Y1 };
+  static const uchar regs2[] = { X0, X0, X1, X1 };
 
-        int idx = value & 0x03;
+  int idx = value & 0x03;
 
-        op->type = o_reg;
-        op->reg  = regs1[idx];
-        op++;
-        op->type = o_reg;
-        op->reg  = regs2[idx];
-        op++;
+  op->type = o_reg;
+  op->reg  = regs1[idx];
+  op++;
+  op->type = o_reg;
+  op->reg  = regs2[idx];
+  op++;
 
-        return true;
+  return true;
 }
+
 //----------------------------------------------------------------------
-static bool S_QQQQ(int value)
+static bool S_QQQQ(insn_t &, int value)
 {
   static const uchar regs1[] = { X0, Y0, X1, Y1, X0, Y0, X1, Y1,
                                  X1, Y1, X0, Y0, Y1, X0, Y0, X1 };
@@ -1394,72 +1377,72 @@ static bool S_QQQQ(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_Fh0h(int value)
+static bool S_Fh0h(insn_t &insn, int value)
 {
   //000100ccccTTFh0h
   static const char regs[] = { -1, -1, X0, Y0 };
 
   if ( (((value & 0x04)>>1) + (value & 0x01)) > 1 )
-    opreg(regs[(((value & 0x04)>>1) + (value & 0x01))]);
+    opreg(insn, regs[(((value & 0x04)>>1) + (value & 0x01))]);
   else
-    opreg(((value & 0x08)>>3) == (value & 0x01) ? B : A);
+    opreg(insn, ((value & 0x08)>>3) == (value & 0x01) ? B : A);
 
   op++;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_uFuuu_add(int value)
+static bool S_uFuuu_add(insn_t &insn, int value)
 {
-  static const uchar regs[] = {X0, Y0, X1, Y1};
+  static const uchar regs[] = { X0, Y0, X1, Y1 };
 
   if ( ((value & 0x07) + ((value & 0x10)>>1)) == 0x0c )
   {
-    opreg( (value & 0x08) ? A : B);
+    opreg(insn, (value & 0x08) ? A : B);
     op++;
     return true;
   }
   if ( ((value & 0x07) + ((value & 0x10)>>1)) > 0x03 )
     return false;
 
-  opreg(regs[value & 0x03]);
+  opreg(insn, regs[value & 0x03]);
   op++;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_uFuuu_sub(int value)
+static bool S_uFuuu_sub(insn_t &insn, int value)
 {
-  static const uchar regs[] = { X0, Y0, X1, Y1};
+  static const uchar regs[] = { X0, Y0, X1, Y1 };
 
   if ( ((value & 0x07) + ((value & 0x10)>>1)) == 0x0d )
   {
-    opreg( (value & 0x08) ? A : B);
+    opreg(insn, (value & 0x08) ? A : B);
     op++;
     return true;
   }
   if ( ((value & 0x07) + ((value & 0x10)>>1)) < 0x04 )
     return false;
 
-  opreg(regs[value & 0x03]);
+  opreg(insn, regs[value & 0x03]);
   op++;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_RR(int value)
+static bool D_RR(insn_t &insn, int value)
 {
-  opreg(R0 + (value & 0x03));
+  opreg(insn, R0 + (value & 0x03));
   return true;
 }
 //----------------------------------------------------------------------
-static bool D_NN(int value)
+static bool D_NN(insn_t &insn, int value)
 {
-  opreg(N0 + (value & 0x03));
+  opreg(insn, N0 + (value & 0x03));
   return true;
 }
 //----------------------------------------------------------------------
-static bool DB_RR(int value)
+static bool DB_RR(insn_t &, int value)
 {
   // P_type(0);
   op->type   = o_phrase;
@@ -1469,7 +1452,7 @@ static bool DB_RR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_PC_RR(int value)
+static bool D_PC_RR(insn_t &, int value)
 {
   // P_type(0);
   op->type   = o_phrase;
@@ -1479,9 +1462,9 @@ static bool D_PC_RR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool DX_RR(int value)
+static bool DX_RR(insn_t &insn, int value)
 {
-  X_type(0);
+  X_type(insn, 0);
   op->type   = o_phrase;
   op->phrase = (uint16)value;
   op->phtype = 4;
@@ -1490,9 +1473,9 @@ static bool DX_RR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool S_RR(int value)
+static bool S_RR(insn_t &insn, int value)
 {
-  if ( D_RR(value) )
+  if ( D_RR(insn, value) )
   {
     op++;
     return true;
@@ -1501,7 +1484,7 @@ static bool S_RR(int value)
 }
 
 //----------------------------------------------------------------------
-static bool m_A_B(int /*value*/)
+static bool m_A_B(insn_t &, int /*value*/)
 {
   op->type = o_reg;
   op->reg  = A;
@@ -1512,7 +1495,7 @@ static bool m_A_B(int /*value*/)
 }
 
 //----------------------------------------------------------------------
-static bool IF(int /*value*/)
+static bool IF(insn_t &, int /*value*/)
 {
   op->type  = o_iftype;
   op->imode = imode_if;
@@ -1520,7 +1503,7 @@ static bool IF(int /*value*/)
 }
 
 //----------------------------------------------------------------------
-static bool IFU(int /*value*/)
+static bool IFU(insn_t &, int /*value*/)
 {
   op->type  = o_iftype;
   op->imode = imode_ifu;
@@ -1528,45 +1511,45 @@ static bool IFU(int /*value*/)
 }
 
 //----------------------------------------------------------------------
-static bool S_i(int value)
+static bool S_i(insn_t &insn, int value)
 {
-  op->type  = o_vsltype;
-  cmd.auxpref |=  (value & 0x01);
+  op->type = o_vsltype;
+  insn.auxpref |= (value & 0x01);
   op++;
   op->amode |= amode_l;   // set L type for last operand
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool SD_TT(int value)
+static bool SD_TT(insn_t &insn, int value)
 {
   //000100ccccTTFh0h >> 4
 
   if ( (value & 0x03) == 0 )        // »сключает паразитную пересылку R0 -> R0
     return true;
 
-  opreg(R0);
+  opreg(insn, R0);
   op++;
 
-  if ( D_RR((value & 0x03) ) )
+  if ( D_RR(insn, value & 0x03) )
     return true;
 
   return false;
 }
 //----------------------------------------------------------------------
-static bool S_BBBiiiiiiii(int value)
+static bool S_BBBiiiiiiii(insn_t &, int value)
 {
   //BBB10010iiiiiiii0001010011Pppppp >> 16
   op->type = o_imm;
-  op->value = (value & 0xff) << (((value & 0xe000) >> 14) * 4);
+  op->value = uint32((value & 0xff) << (((value & 0xe000) >> 14) * 4));
   op++;
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_Pppppp(int value)
+static bool D_Pppppp(insn_t &insn, int value)
 {
-  X_type(0);
+  X_type(insn, 0);
   if ( value & 0x20 )
   {
     op->amode |= amode_ioshort;   // <<
@@ -1577,33 +1560,27 @@ static bool D_Pppppp(int value)
     value = value & 0x1f;
   }
 
-  op->addr   = value;
-  make_o_mem();
+  op->addr = value;
+  make_o_mem(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_ppppp(int value)
+static bool D_ppppp(insn_t &insn, int value)
 {
-  if ( D_Pppppp((value & 0x1f) + 0x20)  )
-    return true;
-
-  return false;
+  return D_Pppppp(insn, (value & 0x1f) + 0x20);
 }
 
 //----------------------------------------------------------------------
-static bool D_aaaaa(int value)
+static bool D_aaaaa(insn_t &insn, int value)
 {
-  if ( D_Pppppp(value & 0x1f) )
-    return true;
-
-  return false;
+  return D_Pppppp(insn, value & 0x1f);
 }
 
 //----------------------------------------------------------------------
-static bool S_DDDDD(int value)
+static bool S_DDDDD(insn_t &insn, int value)
 {
-  if ( D_DDDDD(value) )
+  if ( D_DDDDD(insn, value) )
   {
     op++;
     return true;
@@ -1613,7 +1590,7 @@ static bool S_DDDDD(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_xi(int value)
+static bool D_xi(insn_t &, int value)
 {
   op->type  = o_imm;
   op->value = value & 0xff;
@@ -1621,7 +1598,7 @@ static bool D_xi(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_xi16(int value)
+static bool D_xi16(insn_t &, int value)
 {
   op->type = o_imm;
   op->value = value & 0xffff;
@@ -1629,25 +1606,25 @@ static bool D_xi16(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_xi_adr_16(int value)
+static bool D_xi_adr_16(insn_t &insn, int value)
 {
   op->addr = value & 0xffff;
-  make_o_mem();
+  make_o_mem(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_DD( int value)
+static bool D_DD(insn_t &insn, int value)
 {
-  static const uchar regs[] = {X0, Y0, X1, Y1};
-  opreg(regs[value & 0x03]);
+  static const uchar regs[] = { X0, Y0, X1, Y1 };
+  opreg(insn, regs[value & 0x03]);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool S_DD(int value)
+static bool S_DD(insn_t &insn, int value)
 {
-  if ( D_DD(value)  )
+  if ( D_DD(insn, value) )
   {
     op++;
     return true;
@@ -1657,7 +1634,7 @@ static bool S_DD(int value)
 }
 
 //----------------------------------------------------------------------
-static bool D_Z(int value)
+static bool D_Z(insn_t &, int value)
 {
   op->type   = o_phrase;
   op->phrase = 0;
@@ -1667,66 +1644,66 @@ static bool D_Z(int value)
 
 //----------------------------------------------------------------------
 //new
-static bool D_t(int value)
+static bool D_t(insn_t &insn, int value)
 {
   //xxxxxxxxxxxxxxxx00111WDDDDD1t10Ч >>3
   if ( value & 0x01 )
   {
-    D_xi16( (value >> 13) & 0xffff );
+    D_xi16(insn, (value >> 13) & 0xffff);
   }
   else
   {
-    X_type(0);
-    op->addr = (value >> 13) & 0xffff ;
-    make_o_mem();
+    X_type(insn, 0);
+    op->addr = (value >> 13) & 0xffff;
+    make_o_mem(insn);
   }
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool SD_F00J(int value)
+static bool SD_F00J(insn_t &insn, int value)
 {
-  opreg( (value & 0x08) ? B : A);
+  opreg(insn, (value & 0x08) ? B : A);
   op++;
-  opreg( (value & 0x01) ? Y : X);
+  opreg(insn, (value & 0x01) ? Y : X);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_PC_eeeeee(int value)
+static bool D_PC_eeeeee(insn_t &insn, int value)
 {
   if ( value & 0x20 )
   {
     value = (value^0x3f) + 1;
-    op->addr = cmd.ea - value + 1; // +1 - PC should point to next instruction
+    op->addr = insn.ea - value + 1; // +1 - PC should point to next instruction
   }
   else
   {
-    op->addr = cmd.ea + value + 1;
+    op->addr = insn.ea + value + 1;
   }
-  make_o_mem();
+  make_o_mem(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_PC_aaaaaaaa(int value)
+static bool D_PC_aaaaaaaa(insn_t &insn, int value)
 {
   if ( value & 0x80 )
   {
     value = (value^0xff) + 1;
-    op->addr = cmd.ea - value + 1;// +1 - PC should point to next instruction
+    op->addr = insn.ea - value + 1;// +1 - PC should point to next instruction
   }
   else
   {
-    op->addr = cmd.ea + value + 1;
+    op->addr = insn.ea + value + 1;
   }
-  make_o_mem();
+  make_o_mem(insn);
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool D_BBBBBBBB(int value)
+static bool D_BBBBBBBB(insn_t &, int value)
 {
   op->type   = o_displ;
   op->reg    = 2;
@@ -2142,7 +2119,7 @@ static opcode_t table_61[] =
   { p_1, DSP56_zero,                            "000101010101F000", cl_0, {{D_F,                        0x00000008}}},//added
 //Cmd with Parallel move
 //32-bit mask
-  { p_1, DSP56_pmov,            "----HHHW--------00000101BBBBBBBB", cl_1_3},//X Memory Data Move with short displacement
+  { p_1, DSP56_pmov,            "----HHHW--------00000101BBBBBBBB", cl_1_3 },//X Memory Data Move with short displacement
 //16-bit mask
   { p_1, DSP56_mac,                             "00010111RRDDFQQQ", cl_3, {{S_QQQ,                      0x00000007}, {D_F,              0x08}}},//added
   { p_1, DSP56_mpy,                             "00010110RRDDFQQQ", cl_3, {{S_QQQ,                      0x00000007}, {D_F,              0x08}}},//added
@@ -2150,14 +2127,14 @@ static opcode_t table_61[] =
   { p_1, DSP56_mpyr,                            "011mmKKK1--1F0QQ", cl_2, {{S_QQ,                       0x00000003}, {D_F,              0x08}}},//added
   { p_1, DSP56_mac,                             "011mmKKK1--0F1QQ", cl_2, {{S_QQ,                       0x00000003}, {D_F,              0x08}}},//added
   { p_1, DSP56_macr,                            "011mmKKK1--1F1QQ", cl_2, {{S_QQ,                       0x00000003}, {D_F,              0x08}}},//added
-  { p_1, DSP56_move,                            "011mmKKK0rr10000", cl_2},//added
+  { p_1, DSP56_move,                            "011mmKKK0rr10000", cl_2 },//added
   { p_1, DSP56_tfr,                             "011mmKKK0rr1F0DD", cl_2, {{S_DD,                       0x00000003}, {D_F,              0x08}}},//added
   { p_1, DSP56_sub,                             "011mmKKK0rruF1uu", cl_2, {{S_uFuuu_sub,                0x0000001f}, {D_F,              0x08}}},//added
   { p_1, DSP56_add,                             "011mmKKK0rruFuuu", cl_2, {{S_uFuuu_add,                0x0000001f}, {D_F,              0x08}}},//added
 //8-bit mask
   { p_1, DSP56_clr,                                     "0000F001", cl_1, {{D_F,                        0x00000008}}},//added
   { p_1, DSP56_add,                                     "0000FJJJ", cl_1, {{S_FJJJ,                     0x0000000f}, {D_F,              0x08}}},//added
-  { p_1, DSP56_move,                                    "00010001", cl_1},//added
+  { p_1, DSP56_move,                                    "00010001", cl_1 },//added
   { p_1, DSP56_tfr,                                     "0001FJJJ", cl_1, {{S_FJJJ,                     0x0000000f}, {D_F,              0x08}}},//added
   { p_1, DSP56_rnd,                                     "0010F000", cl_1, {{D_F,                        0x00000008}}},//added
   { p_1, DSP56_tst,                                     "0010F001", cl_1, {{D_F,                        0x00000008}}},//added
@@ -2292,21 +2269,20 @@ static bool is_valid_insn(ushort proc)
 }
 
 //----------------------------------------------------------------------
-static bool disassemble_parallel_move(int i, int value)
+static bool disassemble_parallel_move(insn_t &insn, int i, int value)
 {
-  switch_to_additional_args();
+  switch_to_additional_args(insn);
 
   par_move *pmoves = is561xx() ? pmoves_61 : pmoves_6x;
   par_move &ptr = pmoves[i];
   if ( !is_valid_insn(ptr.proc) )
     return false;
-  for(int j = 0; j < FUNCS_COUNT; j++)
+  for ( int j = 0; j < FUNCS_COUNT; j++ )
   {
     if ( ptr.funcs[j].func != NULL )
     {
-      int v   = value & ptr.funcs[j].mask;
-      v     >>=         ptr.funcs[j].shift;
-      ptr.funcs[j].func(v);
+      int v = (value & ptr.funcs[j].mask) >> ptr.funcs[j].shift;
+      ptr.funcs[j].func(insn, v);
     }
   }
   return true;
@@ -2314,130 +2290,129 @@ static bool disassemble_parallel_move(int i, int value)
 
 
 //----------------------------------------------------------------------
-static bool decode_XY_R_mem(int value)
+static bool decode_XY_R_mem(insn_t &insn, int value)
 {
   /* order of operands depends on whether we are writing or reading */
 
   if ( value & 0x0080 )
   {
-    mem_type((value >> 6) & 0x01);
+    mem_type(insn, (value >> 6) & 0x01);
 
-    D_mMMMRRR((value & 0x3f) | 0x40);
+    D_mMMMRRR(insn, (value & 0x3f) | 0x40);
     op++;
 
     if ( value & 0x40 )
-      D_ff((value >> 8) & 0x03, value & 0x40);
+      D_ff(insn, (value >> 8) & 0x03, value & 0x40);
     else
-      D_ff((value >> 10) & 0x03, value & 0x40);
+      D_ff(insn, (value >> 10) & 0x03, value & 0x40);
   }
   else
   {
     if ( value & 0x40 )
-      D_ff((value >> 8) & 0x03, value & 0x40);
+      D_ff(insn, (value >> 8) & 0x03, value & 0x40);
     else
-      D_ff((value >> 10) & 0x03, value & 0x40);
+      D_ff(insn, (value >> 10) & 0x03, value & 0x40);
     op++;
 
-    mem_type((value >> 6) & 0x01);
+    mem_type(insn, (value >> 6) & 0x01);
 
-    D_mMMMRRR((value & 0x3f) | 0x40);
+    D_mMMMRRR(insn, (value & 0x3f) | 0x40);
   }
 
   return true;
 }
 
 //----------------------------------------------------------------------
-static bool recognize_parallel_move_class1(int value)
+static bool recognize_parallel_move_class1(insn_t &insn, int value)
 {
   int index = -1;
 
-  if( (value & 0xff00) == 0x4a00 )
+  if ( (value & 0xff00) == 0x4a00 )
+  {
     index = 0;  //No Parallel Data Move 01001010----F---
-  else
-    if ( (value & 0xf000) == 0x4000 )
-      index = 1;  //Register to Register Data Move 0100IIII----F---
+  }
+  else if ( (value & 0xf000) == 0x4000 )
+  {
+    index = 1;  //Register to Register Data Move 0100IIII----F---
+  }
+  else if ( (value & 0xf800) == 0x3000 )
+  {
+    index = 2;  //Address Register Update 00110zRR----F---
+  }
+  else if ( (value & 0x8000) == 0x8000 ) //X Memory Data Move 1 1mRRHHHW----F---
+  {
+    switch_to_additional_args(insn);
+
+    if ( value & 0x0100 )
+    {
+      X_type(insn, 0);
+      D_mRR(insn, (value >>12) & 0x07);
+      op++;
+      D_HHH(insn, (value >>9) & 0x07);
+    }
     else
-      if ( (value & 0xf800) == 0x3000 )
-        index = 2;  //Address Register Update 00110zRR----F---
-      else
-        if ( (value & 0x8000) == 0x8000 ) //X Memory Data Move 1 1mRRHHHW----F---
-        {
-          switch_to_additional_args();
+    {
+      D_HHH(insn, (value >>9) & 0x07);
+      op++;
+      X_type(insn, 0);
+      D_mRR(insn, (value >>12) & 0x07);
+    }
+    return true;
+  }
+  else if ( (value & 0xf000) == 0x5000 ) //X Memory Data Move 2 0101HHHW----F---
+  {
+    switch_to_additional_args(insn);
 
-          if ( value & 0x0100 )
-          {
-            X_type(0);
-            D_mRR( (value >>12) & 0x07 );
-            op++;
-            D_HHH( (value >>9) & 0x07 );
-          }
-          else
-          {
-            D_HHH( (value >>9) & 0x07 );
-            op++;
-            X_type(0);
-            D_mRR( (value >>12) & 0x07 );
-          }
-          return true;
-        }
-        else
-          if ( (value & 0xf000) == 0x5000 ) //X Memory Data Move 2 0101HHHW----F---
-          {
-            switch_to_additional_args();
-
-            if ( value & 0x0100 )
-            {
-              X_type(0);
-              op->type   = o_phrase;
-              op->phrase = 0;
-              op->phtype = ((value & 0x08) ? 9 : 10);
-              op++;
-              D_HHH( (value >>9) & 0x07 );
-            }
-            else
-            {
-              D_HHH( (value >>9) & 0x07 );
-              op++;
-              X_type(0);
-              op->type   = o_phrase;
-              op->phrase = 0;
-              op->phtype = ((value & 0x08) ? 9 : 10);
-            }
-            return true;
-          }
-
-
+    if ( value & 0x0100 )
+    {
+      X_type(insn, 0);
+      op->type   = o_phrase;
+      op->phrase = 0;
+      op->phtype = ((value & 0x08) ? 9 : 10);
+      op++;
+      D_HHH(insn, (value >>9) & 0x07);
+    }
+    else
+    {
+      D_HHH(insn, (value >>9) & 0x07);
+      op++;
+      X_type(insn, 0);
+      op->type   = o_phrase;
+      op->phrase = 0;
+      op->phtype = ((value & 0x08) ? 9 : 10);
+    }
+    return true;
+  }
 
   if ( index != -1 )
-    return (disassemble_parallel_move( index, value));
-  else
-    return false;
+    return disassemble_parallel_move(insn, index, value);
+  return false;
 }
 //----------------------------------------------------------------------
-static bool recognize_parallel_move_class1_3(int value)
+static bool recognize_parallel_move_class1_3(insn_t &insn, int value)
 {
   //X Memory Data Move with short displacement
   //----HHHW--------00000101BBBBBBBB
 
-  switch_to_additional_args();
-  if( (value >> 24) & 0x01 )
+  switch_to_additional_args(insn);
+  if ( (value >> 24) & 0x01 )
   {
-    X_type(0);
-    D_BBBBBBBB( value & 0x0ff );
+    X_type(insn, 0);
+    D_BBBBBBBB(insn, value & 0x0ff);
     op++;
-    D_HHH( (value >> 25 ) & 0x07  );
+    D_HHH(insn, (value >> 25 ) & 0x07);
   }
   else
   {
-    D_HHH( (value >> 25 ) & 0x07 );
+    D_HHH(insn, (value >> 25 ) & 0x07);
     op++;
-    X_type(0);
-    D_BBBBBBBB( value & 0x0ff );
+    X_type(insn, 0);
+    D_BBBBBBBB(insn, value & 0x0ff);
   }
   return true;
 }
 //----------------------------------------------------------------------
-static bool recognize_parallel_move_class2( int value)
+static bool recognize_parallel_move_class2(insn_t &insn, int value)
 {
   //Dual X Memory Data Read
   //011mmKKKXrrXXXXX
@@ -2445,21 +2420,21 @@ static bool recognize_parallel_move_class2( int value)
   static const char regs1[] = { -1, Y0, X1, Y1, X0, Y0, -1, Y1 };
   static const char regs2[] = { X0, X0, X0, X0, X1, X1, Y0, X1 };
 
-  switch_to_additional_args();
+  switch_to_additional_args(insn);
 
-  X_type(0);
-  D_mRR( ((value >> 10) & 0x04) + ((value >> 5) & 0x03) );
+  X_type(insn, 0);
+  D_mRR(insn, ((value >> 10) & 0x04) + ((value >> 5) & 0x03));
   op++;
-  char r=  regs1[(value >>8) & 0x07];
+  char r = regs1[(value >>8) & 0x07];
   if ( r != -1 )
-    opreg(r);
+    opreg(insn, r);
   else
-    D_F( ((value & 0x08)>>3) ^ 0x01);
+    D_F(insn, ((value & 0x08)>>3) ^ 0x01);
 
 
-  switch_to_additional_args();
+  switch_to_additional_args(insn);
 
-  X_type(0);
+  X_type(insn, 0);
   op->type   = o_phrase;
   op->phrase = 3;
 
@@ -2469,28 +2444,28 @@ static bool recognize_parallel_move_class2( int value)
     op->phtype = 3;
 
   op++;
-  opreg(regs2[(value >>8) & 0x07]);
+  opreg(insn, regs2[(value >>8) & 0x07]);
 
   return true;
 
 }
 //----------------------------------------------------------------------
-static bool recognize_parallel_move_class3(int value)
+static bool recognize_parallel_move_class3(insn_t &insn, int value)
 {
   //X Memory Data Write and Register Data Move
   //0001011kRRDDXXXX
 
 
-  switch_to_additional_args();
-  opreg(((value >>8) & 0x01) == 1 ? A : B);
+  switch_to_additional_args(insn);
+  opreg(insn, ((value >>8) & 0x01) == 1 ? A : B);
   op++;
-  X_type(0);
-  D_mRR(0x04 + ((value >> 6) & 0x03));
+  X_type(insn, 0);
+  D_mRR(insn, 0x04 + ((value >> 6) & 0x03));
 
 
-  switch_to_additional_args();
-  S_DD ((value >>4) & 0x03);
-  opreg(((value >>8) & 0x01) == 1 ? A : B);
+  switch_to_additional_args(insn);
+  S_DD(insn, (value >>4) & 0x03);
+  opreg(insn, ((value >>8) & 0x01) == 1 ? A : B);
 
   return true;
 
@@ -2498,7 +2473,7 @@ static bool recognize_parallel_move_class3(int value)
 
 
 //----------------------------------------------------------------------
-static bool is_parallel_move(int value)
+static bool is_parallel_move(insn_t &insn, int value)
 {
   int index = -1;
 
@@ -2516,199 +2491,205 @@ static bool is_parallel_move(int value)
     index = 5;    /* IF.U */
   else if ( ((value & 0xc000) == 0x4000) && (((value >> 8) & 0x37) >= 4) )
   {
-    switch_to_additional_args();
+    switch_to_additional_args(insn);
 
     if ( value & 0x0080 )
     {
-      mem_type((value >> 11) & 0x01);
-      D_mMMMRRR(value & 0x7f);
+      mem_type(insn, (value >> 11) & 0x01);
+      D_mMMMRRR(insn, value & 0x7f);
       op++;
-      D_ddddd(((value >> 8) & 0x07) | ((value >> 9) & 0x18));
+      D_ddddd(insn, ((value >> 8) & 0x07) | ((value >> 9) & 0x18));
     }
     else
     {
-      D_ddddd(((value >> 8) & 0x07) | ((value >> 9) & 0x18));
+      D_ddddd(insn, ((value >> 8) & 0x07) | ((value >> 9) & 0x18));
       op++;
-      mem_type((value >> 11) & 0x01);
-      D_mMMMRRR(value & 0x7f);
+      mem_type(insn, (value >> 11) & 0x01);
+      D_mMMMRRR(insn, value & 0x7f);
     }
 
     return true;
   }
   else if ( (value & 0xf000) == 0x1000 )  /* class I */
   {
-    switch_to_additional_args();
+    switch_to_additional_args(insn);
 
     if ( value & 0x40 )        /* Y:R */
     {
-      D_df((value >> 10) & 0x03, value & 0x40);
-      switch_to_additional_args();
-      decode_XY_R_mem(value);
+      D_df(insn, (value >> 10) & 0x03, value & 0x40);
+      switch_to_additional_args(insn);
+      decode_XY_R_mem(insn, value);
     }
     else                                                 /* X:R */
     {
-      decode_XY_R_mem(value);
-      switch_to_additional_args();
-      D_df((value >> 8) & 0x03, value & 0x40);
+      decode_XY_R_mem(insn, value);
+      switch_to_additional_args(insn);
+      D_df(insn, (value >> 8) & 0x03, value & 0x40);
     }
 
     return true;
   }
   else if ( (value & 0xfe40) == 0x0800 )  /* class II */
   {
-    switch_to_additional_args();
+    switch_to_additional_args(insn);
 
     if ( value & 0x0080 )      /* Y:R */
     {
-      opreg(Y0);
+      opreg(insn, Y0);
       op++;
-      opreg((value & 0x0100) ? B : A);
+      opreg(insn, (value & 0x0100) ? B : A);
 
-      switch_to_additional_args();
+      switch_to_additional_args(insn);
 
-      D_d((value >> 8) & 0x01);
+      D_d(insn, (value >> 8) & 0x01);
       op++;
       op->amode |= amode_y;
-      D_mMMMRRR((value & 0x3f) | 0x40);
+      D_mMMMRRR(insn, (value & 0x3f) | 0x40);
     }
     else                                                            /* X:R */
     {
-      D_d((value >> 8) & 0x01);
+      D_d(insn, (value >> 8) & 0x01);
       op++;
       op->amode |= amode_x;
-      D_mMMMRRR((value & 0x3f) | 0x40);
+      D_mMMMRRR(insn, (value & 0x3f) | 0x40);
 
-      switch_to_additional_args();
+      switch_to_additional_args(insn);
 
-      opreg(X0);
+      opreg(insn, X0);
       op++;
-      opreg((value & 0x0100) ? B : A);
+      opreg(insn, (value & 0x0100) ? B : A);
     }
 
     return true;
   }
   else if ( (value & 0xf400) == 0x4000 )  /* L: */
   {
-    switch_to_additional_args();
+    switch_to_additional_args(insn);
 
     if ( value & 0x0080 )
     {
       op->amode |= amode_l;
-      D_mMMMRRR(value & 0x7f);
+      D_mMMMRRR(insn, value & 0x7f);
       op++;
-      D_LLL(((value & 0x0800) >> 9) | ((value & 0x0300) >> 8));
+      D_LLL(insn, ((value & 0x0800) >> 9) | ((value & 0x0300) >> 8));
     }
     else
     {
-      D_LLL(((value & 0x0800) >> 9) | ((value & 0x0300) >> 8));
+      D_LLL(insn, ((value & 0x0800) >> 9) | ((value & 0x0300) >> 8));
       op++;
       op->amode |= amode_l;
-      D_mMMMRRR(value & 0x7f);
+      D_mMMMRRR(insn, value & 0x7f);
     }
 
     return true;
   }
   else if ( value & 0x8000 )      /* X: Y: */
   {
-    switch_to_additional_args();
+    switch_to_additional_args(insn);
 
     /* X: */
     if ( value & 0x0080 )
     {
       op->amode |= amode_x;
-      D_MMRRR_XY(value & 0x1f);
+      D_MMRRR_XY(insn, value & 0x1f);
       op++;
-      D_ff((value >> 10) & 0x3, false);
+      D_ff(insn, (value >> 10) & 0x3, false);
     }
     else
     {
-      D_ff((value >> 10) & 0x3, false);
+      D_ff(insn, (value >> 10) & 0x3, false);
       op++;
       op->amode |= amode_x;
-      D_MMRRR_XY(value & 0x1f);
+      D_MMRRR_XY(insn, value & 0x1f);
     }
 
-    switch_to_additional_args();
+    switch_to_additional_args(insn);
 
     /* Y: */
     if ( value & 0x4000 )
     {
       op->amode |= amode_y;
-      D_MMRRR_XY(((value >> 5) & 0x03) | (~value & 0x04) | ((value >> 9) & 0x18));
+      D_MMRRR_XY(insn, ((value >> 5) & 0x03) | (~value & 0x04) | ((value >> 9) & 0x18));
       op++;
-      D_ff((value >> 8) & 0x3, true);
+      D_ff(insn, (value >> 8) & 0x3, true);
     }
     else
     {
-      D_ff((value >> 8) & 0x3, true);
+      D_ff(insn, (value >> 8) & 0x3, true);
       op++;
       op->amode |= amode_y;
-      D_MMRRR_XY(((value >> 5) & 0x03) | (~value & 0x04) | ((value >> 9) & 0x18));
+      D_MMRRR_XY(insn, ((value >> 5) & 0x03) | (~value & 0x04) | ((value >> 9) & 0x18));
     }
 
     return true;
   }
 
   if ( index != -1 )
-    return disassemble_parallel_move(index, value);
+    return disassemble_parallel_move(insn, index, value);
   return false;
 }
 
 //----------------------------------------------------------------------
-static bool use_table(opcode_t *table, uint32 code, int entry, int start, int end)
+static bool use_table(
+        insn_t &insn,
+        opcode_t *table,
+        uint32 code,
+        int entry,
+        int start,
+        int end)
 {
   opcode_t &ptr = table[entry];
-  for(int j = start; j <= end; j++)
+  for ( int j = start; j <= end; j++ )
   {
-    if ( !ptr.funcs[j].func ) break;
-    int value = code & ptr.funcs[j].mask;
-    value   >>=        ptr.funcs[j].shift;
-    if ( !ptr.funcs[j].func(value) )
+    if ( ptr.funcs[j].func == NULL )
+      break;
+    int value = (code & ptr.funcs[j].mask) >> ptr.funcs[j].shift;
+    if ( !ptr.funcs[j].func(insn, value) )
       return false;
   }
   return true;
 }
 
 //----------------------------------------------------------------------
-static void reset_ops(void)
+static void reset_ops(insn_t &insn)
 {
-  op = &cmd.Op1;
+  op = &insn.Op1;
   for ( int i=0; i < UA_MAXOP; i++ )
-    cmd.Operands[i].type = o_void;
+    insn.ops[i].type = o_void;
   memset(&aa, 0, sizeof(aa));
 }
 
 //----------------------------------------------------------------------
-static int ana_61(void)
+static int ana_61(insn_t &insn)
 {
-  int prev_cmd_p_class = cl_0;
-  int cmd_p_class;
-  uint code = ua_32bits();
-  op = &cmd.Op1;
+  int prev_insn_p_class = cl_0;
+  int insn_p_class;
+  uint code = ua_32bits(insn);
+  op = &insn.Op1;
   memset(&aa, 0, sizeof(aa));
-  aa.ea = cmd.ea;
+  aa.ea = insn.ea;
 
   for ( int i = 0; i < qnumber(table_61); i++ )
   {
     if ( (code & table_61[i].mask) == table_61[i].value )
     {
-      cmd.itype = table_61[i].itype;
-      cmd.size = 1;
-      cmd_p_class = table_61[i].pmov_cl;
+      insn.itype = table_61[i].itype;
+      insn.size = 1;
+      insn_p_class = table_61[i].pmov_cl;
       if ( strlen(table_61[i].recog) > 16 )
-        cmd.size = 2;
+        insn.size = 2;
 
       // обработка сложного случа€ параллельных перемещений
       // X Memory Data Move with short displacement
-      if ( prev_cmd_p_class == cl_1_3 )
+      if ( prev_insn_p_class == cl_1_3 )
       {
-        cmd.size = 2;
-        cmd_p_class = cl_1_3;
+        insn.size = 2;
+        insn_p_class = cl_1_3;
       }
       else
-      if ( cmd_p_class == cl_1_3 )
+      if ( insn_p_class == cl_1_3 )
       {
-        prev_cmd_p_class = cmd_p_class;
+        prev_insn_p_class = insn_p_class;
         code >>= 16;
         continue;
       }
@@ -2727,23 +2708,23 @@ static int ana_61(void)
           first = 3;
           second = 1;
         }
-        if ( !use_table(table_61, code, i, first, first + 1) )
+        if ( !use_table(insn, table_61, code, i, first, first + 1) )
         {
-          reset_ops();
+          reset_ops(insn);
           continue;
         }
         op++;
-        if ( !use_table(table_61, code, i, second, second + 1) )
+        if ( !use_table(insn, table_61, code, i, second, second + 1) )
         {
-          reset_ops();
+          reset_ops(insn);
           continue;
         }
       }
       else
       {
-        if ( !use_table(table_61, code, i, 0, FUNCS_COUNT - 1) )
+        if ( !use_table(insn, table_61, code, i, 0, FUNCS_COUNT - 1) )
         {
-          reset_ops();
+          reset_ops(insn);
           continue;
         }
       }
@@ -2751,55 +2732,55 @@ static int ana_61(void)
 
 
   // –азбор дополнителных операндов параллельных перемещений по шинам
-    switch ( cmd_p_class )
+    switch ( insn_p_class )
     {
       case cl_0://No Parallel move
         break;
       case cl_1://X Memory Data Move (common)
-                    code = ushort(code & 0xffff);
-        recognize_parallel_move_class1(code);
+        code = ushort(code & 0xffff);
+        recognize_parallel_move_class1(insn, code);
         break;
       case cl_1_3://X Memory Data Move with short displacement
-        code = ua_32bits();
-        recognize_parallel_move_class1_3(code);
+        code = ua_32bits(insn);
+        recognize_parallel_move_class1_3(insn, code);
         break;
       case cl_2://Dual X Memory Data Read
-                    code = ushort(code & 0xffff);
-        recognize_parallel_move_class2(code);
+        code = ushort(code & 0xffff);
+        recognize_parallel_move_class2(insn, code);
         break;
       case cl_3://X Memory Data Write and Register Data Move
-                    code = ushort(code & 0xffff);
-        recognize_parallel_move_class3(code);
+        code = ushort(code & 0xffff);
+        recognize_parallel_move_class3(insn, code);
         break;
     }
 
-      if ( cmd.Op1.type == o_void && aa.nargs )
+      if ( insn.Op1.type == o_void && aa.nargs != 0 )
       {
-        cmd.Op1 = aa.args[0][0];
-        cmd.Op2 = aa.args[0][1];
+        insn.Op1 = aa.args[0][0];
+        insn.Op2 = aa.args[0][1];
         aa.args[0][0].type = o_void;
         aa.args[0][1].type = o_void;
       }
-      return cmd.size;
+      return insn.size;
     }
   }
   return 0;
 }
 
 //----------------------------------------------------------------------
-static int ana_6x(void)
+static int ana_6x(insn_t &insn)
 {
-  uint32 code = ua_next_24bits();
-  op = &cmd.Op1;
+  uint32 code = ua_next_24bits(insn);
+  op = &insn.Op1;
   memset(&aa, 0, sizeof(aa));
-  aa.ea = cmd.ea;
+  aa.ea = insn.ea;
 
   for ( int i = 0; i < qnumber(table_6x); i++ )
   {
     if ( (code & table_6x[i].mask) == table_6x[i].value
       && is_valid_insn(table_6x[i].proc) )
     {
-      cmd.itype = table_6x[i].itype;
+      insn.itype = table_6x[i].itype;
       if ( table_6x[i].funcs[0].func == F_SWITCH )
       {
         int first, second;
@@ -2813,23 +2794,23 @@ static int ana_6x(void)
           first = 3;
           second = 1;
         }
-        if ( !use_table(table_6x, code, i, first, first + 1) )
+        if ( !use_table(insn, table_6x, code, i, first, first + 1) )
         {
-          reset_ops();
+          reset_ops(insn);
           continue;
         }
         op++;
-        if ( !use_table(table_6x, code, i, second, second + 1) )
+        if ( !use_table(insn, table_6x, code, i, second, second + 1) )
         {
-          reset_ops();
+          reset_ops(insn);
           continue;
         }
       }
       else
       {
-        if ( !use_table(table_6x, code, i, 0, FUNCS_COUNT - 1) )
+        if ( !use_table(insn, table_6x, code, i, 0, FUNCS_COUNT - 1) )
         {
-          reset_ops();
+          reset_ops(insn);
           continue;
         }
       }
@@ -2837,34 +2818,33 @@ static int ana_6x(void)
       if ( table_6x[i].recog[8] == '\0' )
       {
         code = ushort(code>>8);
-        is_parallel_move(code);
+        is_parallel_move(insn, code);
       }
-      if ( cmd.Op1.type == o_void && aa.nargs )
+      if ( insn.Op1.type == o_void && aa.nargs != 0 )
       {
-        cmd.Op1 = aa.args[0][0];
-        cmd.Op2 = aa.args[0][1];
+        insn.Op1 = aa.args[0][0];
+        insn.Op2 = aa.args[0][1];
         aa.args[0][0].type = o_void;
         aa.args[0][1].type = o_void;
       }
-      return cmd.size;
+      return insn.size;
     }
   }
   return 0;
 }
 
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
-  return is561xx() ? ana_61() : ana_6x();
+  insn_t &insn = *_insn;
+  return is561xx() ? ana_61(insn) : ana_6x(insn);
 }
 
 //--------------------------------------------------------------------------
-void interr(const char *module)
+void interr(const insn_t *insn, const char *module)
 {
   const char *name = NULL;
-  if ( cmd.itype < DSP56_last )
-    name = Instructions[cmd.itype].name;
-  else
-    cmd.itype = DSP56_null;
-  warning("%a(%s): internal error in %s", cmd.ea, name, module);
+  if ( insn->itype < DSP56_last )
+    name = Instructions[insn->itype].name;
+  warning("%a(%s): internal error in %s", insn->ea, name, module);
 }

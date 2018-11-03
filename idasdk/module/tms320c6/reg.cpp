@@ -16,98 +16,197 @@
 // B14 - data page pointer
 // B15 - stack pointer
 static const char *const RegNames[] =
-  {
-        "A0", "A1",  "A2",  "A3",  "A4",  "A5",  "A6",  "A7",
-        "A8", "A9", "A10", "A11", "A12", "A13", "A14", "A15",
-        "A16", "A17", "A18", "A19", "A20", "A21", "A22", "A23",
-        "A24", "A25", "A26", "A27", "A28", "A29", "A30", "A31",
-        "B0", "B1",  "B2",  "B3",  "B4",  "B5",  "B6",  "B7",
-        "B8", "B9", "B10", "B11", "B12", "B13", "B14", "B15",
-        "B16", "B17", "B18", "B19", "B20", "B21", "B22", "B23",
-        "B24", "B25", "B26", "B27", "B28", "B29", "B30", "B31",
-        "AMR",
-        "CSR",
-        "IFR",
-        "ISR",
-        "ICR",
-        "IER",
-        "ISTP",
-        "IRP",
-        "NRP",
-        "ACR",  // undocumented, info from Jeff Bailey <jeff_bailey@infinitek.com>
-        "ADR",  // undocumented, info from Jeff Bailey <jeff_bailey@infinitek.com>
-        "PCE1",
-        "FADCR",
-        "FAUCR",
-        "FMCR",
-        "TSCL",
-        "TSCH",
-        "ILC",
-        "RILC",
-        "REP",
-        "DNUM",
-        "SSR",
-        "GPLYA",
-        "GPLYB",
-        "GFPGFR",
-        "TSR",
-        "ITSR",
-        "NTSR",
-        "ECR",
-        "EFR",
-        "IERR",
-        "CS", "DS"
-  };
+{
+  "A0", "A1",  "A2", "A3",  "A4",  "A5",  "A6",  "A7",
+  "A8", "A9", "A10", "A11", "A12", "A13", "A14", "A15",
+  "A16", "A17", "A18", "A19", "A20", "A21", "A22", "A23",
+  "A24", "A25", "A26", "A27", "A28", "A29", "A30", "A31",
+  "B0", "B1", "B2",  "B3",  "B4",  "B5",  "B6",  "B7",
+  "B8", "B9", "B10", "B11", "B12", "B13", "B14", "B15",
+  "B16", "B17", "B18", "B19", "B20", "B21", "B22", "B23",
+  "B24", "B25", "B26", "B27", "B28", "B29", "B30", "B31",
+  "AMR",
+  "CSR",
+  "IFR",
+  "ISR",
+  "ICR",
+  "IER",
+  "ISTP",
+  "IRP",
+  "NRP",
+  "ACR",  // undocumented, info from Jeff Bailey <jeff_bailey@infinitek.com>
+  "ADR",  // undocumented, info from Jeff Bailey <jeff_bailey@infinitek.com>
+  "PCE1",
+  "FADCR",
+  "FAUCR",
+  "FMCR",
+  "TSCL",
+  "TSCH",
+  "ILC",
+  "RILC",
+  "REP",
+  "DNUM",
+  "SSR",
+  "GPLYA",
+  "GPLYB",
+  "GFPGFR",
+  "TSR",
+  "ITSR",
+  "NTSR",
+  "ECR",
+  "EFR",
+  "IERR",
+  "CS", "DS"
+};
 
 netnode tnode;
 
 //--------------------------------------------------------------------------
-static bool idaapi skip_12(ea_t ea)
+static bool idaapi skip_12(nodeidx_t n)
 {
-  ea_t target = tnode.altval(ea);
-  return target == 1 || target == 2;
+  nodeidx_t ndx = tnode.altval(n);
+  return ndx == 1 || ndx == 2;
 }
 
 //--------------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...) { // Various messages:
-  va_list va;
-  va_start(va, msgid);
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-  switch ( msgid ) {
-    case processor_t::newfile:
-    case processor_t::oldfile:
-      tnode.create("$ tms node");
-    default:
-      break;
-
-    case processor_t::move_segm:// A segment is moved
+static ssize_t idaapi idb_callback(void *, int code, va_list va)
+{
+  switch ( code )
+  {
+    case idb_event::segm_moved: // A segment is moved
                                 // Fix processor dependent address sensitive information
-                                // args: ea_t from - old segment address
-                                //       segment_t - moved segment
       {
-        ea_t from    = va_arg(va, ea_t);
-        segment_t *s = va_arg(va, segment_t *);
-        asize_t size = s->size();
-        tnode.altshift(from, s->startEA, size);
-        tnode.altadjust(from, s->startEA, size, skip_12);
+        ea_t from           = va_arg(va, ea_t);
+        ea_t to             = va_arg(va, ea_t);
+        asize_t size        = va_arg(va, asize_t);
+        bool changed_netmap = va_argi(va, bool);
+        if ( !changed_netmap )
+        {
+          nodeidx_t ndx1 = ea2node(from);
+          nodeidx_t ndx2 = ea2node(to);
+          tnode.altshift(ndx1, ndx2, size);
+          tnode.altadjust(ndx1, ndx2, size, skip_12);
+        }
       }
       break;
-
   }
-  return(1);
+  return 0;
+}
+
+//--------------------------------------------------------------------------
+// Various messages:
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
+      break;
+
+    case processor_t::ev_term:
+      unhook_from_notification_point(HT_IDB, idb_callback);
+      break;
+
+    case processor_t::ev_newfile:
+    case processor_t::ev_oldfile:
+      tnode.create("$ tms node");
+      break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_data:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        bool analyze_only = va_argi(va, bool);
+        data(*ctx, analyze_only);
+        return 1;
+      }
+
+    case processor_t::ev_out_special_item:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        uchar seg_type = va_argi(va, uchar);
+        outspec(*ctx, seg_type);
+        return 1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
+  }
+  return code;
 }
 
 //-----------------------------------------------------------------------
 //           TMS320C6x COFF Assembler
 //-----------------------------------------------------------------------
-static const asm_t dspasm = {
+static const asm_t dspasm =
+{
   AS_COLON | ASH_HEXF0 | ASD_DECF0 | ASB_BINF0 | ASO_OCTF5,
   0,
   "TMS320C6x COFF Assembler",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   NULL,         // org
   ".end",
 
@@ -130,10 +229,6 @@ static const asm_t dspasm = {
   ".space %s",  // uninited arrays
   ".set",       // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "$",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -159,7 +254,8 @@ static const asm_t *const asms[] = { &dspasm, NULL };
 //-----------------------------------------------------------------------
 #define FAMILY "TMS320C6 series:"
 static const char *const shnames[] = { "TMS320C6", NULL };
-static const char *const lnames[] = {
+static const char *const lnames[] =
+{
   FAMILY"Texas Instruments TMS320C6xxx",
   NULL
 };
@@ -167,9 +263,10 @@ static const char *const lnames[] = {
 //--------------------------------------------------------------------------
 static const uchar retcode_1[] = { 0x62, 0x63, 0x0C, 0x00 };
 
-static bytes_t retcodes[] = {
- { sizeof(retcode_1), retcode_1 },
- { 0, NULL }
+static bytes_t retcodes[] =
+{
+  { sizeof(retcode_1), retcode_1 },
+  { 0, NULL }
 };
 
 //-----------------------------------------------------------------------
@@ -177,14 +274,17 @@ static bytes_t retcodes[] = {
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_TMSC6,                   // id
-  PR_USE32
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_TMSC6,             // id
+                          // flag
+    PR_USE32
   | PR_DEFSEG32
   | PR_DELAYED
-  | PR_ALIGN_INSN,              // allow align instructions
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  | PR_ALIGN_INSN,        // allow align instructions
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -193,31 +293,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  NULL,                 // assumes
-
-  ana,
-  emu,
-
-  out,
-  outop,
-  data,
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  qnumber(RegNames),    // Number of registers
   RegNames,             // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(RegNames),    // Number of registers
 
   rVcs,                 // first
   rVds,                 // last
@@ -229,23 +306,8 @@ processor_t LPH =
 
   TMS6_null,
   TMS6_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 2, 4, 8, 12 },      // char real_width[4];
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x);
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize)(func_t *pfn);
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  outspec,              // Generate text representation of an item in a special segment
   TMS6_null,            // Icode of return instruction. It is ok to give any of possible return instructions
-  NULL,                 // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

@@ -7,9 +7,8 @@
 
 #ifndef FUNCS_HPP
 #define FUNCS_HPP
-#include <area.hpp>
+#include <range.hpp>
 #include <bytes.hpp>
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
 
 /*! \file funcs.hpp
 
@@ -30,8 +29,8 @@
   get_func() on a tail address will return the function possessing the tail.
   You can enumerate the functions using the tail by using ::func_parent_iterator_t.
 
-  Each function chunk in the disassembly is represented as an "area" (a range
-  of addresses, see area.hpp for details) with characteristics.
+  Each function chunk in the disassembly is represented as an "range" (a range
+  of addresses, see range.hpp for details) with characteristics.
 
   A function entry must start with an instruction (code) byte.
 */
@@ -39,6 +38,7 @@
 struct stkpnt_t;                // #include <frame.hpp>
 struct regvar_t;                // #include <frame.hpp>
 struct llabel_t;                // #include <frame.hpp>
+class insn_t;                   // #include <ua.hpp>
 
 /// Register argument description.
 /// regargs are destroyed when the full function
@@ -53,7 +53,7 @@ struct regarg_t
 
 //------------------------------------------------------------------------
 /// A function is a set of continuous ranges of addresses with characteristics
-class func_t : public area_t
+class func_t : public range_t
 {
 public:
   ushort flags;                        ///< \ref FUNC_
@@ -64,12 +64,7 @@ public:
 #define FUNC_FAR        0x00000002     ///< Far function
 #define FUNC_LIB        0x00000004     ///< Library function
 
-// oaidl.h also defines FUNC_STATIC
-#ifdef NO_OBSOLETE_FUNCS
-# define FUNC_STATICDEF 0x00000008     ///< Static function
-#else
-# define FUNC_STATIC    0x00000008     ///< Static function
-#endif
+#define FUNC_STATICDEF  0x00000008     ///< Static function
 
 #define FUNC_FRAME      0x00000010     ///< Function uses frame pointer (BP)
 #define FUNC_USERFAR    0x00000020     ///< User has specified far-ness
@@ -131,9 +126,9 @@ public:
       asize_t frsize;      ///< size of local variables part of frame in bytes.
                            ///< If #FUNC_FRAME is set and #fpd==0, the frame pointer
                            ///< (EBP) is assumed to point to the top of the local
-                           ///< variables area.
-      ushort frregs;       ///< size of saved registers in frame. This area is
-                           ///< immediately above the local variables area.
+                           ///< variables range.
+      ushort frregs;       ///< size of saved registers in frame. This range is
+                           ///< immediately above the local variables range.
       asize_t argsize;     ///< number of bytes purged from the stack
                            ///< upon returning
       asize_t fpd;         ///< frame pointer delta. (usually 0, i.e. realBP==typicalBP)
@@ -143,14 +138,14 @@ public:
 
         // the following fields should not be accessed directly:
 
-      ushort pntqty;       ///< number of SP change points
+      uint32 pntqty;       ///< number of SP change points
       stkpnt_t *points;    ///< array of SP change points.
                            ///< use ...stkpnt...() functions to access this array.
 
       int regvarqty;       ///< number of register variables (-1-not read in yet)
                            ///< use find_regvar() to read register variables
       regvar_t *regvars;   ///< array of register variables.
-                           ///< this array is sorted by: startEA.
+                           ///< this array is sorted by: start_ea.
                            ///< use ...regvar...() functions to access this array.
 
       int llabelqty;       ///< number of local labels
@@ -163,7 +158,7 @@ public:
                            ///< use ...regarg...() functions to access this array.
 
       int tailqty;         ///< number of function tails
-      area_t *tails;       ///< array of tails, sorted by ea.
+      range_t *tails;      ///< array of tails, sorted by ea.
                            ///< use func_tail_iterator_t to access function tails.
 #ifndef SWIG
     };
@@ -179,6 +174,17 @@ public:
     };
   };
 #endif // SWIG
+
+  func_t(ea_t start=0, ea_t end=0, flags_t f=0)
+    : range_t(start, end), flags(f|FUNC_NORET_PENDING), frame(BADNODE),
+      frsize(0), frregs(0), argsize(0), fpd(0), color(DEFCOLOR),
+      pntqty(0), points(NULL),
+      regvarqty(0), regvars(NULL),
+      llabelqty(0), llabels(NULL),
+      regargqty(0), regargs(NULL),
+      tailqty(0), tails(NULL)
+  {
+  }
 };
 DECLARE_TYPE_AS_MOVABLE(func_t);
 
@@ -187,8 +193,12 @@ inline bool is_func_entry(const func_t *pfn) { return pfn != NULL && (pfn->flags
 /// Does function describe a function tail chunk?
 inline bool is_func_tail(const func_t *pfn) { return pfn != NULL && (pfn->flags & FUNC_TAIL) != 0; }
 
-idaman areacb_t ida_export_data funcs;      ///< area control block for functions
 
+/// Lock function pointer
+/// Locked pointers are guaranteed to remain valid until they are unlocked.
+/// Ranges with locked pointers can not be deleted or moved.
+
+idaman void ida_export lock_func_range(const func_t *pfn, bool lock);
 
 /// Helper class to lock a function pointer so it stays valid
 class lock_func
@@ -197,20 +207,17 @@ class lock_func
 public:
   lock_func(const func_t *_pfn) : pfn(_pfn)
   {
-    areacb_t_lock_area(&funcs, pfn);
+    lock_func_range(pfn, true);
   }
   ~lock_func(void)
   {
-    areacb_t_unlock_area(&funcs, pfn);
+    lock_func_range(pfn, false);
   }
 };
 
 /// Is the function pointer locked?
 
-inline bool is_func_locked(const func_t *pfn)
-{
-  return areacb_t_get_area_locks(&funcs, pfn) > 0;
-}
+idaman bool ida_export is_func_locked(const func_t *pfn);
 
 //--------------------------------------------------------------------
 //      F U N C T I O N S
@@ -237,6 +244,12 @@ inline bool func_contains(func_t *pfn, ea_t ea)
   return get_func_chunknum(pfn, ea) >= 0;
 }
 
+/// Do two addresses belong to the same function?
+inline bool is_same_func(ea_t ea1, ea_t ea2)
+{
+  func_t *pfn = get_func(ea1);
+  return pfn != NULL && func_contains(pfn, ea2);
+}
 
 /// Get pointer to function structure by number.
 /// \param n  number of function, is in range 0..get_func_qty()-1
@@ -273,62 +286,53 @@ idaman func_t *ida_export get_prev_func(ea_t ea);
 idaman func_t *ida_export get_next_func(ea_t ea);
 
 
-/// Get function limits.
-/// The function limits is the minimal area containing all addresses
-/// belonging to the function
-/// \retval true   ok
-/// \retval false  wrong arguments
+/// Get function ranges.
+/// \param ranges buffer to receive the range info
+/// \param pfn    ptr to function structure
+/// \return end address of the last function range (BADADDR-error)
 
-idaman bool ida_export get_func_limits(func_t *pfn, area_t *limits);
+idaman ea_t ida_export get_func_ranges(rangeset_t *ranges, func_t *pfn);
 
 
 /// Get function comment.
-/// \param fn          ptr to function structure
+/// \param buf         buffer for the comment
+/// \param pfn         ptr to function structure
 /// \param repeatable  get repeatable comment?
-/// \return comment or NULL. The caller must qfree() the result.
+/// \return size of comment or -1
 /// In fact this function works with function chunks too.
 
-inline char *get_func_cmt(func_t *fn, bool repeatable)
-                { return funcs.get_area_cmt(fn, repeatable); }
+idaman ssize_t ida_export get_func_cmt(qstring *buf, const func_t *pfn, bool repeatable);
 
 
 /// Set function comment.
 /// This function works with function chunks too.
-/// \param fn           ptr to function structure
-/// \param repeatable   set repeatable comment?
+/// \param pfn         ptr to function structure
+/// \param cmt         comment string, may be multiline (with '\n').
+///                    Use empty str ("") to delete comment
+/// \param repeatable  set repeatable comment?
 
-inline bool set_func_cmt(func_t *fn, const char *cmt, bool repeatable)
-                { return funcs.set_area_cmt(fn, cmt, repeatable); }
-
-
-/// Delete function comment.
-/// This function works with function chunks too.
-/// \param fn          ptr to function structure
-/// \param repeatable  delete repeatable comment?
-
-inline void del_func_cmt(func_t *fn, bool repeatable)
-                { funcs.del_area_cmt(fn, repeatable); }
+idaman bool ida_export set_func_cmt(const func_t *pfn, const char *cmt, bool repeatable);
 
 
 /// Update information about a function in the database (::func_t).
 /// You must not change the function start and end addresses using this function.
-/// Use ui_func_setstart() and ui_func_setend() for it.
-/// \param fn  ptr to function structure with updated information
+/// Use set_func_start() and set_func_end() for it.
+/// \param pfn         ptr to function structure
 /// \return success
 
-inline bool update_func(func_t *fn) { return funcs.update(fn) != 0; }
+idaman bool ida_export update_func(func_t *pfn);
 
 
 /// Add a new function.
-/// If the fn->endEA is #BADADDR, then
+/// If the fn->end_ea is #BADADDR, then
 /// IDA will try to determine the function bounds
 /// by calling find_func_bounds(..., #FIND_FUNC_DEFINE).
 /// If ea1 is in the middle of an existing function,
-/// the kernel will try to shrink it to make room for the new function.
-/// \param fn  ptr to filled function structure
+/// IDA will try to shrink it to make room for the new function.
+/// \param pfn  ptr to filled function structure
 /// \return success
 
-idaman bool ida_export  add_func_ex(func_t *fn);
+idaman bool ida_export add_func_ex(func_t *pfn);
 
 
 /// Add a new function.
@@ -343,7 +347,11 @@ idaman bool ida_export  add_func_ex(func_t *fn);
 /// \param ea2  end address
 /// \return success
 
-idaman bool ida_export add_func(ea_t ea1, ea_t ea2);
+inline bool add_func(ea_t ea1, ea_t ea2=BADADDR)
+{
+  func_t fn(ea1, ea2);
+  return add_func_ex(&fn);
+}
 
 
 /// Delete a function.
@@ -358,9 +366,9 @@ idaman bool ida_export del_func(ea_t ea);
 /// \param newstart  new end address of the function
 /// \return \ref MOVE_FUNC_
 
-idaman int ida_export func_setstart(ea_t ea, ea_t newstart);
+idaman int ida_export set_func_start(ea_t ea, ea_t newstart);
 /// \defgroup MOVE_FUNC_ Function move result codes
-/// Return values for func_setstart()
+/// Return values for set_func_start()
 //@{
 #define MOVE_FUNC_OK            0  ///< ok
 #define MOVE_FUNC_NOCODE        1  ///< no instruction at 'newstart'
@@ -375,40 +383,36 @@ idaman int ida_export func_setstart(ea_t ea, ea_t newstart);
 /// \param newend  new end address of the function
 /// \return success
 
-idaman bool ida_export func_setend(ea_t ea, ea_t newend);
+idaman bool ida_export set_func_end(ea_t ea, ea_t newend);
 
 
 /// Reanalyze a function.
 /// This function analyzes all chunks of the given function.
-/// Optional parameters (ea1, ea2) may be used to narrow the analyzed area.
+/// Optional parameters (ea1, ea2) may be used to narrow the analyzed range.
 /// \param pfn              pointer to a function
-/// \param ea1              start of the area to analyze
-/// \param ea2              end of area to analyze
+/// \param ea1              start of the range to analyze
+/// \param ea2              end of range to analyze
 /// \param analyze_parents  meaningful only if pfn points to a function tail.
 ///                         if true, all tail parents will be reanalyzed.
 ///                         if false, only the given tail will be reanalyzed.
 
-idaman void ida_export reanalyze_function(func_t *pfn,
-                                          ea_t ea1=0,
-                                          ea_t ea2=BADADDR,
-                                          bool analyze_parents=false);
-
-
-/// Initialize the function structure
-
-idaman void ida_export clear_func_struct(func_t *fn);
+idaman void ida_export reanalyze_function(
+        func_t *pfn,
+        ea_t ea1=0,
+        ea_t ea2=BADADDR,
+        bool analyze_parents=false);
 
 
 /// Determine the boundaries of a new function.
 /// This function tries to find the start and end addresses of a new function.
 /// It calls the module with \ph{func_bounds} in order to fine tune
 /// the function boundaries.
-/// \param ea     starting address of a new function
 /// \param nfn    structure to fill with information
+/// \             nfn->start_ea points to the start address of the new function.
 /// \param flags  \ref FIND_FUNC_F
 /// \return \ref FIND_FUNC_R
 
-idaman int ida_export find_func_bounds(ea_t ea, func_t *nfn, int flags);
+idaman int ida_export find_func_bounds(func_t *nfn, int flags);
 
 /// \defgroup FIND_FUNC_F Find function bounds flags
 /// Passed as 'flags' parameter to find_func_bounds()
@@ -418,13 +422,15 @@ idaman int ida_export find_func_bounds(ea_t ea, func_t *nfn, int flags);
 #define FIND_FUNC_IGNOREFN 0x0002 ///< ignore existing function boundaries.
                                   ///< by default the function returns function boundaries
                                   ///< if ea belongs to a function.
+#define FIND_FUNC_KEEPBD   0x0004 ///< do not modify incoming function boundaries,
+                                  ///< just create instructions inside the boundaries.
 //@}
 
 /// \defgroup FIND_FUNC_R Find function bounds result codes
 /// Return values for find_func_bounds()
 //@{
 #define FIND_FUNC_UNDEF 0         ///< function has instructions that pass execution flow to unexplored bytes.
-                                  ///< nfn->endEA will have the address of the unexplored byte.
+                                  ///< nfn->end_ea will have the address of the unexplored byte.
 #define FIND_FUNC_OK    1         ///< ok, 'nfn' is ready for add_func()
 #define FIND_FUNC_EXIST 2         ///< function exists already.
                                   ///< its bounds are returned in 'nfn'.
@@ -436,7 +442,7 @@ idaman int ida_export find_func_bounds(ea_t ea, func_t *nfn, int flags);
 /// \param ea       any address in the function
 /// \return length of the function name
 
-idaman ssize_t ida_export get_func_name2(qstring *out, ea_t ea);
+idaman ssize_t ida_export get_func_name(qstring *out, ea_t ea);
 
 
 /// Get function bitness (which is equal to the function segment bitness).
@@ -448,10 +454,10 @@ idaman ssize_t ida_export get_func_name2(qstring *out, ea_t ea);
 idaman int ida_export get_func_bitness(const func_t *pfn);
 
 /// Get number of bits in the function addressing
-inline int idaapi get_func_bits(func_t *pfn) { return 1 << (get_func_bitness(pfn)+4); }
+inline int idaapi get_func_bits(const func_t *pfn) { return 1 << (get_func_bitness(pfn)+4); }
 
 /// Get number of bytes in the function addressing
-inline int idaapi get_func_bytes(func_t *pfn) { return get_func_bits(pfn)/8; }
+inline int idaapi get_func_bytes(const func_t *pfn) { return get_func_bits(pfn)/8; }
 
 
 /// Is the function visible (not hidden)?
@@ -468,38 +474,22 @@ idaman void ida_export set_visible_func(func_t *pfn, bool visible);
 
 
 /// Give a meaningful name to function if it consists of only 'jump' instruction.
-/// \param fn       pointer to function (may be NULL)
+/// \param pfn      pointer to function (may be NULL)
 /// \param oldname  old name of function.
 ///                 if old name was in "j_..." form, then we may discard it
 ///                 and set a new name.
 ///                 if oldname is not known, you may pass NULL.
 /// \return success
 
-idaman int ida_export set_func_name_if_jumpfunc(func_t *fn, const char *oldname);
+idaman int ida_export set_func_name_if_jumpfunc(func_t *pfn, const char *oldname);
 
 
 /// Calculate target of a thunk function.
-/// \param fn    pointer to function (may not be NULL)
+/// \param pfn   pointer to function (may not be NULL)
 /// \param fptr  out: will hold address of a function pointer (if indirect jump)
 /// \return the target function or #BADADDR
 
-idaman ea_t ida_export calc_thunk_func_target(func_t *fn, ea_t *fptr);
-
-
-/// Convert address to "funcname+offset" text form.
-/// \param ea       linear address
-/// \param buf      output buffer
-/// \param bufsize  size of the output buffer
-/// \return NULL if no function is found at 'ea'.
-///          "funcname+offset" otherwise.
-
-idaman char *ida_export a2funcoff(ea_t ea, char *buf, size_t bufsize);
-
-
-/// Generate standard function header lines using MakeLine()
-/// \param pfn  pointer to function structure
-
-idaman void ida_export std_gen_func_header(func_t *pfn);
+idaman ea_t ida_export calc_thunk_func_target(func_t *pfn, ea_t *fptr);
 
 
 /// Does the function return?.
@@ -509,6 +499,13 @@ idaman void ida_export std_gen_func_header(func_t *pfn);
 /// to introduce a special flag for them.
 
 idaman bool ida_export func_does_return(ea_t callee);
+
+
+/// Plan to reanalyze noret flag.
+/// This function does not remove FUNC_NORET if it is already present.
+/// It just plans to reanalysis.
+
+idaman bool ida_export reanalyze_noret_flag(ea_t ea);
 
 
 /// Signal a non-returning instruction.
@@ -522,14 +519,14 @@ idaman bool ida_export set_noret_insn(ea_t insn_ea, bool noret);
 
 
 //--------------------------------------------------------------------
-//      F U N C T I O N  C H U N K S
+//      F U N C T I O N   C H U N K S
 //--------------------------------------------------------------------
 /// Get pointer to function chunk structure by address.
 /// \param ea  any address in a function chunk
 /// \return ptr to a function chunk or NULL.
 ///         This function may return a function entry as well as a function tail.
 
-inline func_t *get_fchunk(ea_t ea) { return (func_t *)funcs.get_area(ea); }
+idaman func_t *ida_export get_fchunk(ea_t ea);
 
 
 /// Get pointer to function chunk structure by number.
@@ -537,12 +534,12 @@ inline func_t *get_fchunk(ea_t ea) { return (func_t *)funcs.get_area(ea); }
 /// \return ptr to a function chunk or NULL.
 ///         This function may return a function entry as well as a function tail.
 
-inline func_t *getn_fchunk(int n) { return (func_t *)funcs.getn_area(n); }
+idaman func_t *ida_export getn_fchunk(int n);
 
 
 /// Get total number of function chunks in the program
 
-inline size_t get_fchunk_qty(void) { return funcs.get_area_qty(); }
+idaman size_t ida_export get_fchunk_qty(void);
 
 
 /// Get ordinal number of a function chunk in the global list of function chunks.
@@ -550,21 +547,21 @@ inline size_t get_fchunk_qty(void) { return funcs.get_area_qty(); }
 /// \return number of function chunk (0..get_fchunk_qty()-1).
 ///         -1 means 'no function chunk at the specified address'.
 
-inline int get_fchunk_num(ea_t ea) { return funcs.get_area_num(ea); }
+idaman int ida_export get_fchunk_num(ea_t ea);
 
 
 /// Get pointer to the previous function chunk in the global list.
 /// \param ea  any address in the program
 /// \return ptr to function chunk or NULL if previous function chunk doesn't exist
 
-inline func_t *get_prev_fchunk(ea_t ea) { return getn_fchunk(funcs.get_prev_area(ea)); }
+idaman func_t *ida_export get_prev_fchunk(ea_t ea);
 
 
 /// Get pointer to the next function chunk in the global list.
 /// \param ea  any address in the program
 /// \return ptr to function chunk or NULL if next function chunk doesn't exist
 
-inline func_t *get_next_fchunk(ea_t ea) { return getn_fchunk(funcs.get_next_area(ea)); }
+idaman func_t *ida_export get_next_fchunk(ea_t ea);
 
 
 //--------------------------------------------------------------------
@@ -573,11 +570,12 @@ inline func_t *get_next_fchunk(ea_t ea) { return getn_fchunk(funcs.get_next_area
 /// Append a new tail chunk to the function definition.
 /// If the tail already exists, then it will simply be added to the function tail list
 /// Otherwise a new tail will be created and its owner will be set to be our function
-/// If a new tail can not be created, then this function will fail
+/// If a new tail can not be created, then this function will fail.
 /// \param ea1  start of the tail. If a tail already exists at the specified address
 ///             it must start at 'ea1'
 /// \param ea2  end of the tail. If a tail already exists at the specified address
-///             it must end at 'ea2'
+///             it must end at 'ea2'. If specified as BADADDR, IDA will determine
+///             the end address itself.
 
 idaman bool ida_export append_func_tail(func_t *pfn, ea_t ea1, ea_t ea2);
 
@@ -605,14 +603,12 @@ class func_item_iterator_t;
 /// Declare helper functions for ::func_item_iterator_t
 #define DECLARE_FUNC_ITERATORS(prefix) \
 prefix bool ida_export func_tail_iterator_set(func_tail_iterator_t *fti, func_t *pfn, ea_t ea);\
-prefix bool ida_export func_tail_iterator_set2(func_tail_iterator_t *fti, func_t *pfn, ea_t ea);\
 prefix bool ida_export func_tail_iterator_set_ea(func_tail_iterator_t *fti, ea_t ea);\
 prefix bool ida_export func_parent_iterator_set(func_parent_iterator_t *fpi, func_t *pfn);\
-prefix bool ida_export func_parent_iterator_set2(func_parent_iterator_t *fpi, func_t *pfn);\
 prefix bool ida_export func_item_iterator_next(func_item_iterator_t *fii, testf_t *testf, void *ud);\
 prefix bool ida_export func_item_iterator_prev(func_item_iterator_t *fii, testf_t *testf, void *ud);\
-prefix bool ida_export func_item_iterator_decode_prev_insn(func_item_iterator_t *fii);\
-prefix bool ida_export func_item_iterator_decode_preceding_insn(func_item_iterator_t *fii, eavec_t *visited, bool *p_farref);
+prefix bool ida_export func_item_iterator_decode_prev_insn(func_item_iterator_t *fii, insn_t *out); \
+prefix bool ida_export func_item_iterator_decode_preceding_insn(func_item_iterator_t *fii, eavec_t *visited, bool *p_farref, insn_t *out);
 DECLARE_FUNC_ITERATORS(idaman)
 
 
@@ -631,7 +627,7 @@ inline bool idaapi f_any(flags_t, void *) { return true; }
 /// \code
 ///      func_tail_iterator_t fti(pfn);
 ///      for ( bool ok=fti.first(); ok; ok=fti.next() )
-///        const area_t &a = fti.chunk();
+///        const range_t &a = fti.chunk();
 ///        ....
 /// \endcode
 ///
@@ -642,24 +638,24 @@ inline bool idaapi f_any(flags_t, void *) { return true; }
 /// but it is still possible to use the class. In this case the iteration will be
 /// limited by the segment boundaries.
 /// The function main chunk is locked during the iteration.
-/// It is also possible to enumerate one single arbitrary area using set_range()
+/// It is also possible to enumerate one single arbitrary range using set_range()
 /// This function is mainly designed to be used from ::func_item_iterator_t.
 class func_tail_iterator_t
 {
   DECLARE_FUNC_ITERATORS(friend)
   func_t *pfn;
   int idx;
-  area_t seglim;        // valid and used only if pfn == NULL
+  range_t seglim;        // valid and used only if pfn == NULL
 public:
-  func_tail_iterator_t(void) : pfn(NULL) {}
+  func_tail_iterator_t(void) : pfn(NULL), idx(-1) {}
   func_tail_iterator_t(func_t *_pfn, ea_t ea=BADADDR) : pfn(NULL) { set(_pfn, ea); }
   ~func_tail_iterator_t(void)
   {
     // if was iterating over function chunks, unlock the main chunk
     if ( pfn != NULL )
-      areacb_t_unlock_area(&funcs, pfn);
+      lock_func_range(pfn, false);
   }
-  bool set(func_t *_pfn, ea_t ea=BADADDR) { return func_tail_iterator_set2(this, _pfn, ea); }
+  bool set(func_t *_pfn, ea_t ea=BADADDR) { return func_tail_iterator_set(this, _pfn, ea); }
   bool set_ea(ea_t ea) { return func_tail_iterator_set_ea(this, ea); }
   // set an arbitrary range
   bool set_range(ea_t ea1, ea_t ea2)
@@ -667,14 +663,14 @@ public:
     this->~func_tail_iterator_t();
     pfn = NULL;
     idx = -1;
-    seglim = area_t(ea1, ea2);
+    seglim = range_t(ea1, ea2);
     return !seglim.empty();
   }
-  const area_t &chunk(void) const
+  const range_t &chunk(void) const
   {
     if ( pfn == NULL )
       return seglim;
-    return idx >= 0 && idx < pfn->tailqty ? pfn->tails[idx] : *(area_t*)pfn;
+    return idx >= 0 && idx < pfn->tailqty ? pfn->tails[idx] : *(range_t*)pfn;
   }
   bool first(void) { if ( pfn != NULL ) { idx = 0; return pfn->tailqty > 0; } return false; } // get only tail chunks
   bool last(void) { if ( pfn != NULL ) { idx = pfn->tailqty - 1; return true; } return false; }  // get all chunks (the entry chunk last)
@@ -693,10 +689,10 @@ public:
 ///                         if false, only the given tail will be iterated.
 
 idaman void ida_export iterate_func_chunks(
-                          func_t *pfn,
-                          void (idaapi *func)(ea_t ea1, ea_t ea2, void *ud),
-                          void *ud=NULL,
-                          bool include_parents=false);
+        func_t *pfn,
+        void (idaapi *func)(ea_t ea1, ea_t ea2, void *ud),
+        void *ud=NULL,
+        bool include_parents=false);
 
 
 /// Class to enumerate all function instructions and data sorted by addresses.
@@ -715,42 +711,42 @@ idaman void ida_export iterate_func_chunks(
 /// If 'pfn' is specified as NULL then the set() function will fail,
 /// but it is still possible to use the class. In this case the iteration will be
 /// limited by the segment boundaries.
-/// It is also possible to enumerate addresses in an arbitrary area using set_range().
+/// It is also possible to enumerate addresses in an arbitrary range using set_range().
 class func_item_iterator_t
 {
   DECLARE_FUNC_ITERATORS(friend)
   func_tail_iterator_t fti;
   ea_t ea;
 public:
-  func_item_iterator_t(void) {}
+  func_item_iterator_t(void) : ea(BADADDR) {}
   func_item_iterator_t(func_t *pfn, ea_t _ea=BADADDR) { set(pfn, _ea); }
   /// Set a function range. if pfn == NULL then a segment range will be set.
   bool set(func_t *pfn, ea_t _ea=BADADDR)
   {
-    ea = (_ea != BADADDR || pfn == NULL) ? _ea : pfn->startEA;
+    ea = (_ea != BADADDR || pfn == NULL) ? _ea : pfn->start_ea;
     return fti.set(pfn, _ea);
-   }
+  }
   /// Set an arbitrary range
   bool set_range(ea_t ea1, ea_t ea2) { ea = ea1; return fti.set_range(ea1, ea2); }
-  bool first(void) { if ( !fti.main() ) return false; ea=fti.chunk().startEA; return true; }
-  bool last(void) { if ( !fti.last() ) return false; ea=fti.chunk().endEA; return true; }
+  bool first(void) { if ( !fti.main() ) return false; ea=fti.chunk().start_ea; return true; }
+  bool last(void) { if ( !fti.last() ) return false; ea=fti.chunk().end_ea; return true; }
   ea_t current(void) const { return ea; }
-  const area_t &chunk(void) const { return fti.chunk(); }
+  const range_t &chunk(void) const { return fti.chunk(); }
   bool next(testf_t *func, void *ud) { return func_item_iterator_next(this, func, ud); }
   bool prev(testf_t *func, void *ud) { return func_item_iterator_prev(this, func, ud); }
   bool next_addr(void) { return next(f_any, NULL); }
-  bool next_head(void) { return next(f_isHead, NULL); }
-  bool next_code(void) { return next(f_isCode, NULL); }
-  bool next_data(void) { return next(f_isData, NULL); }
-  bool next_not_tail(void) { return next(f_isNotTail, NULL); }
+  bool next_head(void) { return next(f_is_head, NULL); }
+  bool next_code(void) { return next(f_is_code, NULL); }
+  bool next_data(void) { return next(f_is_data, NULL); }
+  bool next_not_tail(void) { return next(f_is_not_tail, NULL); }
   bool prev_addr(void) { return prev(f_any, NULL); }
-  bool prev_head(void) { return prev(f_isHead, NULL); }
-  bool prev_code(void) { return prev(f_isCode, NULL); }
-  bool prev_data(void) { return prev(f_isData, NULL); }
-  bool prev_not_tail(void) { return prev(f_isNotTail, NULL); }
-  bool decode_prev_insn(void) { return func_item_iterator_decode_prev_insn(this); }
-  bool decode_preceding_insn(eavec_t *visited, bool *p_farref)
-    { return func_item_iterator_decode_preceding_insn(this, visited, p_farref); }
+  bool prev_head(void) { return prev(f_is_head, NULL); }
+  bool prev_code(void) { return prev(f_is_code, NULL); }
+  bool prev_data(void) { return prev(f_is_data, NULL); }
+  bool prev_not_tail(void) { return prev(f_is_not_tail, NULL); }
+  bool decode_prev_insn(insn_t *out) { return func_item_iterator_decode_prev_insn(this, out); }
+  bool decode_preceding_insn(eavec_t *visited, bool *p_farref, insn_t *out)
+    { return func_item_iterator_decode_preceding_insn(this, visited, p_farref, out); }
 };
 
 /// Class to enumerate all function parents sorted by addresses.
@@ -772,14 +768,14 @@ class func_parent_iterator_t
   func_t *fnt;
   int idx;
 public:
-  func_parent_iterator_t(void) : fnt(NULL) {}
+  func_parent_iterator_t(void) : fnt(NULL), idx(0) {}
   func_parent_iterator_t(func_t *_fnt) : fnt(NULL) { set(_fnt); }
   ~func_parent_iterator_t(void)
   {
     if ( fnt != NULL )
-      areacb_t_unlock_area(&funcs, fnt);
+      lock_func_range(fnt, false);
   }
-  bool set(func_t *_fnt) { return func_parent_iterator_set2(this, _fnt); }
+  bool set(func_t *_fnt) { return func_parent_iterator_set(this, _fnt); }
   ea_t parent(void) const { return fnt->referers[idx]; }
   bool first(void) { idx = 0; return is_func_tail(fnt) && fnt->refqty > 0; }
   bool last(void) { idx = fnt->refqty - 1; return idx >= 0; }
@@ -802,7 +798,7 @@ idaman ea_t ida_export get_next_func_addr(func_t *pfn, ea_t ea);
 /// Functions to work with temporary register argument definitions
 //@{
 idaman void ida_export read_regargs(func_t *pfn);
-idaman void ida_export add_regarg2(func_t *pfn, int reg, const tinfo_t &tif, const char *name);
+idaman void ida_export add_regarg(func_t *pfn, int reg, const tinfo_t &tif, const char *name);
 //@}
 
 //--------------------------------------------------------------------
@@ -824,18 +820,6 @@ idaman void ida_export add_regarg2(func_t *pfn, int reg, const tinfo_t &tif, con
 /// \return 0 if failed, otherwise number of planned (and applied) signatures
 
 idaman int ida_export plan_to_apply_idasgn(const char *fname); // plan to use library
-
-
-/// Start application of signature file.
-/// \param advance  switch to current/next library
-///                   - 0: apply the current file from the list of planned
-///                        signature files
-///                   - 1: apply the next file from the list of planned
-///                        signature files
-/// \retval 1  signature file is successfully loaded
-/// \retval 0  failure, a warning was displayed
-
-idaman bool ida_export apply_idasgn(int advance);
 
 
 /// Apply a signature file to the specified address.
@@ -876,38 +860,21 @@ idaman int ida_export del_idasgn(int n);
 
 
 /// Get information about a signature in the list.
-/// \param n            number of signature in the list (0..get_idasgn_qty()-1)
 /// \param signame      buffer for the name of the signature.
 ///                     (short form, only base name without the directory part
 ///                      will be stored).
 ///                     if signame == NULL, then the name won't be returned.
-/// \param signamesize  sizeof(signame)
 /// \param optlibs      buffer for the names of the optional libraries
 ///                     if optlibs == NULL, then the optional libraries are not returned
-/// \param optlibssize  sizeof(optlibs)
+/// \param n            number of signature in the list (0..get_idasgn_qty()-1)
 /// \return number of successfully recognized modules using this signature.
 ///          -1 means the 'n' is a bad argument, i.e. no signature with this
 ///              number exists..
 
 idaman int32 ida_export get_idasgn_desc(
-        int n,
-        char *signame,
-        size_t signamesize,
-        char *optlibs,
-        size_t optlibssize);
-
-
-/// Get full path of a signature file.
-/// This function doesn't test the presence of the file.
-/// \param signame  short name of a signature
-/// \param buf      the output buffer
-/// \param bufsize  sizeof(buf)
-/// \return full path to the signature file
-
-idaman char *ida_export get_sig_filename(
-        char *buf,
-        size_t bufsize,
-        const char *signame);
+        qstring *signame,
+        qstring *optlibs,
+        int n);
 
 
 class idasgn_t;
@@ -920,16 +887,13 @@ idaman idasgn_t *ida_export get_idasgn_header_by_short_name(const char *name);
 
 
 /// Get full description of the signature by its short name.
-/// \param name     short name of a signature
 /// \param buf      the output buffer
-/// \param bufsize  sizeof(buf)
-/// \return NULL if can't find the signature,
-///         otherwise returns the description of the signature
+/// \param name     short name of a signature
+/// \return size of signature description or -1
 
-idaman char *ida_export get_idasgn_title(
-        const char *name,
-        char *buf,
-        size_t bufsize);
+idaman ssize_t ida_export get_idasgn_title(
+        qstring *buf,
+        const char *name);
 
 /// Determine compiler/vendor using the startup signatures.
 /// If determined, then appropriate signature files are included into
@@ -939,7 +903,7 @@ idaman void ida_export determine_rtl(void);
 
 
 /// Apply a startup signature file to the specified address.
-/// \param ea       address to apply the signature to; usually \inf{beginEA}
+/// \param ea       address to apply the signature to; usually \inf{start_ea}
 /// \param startup  the name of the signature file without path and extension
 /// \return true if successfully applied the signature
 
@@ -953,6 +917,7 @@ idaman bool ida_export apply_startup_sig(ea_t ea, const char *startup);
 /// \returns \ref LIBFUNC_
 
 idaman int ida_export try_to_add_libfunc(ea_t ea);
+
 
 /// \defgroup LIBFUNC_ Library function codes
 /// Return values for try_to_add_libfunc() and apply_idasgn_to()
@@ -974,10 +939,4 @@ inline bool invalidate_sp_analysis(ea_t ea)
 
 
 
-#ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED void ida_export add_regarg(func_t *pfn, int reg, const type_t *type, const char *name);
-idaman DEPRECATED char *ida_export get_func_name(ea_t ea, char *buf, size_t bufsize);
-#endif
-
-#pragma pack(pop)
 #endif

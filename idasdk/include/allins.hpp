@@ -8,7 +8,7 @@
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 NN_null = 0,            // Unknown Operation
 NN_aaa,                 // ASCII Adjust after Addition
@@ -1073,8 +1073,6 @@ NN_vmovntdq,             // Store Double Quadword Using Non-Temporal Hint
 NN_vmovntdqa,            // Load Double Quadword Non-Temporal Aligned Hint
 NN_vmovntpd,             // Store Packed Double-Precision Floating-Point Values Using Non-Temporal Hint
 NN_vmovntps,             // Move Aligned Four Packed Single-FP Non Temporal
-NN_vmovntsd,             // Move Non-Temporal Scalar Double-Precision Floating-Point
-NN_vmovntss,             // Move Non-Temporal Scalar Single-Precision Floating-Point
 NN_vmovq,                // Move 64 bits
 NN_vmovsd,               // Move Scalar Double-Precision Floating-Point Values
 NN_vmovshdup,            // Move Packed Single-FP High and Duplicate
@@ -1316,6 +1314,699 @@ NN_vfnmsubpd,            // Negative Multiply and Subtract Packed Double-Precisi
 NN_vfnmsubss,            // Negative Multiply and Subtract Scalar Single-Precision Floating-Point
 NN_vfnmsubsd,            // Negative Multiply and Subtract Double Single-Precision Floating-Point
 
+// Intel Memory Protection Extensions (MPX)
+
+NN_bndmk,                // Make Bounds
+NN_bndcl,                // Check Lower Bound
+NN_bndcu,                // Check Upper Bound
+NN_bndcn,                // Check Upper Bound
+NN_bndmov,               // Move Bounds
+NN_bndldx,               // Load Extended Bounds Using Address Translation
+NN_bndstx,               // Store Extended Bounds Using Address Translation
+
+// New xstate instructions
+
+NN_xrstors,              // Restore Processor Extended States Supervisor
+NN_xsavec,               // Save Processor Extended States with Compaction
+NN_xsaves,               // Save Processor Extended States Supervisor
+
+// PREFETCHWT1 support
+
+NN_prefetchwt1,          // Prefetch Vector Data Into Caches with Intent to Write and T1 Hint
+
+// Memory instructions
+
+NN_clflushopt,           // Flush a Cache Line Optimized
+NN_clwb,                 // Cache Line Write Back
+NN_pcommit,              // Persistent Commit (deprecated by Intel)
+
+// Protection Key Rights for User Pages
+
+NN_rdpkru,               // Read Protection Key Rights for User Pages
+NN_wrpkru,               // Write Data to User Page Key Register
+
+// AVX comparison pseudo-ops
+
+NN_vcmpeqpd,             // Compare Packed Double-Precision Floating-Point Values - Equal (ordered, non-signaling)
+NN_vcmpltpd,             // Compare Packed Double-Precision Floating-Point Values - Less-than (ordered, signaling)
+NN_vcmplepd,             // Compare Packed Double-Precision Floating-Point Values - Less-than-or-equal (ordered, signaling)
+NN_vcmpunordpd,          // Compare Packed Double-Precision Floating-Point Values - Unordered (non-signaling)
+NN_vcmpneqpd,            // Compare Packed Double-Precision Floating-Point Values - Not-equal (unordered, non-signaling)
+NN_vcmpnltpd,            // Compare Packed Double-Precision Floating-Point Values - Not-less-than (unordered, signaling)
+NN_vcmpnlepd,            // Compare Packed Double-Precision Floating-Point Values - Not-less-than-or-equal (unordered, signaling)
+NN_vcmpordpd,            // Compare Packed Double-Precision Floating-Point Values - Ordered (non-signaling)
+NN_vcmpeq_uqpd,          // Compare Packed Double-Precision Floating-Point Values - Equal (unordered, non-signaling)
+NN_vcmpngepd,            // Compare Packed Double-Precision Floating-Point Values - Not-greater-than-or-equal (unordered, signaling)
+NN_vcmpngtpd,            // Compare Packed Double-Precision Floating-Point Values - Not-greater-than (unordered, signaling)
+NN_vcmpfalsepd,          // Compare Packed Double-Precision Floating-Point Values - False (ordered, non-signaling)
+NN_vcmpneq_oqpd,         // Compare Packed Double-Precision Floating-Point Values - Not-equal (ordered, non-signaling)
+NN_vcmpgepd,             // Compare Packed Double-Precision Floating-Point Values - Greater-than-or-equal (ordered, signaling)
+NN_vcmpgtpd,             // Compare Packed Double-Precision Floating-Point Values - Greater-than (ordered, signaling)
+NN_vcmptruepd,           // Compare Packed Double-Precision Floating-Point Values - True (unordered, non-signaling)
+NN_vcmpeq_ospd,          // Compare Packed Double-Precision Floating-Point Values - Equal (ordered, signaling)
+NN_vcmplt_oqpd,          // Compare Packed Double-Precision Floating-Point Values - Less-than (ordered, non-signaling)
+NN_vcmple_oqpd,          // Compare Packed Double-Precision Floating-Point Values - Less-than-or-equal (ordered, non-signaling)
+NN_vcmpunord_spd,        // Compare Packed Double-Precision Floating-Point Values - Unordered (signaling)
+NN_vcmpneq_uspd,         // Compare Packed Double-Precision Floating-Point Values - Not-equal (unordered, signaling)
+NN_vcmpnlt_uqpd,         // Compare Packed Double-Precision Floating-Point Values - Not-less-than (unordered, non-signaling)
+NN_vcmpnle_uqpd,         // Compare Packed Double-Precision Floating-Point Values - Not-less-than-or-equal (unordered, non-signaling)
+NN_vcmpord_spd,          // Compare Packed Double-Precision Floating-Point Values - Ordered (signaling)
+NN_vcmpeq_uspd,          // Compare Packed Double-Precision Floating-Point Values - Equal (unordered, signaling)
+NN_vcmpnge_uqpd,         // Compare Packed Double-Precision Floating-Point Values - Not-greater-than-or-equal (unordered, non-signaling)
+NN_vcmpngt_uqpd,         // Compare Packed Double-Precision Floating-Point Values - Not-greater-than (unordered, non-signaling)
+NN_vcmpfalse_ospd,       // Compare Packed Double-Precision Floating-Point Values - False (ordered, signaling)
+NN_vcmpneq_ospd,         // Compare Packed Double-Precision Floating-Point Values - Not-equal (ordered, signaling)
+NN_vcmpge_oqpd,          // Compare Packed Double-Precision Floating-Point Values - Greater-than-or-equal (ordered, non-signaling)
+NN_vcmpgt_oqpd,          // Compare Packed Double-Precision Floating-Point Values - Greater-than (ordered, non-signaling)
+NN_vcmptrue_uspd,        // Compare Packed Double-Precision Floating-Point Values - True (unordered, signaling)
+
+NN_vcmpeqps,             // Packed Single-FP Compare - Equal (ordered, non-signaling)
+NN_vcmpltps,             // Packed Single-FP Compare - Less-than (ordered, signaling)
+NN_vcmpleps,             // Packed Single-FP Compare - Less-than-or-equal (ordered, signaling)
+NN_vcmpunordps,          // Packed Single-FP Compare - Unordered (non-signaling)
+NN_vcmpneqps,            // Packed Single-FP Compare - Not-equal (unordered, non-signaling)
+NN_vcmpnltps,            // Packed Single-FP Compare - Not-less-than (unordered, signaling)
+NN_vcmpnleps,            // Packed Single-FP Compare - Not-less-than-or-equal (unordered, signaling)
+NN_vcmpordps,            // Packed Single-FP Compare - Ordered (non-signaling)
+NN_vcmpeq_uqps,          // Packed Single-FP Compare - Equal (unordered, non-signaling)
+NN_vcmpngeps,            // Packed Single-FP Compare - Not-greater-than-or-equal (unordered, signaling)
+NN_vcmpngtps,            // Packed Single-FP Compare - Not-greater-than (unordered, signaling)
+NN_vcmpfalseps,          // Packed Single-FP Compare - False (ordered, non-signaling)
+NN_vcmpneq_oqps,         // Packed Single-FP Compare - Not-equal (ordered, non-signaling)
+NN_vcmpgeps,             // Packed Single-FP Compare - Greater-than-or-equal (ordered, signaling)
+NN_vcmpgtps,             // Packed Single-FP Compare - Greater-than (ordered, signaling)
+NN_vcmptrueps,           // Packed Single-FP Compare - True (unordered, non-signaling)
+NN_vcmpeq_osps,          // Packed Single-FP Compare - Equal (ordered, signaling)
+NN_vcmplt_oqps,          // Packed Single-FP Compare - Less-than (ordered, non-signaling)
+NN_vcmple_oqps,          // Packed Single-FP Compare - Less-than-or-equal (ordered, non-signaling)
+NN_vcmpunord_sps,        // Packed Single-FP Compare - Unordered (signaling)
+NN_vcmpneq_usps,         // Packed Single-FP Compare - Not-equal (unordered, signaling)
+NN_vcmpnlt_uqps,         // Packed Single-FP Compare - Not-less-than (unordered, non-signaling)
+NN_vcmpnle_uqps,         // Packed Single-FP Compare - Not-less-than-or-equal (unordered, non-signaling)
+NN_vcmpord_sps,          // Packed Single-FP Compare - Ordered (signaling)
+NN_vcmpeq_usps,          // Packed Single-FP Compare - Equal (unordered, signaling)
+NN_vcmpnge_uqps,         // Packed Single-FP Compare - Not-greater-than-or-equal (unordered, non-signaling)
+NN_vcmpngt_uqps,         // Packed Single-FP Compare - Not-greater-than (unordered, non-signaling)
+NN_vcmpfalse_osps,       // Packed Single-FP Compare - False (ordered, signaling)
+NN_vcmpneq_osps,         // Packed Single-FP Compare - Not-equal (ordered, signaling)
+NN_vcmpge_oqps,          // Packed Single-FP Compare - Greater-than-or-equal (ordered, non-signaling)
+NN_vcmpgt_oqps,          // Packed Single-FP Compare - Greater-than (ordered, non-signaling)
+NN_vcmptrue_usps,        // Packed Single-FP Compare - True (unordered, signaling)
+
+NN_vcmpeqsd,             // Compare Scalar Double-Precision Floating-Point Values - Equal (ordered, non-signaling)
+NN_vcmpltsd,             // Compare Scalar Double-Precision Floating-Point Values - Less-than (ordered, signaling)
+NN_vcmplesd,             // Compare Scalar Double-Precision Floating-Point Values - Less-than-or-equal (ordered, signaling)
+NN_vcmpunordsd,          // Compare Scalar Double-Precision Floating-Point Values - Unordered (non-signaling)
+NN_vcmpneqsd,            // Compare Scalar Double-Precision Floating-Point Values - Not-equal (unordered, non-signaling)
+NN_vcmpnltsd,            // Compare Scalar Double-Precision Floating-Point Values - Not-less-than (unordered, signaling)
+NN_vcmpnlesd,            // Compare Scalar Double-Precision Floating-Point Values - Not-less-than-or-equal (unordered, signaling)
+NN_vcmpordsd,            // Compare Scalar Double-Precision Floating-Point Values - Ordered (non-signaling)
+NN_vcmpeq_uqsd,          // Compare Scalar Double-Precision Floating-Point Values - Equal (unordered, non-signaling)
+NN_vcmpngesd,            // Compare Scalar Double-Precision Floating-Point Values - Not-greater-than-or-equal (unordered, signaling)
+NN_vcmpngtsd,            // Compare Scalar Double-Precision Floating-Point Values - Not-greater-than (unordered, signaling)
+NN_vcmpfalsesd,          // Compare Scalar Double-Precision Floating-Point Values - False (ordered, non-signaling)
+NN_vcmpneq_oqsd,         // Compare Scalar Double-Precision Floating-Point Values - Not-equal (ordered, non-signaling)
+NN_vcmpgesd,             // Compare Scalar Double-Precision Floating-Point Values - Greater-than-or-equal (ordered, signaling)
+NN_vcmpgtsd,             // Compare Scalar Double-Precision Floating-Point Values - Greater-than (ordered, signaling)
+NN_vcmptruesd,           // Compare Scalar Double-Precision Floating-Point Values - True (unordered, non-signaling)
+NN_vcmpeq_ossd,          // Compare Scalar Double-Precision Floating-Point Values - Equal (ordered, signaling)
+NN_vcmplt_oqsd,          // Compare Scalar Double-Precision Floating-Point Values - Less-than (ordered, non-signaling)
+NN_vcmple_oqsd,          // Compare Scalar Double-Precision Floating-Point Values - Less-than-or-equal (ordered, non-signaling)
+NN_vcmpunord_ssd,        // Compare Scalar Double-Precision Floating-Point Values - Unordered (signaling)
+NN_vcmpneq_ussd,         // Compare Scalar Double-Precision Floating-Point Values - Not-equal (unordered, signaling)
+NN_vcmpnlt_uqsd,         // Compare Scalar Double-Precision Floating-Point Values - Not-less-than (unordered, non-signaling)
+NN_vcmpnle_uqsd,         // Compare Scalar Double-Precision Floating-Point Values - Not-less-than-or-equal (unordered, non-signaling)
+NN_vcmpord_ssd,          // Compare Scalar Double-Precision Floating-Point Values - Ordered (signaling)
+NN_vcmpeq_ussd,          // Compare Scalar Double-Precision Floating-Point Values - Equal (unordered, signaling)
+NN_vcmpnge_uqsd,         // Compare Scalar Double-Precision Floating-Point Values - Not-greater-than-or-equal (unordered, non-signaling)
+NN_vcmpngt_uqsd,         // Compare Scalar Double-Precision Floating-Point Values - Not-greater-than (unordered, non-signaling)
+NN_vcmpfalse_ossd,       // Compare Scalar Double-Precision Floating-Point Values - False (ordered, signaling)
+NN_vcmpneq_ossd,         // Compare Scalar Double-Precision Floating-Point Values - Not-equal (ordered, signaling)
+NN_vcmpge_oqsd,          // Compare Scalar Double-Precision Floating-Point Values - Greater-than-or-equal (ordered, non-signaling)
+NN_vcmpgt_oqsd,          // Compare Scalar Double-Precision Floating-Point Values - Greater-than (ordered, non-signaling)
+NN_vcmptrue_ussd,        // Compare Scalar Double-Precision Floating-Point Values - True (unordered, signaling)
+
+NN_vcmpeqss,             // Scalar Single-FP Compare - Equal (ordered, non-signaling)
+NN_vcmpltss,             // Scalar Single-FP Compare - Less-than (ordered, signaling)
+NN_vcmpless,             // Scalar Single-FP Compare - Less-than-or-equal (ordered, signaling)
+NN_vcmpunordss,          // Scalar Single-FP Compare - Unordered (non-signaling)
+NN_vcmpneqss,            // Scalar Single-FP Compare - Not-equal (unordered, non-signaling)
+NN_vcmpnltss,            // Scalar Single-FP Compare - Not-less-than (unordered, signaling)
+NN_vcmpnless,            // Scalar Single-FP Compare - Not-less-than-or-equal (unordered, signaling)
+NN_vcmpordss,            // Scalar Single-FP Compare - Ordered (non-signaling)
+NN_vcmpeq_uqss,          // Scalar Single-FP Compare - Equal (unordered, non-signaling)
+NN_vcmpngess,            // Scalar Single-FP Compare - Not-greater-than-or-equal (unordered, signaling)
+NN_vcmpngtss,            // Scalar Single-FP Compare - Not-greater-than (unordered, signaling)
+NN_vcmpfalsess,          // Scalar Single-FP Compare - False (ordered, non-signaling)
+NN_vcmpneq_oqss,         // Scalar Single-FP Compare - Not-equal (ordered, non-signaling)
+NN_vcmpgess,             // Scalar Single-FP Compare - Greater-than-or-equal (ordered, signaling)
+NN_vcmpgtss,             // Scalar Single-FP Compare - Greater-than (ordered, signaling)
+NN_vcmptruess,           // Scalar Single-FP Compare - True (unordered, non-signaling)
+NN_vcmpeq_osss,          // Scalar Single-FP Compare - Equal (ordered, signaling)
+NN_vcmplt_oqss,          // Scalar Single-FP Compare - Less-than (ordered, non-signaling)
+NN_vcmple_oqss,          // Scalar Single-FP Compare - Less-than-or-equal (ordered, non-signaling)
+NN_vcmpunord_sss,        // Scalar Single-FP Compare - Unordered (signaling)
+NN_vcmpneq_usss,         // Scalar Single-FP Compare - Not-equal (unordered, signaling)
+NN_vcmpnlt_uqss,         // Scalar Single-FP Compare - Not-less-than (unordered, non-signaling)
+NN_vcmpnle_uqss,         // Scalar Single-FP Compare - Not-less-than-or-equal (unordered, non-signaling)
+NN_vcmpord_sss,          // Scalar Single-FP Compare - Ordered (signaling)
+NN_vcmpeq_usss,          // Scalar Single-FP Compare - Equal (unordered, signaling)
+NN_vcmpnge_uqss,         // Scalar Single-FP Compare - Not-greater-than-or-equal (unordered, non-signaling)
+NN_vcmpngt_uqss,         // Scalar Single-FP Compare - Not-greater-than (unordered, non-signaling)
+NN_vcmpfalse_osss,       // Scalar Single-FP Compare - False (ordered, signaling)
+NN_vcmpneq_osss,         // Scalar Single-FP Compare - Not-equal (ordered, signaling)
+NN_vcmpge_oqss,          // Scalar Single-FP Compare - Greater-than-or-equal (ordered, non-signaling)
+NN_vcmpgt_oqss,          // Scalar Single-FP Compare - Greater-than (ordered, non-signaling)
+NN_vcmptrue_usss,        // Scalar Single-FP Compare - True (unordered, signaling)
+
+// AVX-512 instructions
+
+NN_valignd,              // Align Doubleword Vectors
+NN_valignq,              // Align Quadword Vectors
+NN_vblendmpd,            // Blend Float64 Vectors Using an OpMask Control
+NN_vblendmps,            // Blend Float32 Vectors Using an OpMask Control
+NN_vpblendmb,            // Blend Byte Vectors Using an Opmask Control
+NN_vpblendmw,            // Blend Word Vectors Using an Opmask Control
+NN_vpblendmd,            // Blend Int32 Vectors Using an OpMask Control
+NN_vpblendmq,            // Blend Int64 Vectors Using an OpMask Control
+NN_vbroadcastf32x2,      // Load with Broadcast Floating-Point Data
+NN_vbroadcastf32x4,      // Load with Broadcast Floating-Point Data
+NN_vbroadcastf64x2,      // Load with Broadcast Floating-Point Data
+NN_vbroadcastf32x8,      // Load with Broadcast Floating-Point Data
+NN_vbroadcastf64x4,      // Load with Broadcast Floating-Point Data
+NN_vbroadcasti32x2,      // Load Integer and Broadcast
+NN_vbroadcasti32x4,      // Load Integer and Broadcast
+NN_vbroadcasti64x2,      // Load Integer and Broadcast
+NN_vbroadcasti32x8,      // Load Integer and Broadcast
+NN_vbroadcasti64x4,      // Load Integer and Broadcast
+NN_vcompresspd,          // Store Sparse Packed Double-Precision Floating-Point Values into Dense Memory
+NN_vcompressps,          // Store Sparse Packed Single-Precision Floating-Point Values into Dense Memory
+NN_vcvtpd2qq,            // Convert Packed Double-Precision Floating-Point Values to Packed Quadword Integers
+NN_vcvtpd2udq,           // Convert Packed Double-Precision Floating-Point Values to Packed Unsigned Doubleword Integers
+NN_vcvtpd2uqq,           // Convert Packed Double-Precision Floating-Point Values to Packed Unsigned Quadword Integers
+NN_vcvtps2udq,           // Convert Packed Single-Precision Floating-Point Values to Packed Unsigned Doubleword Integer Values
+NN_vcvtps2qq,            // Convert Packed Single Precision Floating-Point Values to Packed Singed Quadword Integer Values
+NN_vcvtps2uqq,           // Convert Packed Single Precision Floating-Point Values to Packed Unsigned Quadword Integer Values
+NN_vcvtqq2pd,            // Convert Packed Quadword Integers to Packed Double-Precision Floating-Point Values
+NN_vcvtqq2ps,            // Convert Packed Quadword Integers to Packed Single-Precision Floating-Point Values
+NN_vcvtsd2usi,           // Convert Scalar Double-Precision Floating-Point Value to Unsigned Doubleword Integer
+NN_vcvtss2usi,           // Convert Scalar Single-Precision Floating-Point Value to Unsigned Doubleword Integer
+NN_vcvttpd2qq,           // Convert with Truncation Packed Double-Precision Floating-Point Values to Packed Quadword Integers
+NN_vcvttpd2udq,          // Convert with Truncation Packed Double-Precision Floating-Point Values to Packed Unsigned Doubleword Integers
+NN_vcvttpd2uqq,          // Convert with Truncation Packed Double-Precision Floating-Point Values to Packed Unsigned Quadword Integers
+NN_vcvttps2udq,          // Convert with Truncation Packed Single-Precision Floating-Point Values to Packed Unsigned Doubleword Integer Values
+NN_vcvttps2qq,           // Convert with Truncation Packed Single Precision Floating-Point Values to Packed Singed Quadword Integer Values
+NN_vcvttps2uqq,          // Convert with Truncation Packed Single Precision Floating-Point Values to Packed Unsigned Quadword Integer Values
+NN_vcvttsd2usi,          // Convert with Truncation Scalar Double-Precision Floating-Point Value to Unsigned Integer
+NN_vcvttss2usi,          // Convert with Truncation Scalar Single-Precision Floating-Point Value to Unsigned Integer
+NN_vcvtudq2pd,           // Convert Packed Unsigned Doubleword Integers to Packed Double-Precision Floating-Point Values
+NN_vcvtudq2ps,           // Convert Packed Unsigned Doubleword Integers to Packed Single-Precision Floating-Point Values
+NN_vcvtuqq2pd,           // Convert Packed Unsigned Quadword Integers to Packed Double-Precision Floating-Point Values
+NN_vcvtuqq2ps,           // Convert Packed Unsigned Quadword Integers to Packed Single-Precision Floating-Point Values
+NN_vcvtusi2sd,           // Convert Unsigned Integer to Scalar Double-Precision Floating-Point Value
+NN_vcvtusi2ss,           // Convert Unsigned Integer to Scalar Single-Precision Floating-Point Value
+NN_vdbpsadbw,            // Double Block Packed Sum-Absolute-Differences (SAD) on Unsigned Bytes
+NN_vexpandpd,            // Load Sparse Packed Double-Precision Floating-Point Values from Dense Memory
+NN_vexpandps,            // Load Sparse Packed Single-Precision Floating-Point Values from Dense Memory
+NN_vextractf32x4,        // Extract Packed Floating-Point Values
+NN_vextractf64x2,        // Extract Packed Floating-Point Values
+NN_vextractf32x8,        // Extract Packed Floating-Point Values
+NN_vextractf64x4,        // Extract Packed Floating-Point Values
+NN_vextracti32x4,        // Extract packed Integer Values
+NN_vextracti64x2,        // Extract packed Integer Values
+NN_vextracti32x8,        // Extract packed Integer Values
+NN_vextracti64x4,        // Extract packed Integer Values
+NN_vfixupimmpd,          // Fix Up Special Packed Float64 Values
+NN_vfixupimmps,          // Fix Up Special Packed Float32 Values
+NN_vfixupimmsd,          // Fix Up Special Scalar Float64 Value
+NN_vfixupimmss,          // Fix Up Special Scalar Float32 Value
+NN_vfpclasspd,           // Tests Types Of a Packed Float64 Values
+NN_vfpclassps,           // Tests Types Of a Packed Float32 Values
+NN_vfpclasssd,           // Tests Types Of a Scalar Float64 Values
+NN_vfpclassss,           // Tests Types Of a Scalar Float32 Values
+NN_vgetexppd,            // Convert Exponents of Packed DP FP Values to DP FP Values
+NN_vgetexpps,            // Convert Exponents of Packed SP FP Values to SP FP Values
+NN_vgetexpsd,            // Convert Exponents of Scalar DP FP Values to DP FP Value
+NN_vgetexpss,            // Convert Exponents of Scalar SP FP Values to SP FP Value
+NN_vgetmantpd,           // Extract Float64 Vector of Normalized Mantissas from Float64 Vector
+NN_vgetmantps,           // Extract Float32 Vector of Normalized Mantissas from Float32 Vector
+NN_vgetmantsd,           // Extract Float64 of Normalized Mantissas from Float64 Scalar
+NN_vgetmantss,           // Extract Float32 Vector of Normalized Mantissa from Float32 Vector
+NN_vinsertf32x4,         // Insert Packed Floating-Point Values
+NN_vinsertf64x2,         // Insert Packed Floating-Point Values
+NN_vinsertf32x8,         // Insert Packed Floating-Point Values
+NN_vinsertf64x4,         // Insert Packed Floating-Point Values
+NN_vinserti32x4,         // Insert Packed Integer Values
+NN_vinserti64x2,         // Insert Packed Integer Values
+NN_vinserti32x8,         // Insert Packed Integer Values
+NN_vinserti64x4,         // Insert Packed Integer Values
+NN_vmovdqa32,            // Move Aligned Packed Integer Values
+NN_vmovdqa64,            // Move Aligned Packed Integer Values
+NN_vmovdqu8,             // Move Unaligned Packed Integer Values
+NN_vmovdqu16,            // Move Unaligned Packed Integer Values
+NN_vmovdqu32,            // Move Unaligned Packed Integer Values
+NN_vmovdqu64,            // Move Unaligned Packed Integer Values
+NN_vpabsq,               // Packed Absolute Value
+NN_vpandd,               // Logical AND
+NN_vpandq,               // Logical AND
+NN_vpandnd,              // Logical AND NOT
+NN_vpandnq,              // Logical AND NOT
+NN_vpbroadcastmb2q,      // Broadcast Mask to Vector Register
+NN_vpbroadcastmw2d,      // Broadcast Mask to Vector Register
+NN_vpcmpb,               // Compare Packed Byte Values Into Mask
+NN_vpcmpub,              // Compare Packed Byte Values Into Mask
+NN_vpcmpd,               // Compare Packed Integer Values into Mask
+NN_vpcmpud,              // Compare Packed Integer Values into Mask
+NN_vpcmpq,               // Compare Packed Integer Values into Mask
+NN_vpcmpuq,              // Compare Packed Integer Values into Mask
+NN_vpcmpw,               // Compare Packed Word Values Into Mask
+NN_vpcmpuw,              // Compare Packed Word Values Into Mask
+NN_vpcompressd,          // Store Sparse Packed Doubleword Integer Values into Dense Memory/Register
+NN_vpcompressq,          // Store Sparse Packed Quadword Integer Values into Dense Memory/Register
+NN_vpconflictd,          // Detect Conflicts Within a Vector of Packed Dword Values into Dense Memory/Register
+NN_vpconflictq,          // Detect Conflicts Within a Vector of Packed Qword Values into Dense Memory/Register
+NN_vpermb,               // Permute Packed Bytes Elements
+NN_vpermw,               // Permute Packed Words Elements
+NN_vpermi2b,             // Full Permute of Bytes From Two Tables Overwriting the Index
+NN_vpermi2w,             // Full Permute From Two Tables Overwriting the Index
+NN_vpermi2d,             // Full Permute From Two Tables Overwriting the Index
+NN_vpermi2q,             // Full Permute From Two Tables Overwriting the Index
+NN_vpermi2ps,            // Full Permute From Two Tables Overwriting the Index
+NN_vpermi2pd,            // Full Permute From Two Tables Overwriting the Index
+NN_vpermt2b,             // Full Permute of Bytes From Two Tables Overwriting a Table
+NN_vpermt2w,             // Full Permute from Two Tables Overwriting one Table
+NN_vpermt2d,             // Full Permute from Two Tables Overwriting one Table
+NN_vpermt2q,             // Full Permute from Two Tables Overwriting one Table
+NN_vpermt2ps,            // Full Permute from Two Tables Overwriting one Table
+NN_vpermt2pd,            // Full Permute from Two Tables Overwriting one Table
+NN_vpexpandd,            // Load Sparse Packed Doubleword Integer Values from Dense Memory/Register
+NN_vpexpandq,            // Load Sparse Packed Quadword Integer Values from Dense Memory/Register
+NN_vplzcntd,             // Count the Number of Leading Zero Bits for Packed Dword Values
+NN_vplzcntq,             // Count the Number of Leading Zero Bits for Packed Qword Values
+NN_vpmadd52luq,          // Packed Multiply of Unsigned 52-bit Integers and Add the Low 52-bit Products to Qword Accumulators
+NN_vpmadd52huq,          // Packed Multiply of Unsigned 52-bit Unsigned Integers and Add High 52-bit Products to 64-bit Accumulators
+NN_vpmaxsq,              // Maximum of Packed Signed Integers
+NN_vpmaxuq,              // Maximum of Packed Unsigned Integers
+NN_vpminsq,              // Minimum of Packed Signed Integers
+NN_vpminuq,              // Minimum of Packed Unsigned Integers
+NN_vpmovm2b,             // Convert a Mask Register to a Vector Register
+NN_vpmovm2w,             // Convert a Mask Register to a Vector Register
+NN_vpmovm2d,             // Convert a Mask Register to a Vector Register
+NN_vpmovm2q,             // Convert a Mask Register to a Vector Register
+NN_vpmovb2m,             // Convert a Vector Register to a Mask
+NN_vpmovw2m,             // Convert a Vector Register to a Mask
+NN_vpmovd2m,             // Convert a Vector Register to a Mask
+NN_vpmovq2m,             // Convert a Vector Register to a Mask
+NN_vpmovqb,              // Down Convert QWord to Byte
+NN_vpmovsqb,             // Down Convert QWord to Byte
+NN_vpmovusqb,            // Down Convert QWord to Byte
+NN_vpmovqw,              // Down Convert QWord to Word
+NN_vpmovsqw,             // Down Convert QWord to Word
+NN_vpmovusqw,            // Down Convert QWord to Word
+NN_vpmovqd,              // Down Convert QWord to DWord
+NN_vpmovsqd,             // Down Convert QWord to DWord
+NN_vpmovusqd,            // Down Convert QWord to DWord
+NN_vpmovdb,              // Down Convert DWord to Byte
+NN_vpmovsdb,             // Down Convert DWord to Byte
+NN_vpmovusdb,            // Down Convert DWord to Byte
+NN_vpmovdw,              // Down Convert DWord to Word
+NN_vpmovsdw,             // Down Convert DWord to Word
+NN_vpmovusdw,            // Down Convert DWord to Word
+NN_vpmovwb,              // Down Convert Word to Byte
+NN_vpmovswb,             // Down Convert Word to Byte
+NN_vpmovuswb,            // Down Convert Word to Byte
+NN_vpmullq,              // Multiply Packed Integers and Store Low Result
+NN_vpmultishiftqb,       // Select Packed Unaligned Bytes from Quadword Sources
+NN_vpord,                // Bitwise Logical Or
+NN_vporq,                // Bitwise Logical Or
+NN_vprold,               // Bit Rotate Left
+NN_vprolvd,              // Bit Rotate Left
+NN_vprolq,               // Bit Rotate Left
+NN_vprolvq,              // Bit Rotate Left
+NN_vprord,               // Bit Rotate Right
+NN_vprorvd,              // Bit Rotate Right
+NN_vprorq,               // Bit Rotate Right
+NN_vprorvq,              // Bit Rotate Right
+NN_vpscatterdd,          // Scatter Packed Dword with Signed Dword
+NN_vpscatterdq,          // Scatter Packed Qword with Signed Qword Indices
+NN_vpscatterqd,          // Scatter Packed Dword with Signed Dword
+NN_vpscatterqq,          // Scatter Packed Qword with Signed Qword Indices
+NN_vpsraq,               // Bit Shift Arithmetic Right
+NN_vpsllvw,              // Variable Bit Shift Left Logical
+NN_vpsrlvw,              // Variable Bit Shift Right Logical
+NN_vptestnmb,            // Logical NAND and Set
+NN_vptestnmw,            // Logical NAND and Set
+NN_vptestnmd,            // Logical NAND and Set
+NN_vptestnmq,            // Logical NAND and Set
+NN_vshuff32x4,           // Shuffle Packed Values at 128-bit Granularity
+NN_vshuff64x2,           // Shuffle Packed Values at 128-bit Granularity
+NN_vshufi32x4,           // Shuffle Packed Values at 128-bit Granularity
+NN_vshufi64x2,           // Shuffle Packed Values at 128-bit Granularity
+NN_vpternlogd,           // Bitwise Ternary Logic
+NN_vpternlogq,           // Bitwise Ternary Logic
+NN_vptestmb,             // Logical AND and Set Mask
+NN_vptestmw,             // Logical AND and Set Mask
+NN_vptestmd,             // Logical AND and Set Mask
+NN_vptestmq,             // Logical AND and Set Mask
+NN_vpsravw,              // Variable Bit Shift Right Arithmetic
+NN_vpsravq,              // Variable Bit Shift Right Arithmetic
+NN_vpxord,               // Exclusive Or
+NN_vpxorq,               // Exclusive Or
+NN_vrangepd,             // Range Restriction Calculation For Packed Pairs of Float64 Values
+NN_vrangeps,             // Range Restriction Calculation For Packed Pairs of Float32 Values
+NN_vrangesd,             // Range Restriction Calculation From a pair of Scalar Float64 Values
+NN_vrangess,             // Range Restriction Calculation From a Pair of Scalar Float32 Values
+NN_vrcp14pd,             // Compute Approximate Reciprocals of Packed Float64 Values
+NN_vrcp14sd,             // Compute Approximate Reciprocal of Scalar Float64 Value
+NN_vrcp14ps,             // Compute Approximate Reciprocals of Packed Float32 Values
+NN_vrcp14ss,             // Compute Approximate Reciprocal of Scalar Float32 Value
+NN_vreducepd,            // Perform Reduction Transformation on Packed Float64 Values
+NN_vreducesd,            // Perform a Reduction Transformation on a Scalar Float64 Value
+NN_vreduceps,            // Perform Reduction Transformation on Packed Float32 Values
+NN_vreducess,            // Perform a Reduction Transformation on a Scalar Float32 Value
+NN_vrndscalepd,          // Round Packed Float64 Values To Include A Given Number Of Fraction Bits
+NN_vrndscalesd,          // Round Scalar Float64 Value To Include A Given Number Of Fraction Bits
+NN_vrndscaleps,          // Round Packed Float32 Values To Include A Given Number Of Fraction Bits
+NN_vrndscaless,          // Round Scalar Float32 Value To Include A Given Number Of Fraction Bits
+NN_vrsqrt14pd,           // Compute Approximate Reciprocals of Square Roots of Packed Float64 Values
+NN_vrsqrt14sd,           // Compute Approximate Reciprocal of Square Root of Scalar Float64 Value
+NN_vrsqrt14ps,           // Compute Approximate Reciprocals of Square Roots of Packed Float32 Values
+NN_vrsqrt14ss,           // Compute Approximate Reciprocal of Square Root of Scalar Float32 Value
+NN_vscalefpd,            // Scale Packed Float64 Values With Float64 Values
+NN_vscalefsd,            // Scale Scalar Float64 Values With Float64 Values
+NN_vscalefps,            // Scale Packed Float32 Values With Float32 Values
+NN_vscalefss,            // Scale Scalar Float32 Value With Float32 Value
+NN_vscatterdps,          // Scatter Packed Single, Packed Double with Signed Dword and Qword Indices
+NN_vscatterdpd,          // Scatter Packed Single, Packed Double with Signed Dword and Qword Indices
+NN_vscatterqps,          // Scatter Packed Single, Packed Double with Signed Dword and Qword Indices
+NN_vscatterqpd,          // Scatter Packed Single, Packed Double with Signed Dword and Qword Indices
+
+NN_vexp2pd,              // Approximation to the Exponential 2^x of Packed Double-Precision Floating-Point Values with Less Than 2^-23 Relative Error
+NN_vexp2ps,              // Approximation to the Exponential 2^x of Packed Single-Precision Floating-Point Values with Less Than 2^-23 Relative Error
+NN_vrcp28pd,             // Approximation to the Reciprocal of Packed Double-Precision Floating-Point Values with Less Than 2^-28 Relative Error
+NN_vrcp28sd,             // Approximation to the Reciprocal of Scalar Double-Precision Floating-Point Value with Less Than 2^-28 Relative Error
+NN_vrcp28ps,             // Approximation to the Reciprocal of Packed Single-Precision Floating-Point Values with Less Than 2^-28 Relative Error
+NN_vrcp28ss,             // Approximation to the Reciprocal of Scalar Single-Precision Floating-Point Value with Less Than 2^-28 Relative Error
+NN_vrsqrt28pd,           // Approximation to the Reciprocal Square Root of Packed Double-Precision Floating-Point Values with Less Than 2^-28 Relative Error
+NN_vrsqrt28sd,           // Approximation to the Reciprocal Square Root of Scalar Double-Precision Floating-Point Value with Less Than 2^-28 Relative Error
+NN_vrsqrt28ps,           // Approximation to the Reciprocal Square Root of Packed Single-Precision Floating-Point Values with Less Than 2^-28 Relative Error
+NN_vrsqrt28ss,           // Approximation to the Reciprocal Square Root of Scalar Single-Precision Floating-Point Value with Less Than 2^-28 Relative Error
+
+NN_vgatherpf0dps,        // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T0 Hint
+NN_vgatherpf0qps,        // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T0 Hint
+NN_vgatherpf0dpd,        // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T0 Hint
+NN_vgatherpf0qpd,        // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T0 Hint
+NN_vgatherpf1dps,        // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T1 Hint
+NN_vgatherpf1qps,        // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T1 Hint
+NN_vgatherpf1dpd,        // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T1 Hint
+NN_vgatherpf1qpd,        // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T1 Hint
+NN_vscatterpf0dps,       // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T0 Hint with Intent to Write
+NN_vscatterpf0qps,       // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T0 Hint with Intent to Write
+NN_vscatterpf0dpd,       // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T0 Hint with Intent to Write
+NN_vscatterpf0qpd,       // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T0 Hint with Intent to Write
+NN_vscatterpf1dps,       // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T1 Hint with Intent to Write
+NN_vscatterpf1qps,       // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T1 Hint with Intent to Write
+NN_vscatterpf1dpd,       // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T1 Hint with Intent to Write
+NN_vscatterpf1qpd,       // Sparse Prefetch Packed SP/DP Data Values with Signed Dword, Signed Qword Indices Using T1 Hint with Intent to Write
+
+// AVX-512 comparison pseudo-ops
+
+NN_vpcmpltd,             // Compare Packed Integer Values into Mask
+NN_vpcmpled,             // Compare Packed Integer Values into Mask
+NN_vpcmpneqd,            // Compare Packed Integer Values into Mask
+NN_vpcmpnltd,            // Compare Packed Integer Values into Mask
+NN_vpcmpnled,            // Compare Packed Integer Values into Mask
+
+NN_vpcmpequd,            // Compare Packed Integer Values into Mask
+NN_vpcmpltud,            // Compare Packed Integer Values into Mask
+NN_vpcmpleud,            // Compare Packed Integer Values into Mask
+NN_vpcmpnequd,           // Compare Packed Integer Values into Mask
+NN_vpcmpnltud,           // Compare Packed Integer Values into Mask
+NN_vpcmpnleud,           // Compare Packed Integer Values into Mask
+
+NN_vpcmpltq,             // Compare Packed Integer Values into Mask
+NN_vpcmpleq,             // Compare Packed Integer Values into Mask
+NN_vpcmpneqq,            // Compare Packed Integer Values into Mask
+NN_vpcmpnltq,            // Compare Packed Integer Values into Mask
+NN_vpcmpnleq,            // Compare Packed Integer Values into Mask
+
+NN_vpcmpequq,            // Compare Packed Integer Values into Mask
+NN_vpcmpltuq,            // Compare Packed Integer Values into Mask
+NN_vpcmpleuq,            // Compare Packed Integer Values into Mask
+NN_vpcmpnequq,           // Compare Packed Integer Values into Mask
+NN_vpcmpnltuq,           // Compare Packed Integer Values into Mask
+NN_vpcmpnleuq,           // Compare Packed Integer Values into Mask
+
+// Opmask instructions
+
+NN_kaddw,                // ADD Two Masks
+NN_kaddb,                // ADD Two Masks
+NN_kaddq,                // ADD Two Masks
+NN_kaddd,                // ADD Two Masks
+NN_kandw,                // Bitwise Logical AND Masks
+NN_kandb,                // Bitwise Logical AND Masks
+NN_kandq,                // Bitwise Logical AND Masks
+NN_kandd,                // Bitwise Logical AND Masks
+NN_kandnw,               // Bitwise Logical AND NOT Masks
+NN_kandnb,               // Bitwise Logical AND NOT Masks
+NN_kandnq,               // Bitwise Logical AND NOT Masks
+NN_kandnd,               // Bitwise Logical AND NOT Masks
+NN_kmovw,                // Move from and to Mask Registers
+NN_kmovb,                // Move from and to Mask Registers
+NN_kmovq,                // Move from and to Mask Registers
+NN_kmovd,                // Move from and to Mask Registers
+NN_kunpckbw,             // Unpack for Mask Registers
+NN_kunpckwd,             // Unpack for Mask Registers
+NN_kunpckdq,             // Unpack for Mask Registers
+NN_knotw,                // NOT Mask Register
+NN_knotb,                // NOT Mask Register
+NN_knotq,                // NOT Mask Register
+NN_knotd,                // NOT Mask Register
+NN_korw,                 // Bitwise Logical OR Masks
+NN_korb,                 // Bitwise Logical OR Masks
+NN_korq,                 // Bitwise Logical OR Masks
+NN_kord,                 // Bitwise Logical OR Masks
+NN_kortestw,             // OR Masks And Set Flags
+NN_kortestb,             // OR Masks And Set Flags
+NN_kortestq,             // OR Masks And Set Flags
+NN_kortestd,             // OR Masks And Set Flags
+NN_kshiftlw,             // Shift Left Mask Registers
+NN_kshiftlb,             // Shift Left Mask Registers
+NN_kshiftlq,             // Shift Left Mask Registers
+NN_kshiftld,             // Shift Left Mask Registers
+NN_kshiftrw,             // Shift Right Mask Registers
+NN_kshiftrb,             // Shift Right Mask Registers
+NN_kshiftrq,             // Shift Right Mask Registers
+NN_kshiftrd,             // Shift Right Mask Registers
+NN_kxnorw,               // Bitwise Logical XNOR Masks
+NN_kxnorb,               // Bitwise Logical XNOR Masks
+NN_kxnorq,               // Bitwise Logical XNOR Masks
+NN_kxnord,               // Bitwise Logical XNOR Masks
+NN_ktestw,               // Packed Bit Test Masks and Set Flags
+NN_ktestb,               // Packed Bit Test Masks and Set Flags
+NN_ktestq,               // Packed Bit Test Masks and Set Flags
+NN_ktestd,               // Packed Bit Test Masks and Set Flags
+NN_kxorw,                // Bitwise Logical XOR Masks
+NN_kxorb,                // Bitwise Logical XOR Masks
+NN_kxorq,                // Bitwise Logical XOR Masks
+NN_kxord,                // Bitwise Logical XOR Masks
+
+// SHA Extensions
+
+NN_sha1rnds4,            // Perform Four Rounds of SHA1 Operation
+NN_sha1nexte,            // Calculate SHA1 State Variable E after Four Rounds
+NN_sha1msg1,             // Perform an Intermediate Calculation for the Next Four SHA1 Message Dwords
+NN_sha1msg2,             // Perform a Final Calculation for the Next Four SHA1 Message Dwords
+NN_sha256rnds2,          // Perform Two Rounds of SHA256 Operation
+NN_sha256msg1,           // Perform an Intermediate Calculation for the Next Four SHA256 Message Dwords
+NN_sha256msg2,           // Perform a Final Calculation for the Next Four SHA256 Message Dwords
+
+// Intel Software Guard Extensions
+
+NN_encls,                // Execute an Enclave System Function of Specified Leaf Number
+NN_enclu,                // Execute an Enclave User Function of Specified Leaf Number
+
+// AMD XOP
+
+NN_vfrczpd,              // Extract Fraction Packed Double-Precision Floating-Point
+NN_vfrczps,              // Extract Fraction Packed Single-Precision Floating-Point
+NN_vfrczsd,              // Extract Fraction Scalar Double-Precision Floating-Point
+NN_vfrczss,              // Extract Fraction Scalar Single-Precision Floating Point
+NN_vpcmov,               // Vector Conditional Moves
+NN_vpcomb,               // Compare Vector Signed Bytes
+NN_vpcomd,               // Compare Vector Signed Doublewords
+NN_vpcomq,               // Compare Vector Signed Quadwords
+NN_vpcomub,              // Compare Vector Unsigned Bytes
+NN_vpcomud,              // Compare Vector Unsigned Doublewords
+NN_vpcomuq,              // Compare Vector Unsigned Quadwords
+NN_vpcomuw,              // Compare Vector Unsigned Words
+NN_vpcomw,               // Compare Vector Signed Words
+NN_vpermil2pd,           // Permute Two-Source Double-Precision Floating-Point Values
+NN_vpermil2ps,           // Permute Two-Source Single-Precision Floating-Point Values
+NN_vphaddbd,             // Packed Horizontal Add Signed Byte to Signed Doubleword
+NN_vphaddbq,             // Packed Horizontal Add Signed Byte to Signed Quadword
+NN_vphaddbw,             // Packed Horizontal Add Signed Byte to Signed Word
+NN_vphadddq,             // Packed Horizontal Add Signed Doubleword to Signed Quadword
+NN_vphaddubd,            // Packed Horizontal Add Unsigned Byte to Doubleword
+NN_vphaddubq,            // Packed Horizontal Add Unsigned Byte to Quadword
+NN_vphaddubw,            // Packed Horizontal Add Unsigned Byte to Word
+NN_vphaddudq,            // Packed Horizontal Add Unsigned Doubleword to Quadword
+NN_vphadduwd,            // Packed Horizontal Add Unsigned Word to Doubleword
+NN_vphadduwq,            // Packed Horizontal Add Unsigned Word to Quadword
+NN_vphaddwd,             // Packed Horizontal Add Signed Word to Signed Doubleword
+NN_vphaddwq,             // Packed Horizontal Add Signed Word to Signed Quadword
+NN_vphsubbw,             // Packed Horizontal Subtract Signed Byte to Signed Word
+NN_vphsubdq,             // Packed Horizontal Subtract Signed Doubleword to Signed Quadword
+NN_vphsubwd,             // Packed Horizontal Subtract Signed Word to Signed Doubleword
+NN_vpmacsdd,             // Packed Multiply Accumulate Signed Doubleword to Signed Doubleword
+NN_vpmacsdqh,            // Packed Multiply Accumulate Signed High Doubleword to Signed Quadword
+NN_vpmacsdql,            // Packed Multiply Accumulate Signed Low Doubleword to Signed Quadword
+NN_vpmacssdd,            // Packed Multiply Accumulate Signed Doubleword to Signed Doubleword with Saturation
+NN_vpmacssdqh,           // Packed Multiply Accumulate Signed High Doubleword to Signed Quadword with Saturation
+NN_vpmacssdql,           // Packed Multiply Accumulate Signed Low Doubleword to Signed Quadword with Saturation
+NN_vpmacsswd,            // Packed Multiply Accumulate Signed Word to Signed Doubleword with Saturation
+NN_vpmacssww,            // Packed Multiply Accumulate Signed Word to Signed Word with Saturation
+NN_vpmacswd,             // Packed Multiply Accumulate Signed Word to Signed Doubleword
+NN_vpmacsww,             // Packed Multiply Accumulate Signed Word to Signed Word
+NN_vpmadcsswd,           // Packed Multiply, Add and Accumulate Signed Word to Signed Doubleword with Saturation
+NN_vpmadcswd,            // Packed Multiply Add and Accumulate Signed Word to Signed Doubleword
+NN_vpperm,               // Packed Permute Bytes
+NN_vprotb,               // Packed Rotate Bytes
+NN_vprotd,               // Packed Rotate Doublewords
+NN_vprotq,               // Packed Rotate Quadwords
+NN_vprotw,               // Packed Rotate Words
+NN_vpshab,               // Packed Shift Arithmetic Bytes
+NN_vpshad,               // Packed Shift Arithmetic Doublewords
+NN_vpshaq,               // Packed Shift Arithmetic Quadwords
+NN_vpshaw,               // Packed Shift Arithmetic Words
+NN_vpshlb,               // Packed Shift Logical Bytes
+NN_vpshld,               // Packed Shift Logical Doublewords
+NN_vpshlq,               // Packed Shift Logical Quadwords
+NN_vpshlw,               // Packed Shift Logical Words
+
+// AMP XOP comparison pseudo-ops
+
+NN_vpcomltb,             // Compare Vector Signed Bytes
+NN_vpcomleb,             // Compare Vector Signed Bytes
+NN_vpcomgtb,             // Compare Vector Signed Bytes
+NN_vpcomgeb,             // Compare Vector Signed Bytes
+NN_vpcomeqb,             // Compare Vector Signed Bytes
+NN_vpcomneqb,            // Compare Vector Signed Bytes
+NN_vpcomfalseb,          // Compare Vector Signed Bytes
+NN_vpcomtrueb,           // Compare Vector Signed Bytes
+
+NN_vpcomltw,             // Compare Vector Signed Words
+NN_vpcomlew,             // Compare Vector Signed Words
+NN_vpcomgtw,             // Compare Vector Signed Words
+NN_vpcomgew,             // Compare Vector Signed Words
+NN_vpcomeqw,             // Compare Vector Signed Words
+NN_vpcomneqw,            // Compare Vector Signed Words
+NN_vpcomfalsew,          // Compare Vector Signed Words
+NN_vpcomtruew,           // Compare Vector Signed Words
+
+NN_vpcomltd,             // Compare Vector Signed Doublewords
+NN_vpcomled,             // Compare Vector Signed Doublewords
+NN_vpcomgtd,             // Compare Vector Signed Doublewords
+NN_vpcomged,             // Compare Vector Signed Doublewords
+NN_vpcomeqd,             // Compare Vector Signed Doublewords
+NN_vpcomneqd,            // Compare Vector Signed Doublewords
+NN_vpcomfalsed,          // Compare Vector Signed Doublewords
+NN_vpcomtrued,           // Compare Vector Signed Doublewords
+
+NN_vpcomltq,             // Compare Vector Signed Quadwords
+NN_vpcomleq,             // Compare Vector Signed Quadwords
+NN_vpcomgtq,             // Compare Vector Signed Quadwords
+NN_vpcomgeq,             // Compare Vector Signed Quadwords
+NN_vpcomeqq,             // Compare Vector Signed Quadwords
+NN_vpcomneqq,            // Compare Vector Signed Quadwords
+NN_vpcomfalseq,          // Compare Vector Signed Quadwords
+NN_vpcomtrueq,           // Compare Vector Signed Quadwords
+
+NN_vpcomltub,            // Compare Vector Unsigned Bytes
+NN_vpcomleub,            // Compare Vector Unsigned Bytes
+NN_vpcomgtub,            // Compare Vector Unsigned Bytes
+NN_vpcomgeub,            // Compare Vector Unsigned Bytes
+NN_vpcomequb,            // Compare Vector Unsigned Bytes
+NN_vpcomnequb,           // Compare Vector Unsigned Bytes
+NN_vpcomfalseub,         // Compare Vector Unsigned Bytes
+NN_vpcomtrueub,          // Compare Vector Unsigned Bytes
+
+NN_vpcomltuw,            // Compare Vector Unsigned Words
+NN_vpcomleuw,            // Compare Vector Unsigned Words
+NN_vpcomgtuw,            // Compare Vector Unsigned Words
+NN_vpcomgeuw,            // Compare Vector Unsigned Words
+NN_vpcomequw,            // Compare Vector Unsigned Words
+NN_vpcomnequw,           // Compare Vector Unsigned Words
+NN_vpcomfalseuw,         // Compare Vector Unsigned Words
+NN_vpcomtrueuw,          // Compare Vector Unsigned Words
+
+NN_vpcomltud,            // Compare Vector Unsigned Doublewords
+NN_vpcomleud,            // Compare Vector Unsigned Doublewords
+NN_vpcomgtud,            // Compare Vector Unsigned Doublewords
+NN_vpcomgeud,            // Compare Vector Unsigned Doublewords
+NN_vpcomequd,            // Compare Vector Unsigned Doublewords
+NN_vpcomnequd,           // Compare Vector Unsigned Doublewords
+NN_vpcomfalseud,         // Compare Vector Unsigned Doublewords
+NN_vpcomtrueud,          // Compare Vector Unsigned Doublewords
+
+NN_vpcomltuq,            // Compare Vector Unsigned Quadwords
+NN_vpcomleuq,            // Compare Vector Unsigned Quadwords
+NN_vpcomgtuq,            // Compare Vector Unsigned Quadwords
+NN_vpcomgeuq,            // Compare Vector Unsigned Quadwords
+NN_vpcomequq,            // Compare Vector Unsigned Quadwords
+NN_vpcomnequq,           // Compare Vector Unsigned Quadwords
+NN_vpcomfalseuq,         // Compare Vector Unsigned Quadwords
+NN_vpcomtrueuq,          // Compare Vector Unsigned Quadwords
+
+// AMD Excavator
+
+NN_monitorx,             // Setup Monitor Address
+NN_mwaitx,               // Monitor Wait with Timeout
+
+// AMD Zen
+
+NN_clzero,               // Zero out 64 byte cache
+
+// Intel Processor Trace
+
+NN_ptwrite,              // Write Data to a Processor Trace Packet
+
+// new Intel AVX-512 instructions (December 2016)
+
+NN_v4fmaddps,            // Packed Single-Precision Floating-Point Fused Multiply-Add (4-iterations)
+NN_v4fnmaddps,           // Packed Single-Precision Floating-Point Fused Multiply-Add (4-iterations)
+NN_v4fmaddss,            // Scalar Single-Precision Floating-Point Fused Multiply-Add (4-iterations)
+NN_v4fnmaddss,           // Scalar Single-Precision Floating-Point Fused Multiply-Add (4-iterations)
+NN_vp4dpwssd,            // Dot Product of Signed Words with Dword Accumulation (4-iterations)
+NN_vp4dpwssds,           // Dot Product of Signed Words with Dword Accumulation and Saturation (4-iterations)
+NN_vpopcntd,             // Return the Count of Number of Bits Set to 1 in DWORD
+NN_vpopcntq,             // Return the Count of Number of Bits Set to 1 in QWORD
+
+// Read Processor ID
+
+NN_rdpid,                // Read Processor ID
+
+// Invoke VM function
+
+NN_vmfunc,               // Invoke VM function
+
+// Control-flow Enforcement
+
+NN_incsspd,              // Increment Shadow Stack Pointer (by 4)
+NN_incsspq,              // Increment Shadow Stack Pointer (by 8)
+NN_rdsspd,               // Read (low 32 bits of) Shadow Stack Pointer
+NN_rdsspq,               // Read Shadow Stack Pointer
+NN_saveprevssp,          // Save Previous Shadow Stack Pointer
+NN_rstorssp,             // Restore saved Shadow Stack Pointer
+NN_wrssd,                // Write (4 bytes) to shadow stack
+NN_wrssq,                // Write (8 bytes) to shadow stack
+NN_wrussd,               // Write (4 bytes) to User Shadow Stack
+NN_wrussq,               // Write (8 bytes) to User Shadow Stack
+NN_setssbsy,             // Mark Shadow Stack Busy
+NN_clrssbsy,             // Clear Shadow Stack Busy Flag
+NN_endbr64,              // Terminate an Indirect Branch in 64-bit Mode
+NN_endbr32,              // Terminate an Indirect Branch in 32-bit and Compatibility Mode
+
 NN_last,
 
     };
@@ -1330,7 +2021,7 @@ NN_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 I5_null = 0,            // Unknown Operation
 
@@ -1630,7 +2321,7 @@ I5_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 I860_null = 0,          // Unknown Operation
@@ -1798,7 +2489,7 @@ I860_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 I51_null = 0,   // Unknown Operation
 
@@ -1887,7 +2578,7 @@ I51_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 TMS_null = 0,   // Unknown Operation
 TMS_abs,        // Absolute value of Acc
@@ -2182,135 +2873,134 @@ TMS_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
-M65_null = 0,           // Unknown Operation
+  M65_null = 0,           // Unknown Operation
 
-// NMOS instructions
+  // NMOS instructions
 
-M65_adc,                // A <- (A) + M + C
-M65_anc,                // A <- A /\ M, C <- ~A7
-M65_and,                // A <- (A) /\ M
-M65_ane,                // M <-[(A)\/$EE] /\ (X)/\(M)
-M65_arr,                // A <- [(A /\ M) >> 1]
-M65_asl,                // C <- A7, A <- (A) << 1
-M65_asr,                // A <- [(A /\ M) >> 1]
-M65_bcc,                // if C=0, PC = PC + offset
-M65_bcs,                // if C=1, PC = PC + offset
-M65_beq,                // if Z=1, PC = PC + offset
-M65_bit,                // Z <- ~(A /\ M) N<-M7 V<-M6
-M65_bmi,                // if N=1, PC = PC + offset
-M65_bne,                // if Z=0, PC = PC + offset
-M65_bpl,                // if N=0, PC = PC + offset
-M65_brk,                // Stack <- PC, PC <- ($fffe)
-M65_bvc,                // if V=0, PC = PC + offset
-M65_bvs,                // if V=1, PC = PC + offset
-M65_clc,                // C <- 0
-M65_cld,                // D <- 0
-M65_cli,                // I <- 0
-M65_clv,                // V <- 0
-M65_cmp,                // (A - M) -> NZC
-M65_cpx,                // (X - M) -> NZC
-M65_cpy,                // (Y - M) -> NZC
-M65_dcp,                // M <- (M)-1, (A-M) -> NZC
-M65_dec,                // M <- (M) - 1
-M65_dex,                // X <- (X) - 1
-M65_dey,                // Y <- (Y) - 1
-M65_eor,                // A <- (A) \-/ M
-M65_inc,                // M <- (M) + 1
-M65_inx,                // X <- (X) +1
-M65_iny,                // Y <- (Y) + 1
-M65_isb,                // M <- (M) - 1,A <- (A)-M-~C
-M65_jmp,                // PC <- Address
-M65_jmpi,               // (PC <- Address)
-M65_jsr,                // Stack <- PC, PC <- Address
-M65_lae,                // X,S,A <- (S /\ M)
-M65_lax,                // A <- M, X <- M
-M65_lda,                // A <- M
-M65_ldx,                // X <- M
-M65_ldy,                // Y <- M
-M65_lsr,                // C <- A0, A <- (A) >> 1
-M65_lxa,                // X04 <- (X04) /\ M04, A04 <- (A04) /\ M04
-M65_nop,                // [no operation]
-M65_ora,                // A <- (A) V M
-M65_pha,                // Stack <- (A)
-M65_php,                // Stack <- (P)
-M65_pla,                // A <- (Stack)
-M65_plp,                // A <- (Stack)
-M65_rla,                // M <- (M << 1) /\ (A)
-M65_rol,                // C <- A7 & A <- A << 1 + C
-M65_ror,                // C<-A0 & A<- (A7=C + A>>1)
-M65_rra,                // M <- (M >> 1) + (A) + C
-M65_rti,                // P <- (Stack), PC <-(Stack)
-M65_rts,                // PC <- (Stack)
-M65_sax,                // M <- (A) /\ (X)
-M65_sbc,                // A <- (A) - M - ~C
-M65_sbx,                // X <- (X)/\(A) - M
-M65_sec,                // C <- 1
-M65_sed,                // D <- 1
-M65_sei,                // I <- 1
-M65_sha,                // M <- (A) /\ (X) /\ (PCH+1)
-M65_shs,                // X <- (A) /\ (X), S <- (X), M <- (X) /\ (PCH+1)
-M65_shx,                // M <- (X) /\ (PCH+1)
-M65_shy,                // M <- (Y) /\ (PCH+1)
-M65_slo,                // M <- (M >> 1) + A + C
-M65_sre,                // M <- (M >> 1) \-/ A
-M65_sta,                // M <- (A)
-M65_stx,                // M <- (X)
-M65_sty,                // M <- (Y)
-M65_tax,                // X <- (A)
-M65_tay,                // Y <- (A)
-M65_tsx,                // X <- (S)
-M65_txa,                // A <- (X)
-M65_txs,                // S <- (X)
-M65_tya,                // A <- (Y)
+  M65_adc,                // A <- (A) + M + C
+  M65_anc,                // A <- A /\ M, C <- ~A7
+  M65_and,                // A <- (A) /\ M
+  M65_ane,                // M <-[(A)\/$EE] /\ (X)/\(M)
+  M65_arr,                // A <- [(A /\ M) >> 1]
+  M65_asl,                // C <- A7, A <- (A) << 1
+  M65_asr,                // A <- [(A /\ M) >> 1]
+  M65_bcc,                // if C=0, PC = PC + offset
+  M65_bcs,                // if C=1, PC = PC + offset
+  M65_beq,                // if Z=1, PC = PC + offset
+  M65_bit,                // Z <- ~(A /\ M) N<-M7 V<-M6
+  M65_bmi,                // if N=1, PC = PC + offset
+  M65_bne,                // if Z=0, PC = PC + offset
+  M65_bpl,                // if N=0, PC = PC + offset
+  M65_brk,                // Stack <- PC, PC <- ($fffe)
+  M65_bvc,                // if V=0, PC = PC + offset
+  M65_bvs,                // if V=1, PC = PC + offset
+  M65_clc,                // C <- 0
+  M65_cld,                // D <- 0
+  M65_cli,                // I <- 0
+  M65_clv,                // V <- 0
+  M65_cmp,                // (A - M) -> NZC
+  M65_cpx,                // (X - M) -> NZC
+  M65_cpy,                // (Y - M) -> NZC
+  M65_dcp,                // M <- (M)-1, (A-M) -> NZC
+  M65_dec,                // M <- (M) - 1
+  M65_dex,                // X <- (X) - 1
+  M65_dey,                // Y <- (Y) - 1
+  M65_eor,                // A <- (A) \-/ M
+  M65_inc,                // M <- (M) + 1
+  M65_inx,                // X <- (X) +1
+  M65_iny,                // Y <- (Y) + 1
+  M65_isb,                // M <- (M) - 1,A <- (A)-M-~C
+  M65_jmp,                // PC <- Address
+  M65_jmpi,               // (PC <- Address)
+  M65_jsr,                // Stack <- PC, PC <- Address
+  M65_lae,                // X,S,A <- (S /\ M)
+  M65_lax,                // A <- M, X <- M
+  M65_lda,                // A <- M
+  M65_ldx,                // X <- M
+  M65_ldy,                // Y <- M
+  M65_lsr,                // C <- A0, A <- (A) >> 1
+  M65_lxa,                // X04 <- (X04) /\ M04, A04 <- (A04) /\ M04
+  M65_nop,                // [no operation]
+  M65_ora,                // A <- (A) V M
+  M65_pha,                // Stack <- (A)
+  M65_php,                // Stack <- (P)
+  M65_pla,                // A <- (Stack)
+  M65_plp,                // A <- (Stack)
+  M65_rla,                // M <- (M << 1) /\ (A)
+  M65_rol,                // C <- A7 & A <- A << 1 + C
+  M65_ror,                // C<-A0 & A<- (A7=C + A>>1)
+  M65_rra,                // M <- (M >> 1) + (A) + C
+  M65_rti,                // P <- (Stack), PC <-(Stack)
+  M65_rts,                // PC <- (Stack)
+  M65_sax,                // M <- (A) /\ (X)
+  M65_sbc,                // A <- (A) - M - ~C
+  M65_sbx,                // X <- (X)/\(A) - M
+  M65_sec,                // C <- 1
+  M65_sed,                // D <- 1
+  M65_sei,                // I <- 1
+  M65_sha,                // M <- (A) /\ (X) /\ (PCH+1)
+  M65_shs,                // X <- (A) /\ (X), S <- (X), M <- (X) /\ (PCH+1)
+  M65_shx,                // M <- (X) /\ (PCH+1)
+  M65_shy,                // M <- (Y) /\ (PCH+1)
+  M65_slo,                // M <- (M >> 1) + A + C
+  M65_sre,                // M <- (M >> 1) \-/ A
+  M65_sta,                // M <- (A)
+  M65_stx,                // M <- (X)
+  M65_sty,                // M <- (Y)
+  M65_tax,                // X <- (A)
+  M65_tay,                // Y <- (A)
+  M65_tsx,                // X <- (S)
+  M65_txa,                // A <- (X)
+  M65_txs,                // S <- (X)
+  M65_tya,                // A <- (Y)
 
-// CMOS instructions
+  // CMOS instructions
 
-M65_bbr0,               // Branch if bit 0 reset
-M65_bbr1,               // Branch if bit 1 reset
-M65_bbr2,               // Branch if bit 2 reset
-M65_bbr3,               // Branch if bit 3 reset
-M65_bbr4,               // Branch if bit 4 reset
-M65_bbr5,               // Branch if bit 5 reset
-M65_bbr6,               // Branch if bit 6 reset
-M65_bbr7,               // Branch if bit 7 reset
-M65_bbs0,               // Branch if bit 0 set
-M65_bbs1,               // Branch if bit 1 set
-M65_bbs2,               // Branch if bit 2 set
-M65_bbs3,               // Branch if bit 3 set
-M65_bbs4,               // Branch if bit 4 set
-M65_bbs5,               // Branch if bit 5 set
-M65_bbs6,               // Branch if bit 6 set
-M65_bbs7,               // Branch if bit 7 set
-M65_rmb0,               // Reset memory bit 0
-M65_rmb1,               // Reset memory bit 1
-M65_rmb2,               // Reset memory bit 2
-M65_rmb3,               // Reset memory bit 3
-M65_rmb4,               // Reset memory bit 4
-M65_rmb5,               // Reset memory bit 5
-M65_rmb6,               // Reset memory bit 6
-M65_rmb7,               // Reset memory bit 7
-M65_smb0,               // Set memory bit 0
-M65_smb1,               // Set memory bit 1
-M65_smb2,               // Set memory bit 2
-M65_smb3,               // Set memory bit 3
-M65_smb4,               // Set memory bit 4
-M65_smb5,               // Set memory bit 5
-M65_smb6,               // Set memory bit 6
-M65_smb7,               // Set memory bit 7
-M65_stz,                // Store zero
-M65_tsb,                // Test and set bits
-M65_trb,                // Test and reset bits
-M65_phy,                // Push Y register
-M65_ply,                // Pull Y register
-M65_phx,                // Push X register
-M65_plx,                // Pull X register
-M65_bra,                // Branch always
+  M65_bbr0,               // Branch if bit 0 reset
+  M65_bbr1,               // Branch if bit 1 reset
+  M65_bbr2,               // Branch if bit 2 reset
+  M65_bbr3,               // Branch if bit 3 reset
+  M65_bbr4,               // Branch if bit 4 reset
+  M65_bbr5,               // Branch if bit 5 reset
+  M65_bbr6,               // Branch if bit 6 reset
+  M65_bbr7,               // Branch if bit 7 reset
+  M65_bbs0,               // Branch if bit 0 set
+  M65_bbs1,               // Branch if bit 1 set
+  M65_bbs2,               // Branch if bit 2 set
+  M65_bbs3,               // Branch if bit 3 set
+  M65_bbs4,               // Branch if bit 4 set
+  M65_bbs5,               // Branch if bit 5 set
+  M65_bbs6,               // Branch if bit 6 set
+  M65_bbs7,               // Branch if bit 7 set
+  M65_rmb0,               // Reset memory bit 0
+  M65_rmb1,               // Reset memory bit 1
+  M65_rmb2,               // Reset memory bit 2
+  M65_rmb3,               // Reset memory bit 3
+  M65_rmb4,               // Reset memory bit 4
+  M65_rmb5,               // Reset memory bit 5
+  M65_rmb6,               // Reset memory bit 6
+  M65_rmb7,               // Reset memory bit 7
+  M65_smb0,               // Set memory bit 0
+  M65_smb1,               // Set memory bit 1
+  M65_smb2,               // Set memory bit 2
+  M65_smb3,               // Set memory bit 3
+  M65_smb4,               // Set memory bit 4
+  M65_smb5,               // Set memory bit 5
+  M65_smb6,               // Set memory bit 6
+  M65_smb7,               // Set memory bit 7
+  M65_stz,                // Store zero
+  M65_tsb,                // Test and set bits
+  M65_trb,                // Test and reset bits
+  M65_phy,                // Push Y register
+  M65_ply,                // Pull Y register
+  M65_phx,                // Push X register
+  M65_plx,                // Pull X register
+  M65_bra,                // Branch always
 
-M65_last,
-
-    };
+  M65_last,
+};
 
 
 
@@ -2320,10 +3010,10 @@ extern struct instruc_t Instructions[];
 // m65* CPUs implements.
 //
 // One should _never_ put anything else in 'ins.hpp'
-// but the instruction types: IDA possesses build scripts that 
+// but the instruction types: IDA possesses build scripts that
 // will parse ins.hpp files, and build a database of
 // <cpu> + <itype> -> <autocomment>
-// Where 'autocomment' is the contents of the comment string 
+// Where 'autocomment' is the contents of the comment string
 // associated to the itype.
 enum m65_itype_t
 {
@@ -2438,7 +3128,7 @@ enum m65_itype_t
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 pdp_null = 0,           // Unknown Operation
 
@@ -2565,7 +3255,7 @@ pdp_last
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 mc_null = 0,           // Unknown Operation
 
@@ -2790,7 +3480,7 @@ mc_last
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 mc8_null = 0,           // Unknown Operation
 
@@ -2965,253 +3655,254 @@ mc8_last
 
 
 extern instruc_t Instructions[];
-enum 
+enum
 {
-//j_null = 0,           // Unknown Operation
-j_nop = 0,      //  0   //Do nothing
-j_aconst_null,  //  1   //Push null object reference
-j_iconst_m1,    //  2   //Push integer constant -1
-j_iconst_0,     //  3   //Push the integer 0
-j_iconst_1,     //  4   //Push the integer 1
-j_iconst_2,     //  5   //Push the integer 2
-j_iconst_3,     //  6   //Push the integer 3
-j_iconst_4,     //  7   //Push the integer 4
-j_iconst_5,     //  8   //Push the integer 5
-j_lconst_0,     //  9   //Push the long integer 0
-j_lconst_1,     // 10   //Push the long integer 1
-j_fconst_0,     // 11   //Push the single-precision foating point 0.0
-j_fconst_1,     // 12   //Push the single-precision foating point 1.0
-j_fconst_2,     // 13   //Push the single-precision foating point 2.0
-j_dconst_0,     // 14   //Push the double-precision foating point 2.0
-j_dconst_1,     // 15   //Push the double-precision foating point 2.0
-j_bipush,       // 16   //Push one byte signed integer
-j_sipush,       // 17   //Push two-byte signed integer
-j_ldc,          // 18   //Push item from constant pool (i1)
-j_ldcw,         // 19   //Push item from constant pool (i2)
-j_ldc2w,        // 20   //Push long or double from constant pool
-j_iload,        // 21   //Push integer value of the local variable
-j_lload,        // 22   //Push long value of the local variable
-j_fload,        // 23   //Push single float value of the local variable
-j_dload,        // 24   //Push double float value of the local variable
-j_aload,        // 25   //Push object reference from the local variable
-j_iload_0,      // 26   //Push integer value of the local variable #0
-j_iload_1,      // 27   //Push integer value of the local variable #1
-j_iload_2,      // 28   //Push integer value of the local variable #2
-j_iload_3,      // 29   //Push integer value of the local variable #3
-j_lload_0,      // 30   //Push long value of the local variable #0
-j_lload_1,      // 31   //Push long value of the local variable #1
-j_lload_2,      // 32   //Push long value of the local variable #2
-j_lload_3,      // 33   //Push long value of the local variable #3
-j_fload_0,      // 34   //Push single float value of the local variable #0
-j_fload_1,      // 35   //Push single float value of the local variable #1
-j_fload_2,      // 36   //Push single float value of the local variable #2
-j_fload_3,      // 37   //Push single float value of the local variable #3
-j_dload_0,      // 38   //Push double float value of the local variable #0
-j_dload_1,      // 39   //Push double float value of the local variable #1
-j_dload_2,      // 40   //Push double float value of the local variable #2
-j_dload_3,      // 41   //Push double float value of the local variable #3
-j_aload_0,      // 42   //Push object reference from the local variable #0
-j_aload_1,      // 43   //Push object reference from the local variable #1
-j_aload_2,      // 44   //Push object reference from the local variable #2
-j_aload_3,      // 45   //Push object reference from the local variable #3
-j_iaload,       // 46   //Push integer from array
-j_laload,       // 47   //Push long from array
-j_faload,       // 48   //Push single float from array
-j_daload,       // 49   //Push double float from array
-j_aaload,       // 50   //Push object refernce from array
-j_baload,       // 51   //Push signed byte from array
-j_caload,       // 52   //Push character from array
-j_saload,       // 53   //Push short from array
-j_istore,       // 54   //Pop integer value into local variable
-j_lstore,       // 55   //Pop long value into local variable
-j_fstore,       // 56   //Pop single float value into local variable
-j_dstore,       // 57   //Pop double float value into local variable
-j_astore,       // 58   //Pop object refernce into local variable
-j_istore_0,     // 59   //Pop integer value into local variable #0
-j_istore_1,     // 60   //Pop integer value into local variable #1
-j_istore_2,     // 61   //Pop integer value into local variable #2
-j_istore_3,     // 62   //Pop integer value into local variable #3
-j_lstore_0,     // 63   //Pop long value into local variable #0
-j_lstore_1,     // 64   //Pop long value into local variable #1
-j_lstore_2,     // 65   //Pop long value into local variable #2
-j_lstore_3,     // 66   //Pop long value into local variable #3
-j_fstore_0,     // 67   //Pop single float value into local variable #0
-j_fstore_1,     // 68   //Pop single float value into local variable #1
-j_fstore_2,     // 69   //Pop single float value into local variable #2
-j_fstore_3,     // 70   //Pop single float value into local variable #3
-j_dstore_0,     // 71   //Pop double float value into local variable
-j_dstore_1,     // 72   //Pop double float value into local variable #0
-j_dstore_2,     // 73   //Pop double float value into local variable #1
-j_dstore_3,     // 74   //Pop double float value into local variable #2
-j_astore_0,     // 75   //Pop object refernce into local variable #0
-j_astore_1,     // 76   //Pop object refernce into local variable #1
-j_astore_2,     // 77   //Pop object refernce into local variable #2
-j_astore_3,     // 78   //Pop object refernce into local variable #3
-j_iastore,      // 79   //Pop integer from array
-j_lastore,      // 80   //Pop long from array
-j_fastore,      // 81   //Pop single float from array
-j_dastore,      // 82   //Pop double float from array
-j_aastore,      // 83   //Pop object refernce from array
-j_bastore,      // 84   //Pop signed byte from array
-j_castore,      // 85   //Pop character from array
-j_sastore,      // 86   //Pop short from array
-j_pop,          // 87   //Pop top stack word
-j_pop2,         // 88   //Pop top two stack word
-j_dup,          // 89   //Duplicate top stack word
-j_dup_x1,       // 90   //Duplicate top stack word and put two down
-j_dup_x2,       // 91   //Duplicate top stack word and put three down
-j_dup2,         // 92   //Duplicate top two stack word
-j_dup2_x1,      // 93   //Duplicate top two stack words and put two down
-j_dup2_x2,      // 94   //Duplicate top two stack words and put three down
-j_swap,         // 95   //Swap two top stack words
-j_iadd,         // 96   //Integer add
-j_ladd,         // 97   //Long add
-j_fadd,         // 98   //Single float add
-j_dadd,         // 99   //Double float add
-j_isub,         //100   //Integer subtract
-j_lsub,         //101   //Long subtract
-j_fsub,         //102   //Single float subtract
-j_dsub,         //103   //Double Float subtract
-j_imul,         //104   //Integer multiply
-j_lmul,         //105   //Long multiply
-j_fmul,         //106   //Single float multiply
-j_dmul,         //107   //Double Float multiply
-j_idiv,         //108   //Integer divide
-j_ldiv,         //109   //Long divide
-j_fdiv,         //110   //Single float divide
-j_ddiv,         //111   //Double Float divide
-j_irem,         //112   //Integer reminder
-j_lrem,         //113   //Long reminder
-j_frem,         //114   //Single float reminder
-j_drem,         //115   //Double Float reminder
-j_ineg,         //116   //Integer negate
-j_lneg,         //117   //Long negate
-j_fneg,         //118   //Single float negate
-j_dneg,         //119   //Double Float negate
-j_ishl,         //120   //Integer shift left
-j_lshl,         //121   //Long shift left
-j_ishr,         //122   //Integer logical shift right
-j_lshr,         //123   //Long logical shift right
-j_iushr,        //124   //Integer arithmetic shift right
-j_lushr,        //125   //Long arithmeticshift right
-j_iand,         //126   //Integer boolean AND
-j_land,         //127   //Long boolean AND
-j_ior,          //128   //Integer boolean OR
-j_lor,          //129   //Long boolean OR
-j_ixor,         //130   //Integer boolean XOR
-j_lxor,         //131   //Long boolean XOR
-j_iinc,         //132   //Add 8-bit signed const to local variable
-j_i2l,          //133   //Integer to Long conversion
-j_i2f,          //134   //Integer to single float conversion
-j_i2d,          //135   //Integer to double float conversion
-j_l2i,          //136   //Long to Integer conversion
-j_l2f,          //137   //Long to single float conversion
-j_l2d,          //138   //Long to double float conversion
-j_f2i,          //139   //Single float to Integer conversion
-j_f2l,          //140   //Single float to Long conversion
-j_f2d,          //141   //Single float to double float conversion
-j_d2i,          //142   //Double float to Integer conversion
-j_d2l,          //143   //Double float to Long conversion
-j_d2f,          //144   //Double float to double float conversion
-j_i2b,          //145   //Integer to signed byte conversion
-j_i2c,          //146   //Integer to unsigned short conversion
-j_i2s,          //147   //Integer to signed short conversion
-j_lcmp,         //148   //Long compare
-j_fcmpl,        //149   //Single float compare (-1 on NaN)
-j_fcmpg,        //150   //Single float compare (1 on NaN)
-j_dcmpl,        //151   //Double float compare (-1 on NaN)
-j_dcmpg,        //152   //Double float compare (1 on NaN)
-j_ifeq,         //153   //Branch if equal to 0
-j_ifne,         //154   //Branch if not equal to 0
-j_iflt,         //155   //Branch if less then 0
-j_ifge,         //156   //Branch if greater than or equal to 0
-j_ifgt,         //157   //Branch if greater than 0
-j_ifle,         //158   //Branch if less than or equal to 0
-j_if_icmpeq,    //159   //Branch if integers equal
-j_if_icmpne,    //160   //Branch if integers not equal
-j_if_icmplt,    //161   //Branch if integers less than
-j_if_icmpge,    //162   //Branch if integers grater than or equal to
-j_if_icmpgt,    //163   //Branch if integers grater than
-j_if_icmple,    //164   //Branch if integers less than or equal to
-j_if_acmpeq,    //165   //Branch if object references are equal
-j_if_acmpne,    //166   //Branch if object references not equal
-j_goto,         //167   //Branch always
-j_jsr,          //168   //Jump subroutine
-j_ret,          //169   //Return from subroutine
-j_tableswitch,  //170   //Access jump table by index and jump
-j_lookupswitch, //171   //Access jump table by key match and jump
-j_ireturn,      //172   //Return integer from function
-j_lreturn,      //173   //Return long from function
-j_freturn,      //174   //Return single floatr from function
-j_dreturn,      //175   //Return double float from function
-j_areturn,      //176   //Return object reference from function
-j_return,       //177   //Return (void) from procedure
-j_getstatic,    //178   //Set static field from class
-j_putstatic,    //179   //Set static field in class
-j_getfield,     //180   //Fetch field from object
-j_putfield,     //181   //Set field in object
-j_invokevirtual, //182  //invoke instance method
-j_invokespecial, //183  //invoke instance method (superclass/init/...)
-j_invokestatic, //184  //invoke a class (static) method
-j_invokeinterface, //185  //invoke interface method
-j_invokedynamic, //186   // invoke instance method (select by paraneter)
-j_new,          //187   //Create new object
-j_newarray,     //188   //Allocate new array
-j_anewarray,    //189   //Allocate new array of refernces to object
-j_arraylength,  //190   //Get length of array
-j_athrow,       //191   //Throw exception or error
-j_checkcast,    //192   //Make sure object is of given type
-j_instanceof,   //193   //Determine if an object is of given type
-j_monitorenter, //194   //Enter monitored region of code
-j_monitorexit,  //195   //Exit monitored region of code
-j_wide,         //196   //wide (prefix of command)
-j_multianewarray, //197 //Allocate new multi-dimensional array
-j_ifnull,       //198   //Branch if NULL-ptr
-j_ifnonnull,    //199   //Branch if not NULL-ptr
-j_goto_w,       //200   //Branch always (wide index)
-j_jsr_w,        //201   //Jump subroutine (wide index)
-j_breakpoint,   //202   //Stop and pass control to breakpoint handler
-//
-j_lastnorm,
-j_a_invokesuper = j_lastnorm,
-j_a_invokevirtualobject,
-j_a_invokeignored,
-//bottom of table ! (emu)
-j_a_software,
-j_a_hardware,
-//
-j_last
-    };
+  //j_null = 0,           // Unknown Operation
+  j_nop = 0,      //  0   //Do nothing
+  j_aconst_null,  //  1   //Push null object reference
+  j_iconst_m1,    //  2   //Push integer constant -1
+  j_iconst_0,     //  3   //Push the integer 0
+  j_iconst_1,     //  4   //Push the integer 1
+  j_iconst_2,     //  5   //Push the integer 2
+  j_iconst_3,     //  6   //Push the integer 3
+  j_iconst_4,     //  7   //Push the integer 4
+  j_iconst_5,     //  8   //Push the integer 5
+  j_lconst_0,     //  9   //Push the long integer 0
+  j_lconst_1,     // 10   //Push the long integer 1
+  j_fconst_0,     // 11   //Push the single-precision foating point 0.0
+  j_fconst_1,     // 12   //Push the single-precision foating point 1.0
+  j_fconst_2,     // 13   //Push the single-precision foating point 2.0
+  j_dconst_0,     // 14   //Push the double-precision foating point 2.0
+  j_dconst_1,     // 15   //Push the double-precision foating point 2.0
+  j_bipush,       // 16   //Push one byte signed integer
+  j_sipush,       // 17   //Push two-byte signed integer
+  j_ldc,          // 18   //Push item from constant pool (i1)
+  j_ldcw,         // 19   //Push item from constant pool (i2)
+  j_ldc2w,        // 20   //Push long or double from constant pool
+  j_iload,        // 21   //Push integer value of the local variable
+  j_lload,        // 22   //Push long value of the local variable
+  j_fload,        // 23   //Push single float value of the local variable
+  j_dload,        // 24   //Push double float value of the local variable
+  j_aload,        // 25   //Push object reference from the local variable
+  j_iload_0,      // 26   //Push integer value of the local variable #0
+  j_iload_1,      // 27   //Push integer value of the local variable #1
+  j_iload_2,      // 28   //Push integer value of the local variable #2
+  j_iload_3,      // 29   //Push integer value of the local variable #3
+  j_lload_0,      // 30   //Push long value of the local variable #0
+  j_lload_1,      // 31   //Push long value of the local variable #1
+  j_lload_2,      // 32   //Push long value of the local variable #2
+  j_lload_3,      // 33   //Push long value of the local variable #3
+  j_fload_0,      // 34   //Push single float value of the local variable #0
+  j_fload_1,      // 35   //Push single float value of the local variable #1
+  j_fload_2,      // 36   //Push single float value of the local variable #2
+  j_fload_3,      // 37   //Push single float value of the local variable #3
+  j_dload_0,      // 38   //Push double float value of the local variable #0
+  j_dload_1,      // 39   //Push double float value of the local variable #1
+  j_dload_2,      // 40   //Push double float value of the local variable #2
+  j_dload_3,      // 41   //Push double float value of the local variable #3
+  j_aload_0,      // 42   //Push object reference from the local variable #0
+  j_aload_1,      // 43   //Push object reference from the local variable #1
+  j_aload_2,      // 44   //Push object reference from the local variable #2
+  j_aload_3,      // 45   //Push object reference from the local variable #3
+  j_iaload,       // 46   //Push integer from array
+  j_laload,       // 47   //Push long from array
+  j_faload,       // 48   //Push single float from array
+  j_daload,       // 49   //Push double float from array
+  j_aaload,       // 50   //Push object refernce from array
+  j_baload,       // 51   //Push signed byte from array
+  j_caload,       // 52   //Push character from array
+  j_saload,       // 53   //Push short from array
+  j_istore,       // 54   //Pop integer value into local variable
+  j_lstore,       // 55   //Pop long value into local variable
+  j_fstore,       // 56   //Pop single float value into local variable
+  j_dstore,       // 57   //Pop double float value into local variable
+  j_astore,       // 58   //Pop object refernce into local variable
+  j_istore_0,     // 59   //Pop integer value into local variable #0
+  j_istore_1,     // 60   //Pop integer value into local variable #1
+  j_istore_2,     // 61   //Pop integer value into local variable #2
+  j_istore_3,     // 62   //Pop integer value into local variable #3
+  j_lstore_0,     // 63   //Pop long value into local variable #0
+  j_lstore_1,     // 64   //Pop long value into local variable #1
+  j_lstore_2,     // 65   //Pop long value into local variable #2
+  j_lstore_3,     // 66   //Pop long value into local variable #3
+  j_fstore_0,     // 67   //Pop single float value into local variable #0
+  j_fstore_1,     // 68   //Pop single float value into local variable #1
+  j_fstore_2,     // 69   //Pop single float value into local variable #2
+  j_fstore_3,     // 70   //Pop single float value into local variable #3
+  j_dstore_0,     // 71   //Pop double float value into local variable
+  j_dstore_1,     // 72   //Pop double float value into local variable #0
+  j_dstore_2,     // 73   //Pop double float value into local variable #1
+  j_dstore_3,     // 74   //Pop double float value into local variable #2
+  j_astore_0,     // 75   //Pop object refernce into local variable #0
+  j_astore_1,     // 76   //Pop object refernce into local variable #1
+  j_astore_2,     // 77   //Pop object refernce into local variable #2
+  j_astore_3,     // 78   //Pop object refernce into local variable #3
+  j_iastore,      // 79   //Pop integer from array
+  j_lastore,      // 80   //Pop long from array
+  j_fastore,      // 81   //Pop single float from array
+  j_dastore,      // 82   //Pop double float from array
+  j_aastore,      // 83   //Pop object refernce from array
+  j_bastore,      // 84   //Pop signed byte from array
+  j_castore,      // 85   //Pop character from array
+  j_sastore,      // 86   //Pop short from array
+  j_pop,          // 87   //Pop top stack word
+  j_pop2,         // 88   //Pop top two stack word
+  j_dup,          // 89   //Duplicate top stack word
+  j_dup_x1,       // 90   //Duplicate top stack word and put two down
+  j_dup_x2,       // 91   //Duplicate top stack word and put three down
+  j_dup2,         // 92   //Duplicate top two stack word
+  j_dup2_x1,      // 93   //Duplicate top two stack words and put two down
+  j_dup2_x2,      // 94   //Duplicate top two stack words and put three down
+  j_swap,         // 95   //Swap two top stack words
+  j_iadd,         // 96   //Integer add
+  j_ladd,         // 97   //Long add
+  j_fadd,         // 98   //Single float add
+  j_dadd,         // 99   //Double float add
+  j_isub,         //100   //Integer subtract
+  j_lsub,         //101   //Long subtract
+  j_fsub,         //102   //Single float subtract
+  j_dsub,         //103   //Double Float subtract
+  j_imul,         //104   //Integer multiply
+  j_lmul,         //105   //Long multiply
+  j_fmul,         //106   //Single float multiply
+  j_dmul,         //107   //Double Float multiply
+  j_idiv,         //108   //Integer divide
+  j_ldiv,         //109   //Long divide
+  j_fdiv,         //110   //Single float divide
+  j_ddiv,         //111   //Double Float divide
+  j_irem,         //112   //Integer reminder
+  j_lrem,         //113   //Long reminder
+  j_frem,         //114   //Single float reminder
+  j_drem,         //115   //Double Float reminder
+  j_ineg,         //116   //Integer negate
+  j_lneg,         //117   //Long negate
+  j_fneg,         //118   //Single float negate
+  j_dneg,         //119   //Double Float negate
+  j_ishl,         //120   //Integer shift left
+  j_lshl,         //121   //Long shift left
+  j_ishr,         //122   //Integer logical shift right
+  j_lshr,         //123   //Long logical shift right
+  j_iushr,        //124   //Integer arithmetic shift right
+  j_lushr,        //125   //Long arithmeticshift right
+  j_iand,         //126   //Integer boolean AND
+  j_land,         //127   //Long boolean AND
+  j_ior,          //128   //Integer boolean OR
+  j_lor,          //129   //Long boolean OR
+  j_ixor,         //130   //Integer boolean XOR
+  j_lxor,         //131   //Long boolean XOR
+  j_iinc,         //132   //Add 8-bit signed const to local variable
+  j_i2l,          //133   //Integer to Long conversion
+  j_i2f,          //134   //Integer to single float conversion
+  j_i2d,          //135   //Integer to double float conversion
+  j_l2i,          //136   //Long to Integer conversion
+  j_l2f,          //137   //Long to single float conversion
+  j_l2d,          //138   //Long to double float conversion
+  j_f2i,          //139   //Single float to Integer conversion
+  j_f2l,          //140   //Single float to Long conversion
+  j_f2d,          //141   //Single float to double float conversion
+  j_d2i,          //142   //Double float to Integer conversion
+  j_d2l,          //143   //Double float to Long conversion
+  j_d2f,          //144   //Double float to double float conversion
+  j_i2b,          //145   //Integer to signed byte conversion
+  j_i2c,          //146   //Integer to unsigned short conversion
+  j_i2s,          //147   //Integer to signed short conversion
+  j_lcmp,         //148   //Long compare
+  j_fcmpl,        //149   //Single float compare (-1 on NaN)
+  j_fcmpg,        //150   //Single float compare (1 on NaN)
+  j_dcmpl,        //151   //Double float compare (-1 on NaN)
+  j_dcmpg,        //152   //Double float compare (1 on NaN)
+  j_ifeq,         //153   //Branch if equal to 0
+  j_ifne,         //154   //Branch if not equal to 0
+  j_iflt,         //155   //Branch if less then 0
+  j_ifge,         //156   //Branch if greater than or equal to 0
+  j_ifgt,         //157   //Branch if greater than 0
+  j_ifle,         //158   //Branch if less than or equal to 0
+  j_if_icmpeq,    //159   //Branch if integers equal
+  j_if_icmpne,    //160   //Branch if integers not equal
+  j_if_icmplt,    //161   //Branch if integers less than
+  j_if_icmpge,    //162   //Branch if integers grater than or equal to
+  j_if_icmpgt,    //163   //Branch if integers grater than
+  j_if_icmple,    //164   //Branch if integers less than or equal to
+  j_if_acmpeq,    //165   //Branch if object references are equal
+  j_if_acmpne,    //166   //Branch if object references not equal
+  j_goto,         //167   //Branch always
+  j_jsr,          //168   //Jump subroutine
+  j_ret,          //169   //Return from subroutine
+  j_tableswitch,  //170   //Access jump table by index and jump
+  j_lookupswitch, //171   //Access jump table by key match and jump
+  j_ireturn,      //172   //Return integer from function
+  j_lreturn,      //173   //Return long from function
+  j_freturn,      //174   //Return single floatr from function
+  j_dreturn,      //175   //Return double float from function
+  j_areturn,      //176   //Return object reference from function
+  j_return,       //177   //Return (void) from procedure
+  j_getstatic,    //178   //Set static field from class
+  j_putstatic,    //179   //Set static field in class
+  j_getfield,     //180   //Fetch field from object
+  j_putfield,     //181   //Set field in object
+  j_invokevirtual, //182  //invoke instance method
+  j_invokespecial, //183  //invoke instance method (superclass/init/...)
+  j_invokestatic, //184  //invoke a class (static) method
+  j_invokeinterface, //185  //invoke interface method
+  j_invokedynamic, //186   // invoke instance method (select by paraneter)
+  j_new,          //187   //Create new object
+  j_newarray,     //188   //Allocate new array
+  j_anewarray,    //189   //Allocate new array of refernces to object
+  j_arraylength,  //190   //Get length of array
+  j_athrow,       //191   //Throw exception or error
+  j_checkcast,    //192   //Make sure object is of given type
+  j_instanceof,   //193   //Determine if an object is of given type
+  j_monitorenter, //194   //Enter monitored region of code
+  j_monitorexit,  //195   //Exit monitored region of code
+  j_wide,         //196   //wide (prefix of command)
+  j_multianewarray, //197 //Allocate new multi-dimensional array
+  j_ifnull,       //198   //Branch if NULL-ptr
+  j_ifnonnull,    //199   //Branch if not NULL-ptr
+  j_goto_w,       //200   //Branch always (wide index)
+  j_jsr_w,        //201   //Jump subroutine (wide index)
+  j_breakpoint,   //202   //Stop and pass control to breakpoint handler
+  //
+  j_lastnorm,
+  j_a_invokesuper = j_lastnorm,
+  j_a_invokevirtualobject,
+  j_a_invokeignored,
+  //bottom of table ! (emu)
+  j_a_software,
+  j_a_hardware,
+  //
+  j_last
+};
 
-enum name_quick {
-j_ldc_quick = j_lastnorm,       //203     (18)
-j_ldcw_quick,                   //204     (19)
-j_ldc2w_quick,                  //205     (20)
-j_getfield_quick,               //206     (180)
-j_putfield_quick,               //207     (181)
-j_getfield2_quick,              //208
-j_putfield2_quick,              //209
-j_getstatic_quick,              //210     (178)
-j_putstatic_quick,              //211     (179)
-j_getstatic2_quick,             //212
-j_putstatic2_quick,             //213
-j_invokevirtual_quick,          //214     (182)
-j_invokenonvirtual_quick,       //215     (183)
-j_invokesuper_quick,            //216
-j_invokestatic_quick,           //217     (184)
-j_invokeinterface_quick,        //218     (185)
-j_invokevirtualobject_quick,    //219
-j_invokeignored_quick,          //220
-j_new_quick,                    //221     (187)
-j_anewarray_quick,              //222     (189)
-j_multianewarray_quick,         //223     (197)
-j_checkcast_quick,              //224     (192)
-j_instanceof_quick,             //225     (193)
-j_invokevirtual_quick_w,        //226
-j_getfield_quick_w,             //227
-j_putfield_quick_w,             //228
-j_quick_last
-    };
+enum name_quick
+{
+  j_ldc_quick = j_lastnorm,       //203     (18)
+  j_ldcw_quick,                   //204     (19)
+  j_ldc2w_quick,                  //205     (20)
+  j_getfield_quick,               //206     (180)
+  j_putfield_quick,               //207     (181)
+  j_getfield2_quick,              //208
+  j_putfield2_quick,              //209
+  j_getstatic_quick,              //210     (178)
+  j_putstatic_quick,              //211     (179)
+  j_getstatic2_quick,             //212
+  j_putstatic2_quick,             //213
+  j_invokevirtual_quick,          //214     (182)
+  j_invokenonvirtual_quick,       //215     (183)
+  j_invokesuper_quick,            //216
+  j_invokestatic_quick,           //217     (184)
+  j_invokeinterface_quick,        //218     (185)
+  j_invokevirtualobject_quick,    //219
+  j_invokeignored_quick,          //220
+  j_new_quick,                    //221     (187)
+  j_anewarray_quick,              //222     (189)
+  j_multianewarray_quick,         //223     (197)
+  j_checkcast_quick,              //224     (192)
+  j_instanceof_quick,             //225     (193)
+  j_invokevirtual_quick_w,        //226
+  j_getfield_quick_w,             //227
+  j_putfield_quick_w,             //228
+  j_quick_last
+};
 
 /*
  *      Interactive disassembler (IDA).
@@ -3223,7 +3914,7 @@ j_quick_last
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 ARM_null = 0,           // Unknown Operation
 ARM_ret,                // Return from Subroutine
@@ -3623,7 +4314,7 @@ ARM_vmov,               // Vector Move
 ARM_vmovl,              // Vector Move Long
 ARM_vmovn,              // Vector Move and Narrow
 ARM_vmrs,               // Move FPSCR to ARM Register
-ARM_vmsr,               // Move to FPSCR from ARM Register 
+ARM_vmsr,               // Move to FPSCR from ARM Register
 ARM_vmul,               // Vector Multiply
 ARM_vmull,              // Vector Multiply Long
 ARM_vmvn,               // Vector Bitwise NOT
@@ -3893,8 +4584,8 @@ ARM_fcvtau,             // Convert Floating-point to Unsigned Integer (Round to 
 ARM_fcvtnu,             // Convert Floating-point to Unsigned Integer (Round to Nearest, Ties to Even)
 ARM_fcvtpu,             // Convert Floating-point to Unsigned Integer (Round towards +Infinity)
 ARM_fcvtmu,             // Convert Floating-point to Unsigned Integer (Round towards -Infinity)
-ARM_ucvtf,              // Convert Unsigned Integer to Floating-point 
-ARM_scvtf,              // Convert Signed Integer to Floating-point 
+ARM_ucvtf,              // Convert Unsigned Integer to Floating-point
+ARM_scvtf,              // Convert Signed Integer to Floating-point
 ARM_fcvtn,              // Floating-point Convert Precision, Narrow
 ARM_fcvtn2,             // Floating-point Convert Precision, Narrow (second part)
 ARM_fcvtl,              // Floating-point Convert Precision, Long
@@ -4091,6 +4782,87 @@ ARM_sminv,              // Signed Integer Min Element in Vector
 ARM_fminv,              // Floating-point Min Element in Vector
 ARM_fminnmv,            // Floating-point minNum Element in Vector
 
+// atomic operations (ARMv8.1/ARMv8.3)
+//ARM_swp,              // Swap value with memory, No memory ordering
+ARM_swpl,               // Swap value with memory, Release
+ARM_swpa,               // Swap value with memory, Acquire
+ARM_swpal,              // Swap value with memory, Acquire and release
+
+ARM_ldapr,              // Load-Acquire RCpc Register
+
+ARM_ldadd,             // Atomic add on value in memory (return initial value), No memory ordering
+ARM_ldaddl,            // Atomic add on value in memory (return initial value), Release
+ARM_ldadda,            // Atomic add on value in memory (return initial value), Acquire
+ARM_ldaddal,           // Atomic add on value in memory (return initial value), Acquire and release
+ARM_stadd,             // Atomic add on value in memory (no return), No memory ordering
+ARM_staddl,            // Atomic add on value in memory (no return), Release
+
+ARM_ldclr,             // Atomic bit clear on value in memory (return initial value), No memory ordering
+ARM_ldclrl,            // Atomic bit clear on value in memory (return initial value), Release
+ARM_ldclra,            // Atomic bit clear on value in memory (return initial value), Acquire
+ARM_ldclral,           // Atomic bit clear on value in memory (return initial value), Acquire and release
+ARM_stclr,             // Atomic bit clear on value in memory (no return), No memory ordering
+ARM_stclrl,            // Atomic bit clear on value in memory (no return), Release
+
+ARM_ldeor,             // Atomic exclusive OR on value in memory (return initial value), No memory ordering
+ARM_ldeorl,            // Atomic exclusive OR on value in memory (return initial value), Release
+ARM_ldeora,            // Atomic exclusive OR on value in memory (return initial value), Acquire
+ARM_ldeoral,           // Atomic exclusive OR on value in memory (return initial value), Acquire and release
+ARM_steor,             // Atomic exclusive OR on value in memory (no return), No memory ordering
+ARM_steorl,            // Atomic exclusive OR on value in memory (no return), Release
+
+ARM_ldset,             // Atomic bit set on value in memory (return initial value), No memory ordering
+ARM_ldsetl,            // Atomic bit set on value in memory (return initial value), Release
+ARM_ldseta,            // Atomic bit set on value in memory (return initial value), Acquire
+ARM_ldsetal,           // Atomic bit set on value in memory (return initial value), Acquire and release
+ARM_stset,             // Atomic bit set on value in memory (no return), No memory ordering
+ARM_stsetl,            // Atomic bit set on value in memory (no return), Release
+
+ARM_ldsmax,            // Atomic signed maximum  on value in memory (return initial value), No memory ordering
+ARM_ldsmaxl,           // Atomic signed maximum  on value in memory (return initial value), Release
+ARM_ldsmaxa,           // Atomic signed maximum  on value in memory (return initial value), Acquire
+ARM_ldsmaxal,          // Atomic signed maximum  on value in memory (return initial value), Acquire and release
+ARM_stsmax,            // Atomic signed maximum  on value in memory (no return), No memory ordering
+ARM_stsmaxl,            // Atomic signed maximum  on value in memory (no return), Release
+
+
+ARM_ldsmin,            // Atomic signed minimum  on value in memory (return initial value), No memory ordering
+ARM_ldsminl,           // Atomic signed minimum  on value in memory (return initial value), Release
+ARM_ldsmina,           // Atomic signed minimum  on value in memory (return initial value), Acquire
+ARM_ldsminal,          // Atomic signed minimum  on value in memory (return initial value), Acquire and release
+ARM_stsmin,            // Atomic signed minimum  on value in memory (no return), No memory ordering
+ARM_stsminl,            // Atomic signed minimum  on value in memory (no return), Release
+
+ARM_ldumax,            // Atomic unsigned maximum  on value in memory (return initial value), No memory ordering
+ARM_ldumaxl,           // Atomic unsigned maximum  on value in memory (return initial value), Release
+ARM_ldumaxa,           // Atomic unsigned maximum  on value in memory (return initial value), Acquire
+ARM_ldumaxal,          // Atomic unsigned maximum  on value in memory (return initial value), Acquire and release
+ARM_stumax,            // Atomic unsigned maximum  on value in memory (no return), No memory ordering
+ARM_stumaxl,            // Atomic unsigned maximum  on value in memory (no return), Release
+
+
+ARM_ldumin,            // Atomic unsigned minimum  on value in memory (return initial value), No memory ordering
+ARM_lduminl,           // Atomic unsigned minimum  on value in memory (return initial value), Release
+ARM_ldumina,           // Atomic unsigned minimum  on value in memory (return initial value), Acquire
+ARM_lduminal,          // Atomic unsigned minimum  on value in memory (return initial value), Acquire and release
+ARM_stumin,            // Atomic unsigned minimum  on value in memory (no return), No memory ordering
+ARM_stuminl,            // Atomic unsigned minimum  on value in memory (no return), Release
+
+//Compare and Swap (ARMv8.1)
+
+ARM_cas,            // Compare and Swap , No memory ordering
+ARM_casl,           // Compare and Swap, Release
+ARM_casa,           // Compare and Swap, Acquire
+ARM_casal,          // Compare and Swap, Acquire and release
+
+ARM_casp,            // Compare and Swap Pair, No memory ordering
+ARM_caspl,           // Compare and Swap Pair, Release
+ARM_caspa,           // Compare and Swap Pair, Acquire
+ARM_caspal,          // Compare and Swap Pair, Acquire and release
+
+ARM_ldlar,           // Load LOAcquire Register
+ARM_stllr,           // Store LORelease Register
+
 ARM_last
 
     };
@@ -4107,7 +4879,7 @@ ARM_last
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 // Original TMS320C62x instructions
 
@@ -4358,7 +5130,7 @@ TMS6_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
   I196_null = 0,    // Unknown Operation
 
@@ -4543,7 +5315,7 @@ enum
 extern instruc_t Instructions[];
 
 
-enum 
+enum
 {
 SH3_null = 0,     // Unknown Operation
 
@@ -4747,7 +5519,7 @@ SH4_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
   Z8_null = 0,    // Unknown Operation
 
@@ -4816,7 +5588,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 AVR_null = 0,     // Unknown Operation
@@ -4968,7 +5740,7 @@ AVR_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 MIPS_null = 0,    // Unknown Operation
 
@@ -5645,7 +6417,7 @@ PSP_vi2uc,             // Vector convert integer to unsigned char
 PSP_vi2us,             // Vector convert integer to unsigned short
 PSP_vidt,              // Set vector to identity
 PSP_viim,              // Set integer immediate
-PSP_vlgb,              // 
+PSP_vlgb,              //
 PSP_vlog2,             // Vector logarithm base 2
 PSP_vmax,              // Vector maximum values
 PSP_vmfvc,             // Vector move from control register
@@ -5702,7 +6474,7 @@ PSP_vtfm3,             // Transform vector by matrix
 PSP_vtfm4,             // Transform vector by matrix
 PSP_vuc2i,             // Vector convert unsigned char to integer
 PSP_vus2i,             // Vector convert unsigned short to integer
-PSP_vwbn,              // 
+PSP_vwbn,              //
 PSP_vzero,             // VFPU set vector to zeroes
 
 // PSP Media Engine instructions
@@ -6685,7 +7457,7 @@ MIPS_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 H8_null = 0,      // Unknown Operation
@@ -6779,7 +7551,7 @@ H8_xorc,           // Logical XOR with control register
 
 // H8SX
 H8_rtel,           // Returns from an exception, restoring data to multiple general registers
-H8_rtsl,           // Returns from a subroutine, restoring data to multiple general registers 
+H8_rtsl,           // Returns from a subroutine, restoring data to multiple general registers
 H8_movmd,          // Transfers a data block
 H8_movsd,          // Transfers a data block with zero detection
 H8_bras,           // Branch always after the next instruction (delay slot)
@@ -6794,7 +7566,7 @@ H8_bstz,           // Bit STore Zero flag
 H8_bistz,          // Bit Invert STore Zero flag
 H8_bfld,           // Bit Field LoaD
 H8_bfst,           // Bit Field STore
-H8_muls,           // MULtiply as Signed 
+H8_muls,           // MULtiply as Signed
 H8_divs,           // DIVide as Signed
 H8_mulu,           // MULtiply as Unsigned
 H8_divu,           // DIVide as Unsigned
@@ -6802,7 +7574,7 @@ H8_mulsu,          // MULtiply as Signed
 H8_muluu,          // MULtiply as Unsigned
 H8_brabc,          // BRAnch if Bit Cleared
 H8_brabs,          // BRAnch if Bit Set
-H8_bsrbc,          // Branch to SubRoutine if Bit Cleared 
+H8_bsrbc,          // Branch to SubRoutine if Bit Cleared
 H8_bsrbs,          // Branch to SubRoutine if Bit Set
 
 H8_last,
@@ -6819,7 +7591,7 @@ H8_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 PIC_null = 0,      // Unknown Operation
@@ -7010,7 +7782,7 @@ PIC_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 SPARC_null = 0,   // Unknown Operation
 
@@ -7252,6 +8024,14 @@ SPARC_shutdown,      // Power-down support
 // V8 only instructions
 SPARC_rett,          // Return from trap
 
+// UA 2005 instructions
+SPARC_bmask,         // Byte Mask
+SPARC_bshuffle,      // Byte Shuffle
+SPARC_edgen,         // Edge boundary processing (no CC) {little-endian}
+SPARC_rdhpr,         // Read Hyperprivileged Register
+SPARC_wrhpr,         // Write Hyperprivileged Register
+SPARC_siam,          // Set Interval Arithmetic Mode
+
 SPARC_last,
 
 };
@@ -7266,7 +8046,7 @@ SPARC_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 HPPA_null = 0,     // Unknown Operation
 
@@ -7437,7 +8217,7 @@ HPPA_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 H8500_null = 0,      // Unknown Operation
@@ -7558,7 +8338,7 @@ H8500_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 DSP56_null = 0,     // Unknown Operation
 
@@ -7693,7 +8473,7 @@ DSP56_vsl,          // Viterbi Shift Left
 DSP56_wait,         // Wait for Interrupt or DMA Request (Low-Power Standby)
 DSP56_zero,         // Zero Extend Accumulator
 DSP56_swi,          // Software Interrupt (only for 56000)
-DSP56_pmov,         // Pseudo cmd
+DSP56_pmov,         // Pseudo insn
 DSP56_last,
 
 };
@@ -7702,7 +8482,7 @@ DSP56_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 DSP96_null = 0,     // Unknown Operation
 
@@ -7866,7 +8646,7 @@ enum PMNum // Parallel Move enumeration
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 C166_null = 0,      // Unknown Operation
@@ -7996,7 +8776,7 @@ C166_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 ST20_null = 0,      // Unknown Operation
 
@@ -8236,7 +9016,7 @@ ST20_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 ST7_null = 0,           // Unknown Operation
 
@@ -8318,7 +9098,7 @@ ST7_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 IA64_null,       //   0
 IA64_0,          //   1
@@ -8618,7 +9398,7 @@ IA64_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 NET_null = 0,           // Unknown Operation
 
@@ -8875,7 +9655,7 @@ NET_last,
 extern instruc_t Instructions[];
 
 
-enum 
+enum
 {
 MC12_null = 0,          // Unknown Operation
 
@@ -9197,7 +9977,7 @@ MC12XGATE_blt,          // Branch if Lower than Zero
 MC12XGATE_bmi,          // Branch if Minus
 MC12XGATE_bne,          // Branch if Not Equal
 MC12XGATE_bpl,          // Branch if Plus
-MC12XGATE_bra,          // Branch Always 
+MC12XGATE_bra,          // Branch Always
 MC12XGATE_brk,          // Break
 MC12XGATE_bvc,          // Branch if Overflow Cleared
 MC12XGATE_bvs,          // Branch if Overflow Set
@@ -9264,7 +10044,7 @@ MC12_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
   MC6816_null = 0, // Unknown Operation
@@ -9616,7 +10396,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 I960_null = 0,          // Unknown Operation
 
@@ -9901,7 +10681,7 @@ I960_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 F2MC_null = 0,     // Unknown Operation
@@ -10120,7 +10900,7 @@ F2MC_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 TMS320C3X_null = 0,     // Unknown Operation
 
@@ -10216,8 +10996,8 @@ TMS320C3X_RETScond,             // Return from subroutine conditionally
 TMS320C3X_RETIU,                // Return from interrupt unconditionally
 TMS320C3X_RETSU,                // Return from subroutine unconditionally
 
-TMS320C3X_NONE,                 // Pseudo cmd (more accurate definition need)
-TMS320C3X_MV_IDX,               // Pseudo cmd (move to next index need)
+TMS320C3X_NONE,                 // Pseudo insn (more accurate definition need)
+TMS320C3X_MV_IDX,               // Pseudo insn (move to next index need)
 TMS320C3X_last,                 // last ID
 
 };
@@ -10233,7 +11013,7 @@ TMS320C3X_last,                 // last ID
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 TMS320C54_null = 0, // Unknown Operation
@@ -10541,7 +11321,7 @@ TMS320C54_last
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 TMS320C55_null = 0,      // Unknown Operation
@@ -10888,7 +11668,7 @@ TMS320C55_last
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 TRIMEDIA_null,
 
@@ -11118,7 +11898,7 @@ TRIMEDIA_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 NEC_78K_0_null = 0,       // Unknown Operation
 
@@ -11211,55 +11991,55 @@ NEC_78K_0_last
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
-NEC_78K_0S_null = 0,           // Unknown Operation
-NEC_78K_0S_cmp,                // Compare Byte Data Comparison
-NEC_78K_0S_xor,                // Exclusive Or Exclusive Logical Sum of Byte Data
-NEC_78K_0S_and,                // AND Logical Product of Byte Data
-NEC_78K_0S_or,                 // OR Logical Sum of Byte Data
-NEC_78K_0S_add,                // ADD Byte Data Addition
-NEC_78K_0S_sub,                // Subtract Byte Data Subtraction
-NEC_78K_0S_addc,               // Add with Carry Addition of Byte Data with Carry
-NEC_78K_0S_subc,               // Subtract with Carry Subtraction of Byte Data with Carry
-NEC_78K_0S_subw,               // Subtract Word Data Subtraction
-NEC_78K_0S_addw,               // Add Word Data Addition
-NEC_78K_0S_cmpw,               // Compare Word Data Comparison
-NEC_78K_0S_inc,                // Increment Byte Data Increment
-NEC_78K_0S_dec,                // Decrement Byte Data Decrement
-NEC_78K_0S_incw,               // Increment Word Data Increment
-NEC_78K_0S_decw,               // Decrement Word Data Decrement
-NEC_78K_0S_ror,                // Rotate Right Byte Data Rotation to the Right
-NEC_78K_0S_rol,                // Rotate Left Byte Data Rotation to the Left
-NEC_78K_0S_rorc,               // Rotate Right with Carry Byte Data Rotation to the Right with Carry
-NEC_78K_0S_rolc,               // Rotate Left with Carry Byte Data Rotation to the Left with Carry
-NEC_78K_0S_call,               // CALL Subroutine Call (16 Bit Direct)
-NEC_78K_0S_callt,              // Call Table Subroutine Call (Call Table Reference)
-NEC_78K_0S_ret,                // Return from Subroutine
-NEC_78K_0S_reti,               // Return from Interrupt / Return from Hardware Vectored Interrupt
-NEC_78K_0S_mov,                // Move Byte Data Transfer
-NEC_78K_0S_xch,                // Exchange Byte Data Exchange
-NEC_78K_0S_xchw,               // Exchange Word Data Exchange
-NEC_78K_0S_set1,               // Set Single Bit (Carry Flag) 1 Bit Data Set
-NEC_78K_0S_clr1,               // Clear Single Bit (Carry Flag) 1 Bit Data Clear
-NEC_78K_0S_not1,               // Not Single Bit (Carry Flag) 1 Bit Data Logical Negation
-NEC_78K_0S_push,               // Push
-NEC_78K_0S_pop,                // Pop
-NEC_78K_0S_movw,               // Move Word Data Transfer / Word Data Transfer with Stack Pointer
-NEC_78K_0S_br,                 // Unconditional Branch
-NEC_78K_0S_bc,                 // Branch if Carry Conditional Branch with Carry Flag (CY = 1)
-NEC_78K_0S_bnc,                // Branch if Not Carry Conditional Branch with Carry Flag (CY = 0)
-NEC_78K_0S_bz,                 // Branch if Zero Conditional Branch with Zero Flag (Z = 1)
-NEC_78K_0S_bnz,                // Branch if Not Zero Conditional Branch with Zero Flag (Z = 0)
-NEC_78K_0S_bt,                 // Branch if True Conditional Branch by Bit Test (Byte Data Bit = 1)
-NEC_78K_0S_bf,                 // Branch if False Conditional Branch by Bit Test (Byte Data Bit = 0)
-NEC_78K_0S_dbnz,               // Decrement and Branch if Not Zero Conditional Loop (R1 != 0)
-NEC_78K_0S_nop,                // No Operation
-NEC_78K_0S_EI,                 // Enable Interrupt
-NEC_78K_0S_DI,                 // Disable Interrupt
-NEC_78K_0S_HALT,               // HALT Mode Set
-NEC_78K_0S_STOP,               // Stop Mode Set
-NEC_78K_0S_last
+  NEC_78K_0S_null = 0,           // Unknown Operation
+  NEC_78K_0S_cmp,                // Compare Byte Data Comparison
+  NEC_78K_0S_xor,                // Exclusive Or Exclusive Logical Sum of Byte Data
+  NEC_78K_0S_and,                // AND Logical Product of Byte Data
+  NEC_78K_0S_or,                 // OR Logical Sum of Byte Data
+  NEC_78K_0S_add,                // ADD Byte Data Addition
+  NEC_78K_0S_sub,                // Subtract Byte Data Subtraction
+  NEC_78K_0S_addc,               // Add with Carry Addition of Byte Data with Carry
+  NEC_78K_0S_subc,               // Subtract with Carry Subtraction of Byte Data with Carry
+  NEC_78K_0S_subw,               // Subtract Word Data Subtraction
+  NEC_78K_0S_addw,               // Add Word Data Addition
+  NEC_78K_0S_cmpw,               // Compare Word Data Comparison
+  NEC_78K_0S_inc,                // Increment Byte Data Increment
+  NEC_78K_0S_dec,                // Decrement Byte Data Decrement
+  NEC_78K_0S_incw,               // Increment Word Data Increment
+  NEC_78K_0S_decw,               // Decrement Word Data Decrement
+  NEC_78K_0S_ror,                // Rotate Right Byte Data Rotation to the Right
+  NEC_78K_0S_rol,                // Rotate Left Byte Data Rotation to the Left
+  NEC_78K_0S_rorc,               // Rotate Right with Carry Byte Data Rotation to the Right with Carry
+  NEC_78K_0S_rolc,               // Rotate Left with Carry Byte Data Rotation to the Left with Carry
+  NEC_78K_0S_call,               // CALL Subroutine Call (16 Bit Direct)
+  NEC_78K_0S_callt,              // Call Table Subroutine Call (Call Table Reference)
+  NEC_78K_0S_ret,                // Return from Subroutine
+  NEC_78K_0S_reti,               // Return from Interrupt / Return from Hardware Vectored Interrupt
+  NEC_78K_0S_mov,                // Move Byte Data Transfer
+  NEC_78K_0S_xch,                // Exchange Byte Data Exchange
+  NEC_78K_0S_xchw,               // Exchange Word Data Exchange
+  NEC_78K_0S_set1,               // Set Single Bit (Carry Flag) 1 Bit Data Set
+  NEC_78K_0S_clr1,               // Clear Single Bit (Carry Flag) 1 Bit Data Clear
+  NEC_78K_0S_not1,               // Not Single Bit (Carry Flag) 1 Bit Data Logical Negation
+  NEC_78K_0S_push,               // Push
+  NEC_78K_0S_pop,                // Pop
+  NEC_78K_0S_movw,               // Move Word Data Transfer / Word Data Transfer with Stack Pointer
+  NEC_78K_0S_br,                 // Unconditional Branch
+  NEC_78K_0S_bc,                 // Branch if Carry Conditional Branch with Carry Flag (CY = 1)
+  NEC_78K_0S_bnc,                // Branch if Not Carry Conditional Branch with Carry Flag (CY = 0)
+  NEC_78K_0S_bz,                 // Branch if Zero Conditional Branch with Zero Flag (Z = 1)
+  NEC_78K_0S_bnz,                // Branch if Not Zero Conditional Branch with Zero Flag (Z = 0)
+  NEC_78K_0S_bt,                 // Branch if True Conditional Branch by Bit Test (Byte Data Bit = 1)
+  NEC_78K_0S_bf,                 // Branch if False Conditional Branch by Bit Test (Byte Data Bit = 0)
+  NEC_78K_0S_dbnz,               // Decrement and Branch if Not Zero Conditional Loop (R1 != 0)
+  NEC_78K_0S_nop,                // No Operation
+  NEC_78K_0S_EI,                 // Enable Interrupt
+  NEC_78K_0S_DI,                 // Disable Interrupt
+  NEC_78K_0S_HALT,               // HALT Mode Set
+  NEC_78K_0S_STOP,               // Stop Mode Set
+  NEC_78K_0S_last
 };
 
 
@@ -11269,11 +12049,11 @@ extern struct instruc_t Instructions[];
 // The instruction types (``itype''s)
 // M16C/60, M16C/20, M16C/Tiny  CPUs implements.
 //
-// Please, don't put anything else in this file but the itypes: 
-// IDA possesses build scripts that 
+// Please, don't put anything else in this file but the itypes:
+// IDA possesses build scripts that
 // will parse ins.hpp files, and build a database of
 // <cpu> + <itype> -> <autocomment>
-// Where 'autocomment' is the contents of the comment string 
+// Where 'autocomment' is the contents of the comment string
 // associated to the itype.
 
 enum m16c_itype_t
@@ -11405,7 +12185,7 @@ enum m16c_itype_t
   M16C_wait,        // Wait
   M16C_xchg,        // Exchange
   M16C_xor,         // Exclusive OR
-  M16C_last  
+  M16C_last
 };
 
 
@@ -11418,7 +12198,7 @@ enum m16c_itype_t
 extern instruc_t Instructions[];
 
 // m32r instructions declaration
-enum 
+enum
 {
     m32r_null = 0,     // Null instruction
     m32r_add,          // Add
@@ -11571,7 +12351,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
     m740_null = 0,           // null instruction
     m740_adc,                // add with carry
@@ -11654,7 +12434,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
     // 7700 :
 
@@ -11786,7 +12566,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 m7900_null = 0,           // Unknown Operation
 
@@ -12075,7 +12855,7 @@ m7900_last   //
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
     st9_null = 0,           // Unknown Operation.
     st9_ld,                 // Load.
@@ -12190,7 +12970,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
     fr_null = 0,            // null instruction
 
@@ -12307,7 +13087,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 ALPHA_null = 0,     // Unknown Operation
 
@@ -12545,11 +13325,11 @@ ALPHA_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 KR1878_null = 0,     // Unknown Operation
 
-KR1878_mov,     
+KR1878_mov,
 KR1878_cmp,      // Compare
 KR1878_add,      // Addition
 KR1878_sub,      // Subtract
@@ -12557,7 +13337,7 @@ KR1878_and,      // Logical AND
 KR1878_or,       // Logical Inclusive OR
 KR1878_xor,      // Logical Exclusive OR
 
-KR1878_movl,     
+KR1878_movl,
 KR1878_cmpl,     // Compare
 KR1878_addl,     // Addition
 KR1878_subl,     // Subtract
@@ -12577,15 +13357,15 @@ KR1878_rrc,      // Rotate Right
 KR1878_adc,      // Add with Carry
 KR1878_sbc,      // Subtract with Carry
 
-KR1878_ldr,     
-KR1878_mtpr,     
-KR1878_mfpr,     
-KR1878_push,     
-KR1878_pop,     
-KR1878_sst,     
-KR1878_cst,     
-KR1878_tof,     
-KR1878_tdc,     
+KR1878_ldr,
+KR1878_mtpr,
+KR1878_mfpr,
+KR1878_push,
+KR1878_pop,
+KR1878_sst,
+KR1878_cst,
+KR1878_tof,
+KR1878_tdc,
 
 KR1878_jmp,      // Jump
 KR1878_jsr,      // Jump to Subroutine
@@ -12602,10 +13382,10 @@ KR1878_rtsc,     // Return from Subroutine
 KR1878_rti,      // Return from Interrupt
 
 KR1878_nop,      // No Operation
-KR1878_wait,     
-KR1878_stop,     
-KR1878_reset,     
-KR1878_sksp,     
+KR1878_wait,
+KR1878_stop,
+KR1878_reset,
+KR1878_sksp,
 
 KR1878_last,
 
@@ -12615,7 +13395,7 @@ KR1878_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 AD218X_null = 0,        // Unknown Operation
 // AMF subcodes
@@ -12668,11 +13448,11 @@ AD218X_shft_d,          // sr = exp op (hix)
 AD218X_shft_e,          // sr = exp op (lo)
 AD218X_shft_f,          // sr = expadj op
 // ALU/MAC specific options
-AD218X_alu_00,          // op = op + op + C                     [IF  COND] X + Const  
-AD218X_alu_01,          // op = op + op 
+AD218X_alu_00,          // op = op + op + C                     [IF  COND] X + Const
+AD218X_alu_01,          // op = op + op
 AD218X_alu_02,          // op = op - op + C - 1                 [IF  COND] X - Const
 AD218X_alu_03,          // op = op - op
-AD218X_alu_04,          // op = op - op + C - 1                 [IF  COND] Const - X  
+AD218X_alu_04,          // op = op - op + C - 1                 [IF  COND] Const - X
 AD218X_alu_05,          // op = op - op
 AD218X_alu_06,          // op = op and op                       [IF  COND] X and,or,xor Const
 AD218X_alu_07,          // op = op or op
@@ -12713,7 +13493,7 @@ AD218X_mac_b,           // if mv sat mr                         ALU/MAC Type 25
 // ALU/MAC Common case
 AD218X_amf,             // [IF  COND] AMF
 // Shifter Common case
-AD218X_shft,            // [IF  COND] Shifter    
+AD218X_shft,            // [IF  COND] Shifter
 // Shifter specific options. Shifter Type 15, const
 AD218X_shifter_0,       // sr = ashift op by op (hi)
 AD218X_shifter_1,       // sr = sr or ashift op by op (hi)
@@ -12728,9 +13508,9 @@ AD218X_move_0,          // op = op                              Internal Data Mo
 AD218X_move_1,          // op = op                              Load Register Immediate, Instruction Type 6:
 AD218X_move_2,          // op = op                              Load Non-Data Register Immediate, Instruction Type 7:
 AD218X_move_3,          // op = dm(op)                          Data Memory Read (Direct Address), Instruction Type 3:
-AD218X_move_4,          // op = dm(op, op)                      Data Memory Read, Instruction Type 4:        
+AD218X_move_4,          // op = dm(op, op)                      Data Memory Read, Instruction Type 4:
 AD218X_move_5,          // op = pm(op, op)                      Program Memory Read
-AD218X_move_6,          // dm(op) = op                          Data Memory Write (Direct Address)   
+AD218X_move_6,          // dm(op) = op                          Data Memory Write (Direct Address)
 AD218X_move_7,          // dm(op, op) = op                      Data Memory Write, Instruction Type 4:
 AD218X_move_8,          // dm(op, op) = op                      Data Memory Write, Immediate Data, Instruction Type 2:
 AD218X_move_9,          // pm(op, op) = op                      Program Memory Write, Instruction Type 5
@@ -12752,7 +13532,7 @@ AD218X_rti_cond,        // Conditional Return, Instruction Type 20:
 AD218X_nop,             // No operation, Instruction Type 30
 AD218X_do,              // Do Until, Instruction Type 11:
 // Misc
-AD218X_idle,            // Idle, Instruction Type 31:        
+AD218X_idle,            // Idle, Instruction Type 31:
 AD218X_idle_1,
 AD218X_flag_out,        // Flag Out Mode Control Instruction Type 28:
 AD218X_stack_ctl,       // Stack Control, Instruction Type 26:
@@ -12761,17 +13541,17 @@ AD218X_tops_w,          // toppcstack = op                      Internal Data Mo
 AD218X_tops_r,          // op = toppcstack
 AD218X_ints_dis,        // dis ints
 AD218X_ints_ena,        // ena ints
-AD218X_modify,          // modify(op, op)                       Modify Address Register, Instruction Type 21:        
+AD218X_modify,          // modify(op, op)                       Modify Address Register, Instruction Type 21:
 // ALU/MAC operation with Data Memory Read/Write
 AD218X_double_move,     // op = dm(op, op), op = pm(op, op)     Data & Program Memory Read, Instruction Type 1:
 AD218X_amf_move_0,      // amf_cmd, op = dm(op, op)             ALU/MAC operation with Data Memory Read, Instruction Type 4:
-AD218X_amf_move_1,      // amf_cmd, op = pm(op, op)             ALU/MAC operation with Program Memory Read, Instruction Type 5:        
+AD218X_amf_move_1,      // amf_cmd, op = pm(op, op)             ALU/MAC operation with Program Memory Read, Instruction Type 5:
 AD218X_amf_move_2,      // amf_cmd, op = dm(op, op)             Shift operation with Data Memory Read, Instruction Type 12:
 AD218X_amf_move_3,      // amf_cmd, op = pm(op, op)             Shift operation with Program Memory Read, Instruction Type 13:
 AD218X_amf_move_4,      // amf_cmd, op = op                     ALU/MAC operation with Data Register Move, Instruction Type 8:
 AD218X_amf_move_5,      // amf_cmd, op = op                     Shift operation with Data Register Move, Instruction Type 14:
 AD218X_amf_move_6,      // dm(op, op) = op, amf_cmd             ALU/MAC operation with Data Memory Write, Instruction Type 4:
-AD218X_amf_move_7,      // pm(op, op) = op, amf_cmd             ALU/MAC operation with Program Memory Write, Instruction Type 5:        
+AD218X_amf_move_7,      // pm(op, op) = op, amf_cmd             ALU/MAC operation with Program Memory Write, Instruction Type 5:
 AD218X_amf_move_8,      // dm(op, op) = op, amf_cmd             Shift operation with Data Memory Write, Instruction Type 12:
 AD218X_amf_move_9,      // pm(op, op) = op, amf_cmd             Shift operation with Program Memory Write, Instruction Type 13:
 AD218X_amf_move_a,      // amf_cmd, op = dm(op, op), op = pm(op, op)    ALU/MAC with Data and Program Memory Read, Instruction Type 1:
@@ -12783,7 +13563,7 @@ AD218X_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 OAK_Dsp_null = 0,       // Unknown Operation
 OAK_Dsp_proc,           // cmd need further process
@@ -12826,7 +13606,7 @@ OAK_Dsp_copy,           //1111  Copy aX-accumulator
 // ---
 OAK_Dsp_norm,           //Normalize
 OAK_Dsp_divs,           //Division Step
-// ALB subcodes 
+// ALB subcodes
 OAK_Dsp_set,            //000  Set Bit-field
 OAK_Dsp_rst,            //001  Reset Bit-field
 OAK_Dsp_chng,           //010  Change Bit-field
@@ -12840,7 +13620,7 @@ OAK_Dsp_maxd,           //Maximum between Data Memory Location and Accumulator
 OAK_Dsp_max,            //Maximum between Two Accumulators
 OAK_Dsp_min,            //Minimum between Two Accumulators
 OAK_Dsp_lim,            //Limit Accumulator     (lim aX[, aX])
-// MUL subcodes 
+// MUL subcodes
 OAK_Dsp_mpy,            //000  Multiply
 OAK_Dsp_mpysu,          //001  Multiply Signed by Unsigned
 OAK_Dsp_mac,            //010  Multiply and Accumulate Previous Product
@@ -12915,7 +13695,7 @@ OAK_Dsp_last,
 extern instruc_t Instructions[];
 
 //
-enum 
+enum
 {
 T900_null = 0,           // Unknown Operation
 T900_ld,
@@ -13061,7 +13841,7 @@ T900_last
 extern instruc_t Instructions[];
 
 //
-enum 
+enum
 {
 C39_null = 0,           // Unknown Operation
 C39_adc,
@@ -13191,7 +13971,7 @@ C39_last
 // list of instructions
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 CR16_null = 0,           // Unknown Operation
 CR16_addb,
@@ -13324,7 +14104,7 @@ CR16_last
 // List of instructions
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 mn102_null = 0,           // Unknown Operation
 mn102_add,
@@ -13411,7 +14191,7 @@ mn102_last
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 PPC_null = 0,   // Unknown Operation
@@ -14683,7 +15463,7 @@ PPC_or2is,            // [e_or2is] OR (2 operand) Immediate Shifted
 PPC_rlw,              // [e_rlw] Rotate Left Word
 PPC_rlwi,             // [e_rlwi] Rotate Left Word Immediate
 PPC_bclri,            // [se_bclri] Bit Clear Immediate
-//PPC_bctr,             // [se_bctr] Branch to Count Register 
+//PPC_bctr,             // [se_bctr] Branch to Count Register
 //PPC_bctrl,            // [se_bctrl] Branch to Count Register and Link
 PPC_bgeni,            // [se_bgeni] Bit Generate Immediate
 PPC_bmaski,           // [se_bmaski] Bit Mask Generate Immediate
@@ -15970,7 +16750,7 @@ enum NEC850_Instructions
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
  TRICORE_null = 0,           // Unknown Operation
  TRICORE_abs,
@@ -16370,6 +17150,13 @@ enum
  TRICORE_ftoq31z,
  TRICORE_ftouz,
  TRICORE_restore,
+
+ // new v1.6.1 instrcutions
+ TRICORE_crc32,
+ TRICORE_wait,
+ TRICORE_cmpswap_w,
+ TRICORE_swapmsk_w,
+
  TRICORE_last
 };
 
@@ -16384,7 +17171,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
   ARC_null = 0,                 // Unknown Operation
@@ -16490,10 +17277,10 @@ enum
   ARC_subsdw,                   // Subtract and saturate dual word
 
   // mac d16
-  ARC_muldw, 
+  ARC_muldw,
   ARC_muludw,
   ARC_mulrdw,
-  ARC_macdw, 
+  ARC_macdw,
   ARC_macudw,
   ARC_macrdw,
   ARC_msubdw,
@@ -16510,8 +17297,41 @@ enum
   ARC_mulhlw,
   ARC_mulhflw,
 
-  ARC_last,
+  // Major 6 compact insns
+  ARC_acm,
+  ARC_addqbs,
+  ARC_avgqb,
+  ARC_clamp,
+  ARC_daddh11,
+  ARC_daddh12,
+  ARC_daddh21,
+  ARC_daddh22,
+  ARC_dexcl1,
+  ARC_dexcl2,
+  ARC_dmulh11,
+  ARC_dmulh12,
+  ARC_dmulh21,
+  ARC_dmulh22,
+  ARC_dsubh11,
+  ARC_dsubh12,
+  ARC_dsubh21,
+  ARC_dsubh22,
+  ARC_drsubh11,
+  ARC_drsubh12,
+  ARC_drsubh21,
+  ARC_drsubh22,
+  ARC_fadd,
+  ARC_fmul,
+  ARC_fsub,
+  ARC_fxtr,
+  ARC_iaddr,
+  ARC_mpyqb,
+  ARC_sfxtr,
+  ARC_pkqb,
+  ARC_upkqb,
+  ARC_xpkqb,
 
+  ARC_last,
 };
 
 /*
@@ -16524,7 +17344,7 @@ enum
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 
 TMS28_null = 0,      // Unknown Operation
@@ -16698,7 +17518,7 @@ TMS28_last,
 
 extern instruc_t Instructions[];
 
-enum 
+enum
 {
 UNSP_null = 0,   // Unknown Operation
 
@@ -16808,7 +17628,7 @@ extern instruc_t Instructions[];
  * Dalvik opcode list.
  */
 
-enum 
+enum
 {
   DALVIK_NOP                          = 0x00,
 

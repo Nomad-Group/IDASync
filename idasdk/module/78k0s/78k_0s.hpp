@@ -49,24 +49,22 @@ enum nec_registers { rX, rA, rC, rB, rE, rD, rL, rH, rAX, rBC, rDE, rHL,
                      bCY,
                      Rcs, Rds };
 
-enum bitOper { SADDR=0, SFR, A, PSW, HL, CY};
+enum bitOper { SADDR=0, SFR, A, PSW, HL, CY };
 //------------------------------------------------------------------------
-extern char device[];
-extern char deviceparams[];
+extern qstring deviceparams;
+extern qstring device;
 
 struct ioport_bit_t;
-bool nec_find_ioport_bit(int port, int bit);
+bool nec_find_ioport_bit(outctx_t &ctx, int port, int bit);
 uint32 Get_Data_16bits();
 //------------------------------------------------------------------------
-void    idaapi header(void);
-void    idaapi footer(void);
+void idaapi nec78k0s_header(outctx_t &ctx);
+void idaapi nec78k0s_footer(outctx_t &ctx);
 
-void    idaapi segstart(ea_t ea);
+void idaapi nec78k0s_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi ana(void);
-int     idaapi emu(void);
-void    idaapi out(void);
-bool    idaapi outop(op_t &op);
+int  idaapi ana(insn_t *_insn);
+int  idaapi emu(const insn_t &insn);
 
 
 #endif

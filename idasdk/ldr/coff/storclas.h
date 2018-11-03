@@ -71,7 +71,7 @@
 #define C_HIDEXT        107     /* Un-named external symbol */
 #define C_BINCL         108     /* Marks beginning of include file */
 #define C_EINCL         109     /* Marks ending of include file */
-#define C_WEAKEXT       111     /* Weak external symbol */ 
+#define C_WEAKEXT       111     /* Weak external symbol */
 
 /* Storage classes for MS Windows */
 

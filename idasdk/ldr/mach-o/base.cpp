@@ -20,10 +20,11 @@ local void swap_fat_arch(fat_arch *fa)
   fa->align      = swap32(fa->align);
 }
 
-#if defined(LOADER_COMPILE) || defined(BUILD_DWARF) || defined(BUILD_EFD) || defined(BUILD_DEBUGGER)
+#if defined(LOADER_COMPILE) || defined(BUILD_DWARF) || defined(DWARFER) || defined(BUILD_EFD) || defined(BUILD_DEBUGGER)
 // ---------------------------------------------------------------------------
-int macho_arch_to_ida_arch(cpu_type_t cputype, cpu_subtype_t /*cpusubtype*/)
+int macho_arch_to_ida_arch(cpu_type_t cputype, cpu_subtype_t /*cpusubtype*/, bool *is_64)
 {
+  bool _64 = false;
   int target = -1;
   switch ( cputype )
   {
@@ -60,9 +61,11 @@ int macho_arch_to_ida_arch(cpu_type_t cputype, cpu_subtype_t /*cpusubtype*/)
       break;
 #ifdef __EA64__ // see also below, the error message for it
     case CPU_TYPE_ARM64:
+      _64 = true;
       target = PLFM_ARM;
       break;
     case CPU_TYPE_X86_64:
+      _64 = true;
       target = PLFM_386;
       break;
 #endif
@@ -70,6 +73,8 @@ int macho_arch_to_ida_arch(cpu_type_t cputype, cpu_subtype_t /*cpusubtype*/)
       target = PLFM_PPC;
       break;
   }
+  if ( is_64 != NULL )
+    *is_64 = _64;
   return target;
 }
 #endif
@@ -102,7 +107,7 @@ bool macho_file_t::parse_fat_header()
   if ( code == 0 || fheader.nfat_arch > 16 )
     return false;
 
-  uint32 fsize = qlsize(li);
+  uint64 fsize = qlsize(li);
   uint32 archs_size = fheader.nfat_arch * sizeof(fat_arch);
   if ( sizeof(fat_header) + archs_size >= fsize )
     return false;
@@ -120,10 +125,10 @@ bool macho_file_t::parse_fat_header()
     fat_arch *parch = &fat_archs[i];
     if ( code == 2 )
       swap_fat_arch(parch);
-    if ( parch->size <= sizeof(mach_header) ||
-         parch->size >= fsize ||
-         parch->offset < sizeof(fat_header) + archs_size ||
-         parch->offset + parch->size > fsize )
+    if ( parch->size <= sizeof(mach_header)
+      || parch->size >= fsize
+      || parch->offset < sizeof(fat_header) + archs_size
+      || parch->offset + parch->size > fsize )
     {
       fat_archs.clear();
       return false;

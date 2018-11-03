@@ -79,7 +79,6 @@ static const asm_t motasm =
   "Motorola DSP56K Assembler",
   0,
   NULL,         // header lines
-  NULL,         // bad instructions
   "org",        // org
   "end",        // end
 
@@ -102,10 +101,6 @@ static const asm_t motasm =
   "ds %s",      // uninited arrays
   "equ",        // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "*",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -146,7 +141,6 @@ static const asm_t gas =
   "GNU-like hypothetical assembler",
   0,
   NULL,         // header lines
-  NULL,         // bad instructions
   ".org",       // org
   NULL,         // end
 
@@ -169,10 +163,6 @@ static const asm_t gas =
   ".space %s",  // uninited arrays
   "=",          // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   ".",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -208,43 +198,42 @@ static ea_t AdditionalSegment(asize_t size, int offset, const char *name)
 {
   segment_t s;
   int step = is561xx() ? 0xF : 0x1000000-1;
-  s.startEA = freechunk(0x1000000, size, step);
-  s.endEA   = s.startEA + size;
-  s.sel     = allocate_selector((s.startEA-offset) >> 4);
+  s.start_ea = free_chunk(0x1000000, size, step);
+  s.end_ea   = s.start_ea + size;
+  s.sel     = allocate_selector((s.start_ea-offset) >> 4);
   s.type    = SEG_DATA;
   s.bitness = ph.dnbits > 16;
   add_segm_ex(&s, name, "DATA", ADDSEG_NOSREG|ADDSEG_OR_DIE);
-  return s.startEA - offset;
+  return s.start_ea - offset;
 }
 
 inline ea_t get_start(const segment_t *s)
 {
-  return s ? s->startEA : BADADDR;
+  return s ? s->start_ea : BADADDR;
 }
 
 //--------------------------------------------------------------------------
-static ioport_t *ports = NULL;
-static size_t numports = 0;
-char device[MAXSTR];
+static ioports_t ports;
+qstring device;
 ea_t xmem = BADADDR;
 ea_t ymem = BADADDR;
 static int xmemsize = 0x10000;
 static int ymemsize = 0x10000;
 
-static const char *idaapi dsp56k_callback(const ioport_t *ports, size_t numports, const char *line);
+static const char *idaapi dsp56k_callback(const ioports_t &_ports, const char *line);
 
 #define callback dsp56k_callback
 #include "../iocommon.cpp"
 
 //lint -esym(528,dsp56k_callback) not referenced
-static const char *idaapi dsp56k_callback(const ioport_t *_ports, size_t num_ports, const char *line)
+static const char *idaapi dsp56k_callback(const ioports_t &_ports, const char *line)
 {
   int size;
   if ( qsscanf(line, "XMEMSIZE = %i", &size) == 1 )
   {
     xmemsize = size;
 RETOK:
-    qsnprintf(deviceparams, sizeof(deviceparams), "XMEM=0x%X YMEM=0x%X", xmemsize, ymemsize);
+    deviceparams.sprnt("XMEM=0x%X YMEM=0x%X", xmemsize, ymemsize);
     return NULL;
   }
   if ( !is561xx() && qsscanf(line, "YMEMSIZE = %i", &size) == 1 )
@@ -252,13 +241,12 @@ RETOK:
     ymemsize = size;
     goto RETOK;
   }
-  return standard_callback(_ports, num_ports, line);
+  return standard_callback(_ports, line);
 }
 
-const char *find_port(ea_t address)
+const ioport_t *find_port(ea_t address)
 {
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? port->name : NULL;
+  return find_ioport(ports, address);
 }
 
 //--------------------------------------------------------------------------
@@ -280,16 +268,16 @@ void select_device(const char *dname, int resp_info)
 
   create_xmem_ymem();
 
-  for ( int i=0; i < numports; i++ )
+  for ( int i=0; i < ports.size(); i++ )
   {
-    ioport_t *p = ports + i;
-    ea_t ea = xmem + p->address;
-    const char *name = p->name;
+    const ioport_t &p = ports[i];
+    ea_t ea = xmem + p.address;
+    const char *name = p.name.c_str();
     ea_t nameea = get_name_ea(BADADDR, name);
     if ( nameea != ea )
     {
       set_name(nameea, "");
-      if ( !set_name(ea, name, SN_NOWARN) )
+      if ( !set_name(ea, name, SN_NOCHECK|SN_NOWARN) )
         set_cmt(ea, name, 0);
     }
   }
@@ -298,44 +286,58 @@ void select_device(const char *dname, int resp_info)
 //--------------------------------------------------------------------------
 const char *idaapi set_idp_options(const char *keyword,int /*value_type*/,const void * /*value*/)
 {
-  if ( keyword != NULL ) return IDPOPT_BADKEY;
+  if ( keyword != NULL )
+    return IDPOPT_BADKEY;
   char cfgfile[QMAXFILE];
   get_cfg_filename(cfgfile, sizeof(cfgfile));
-  if ( choose_ioport_device(cfgfile, device, sizeof(device), NULL) )
-    select_device(device, IORESP_INT);
+  if ( choose_ioport_device(&device, cfgfile) )
+    select_device(device.c_str(), IORESP_INT);
   return IDPOPT_OK;
+}
+
+//-----------------------------------------------------------------------
+// We always return "yes" because of the messy problem that
+// there are additional operands with a wrong operand number (always 1)
+static bool idaapi can_have_type(const op_t &)
+{
+  return true;
 }
 
 //--------------------------------------------------------------------------
 int procnum = -1;
 netnode helper;
 
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
 {
-  va_list va;
-  va_start(va, msgid);
+  switch ( code )
+  {
+    case idb_event::closebase:
+    case idb_event::savebase:
+      helper.supset(0, device.c_str());
+      break;
+  }
+  return 0;
+}
 
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ dsp56k");
       init_analyzer();
-    default:
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::newfile:      // new file loaded
+    case processor_t::ev_newfile:      // new file loaded
       {
         // data memory could already be present, check it
         xmem = get_start(get_segm_by_name("XMEM"));
@@ -344,32 +346,25 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
 
         char cfgfile[QMAXFILE];
         get_cfg_filename(cfgfile, sizeof(cfgfile));
-        if ( choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0) )
-          select_device(device, IORESP_AREA|IORESP_INT);
+        if ( choose_ioport_device(&device, cfgfile, parse_area_line0) )
+          select_device(device.c_str(), IORESP_AREA|IORESP_INT);
         else
           create_xmem_ymem();
       }
       break;
 
-    case processor_t::oldfile:      // old file loaded
+    case processor_t::ev_oldfile:      // old file loaded
       xmem = get_start(get_segm_by_name("XMEM"));
       if ( !is561xx() )
         ymem = get_start(get_segm_by_name("YMEM"));
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          select_device(buf, IORESP_NONE);
-      }
+      if ( helper.supstr(&device, -1) > 0 )
+        select_device(device.c_str(), IORESP_NONE);
       break;
 
-    case processor_t::closebase:
-    case processor_t::savebase:
-      helper.supset(0, device);
-      break;
-
-    case processor_t::newprc:    // new processor type
+    case processor_t::ev_newprc:    // new processor type
       {
         int n = va_arg(va, int);
+        // bool keep_cfg = va_argi(va, bool);
         if ( procnum == -1 )
         {
           procnum = n;
@@ -377,7 +372,8 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
         else if ( procnum != n )  // can't change the processor type
         {                         // after the initial set up
           warning("Sorry, processor type can not be changed after loading");
-          return 0;
+          code = -1;
+          break;
         }
         ph.cnbits = (is561xx()             ) ? 16 : 24;
         ph.dnbits = (is561xx() || is566xx()) ? 16 : 24;
@@ -386,27 +382,115 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
       }
       break;
 
-    case processor_t::is_sane_insn:
-      return is_sane_insn(va_arg(va, int));
+    case processor_t::ev_is_sane_insn:
+      {
+        const insn_t &insn = *va_arg(va, const insn_t *);
+        int nocrefs = va_arg(va, int);
+        return is_sane_insn(insn, nocrefs) == 1 ? 1 : -1;
+      }
 
-    case processor_t::may_be_func:
-                                // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
-                                // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
-      return may_be_func();
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
   }
-  va_end(va);
-  return 1;
-}
-
-//-----------------------------------------------------------------------
-// We always return "yes" because of the messy problem that
-// there are additional operands with a wrong operand number (always 1)
-static bool idaapi can_have_type(op_t &)
-{
-  return true;
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -435,12 +519,16 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_DSP56K,                  // id
-  PRN_HEX | PR_ALIGN | PR_BINMEM,
-  24,                           // 24 bits in a byte for code segments
-  24,                           // 24 bits in a byte for other segments
-
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_DSP56K,            // id
+                          // flag
+    PRN_HEX
+  | PR_ALIGN
+  | PR_BINMEM,
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  24,                     // 24 bits in a byte for code segments
+  24,                     // 24 bits in a byte for other segments
   shnames,
   lnames,
 
@@ -448,31 +536,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  assumes,              // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  dsp56k_data,          // generate ...                    data directive
-  NULL,                 // compare operands
-  can_have_type,        // can_have_type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   vCS,                  // first
   vDS,                  // last
@@ -484,28 +549,13 @@ processor_t LPH =
 
   DSP56_null,
   DSP56_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 0 },      // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  is_sp_based,          // int (*is_sp_based)(op_t &x);
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   DSP56_rts,            // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

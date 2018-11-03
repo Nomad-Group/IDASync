@@ -143,7 +143,7 @@ static const char *idaapi set_wince_options(
       "  <Enable hardware breakpoints:C>>\n"
       "\n";
 
-    if ( !AskUsingForm_c(form, &hwbpts) )
+    if ( !ask_form(form, &hwbpts) )
       return IDPOPT_OK;
     wince_save_options();
   }

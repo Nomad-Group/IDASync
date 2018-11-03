@@ -21,10 +21,10 @@ int async_stream_t::read_loop(void)
 //--------------------------------------------------------------------------
 ssize_t async_stream_t::qrecv(void *buf, size_t n)
 {
-  idastate_t oldstate = setStat(st_Work);
+  idastate_t oldstate = set_ida_state(st_Work);
   WaitForSingleObject(data_ready, TIMEOUT_INFINITY);
   ResetEvent(data_ready);
-  setStat(oldstate);
+  set_ida_state(oldstate);
 
   if ( FAILED(last_code) || n != read_size ) // desync in the packet handling
   {
@@ -64,7 +64,7 @@ ssize_t async_stream_t::qrecv(void *buf, size_t n)
 }
 
 //--------------------------------------------------------------------------
-static DWORD WINAPI read_thread(void *ud)
+static unsigned WINAPI read_thread(void *ud)
 {
   async_stream_t &as = *(async_stream_t *)ud;
   return as.read_loop();
@@ -165,8 +165,12 @@ bool async_stream_t::init(IRAPIStream *_s)
   buffer_ready = CreateEvent(NULL, false, false, NULL);
   if ( buffer_ready == NULL )
     return false;
+#ifdef UNDER_CE
   DWORD dummy_tid;
-  rt = CreateThread(NULL, 0, read_thread, this, 0, &dummy_tid);
+  rt = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)read_thread, this, 0, &dummy_tid);
+#else
+  rt = (HANDLE)_beginthreadex(NULL, 0, read_thread, this, 0, NULL);
+#endif
   if ( rt == NULL )
     return false;
   return true;
@@ -184,7 +188,7 @@ idarpc_stream_t *init_server_irs(void *stream)
 {
   IRAPIStream *s = (IRAPIStream *)stream;
   async_stream_t *as = new async_stream_t;
-  if ( as != NULL && !as->init(s) )
+  if ( !as->init(s) )
   {
     delete as;
     as = NULL;
@@ -260,14 +264,14 @@ static bool load_rapi_functions(void)
       *(FARPROC*)&pCeCloseHandle  = GetProcAddress(rapi_handle, "CeCloseHandle");
       *(FARPROC*)&pCeRapiGetError = GetProcAddress(rapi_handle, "CeRapiGetError");
       *(FARPROC*)&pCeGetLastError = GetProcAddress(rapi_handle, "CeGetLastError");
-      if ( pCeRapiInit    != NULL
-        && pCeRapiUninit  != NULL
-        && pCeRapiInvoke  != NULL
-        && pCeCreateFile  != NULL
-        && pCeWriteFile   != NULL
-        && pCeCloseHandle != NULL
-        && pCeRapiGetError!= NULL
-        && pCeGetLastError!= NULL )
+      if ( pCeRapiInit     != NULL
+        && pCeRapiUninit   != NULL
+        && pCeRapiInvoke   != NULL
+        && pCeCreateFile   != NULL
+        && pCeWriteFile    != NULL
+        && pCeCloseHandle  != NULL
+        && pCeRapiGetError != NULL
+        && pCeGetLastError != NULL )
       {
         return true;
       }
@@ -359,7 +363,7 @@ idarpc_stream_t *init_client_irs(const char * /*hostname*/, int /*port_number*/)
       while ( 1 )
       {
         // check for user break
-        if ( wasBreak() )
+        if ( user_cancelled() )
         {
           hide_wait_box();
           return NULL;
@@ -409,7 +413,7 @@ idarpc_stream_t *init_client_irs(const char * /*hostname*/, int /*port_number*/)
 
   while ( true )
   {
-    cancelled = wasBreak();
+    cancelled = user_cancelled();
     if ( cancelled )
       break;
 
@@ -491,7 +495,7 @@ COPY:
   }
 
   async_stream_t *as = new async_stream_t;
-  if ( as == NULL || !as->init(s) )
+  if ( !as->init(s) )
   {
     int code = GetLastError();
     delete as;

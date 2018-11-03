@@ -9,14 +9,15 @@
  */
 
 #include "avr.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <diskio.hpp>
 #include <loader.hpp>
 #include <fixup.hpp>
+#include "notify_codes.hpp"
 #include "../../ldr/elf/elfr_avr.h"
 
 static bool nonBinary = false;
-static int cfh_avr16_id;
+static fixup_type_t cfh_avr16_id;
 static int ref_avr16_id;
 
 //--------------------------------------------------------------------------
@@ -39,7 +40,6 @@ static asm_t avrasm =
   "AVR Assembler",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   ".org",       // org
   ".exit",      // end
 
@@ -62,10 +62,6 @@ static asm_t avrasm =
   ".byte %s",   // uninited arrays
   ".equ",       // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   NULL,         // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -89,11 +85,10 @@ static asm_t avrasm =
 static asm_t *const asms[] = { &avrasm, NULL };
 
 //--------------------------------------------------------------------------
-static ioport_t *ports = NULL;
-static size_t numports = 0;
+static ioports_t ports;
 static int subarch = 0;
 static bool imageFile = false;
-char device[MAXSTR] = "";
+qstring device;
 static const char cfgname[] = "avr.cfg";
 netnode helper;
 
@@ -105,14 +100,14 @@ ea_t ram = BADADDR;
 //lint -esym(528,entry_processing) not referenced
 static bool entry_processing(ea_t &ea1)
 {
-  helper.altset(ea1, 1);
+  helper.altset_ea(ea1, 1);
   create_insn(ea1);
   ea_t ea = get_first_fcref_from(ea1);
   if ( ea != BADADDR )
     ea1 = ea;
   return false; // continue processing
 }
-static const char *idaapi avr_callback(const ioport_t *_ports, size_t numports, const char *line);
+static const char *idaapi avr_callback(const ioports_t &_ports, const char *line);
 static bool ioresp_ok(void);
 #define callback avr_callback
 #define ENTRY_PROCESSING(ea, name, cmt)  entry_processing(ea)
@@ -136,7 +131,7 @@ static bool is_possible_subarch(int addr)
 
 //--------------------------------------------------------------------------
 //lint -esym(528,avr_callback) not referenced
-static const char *idaapi avr_callback(const ioport_t *_ports, size_t num_ports, const char *line)
+static const char *idaapi avr_callback(const ioports_t &_ports, const char *line)
 {
   char word[MAXSTR];
   int addr;
@@ -162,11 +157,11 @@ static const char *idaapi avr_callback(const ioport_t *_ports, size_t num_ports,
       return is_possible_subarch(addr) ? NULL : IOPORT_SKIP_DEVICE;
     }
   }
-  return standard_callback(_ports, num_ports, line);
+  return standard_callback(_ports, line);
 }
 
 //--------------------------------------------------------------------------
-static const char *idaapi parser(const char* line, char* /*buf*/, size_t /*buflen*/)
+static const char *idaapi parser(qstring * /*buf*/, const char *line)
 {
   char word[MAXSTR];
   int addr;
@@ -177,40 +172,39 @@ static const char *idaapi parser(const char* line, char* /*buf*/, size_t /*bufle
 }
 
 //--------------------------------------------------------------------------
-const char *find_port(ea_t address)
+const ioport_t *find_port(ea_t address)
 {
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? port->name : NULL;
+  return find_ioport(ports, address);
 }
 
 //--------------------------------------------------------------------------
 const char *find_bit(ea_t address, size_t bit)
 {
-  const ioport_bit_t *b = find_ioport_bit(ports, numports, address, bit);
-  return b ? b->name : NULL;
+  const ioport_bit_t *b = find_ioport_bit(ports, address, bit);
+  return b ? b->name.c_str() : NULL;
 }
 
 //--------------------------------------------------------------------------
 static void setup_avr_device(int resp_info)
 {
-  if ( !choose_ioport_device(cfgname, device, sizeof(device), NULL) )
+  if ( !choose_ioport_device(&device, cfgname) )
     return;
 
-  set_device_name(device, resp_info);
+  set_device_name(device.c_str(), resp_info);
   if ( get_first_seg() == NULL )  // set processor options before load file
     return;
-  noUsed(0, BADADDR); // reanalyze program
+  plan_range(0, BADADDR); // reanalyze program
 
   // resize the ROM segment
   {
-    segment_t *s = getseg(helper.altval(-1));
+    segment_t *s = getseg(node2ea(helper.altval(-1)));
     if ( s == NULL )
       s = get_first_seg();  // for the old databases
     if ( s != NULL )
     {
       if ( s->size() > romsize )
         warning("The input file is bigger than the ROM size of the current device");
-      set_segm_end(s->startEA, s->startEA+romsize, SEGMOD_KILL);
+      set_segm_end(s->start_ea, s->start_ea+romsize, SEGMOD_KILL);
     }
   }
   // resize the RAM segment
@@ -218,7 +212,7 @@ static void setup_avr_device(int resp_info)
     segment_t *s = get_segm_by_name("RAM");
     if ( s == NULL && ramsize != 0 )
     {
-      ea_t start = (inf.maxEA + 0xFFFFF) & ~0xFFFFF;
+      ea_t start = (inf.max_ea + 0xFFFFF) & ~0xFFFFF;
       add_segm(start>>4, start, start+ramsize, "RAM", "DATA");
       s = getseg(start);
     }
@@ -226,25 +220,25 @@ static void setup_avr_device(int resp_info)
     if ( s != NULL )
     {
       int i;
-      ram = s->startEA;
+      ram = s->start_ea;
       set_segm_end(ram, ram+ramsize, SEGMOD_KILL);
       // set register names
       for ( i=0; i < 32; i++ )
-        if ( !has_any_name(get_flags_novalue(ram+i)) )
+        if ( !has_any_name(get_flags(ram+i)) )
           set_name(ram+i, register_names[i]);
       // set I/O port names
-      for ( i=0; i < numports; i++ )
+      for ( i=0; i < ports.size(); i++ )
       {
-        ioport_t *p = ports + i;
-        set_name(ram+p->address+0x20, p->name);
-        set_cmt(ram+p->address+0x20, p->cmt, true);
+        const ioport_t &p = ports[i];
+        set_name(ram+p.address+0x20, p.name.c_str());
+        set_cmt(ram+p.address+0x20, p.cmt.c_str(), true);
       }
     }
   }
 }
 
 //--------------------------------------------------------------------------
-const char *idaapi set_idp_options(const char* keyword, int value_type, const void* value)
+const char *idaapi set_idp_options(const char *keyword, int value_type, const void *value)
 {
   if ( keyword == NULL )
   {
@@ -256,7 +250,7 @@ const char *idaapi set_idp_options(const char* keyword, int value_type, const vo
     if ( value_type != IDPOPT_STR )
       return IDPOPT_BADTYPE;
 
-    qstrncpy(device, (const char*)value, sizeof(device));
+    device = (const char *) value;
     return IDPOPT_OK;
   }
 
@@ -388,9 +382,9 @@ static bool set_param_by_arch(void)
         max_eeprom  = 4096;
         break;
     }
-    if ( !choose_ioport_device(cfgname, device, sizeof(device), parser) )
+    if ( !choose_ioport_device(&device, cfgname, parser) )
     {
-      qsnprintf(device, sizeof(device), "avr%d", subarch);
+      device.sprnt("avr%d", subarch);
       device[sizeof("avrX")-1] = '\0';
       romsize    = max_rom >> 1;
       ramsize    = max_ram;
@@ -398,8 +392,8 @@ static bool set_param_by_arch(void)
     }
     else
     {
-      set_device_name(device, IORESP_INT);
-      noUsed(0, BADADDR); // reanalyze program
+      set_device_name(device.c_str(), IORESP_INT);
+      plan_range(0, BADADDR); // reanalyze program
     }
     return true;
 }
@@ -408,122 +402,127 @@ static bool set_param_by_arch(void)
 static inline ea_t get16bit(ea_t ea)
 {
     if ( segtype(ea) == SEG_CODE )
-      return get_full_byte(ea);
+      return get_wide_byte(ea);
 
     return get_word(ea);
 }
 
 //--------------------------------------------------------------------------
-static int idaapi idb_callback(void *, int code, va_list va)
+static ssize_t idaapi idb_callback(void *, int code, va_list va)
 {
   switch ( code )
   {
     case idb_event::segm_added:
       {
         segment_t *s = va_arg(va, segment_t *);
-        char sclass[32];
-        if ( get_segm_class(s, sclass, sizeof(sclass)) > 0 && strcmp(sclass, "DATA") == 0 )
+        qstring sclass;
+        if ( get_segm_class(&sclass, s) > 0 && sclass == "DATA" )
           set_default_dataseg(s->sel);
       }
       break;
+
+    case idb_event::segm_moved: // A segment is moved
+                                // Fix processor dependent address sensitive information
+      {
+        ea_t from    = va_arg(va, ea_t);
+        ea_t to      = va_arg(va, ea_t);
+        asize_t size = va_arg(va, asize_t);
+        //bool changed_netmap = va_argi(va, bool);
+
+        nodeidx_t ndx1 = ea2node(from);
+        nodeidx_t ndx2 = ea2node(to);
+        helper.altshift(ndx1, ndx2, size); // move address information
+      }
+      break;
+
   }
   return 0;
 }
 
 //--------------------------------------------------------------------------
 static bool idaapi avr16_apply(
-        ea_t ea,
-        const fixup_data_t *fd,
-        ea_t item_start,
+        const fixup_handler_t *fh,
+        ea_t item_ea,
+        ea_t fixup_ea,
         int opnum,
-        bool /*is_macro*/)
+        bool /*is_macro*/,
+        const fixup_data_t &fd)
 {
   if ( !nonBinary
-    || (fd->type & (FIXUP_REL|FIXUP_UNUSED)) != 0
-    || fd->displacement != 0)
+    || fd.has_base()
+    || fd.is_unused()
+    || fd.displacement != 0 )
   {
-    msg("%a: Unexpected or incorrect CUSTOM_FIXUP\n", ea);
+    msg("%a: Unexpected or incorrect CUSTOM_FIXUP\n", fixup_ea);
     return false;
   }
 
-  if ( isUnknown(get_flags_novalue(item_start)) )
-    do16bit(item_start, 2);
+  if ( is_unknown(get_flags(item_ea)) )
+    create_16bit_data(item_ea, 2);
 
   refinfo_t ri;
-  ri.flags = ref_avr16_id | REFINFO_CUSTOM;
-  ri.tdelta = 0;  // fd.displacement;
-  ri.target = (ri.base = sel2ea(fd->sel)) + fd->off;
-  op_offset_ex(item_start, opnum, &ri);
+  ri.flags  = fh->reftype;
+  ri.base   = fd.get_base();
+  ri.target = ri.base + fd.off;
+  ri.tdelta = fd.displacement;
+  op_offset_ex(item_ea, opnum, &ri);
   return true;
 }
 
 //--------------------------------------------------------------------------
-static void idaapi avr16_move(ea_t ea, fixup_data_t *fdp, adiff_t delta)
+static uval_t idaapi avr16_get_value(const fixup_handler_t *, ea_t ea)
 {
-  fdp->off += delta;
-  fdp->off &= 0xFFFF;
-  put_word(ea, fdp->off);
-  set_fixup(ea, fdp);
+  return get_word(ea);
 }
 
 //--------------------------------------------------------------------------
-static int idaapi avr16_desc(ea_t ea, const fixup_data_t *fd, char *buf, size_t bufsize)
+static bool idaapi avr16_patch_value(
+        const fixup_handler_t * /*fh*/,
+        ea_t ea,
+        const fixup_data_t &fd)
 {
-  char *end = buf + bufsize;
-  char name[MAXSTR];
-  stoa(ea, fd->sel, name, sizeof(name));
-  append_snprintf(buf, end, "OFF16 %sDEF [%s,%a]",
-                  (fd->type & FIXUP_EXTDEF) ? "EXT" : "SEG",
-                  name, fd->off);
-  if ( fd->type & FIXUP_EXTDEF )
-  {
-    ea = sel2ea(fd->sel) + fd->off;
-    qstring sname = get_short_name(ea, GN_LOCAL);
-    append_snprintf(buf, end, "=%a (%s)", ea, sname.c_str());
-  }
-  return strlen(buf);
+  put_word(ea, fd.off & 0xFFFF);
+  return true;
 }
 
 //--------------------------------------------------------------------------
-static const custom_fixup_handler_t cfh_avr16 =
+// not tested
+static fixup_handler_t cfh_avr16 =
 {
-  sizeof(custom_fixup_handler_t),
+  sizeof(fixup_handler_t),
   "AVR16",                      // Format name, must be unique
-  0,                            // properties (currently 0)
-  2,                            // size in bytes
-  NULL,                         // get_base
-  avr16_desc,
-  avr16_apply,
-  avr16_move,
+  0,                            // props
+  2, 0, 0, 0,                   // size, width, shift
+  REFINFO_CUSTOM,               // reftype
+  avr16_apply,                  // apply
+  avr16_get_value,              // get_value
+  avr16_patch_value,            // patch_value
 };
 
 //--------------------------------------------------------------------------
 //lint -e{818} could be declared const
 static int idaapi avr16_gen_expr(
+        qstring * /*buf*/,
+        qstring * /*format*/,
         ea_t ea,
         int numop,
-        refinfo_t *ri,
+        const refinfo_t &ri,
         ea_t /*from*/,
         adiff_t *opval,
-        char * /*buf*/,
-        size_t /*bufsize*/,
-        char * /*format*/,
-        size_t /*formatsize*/,
         ea_t * /*target*/,
         ea_t * /*fullvalue*/,
         int /*getn_flags*/)
 {
   if ( !nonBinary
     || numop != 0
-    || ri->flags != (ref_avr16_id | REFINFO_CUSTOM)
-    || ri->tdelta != 0
-    || ri->target == BADADDR
+    || ri.flags != (ref_avr16_id | REFINFO_CUSTOM)
+    || ri.tdelta != 0
+    || ri.target == BADADDR
     || *opval != get16bit(ea) )
   {
     msg("%a: Unexpected or incorrect CUSTOM offset\n", ea);
     return 0;
   }
-  *opval |= (ri->target & ~0xFFFF);
   return 3; // process as a regular fixup
 }
 
@@ -534,50 +533,39 @@ static const custom_refinfo_handler_t ref_avr16 =
   "AVR16",
   "AVR 16-bit offset",
   0,                    // properties (currently 0)
-  NULL,                 // calc_basevalue
-  NULL,                 // calc_target
-  avr16_gen_expr,
+  avr16_gen_expr,       // gen_expr
+  NULL,                 // calc_reference_data
+  NULL,                 // get_format
 };
 
 //--------------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code )
-    return code;
-
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
       helper.create(AVR_INFO_NODENAME);
-      hook_to_notification_point(HT_IDB, idb_callback, NULL);
+      hook_to_notification_point(HT_IDB, idb_callback);
       cfh_avr16_id = register_custom_fixup(&cfh_avr16);
       ref_avr16_id = register_custom_refinfo(&ref_avr16);
-    default:
+      cfh_avr16.reftype = REFINFO_CUSTOM | ref_avr16_id;
       break;
 
-    case processor_t::term:
+    case processor_t::ev_term:
+      cfh_avr16.reftype = REFINFO_CUSTOM;
       unregister_custom_refinfo(ref_avr16_id);
       unregister_custom_fixup(cfh_avr16_id);
-      unhook_from_notification_point(HT_IDB, idb_callback, NULL);
-      free_ioports(ports, numports);
+      unhook_from_notification_point(HT_IDB, idb_callback);
+      ports.clear();
       break;
 
-    case processor_t::loader:   // elf-loader 'set machine type' and file type
+    case avr_module_t::ev_set_machine_type:   // elf-loader 'set machine type' and file type
       subarch   = va_arg(va, int);
       imageFile = va_argi(va, bool);
       nonBinary = true;
       break;
 
-    case processor_t::newfile:   // new file loaded
+    case processor_t::ev_newfile:   // new file loaded
       // remember the ROM segment
       {
         segment_t *s = get_first_seg();
@@ -585,7 +573,7 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
         {
           if ( subarch == 0 )
             set_segm_name(s, "ROM");
-          helper.altset(-1, s->startEA);
+          helper.altset(-1, ea2node(s->start_ea));
         }
       }
       if ( subarch != 0 && set_param_by_arch() )
@@ -595,17 +583,17 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
         break;
       // create additional segments
       {
-        ea_t start = (inf.maxEA + 0xFFFFF) & ~0xFFFFF;
+        ea_t start = (inf.max_ea + 0xFFFFF) & ~0xFFFFF;
         if ( eepromsize != 0 )
         {
-          char *file = askfile_c(0,"*.bin","Please enter the binary EEPROM image file");
+          char *file = ask_file(false, "*.bin", "Please enter the binary EEPROM image file");
           if ( file != NULL )
           {
             add_segm(start>>4, start, start+eepromsize, "EEPROM", "DATA");
             linput_t *li = open_linput(file, false);
             if ( li != NULL )
             {
-              uint32 size = qlsize(li);
+              uint64 size = qlsize(li);
               if ( size > eepromsize )
                 size = eepromsize;
               file2base(li, 0, start, start+size, FILEREG_NOTPATCHABLE);
@@ -616,57 +604,109 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
       }
       break;
 
-    case processor_t::oldfile:   // old file loaded
+    case processor_t::ev_oldfile:   // old file loaded
       {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_NONE);
+        if ( helper.supstr(&device, -1) > 0 )
+          set_device_name(device.c_str(), IORESP_NONE);
         segment_t *s = get_segm_by_name("RAM");
         if ( s != NULL )
-          ram = s->startEA;
+          ram = s->start_ea;
       }
       break;
 
-    case processor_t::newprc:    // new processor type
+    case processor_t::ev_newprc:    // new processor type
       break;
 
-    case processor_t::newasm:    // new assembler type
+    case processor_t::ev_newasm:    // new assembler type
       break;
 
-    case processor_t::outlabel: // The kernel is going to generate an instruction
-                                // label line or a function header
+    case processor_t::ev_out_label: // The kernel is going to generate an instruction
+                                 // label line or a function header
       {
-        ea_t ea = va_arg(va, ea_t);
-        if ( helper.altval(ea) ) // if entry point
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        if ( helper.altval_ea(ctx->insn_ea) ) // if entry point
         {
           char buf[MAX_NUMBUF];
-          btoa(buf, sizeof(buf), ea);
-          printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+          btoa(buf, sizeof(buf), ctx->insn_ea);
+          ctx->gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
         }
       }
       break;
 
-    case processor_t::move_segm:// A segment is moved
-                                // Fix processor dependent address sensitive information
-                                // args: ea_t from - old segment address
-                                //       segment_t - moved segment
+    case processor_t::ev_out_header:
       {
-        ea_t from    = va_arg(va, ea_t);
-        segment_t *s = va_arg(va, segment_t *);
-        helper.altshift(from, s->startEA, s->size()); // move address information
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        avr_header(*ctx);
+        return 1;
       }
-      break;
 
-    case processor_t::register_custom_fixup:
+    case processor_t::ev_out_footer:
       {
-        const char *name = va_arg(va, const char *);
-        if ( streq(name, "AVR16") )
-          return cfh_avr16_id + 1;
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        avr_footer(*ctx);
+        return 1;
       }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        avr_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        avr_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
       break;
   }
-  va_end(va);
-  return 1;
+  return 0;
 }
 
 //--------------------------------------------------------------------------
@@ -714,11 +754,15 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_AVR,                     // id
-  PRN_HEX|PR_RNAMESOK,
-  16,                   // 16 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_AVR,               // id
+                          // flag
+    PRN_HEX
+  | PR_RNAMESOK,
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  16,                     // 16 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -727,31 +771,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  NULL,                 // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  intel_data,           // generate ...                    data directive
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   rVcs,                 // first
   rVds,                 // last
@@ -763,28 +784,13 @@ processor_t LPH =
 
   AVR_null,
   AVR_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, },               // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x); -- always, so leave it NULL
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   AVR_ret,              // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

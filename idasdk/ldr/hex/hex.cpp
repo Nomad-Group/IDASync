@@ -22,11 +22,12 @@
 #include "../idaldr.h"
 
 //--------------------------------------------------------------------------
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *,
+        linput_t *li,
+        const char *)
 {
-  if ( n )
-    return 0;
-
   char str[80];
   if ( qlgets(str, sizeof(str), li) == NULL )
     return 0;
@@ -59,7 +60,7 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
     }
   }
   if ( type != 0 )
-    qstrncpy(fileformatname, p, MAX_FILE_FORMAT_NAME);
+    *fileformatname = p;
   return type;
 }
 
@@ -75,8 +76,8 @@ static struct local_data
   };
   union
   {
-    uint32  ln;   //load
-    int    size;  //write
+    uint32 ln;    //load
+    int size;     //write
   };
   ushort sum;     //load/write
   uchar  len;     //load
@@ -138,13 +139,12 @@ static uint32 hexdata(int size)
 void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname*/)
 {
   memset(&lc, 0, sizeof(local_data));
-  inf.startIP = BADADDR;          // f_SREC without start record
+  inf.start_ip = BADADDR;          // f_SREC without start record
 
   bool iscode = (neflag & NEF_CODE) != 0;
-  uint nb = iscode ? ph.cnbits : ph.dnbits; // number of bits in a byte
-  uint bs = (nb + 7) / 8;                   // number of bytes
-  ea_t startEA = toEA(inf.baseaddr, 0);
-  sel_t sel = setup_selector(startEA >> 4);
+  uint bs = iscode ? ph.cbsize() : ph.dbsize();   // number of bytes
+  ea_t start_ea = to_ea(inf.baseaddr, 0);
+  sel_t sel = setup_selector(start_ea >> 4);
   bool segment_created = false;
 
   bool cvt_to_bytes = false;
@@ -152,7 +152,7 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
   {
     // pic12xx and pic16xx use 12-bit and 14-bit words in program memory
     // pic18xx uses 16-bit opcodes but byte addressing
-    if ( strncmp(inf.procName, "PIC18", 5) != 0 )
+    if ( strncmp(inf.procname, "PIC18", 5) != 0 )
     {
       static const char *const form =
 //      "PIC HEX file addressing mode\n"
@@ -162,9 +162,11 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
       "flavor automatically. Please specify what addressing mode should\n"
       "be used to load the input file. If you don't know, try both and\n"
       "choose the one which produces the more meaningful result\n";
-      int code = askbuttons_c("~B~yte addressing",
-                              "~W~ord addressing",
-                              "~C~ancel", 1, form);
+      int code = ask_buttons("~B~yte addressing",
+                             "~W~ord addressing",
+                             "~C~ancel",
+                             1,
+                             form);
       switch ( code )
       {
         case 1:
@@ -178,16 +180,20 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
     }
   }
 
+  bool bs_addr_scale = true;
+  if ( ph.id == PLFM_TMS320C28 )
+    bs_addr_scale = false;
+
   char rstart = (inf.filetype == f_SREC) ? 'S'
               : (inf.filetype == f_HEX)  ? ':'
               :                            ';';
   ea_t addr;
-  ea_t endEA = 0;
+  ea_t end_ea = 0;
   ea_t seg_start = 0;
   ea_t subs_addr = 0;
   bool bigaddr = false;
   char line[BUFFSIZE];
-  for( lc.ln = 1; qlgets(line, BUFFSIZE, li); lc.ln++ )
+  for ( lc.ln = 1; qlgets(line, BUFFSIZE, li); lc.ln++ )
   {
     char *p = line;
     while ( *p == ' ' )
@@ -223,9 +229,11 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
         case '3':
         case '7':
           ++sz;
+          // fallthrough
         case '2':
         case '8':
           ++sz;
+          // fallthrough
         case '1':
         case '9':
           if ( mode > '3' )
@@ -235,11 +243,11 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
       }
     }
     addr = hexdata(sz);
-    if ( inf.filetype != f_SREC )
+    if ( inf.filetype != f_SREC && bs_addr_scale )
       addr = addr / bs;
     if ( !mode )
     {
-      inf.startIP = addr;
+      inf.start_ip = addr;
       continue;
     }
 
@@ -250,10 +258,14 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
       {
         case 0xFF:                // mitsubishi hex format
         case 4:                   // Extended linear address record
-          subs_addr = hexdata(2) << 16;
+          subs_addr = uint32(hexdata(2) << 16);
+          if ( bs_addr_scale )
+            subs_addr /= bs;
           break;
         case 2:                   // Extended segment address record
-          subs_addr = hexdata(2) << 4;
+          subs_addr = uint32(hexdata(2) << 4);
+          if ( bs_addr_scale )
+            subs_addr /= bs;
           break;
       }
       if ( type != 0 )
@@ -263,7 +275,7 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
         continue;                 // not a data record
       }
     }
-    addr += subs_addr / bs;
+    addr += subs_addr;
     if ( lc.len )
     {
       ea_t top = addr + lc.len / bs;
@@ -276,21 +288,21 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
       }
       if ( top >= 0x10000 )
         bigaddr = true;
-      addr += startEA;
-      showAddr(addr);
-      top += startEA;
-      if ( top > endEA || !segment_created )
+      addr += start_ea;
+      show_addr(addr);
+      top += start_ea;
+      if ( top > end_ea || !segment_created )
       {
-        asize_t delta = addr - endEA;
+        asize_t delta = addr - end_ea;
         if ( delta >= SEGMENTGAP )
           segment_created = false; // force creation of new segment
 
-        endEA = top;
+        end_ea = top;
         if ( neflag & NEF_SEGS )
         {
           if ( !segment_created )
           {
-            if ( !add_segm(sel, addr, endEA, NULL, iscode ? CLASS_CODE : CLASS_DATA) )
+            if ( !add_segm(sel, addr, end_ea, NULL, iscode ? CLASS_CODE : CLASS_DATA) )
               loader_failure();
             segment_created = true;
             seg_start = addr;
@@ -298,7 +310,7 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
           else
           {
             int flags = delta > SPARSE_GAP ? SEGMOD_SPARSE : 0;
-            set_segm_end(seg_start, endEA, flags);
+            set_segm_end(seg_start, end_ea, flags);
           }
         }
       }
@@ -316,7 +328,8 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
     {
       ushort chi;       // checksum
       ++lc.len;
-      switch ( inf.filetype ) {
+      switch ( inf.filetype )
+      {
         case f_SREC:
           chi = (uchar)(~lc.sum);
           chi ^= (uchar)hexdata(1);
@@ -352,11 +365,11 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
         inf.lflags |= LFLG_PC_FLAT;
     }
     set_default_dataseg(sel);
-    inf.start_cs  = sel;
+    inf.start_cs = sel;
   }
   else
   {
-    enable_flags(startEA, endEA, STT_CUR);
+    enable_flags(start_ea, end_ea, STT_CUR);
   }
   inf.af &= ~AF_FINAL;                    // behave as a binary file
 
@@ -396,29 +409,29 @@ int idaapi write_file(FILE *fp, const char * /*fileformatname*/)
 #else
 #  define DECL_FMT(x, y) static char x[] = y
 #endif
-  DECL_FMT(fmt0, "%02X%0*"FMT_EA"X%s%0?X\r\n");
+  DECL_FMT(fmt0, "%02X%0*" FMT_EA "X%s%0?X\r\n");
   DECL_FMT(fmt1, "?00?00001FF\r\n");
   DECL_FMT(fone, "%02X");
 
-  ea_t base = toEA(inf.baseaddr, 0);
-  if ( inf.minEA < base )
+  ea_t base = to_ea(inf.baseaddr, 0);
+  if ( inf.min_ea < base )
     base = BADADDR;
 
   if ( fp == NULL )
   {
     if ( inf.filetype == f_SREC )
       return 1;
-    ea_t ea1 = inf.maxEA - inf.minEA;
+    ea_t ea1 = inf.max_ea - inf.min_ea;
     if ( ea1 <= 0x10000 )
       return 1;
     ea_t strt = 0;
     ea_t addr;
-    for ( addr = inf.minEA; addr < inf.maxEA; )
+    for ( addr = inf.min_ea; addr < inf.max_ea; )
     {
       segment_t *ps = getseg(addr);
       if ( ps == NULL || ps->type != SEG_IMEM )
       {
-        if ( isLoaded(addr) )
+        if ( is_loaded(addr) )
           break;
         if ( base != BADADDR )
         {
@@ -439,44 +452,47 @@ int idaapi write_file(FILE *fp, const char * /*fileformatname*/)
           return 1;
         strt = 0;
       }
-      ea1 -= (ps->endEA - addr);
+      ea1 -= (ps->end_ea - addr);
       if ( ea1 < 0x10000 )
         return 1;
       ++ea1;
-      addr = ps->endEA;
+      addr = ps->end_ea;
     }
     if ( base == BADADDR )
     {
       segment_t *ps = getseg(addr);
-      ea1 -= (ps == NULL) ? addr : ps->startEA;
+      ea1 -= (ps == NULL) ? addr : ps->start_ea;
       if ( ea1 <= 0x10000 )
         return 1;
     }
-    if ( addr == inf.maxEA )
+    if ( addr == inf.max_ea )
       return 0;
-    for ( base = inf.maxEA-1; base > addr; )
+    for ( base = inf.max_ea-1; base > addr; )
     {
       segment_t *ps = getseg(base);
       if ( ps == NULL || ps->type != SEG_IMEM )
       {
-        if ( isLoaded(base) )
+        if ( is_loaded(base) )
           break;
         if ( --ea1 <= 0x10000 )
           return 1;
         --base;
         continue;
       }
-      ea1 -= (base - ps->startEA);
+      ea1 -= (base - ps->start_ea);
       if ( ea1 < 0x10000 )
         return 1;
       ++ea1;
-      base = ps->startEA;
+      base = ps->start_ea;
     }
     return 0;
   }
 
   char ident;
-  fmt0[13] = '2';
+  const char *found = qstrrchr(fmt0, '?');
+  QASSERT(20067, found != NULL);
+  int fmt0_marker = ((char *) found) - fmt0;
+  fmt0[fmt0_marker] = '2';
   switch ( inf.filetype )
   {
     case f_SREC:
@@ -488,19 +504,19 @@ int idaapi write_file(FILE *fp, const char * /*fileformatname*/)
       break;
     default:
       ident = ';';
-      fmt0[13] = '4';
+      fmt0[fmt0_marker] = '4';
       fmt1[3] = '\0';
       break;
   }
   fmt1[0] = ident;
   lc.sz = 4;
 
-  ea_t strt = inf.startIP;
-  for ( ea_t ea1 = inf.minEA; ea1 < inf.maxEA; )
+  ea_t strt = inf.start_ip;
+  for ( ea_t ea1 = inf.min_ea; ea1 < inf.max_ea; )
   {
     char str[(2 * MAX_BYTES) + 3];
     char *const end = str + sizeof(str);
-    if ( !isLoaded(ea1) || segtype(ea1) == SEG_IMEM )
+    if ( !is_loaded(ea1) || segtype(ea1) == SEG_IMEM )
     {
       ++ea1;
       continue;
@@ -508,9 +524,9 @@ int idaapi write_file(FILE *fp, const char * /*fileformatname*/)
     if ( base == BADADDR )
     {
       segment_t *ps = getseg(ea1);
-      base = ps == NULL ? ea1 : ps->startEA;
+      base = ps == NULL ? ea1 : ps->start_ea;
       if ( strt != BADADDR )
-        strt += inf.minEA - base;
+        strt += inf.min_ea - base;
     }
     ea_t addr = ea1 - base;
     lc.sum = (uchar)addr + (uchar)(addr >> 8);
@@ -527,8 +543,8 @@ int idaapi write_file(FILE *fp, const char * /*fileformatname*/)
       p += qsnprintf(p, end-p, fone, (unsigned)b);
       lc.sum += b;
     } while ( ++lc.size < MAX_BYTES
-           && ea1 < inf.maxEA
-           && isLoaded(ea1)
+           && ea1 < inf.max_ea
+           && is_loaded(ea1)
            && segtype(ea1) != SEG_IMEM );
     qfputc(ident, fp);
     if ( inf.filetype == f_SREC )
@@ -564,7 +580,7 @@ GCC_DIAG_ON(format-nonliteral);
 loader_t LDSC =
 {
   IDP_INTERFACE_VERSION,
-  0,                            // loader flags
+  LDRF_REQ_PROC,                // requires the target processor to the set
 //
 //      check input file format. if recognized, then return 1
 //      and fill 'fileformatname'.
@@ -580,4 +596,6 @@ loader_t LDSC =
 //      this function may be absent.
 //
   write_file,
+  NULL,
+  NULL,
 };

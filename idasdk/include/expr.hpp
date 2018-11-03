@@ -7,7 +7,8 @@
 
 #ifndef _EXPR_H
 #define _EXPR_H
-#pragma pack(push, 1)   // IDA uses 1 byte alignments!
+
+#include <idp.hpp>
 
 /*! \file expr.hpp
 
@@ -32,13 +33,13 @@ class idc_object_t;
 /// Convert IDC variable to a long (32/64bit) number.
 /// \return v = 0 if impossible to convert to long
 
-idaman THREAD_SAFE error_t ida_export VarLong(idc_value_t *v);
+idaman THREAD_SAFE error_t ida_export idcv_long(idc_value_t *v);
 
 
 /// Convert IDC variable to a 64bit number.
 /// \return v = 0 if impossible to convert to int64
 
-idaman THREAD_SAFE error_t ida_export VarInt64(idc_value_t *v);
+idaman THREAD_SAFE error_t ida_export idcv_int64(idc_value_t *v);
 
 
 /// Convert IDC variable to a long number.
@@ -48,17 +49,17 @@ idaman THREAD_SAFE error_t ida_export VarInt64(idc_value_t *v);
 ///   - v = number    if IDC variable is number or string containing a number
 ///   - eTypeConflict if IDC variable = empty string
 
-idaman THREAD_SAFE error_t ida_export VarNum(idc_value_t *v);
+idaman THREAD_SAFE error_t ida_export idcv_num(idc_value_t *v);
 
 
 /// Convert IDC variable to a text string
 
-idaman THREAD_SAFE error_t ida_export VarString2(idc_value_t *v);
+idaman THREAD_SAFE error_t ida_export idcv_string(idc_value_t *v);
 
 
 /// Convert IDC variable to a floating point
 
-idaman THREAD_SAFE error_t ida_export VarFloat(idc_value_t *v);
+idaman THREAD_SAFE error_t ida_export idcv_float(idc_value_t *v);
 
 
 /// Create an IDC object. The original value of 'v' is discarded (freed).
@@ -67,46 +68,72 @@ idaman THREAD_SAFE error_t ida_export VarFloat(idc_value_t *v);
 ///              this ptr must be returned by add_idc_class() or find_idc_class()
 /// \return always eOk
 
-idaman THREAD_SAFE error_t ida_export VarObject(idc_value_t *v, const idc_class_t *icls=NULL);
+idaman THREAD_SAFE error_t ida_export idcv_object(
+        idc_value_t *v,
+        const idc_class_t *icls=NULL);
 
 
-/// Copy an IDC object.
-/// If 'src' is not an object, simple variable assignment will be performed
+/// Move 'src' to 'dst'.
+/// This function is more effective than copy_idcv since it never copies big
+/// amounts of data.
 
-idaman THREAD_SAFE error_t ida_export VarCopy(idc_value_t *dst, const idc_value_t *src);
+idaman THREAD_SAFE error_t ida_export move_idcv(
+        idc_value_t *dst,
+        idc_value_t *src);
 
 
-/// Free storage used by #VT_STR2/#VT_OBJ IDC variables.
+/// Copy 'src' to 'dst'.
+/// For idc objects only a reference is copied.
+
+idaman THREAD_SAFE error_t ida_export copy_idcv(
+        idc_value_t *dst,
+        const idc_value_t &src);
+
+
+/// Deep copy an IDC object.
+/// This function performs deep copy of idc objects.
+/// If 'src' is not an object, copy_idcv() will be called
+
+idaman THREAD_SAFE error_t ida_export deep_copy_idcv(
+        idc_value_t *dst,
+        const idc_value_t &src);
+
+
+/// Free storage used by #VT_STR/#VT_OBJ IDC variables.
 /// After this call the variable has a numeric value 0
 
-idaman THREAD_SAFE void ida_export VarFree(idc_value_t *v);
+idaman THREAD_SAFE void ida_export free_idcv(idc_value_t *v);
 
 
 /// Swap 2 variables
 
-idaman THREAD_SAFE void ida_export VarSwap(idc_value_t *v1, idc_value_t *v2);
+idaman THREAD_SAFE void ida_export swap_idcvs(
+        idc_value_t *v1,
+        idc_value_t *v2);
 
 
 /// Retrieves the IDC object class name.
+/// \param out   qstring ptr for the class name. Can be NULL.
 /// \param obj   class instance variable
-/// \param name  qstring ptr for the class name. Can be NULL.
 /// \return error code, eOk on success
 
-idaman THREAD_SAFE error_t ida_export VarGetClassName(const idc_value_t *obj, qstring *name);
+idaman THREAD_SAFE error_t ida_export get_idcv_class_name(
+        qstring *out,
+        const idc_value_t *obj);
 
 
 /// Get an object attribute.
+/// \param res              buffer for the attribute value
 /// \param obj              variable that holds an object reference.
 ///                         if obj is NULL it searches global variables, then user functions
 /// \param attr             attribute name
-/// \param res              buffer for the attribute value
 /// \param may_use_getattr  may call getattr functions to calculate the attribute if it does not exist
 /// \return error code, eOk on success
 
-idaman THREAD_SAFE error_t ida_export VarGetAttr(
+idaman THREAD_SAFE error_t ida_export get_idcv_attr(
+        idc_value_t *res,
         const idc_value_t *obj,
         const char *attr,
-        idc_value_t *res,
         bool may_use_getattr=false);
 
 
@@ -118,10 +145,10 @@ idaman THREAD_SAFE error_t ida_export VarGetAttr(
 /// \param may_use_setattr  may call setattr functions for the class
 /// \return error code, eOk on success
 
-idaman THREAD_SAFE error_t ida_export VarSetAttr(
+idaman THREAD_SAFE error_t ida_export set_idcv_attr(
         idc_value_t *obj,
         const char *attr,
-        const idc_value_t *value,
+        const idc_value_t &value,
         bool may_use_setattr=false);
 
 
@@ -130,58 +157,46 @@ idaman THREAD_SAFE error_t ida_export VarSetAttr(
 /// \param attr  attribute name
 /// \return error code, eOk on success
 
-idaman THREAD_SAFE error_t ida_export VarDelAttr(
+idaman THREAD_SAFE error_t ida_export del_idcv_attr(
         idc_value_t *obj,
         const char *attr);
 
 
 /// \name Enumerate object attributes
 //@{
-idaman THREAD_SAFE const char *ida_export VarFirstAttr(const idc_value_t *obj);
-idaman THREAD_SAFE const char *ida_export VarLastAttr(const idc_value_t *obj);
-idaman THREAD_SAFE const char *ida_export VarNextAttr(const idc_value_t *obj, const char *attr);
-idaman THREAD_SAFE const char *ida_export VarPrevAttr(const idc_value_t *obj, const char *attr);
+idaman THREAD_SAFE const char *ida_export first_idcv_attr(const idc_value_t *obj);
+idaman THREAD_SAFE const char *ida_export last_idcv_attr(const idc_value_t *obj);
+idaman THREAD_SAFE const char *ida_export next_idcv_attr(const idc_value_t *obj, const char *attr);
+idaman THREAD_SAFE const char *ida_export prev_idcv_attr(const idc_value_t *obj, const char *attr);
 //@}
-
-
-/// Assign 'src' to 'dst'
-
-idaman THREAD_SAFE error_t ida_export VarAssign(idc_value_t *dst, const idc_value_t *src);
-
-
-/// Move 'src' to 'dst'.
-/// This function is more effective than VarAssign since it never copies big
-/// amounts of data.
-
-idaman THREAD_SAFE error_t ida_export VarMove(idc_value_t *dst, idc_value_t *src);
 
 
 /// Get text representation of idc_value_t
 
-idaman bool ida_export VarPrint(
+idaman bool ida_export print_idcv(
         qstring *out,
-        const idc_value_t *v,
+        const idc_value_t &v,
         const char *name=NULL,
         int indent=0);
 
 
 /// Get slice.
+/// \param res    output variable that will contain the slice
 /// \param v      input variable (string or object)
 /// \param i1     slice start index
 /// \param i2     slice end index (excluded)
-/// \param res    output variable that will contain the slice
 /// \param flags  \ref VARSLICE_ or 0
 /// \returns eOk if success
 
-idaman THREAD_SAFE error_t ida_export VarGetSlice(
+idaman THREAD_SAFE error_t ida_export get_idcv_slice(
+        idc_value_t *res,
         const idc_value_t *v,
         uval_t i1,
         uval_t i2,
-        idc_value_t *res,
         int flags=0);
 
 /// \defgroup VARSLICE_ IDC variable slice flags
-/// Passed as 'flags' parameter to VarGetSlice() and VarSetSlice()
+/// Passed as 'flags' parameter to get_idcv_slice() and set_idcv_slice()
 //@{
 #define VARSLICE_SINGLE 0x0001  ///< return single index (i2 is ignored)
 //@}
@@ -194,11 +209,11 @@ idaman THREAD_SAFE error_t ida_export VarGetSlice(
 /// \param flags  \ref VARSLICE_ or 0
 /// \return eOk on success
 
-idaman THREAD_SAFE error_t ida_export VarSetSlice(
+idaman THREAD_SAFE error_t ida_export set_idcv_slice(
         idc_value_t *v,
         uval_t i1,
         uval_t i2,
-        const idc_value_t *in,
+        const idc_value_t &in,
         int flags=0);
 
 
@@ -256,10 +271,10 @@ idaman THREAD_SAFE const char *ida_export set_idc_dtor(idc_class_t *icls, const 
 /// \return pointer to the dereference result or NULL.
 /// If returns NULL, qerrno is set to eExecBadRef "Illegal variable reference"
 
-idaman THREAD_SAFE idc_value_t *ida_export VarDeref(idc_value_t *v, int vref_flags);
+idaman THREAD_SAFE idc_value_t *ida_export deref_idcv(idc_value_t *v, int vref_flags);
 
 /// \defgroup VREF_ Dereference IDC variable flags
-/// Passed as 'vref_flags' parameter to VarDeref()
+/// Passed as 'vref_flags' parameter to deref_idcv()
 //@{
 #define VREF_LOOP 0x0000        ///< dereference until we get a non #VT_REF
 #define VREF_ONCE 0x0001        ///< dereference only once, do not loop
@@ -273,7 +288,7 @@ idaman THREAD_SAFE idc_value_t *ida_export VarDeref(idc_value_t *v, int vref_fla
 /// \param v    variable to reference
 /// \return success
 
-idaman THREAD_SAFE bool ida_export VarRef(idc_value_t *ref, const idc_value_t *v);
+idaman THREAD_SAFE bool ida_export create_idcv_ref(idc_value_t *ref, const idc_value_t *v);
 
 
 /// Add global IDC variable.
@@ -302,10 +317,6 @@ public:
 /// \defgroup VT_ IDC value types
 /// Used by idc_value_t::vtype
 //@{
-#if !defined(NO_OBSOLETE_FUNCS) || defined(__EXPR_SRC)
-#define  VT_STR         1       ///< String (obsolete because it cannot store zero bytes).
-                                ///< See #VT_STR2
-#endif
 #define  VT_LONG        2       ///< Integer (see idc_value_t::num)
 #define  VT_FLOAT       3       ///< Floating point (see idc_value_t::e)
 #define  VT_WILD        4       ///< Function with arbitrary number of arguments.
@@ -313,7 +324,7 @@ public:
                                 ///< This value should not be used for ::idc_value_t.
 #define  VT_OBJ         5       ///< Object (see idc_value_t::obj)
 #define  VT_FUNC        6       ///< Function (see idc_value_t::funcidx)
-#define  VT_STR2        7       ///< String (see qstr() and similar functions)
+#define  VT_STR         7       ///< String (see qstr() and similar functions)
 #define  VT_PVOID       8       ///< void *
 #define  VT_INT64       9       ///< i64
 #define  VT_REF        10       ///< Reference
@@ -323,9 +334,6 @@ public:
   union
   {
 #endif //SWIG
-#if !defined(NO_OBSOLETE_FUNCS) || defined(__EXPR_SRC)
-    char *str;                  ///< #VT_STR
-#endif
     sval_t num;                 ///< #VT_LONG
     ushort e[6];                ///< #VT_FLOAT
     idc_object_t *obj;
@@ -340,44 +348,44 @@ public:
   /// Create a #VT_LONG value
   idc_value_t(sval_t n=0) : vtype(VT_LONG), num(n) {}
   /// Create a $VT_LONG with an existing idc value
-  idc_value_t(const idc_value_t &r) : vtype(VT_LONG) { VarAssign(this, &r); }
-  /// Create a #VT_STR2 value
-  idc_value_t(const char *_str) : vtype(VT_STR2) { new(&qstr()) qstring(_str); }
-  /// Create a #VT_STR2 value
-  idc_value_t(const qstring &_str) : vtype(VT_STR2) { new(&qstr()) qstring(_str); }
+  idc_value_t(const idc_value_t &r) : vtype(VT_LONG) { copy_idcv(this, r); }
+  /// Create a #VT_STR value
+  idc_value_t(const char *_str) : vtype(VT_STR) { new(&qstr()) qstring(_str); }
+  /// Create a #VT_STR value
+  idc_value_t(const qstring &_str) : vtype(VT_STR) { new(&qstr()) qstring(_str); }
   /// Destructor
   ~idc_value_t(void) { clear(); }
-  /// See VarFree()
-  void clear(void) { VarFree(this); } // put num 0
+  /// See free_idcv()
+  void clear(void) { free_idcv(this); } // put num 0
   /// Assign this value to an existing value
   idc_value_t &operator = (const idc_value_t &r)
   {
-    VarAssign(this, &r);
+    copy_idcv(this, r);
     return *this;
   }
-        qstring &qstr(void)       { return *(qstring *)&num; }       ///< #VT_STR2
-  const qstring &qstr(void) const { return *(qstring *)&num; }       ///< #VT_STR2
-  const char *c_str(void) const   { return qstr().c_str(); }         ///< #VT_STR2
-  const uchar *u_str(void) const  { return (const uchar *)c_str(); } ///< #VT_STR2
-  void swap(idc_value_t &v) { VarSwap(this, &v); }                   ///< Set this = r and v = this
+        qstring &qstr(void)       { return *(qstring *)&num; }       ///< #VT_STR
+  const qstring &qstr(void) const { return *(qstring *)&num; }       ///< #VT_STR
+  const char *c_str(void) const   { return qstr().c_str(); }         ///< #VT_STR
+  const uchar *u_str(void) const  { return (const uchar *)c_str(); } ///< #VT_STR
+  void swap(idc_value_t &v) { swap_idcvs(this, &v); }                   ///< Set this = r and v = this
   bool is_zero(void) const { return vtype == VT_LONG && num == 0; }  ///< Does value represent the integer 0?
   bool is_integral(void)   { return vtype == VT_LONG || vtype == VT_INT64; } ///< Does value represent a whole number?
-  /// Convertible types are #VT_LONG, #VT_FLOAT, #VT_INT64, and #VT_STR2
-  bool is_convertible(void) const { return (vtype >= 1 && vtype <= VT_FLOAT) || vtype == VT_STR2 || vtype == VT_INT64; }
+  /// Convertible types are #VT_LONG, #VT_FLOAT, #VT_INT64, and #VT_STR
+  bool is_convertible(void) const { return (vtype >= 1 && vtype <= VT_FLOAT) || vtype == VT_STR || vtype == VT_INT64; }
 
   /// \name Warning
   /// The following functions do not free the existing data!
   /// When the contents are unknown, use the functions without a leading underscore.
   //@{
-  void _create_empty_string(void) { vtype = VT_STR2; new (&qstr()) qstring; }
+  void _create_empty_string(void) { vtype = VT_STR; new (&qstr()) qstring; }
   void _set_string(const qstring &_str)
   {
-    vtype = VT_STR2;
+    vtype = VT_STR;
     new (&qstr()) qstring(_str);
   }
   void _set_string(const char *_str, size_t len)
   {
-    vtype = VT_STR2;
+    vtype = VT_STR;
     new (&qstr()) qstring(_str, len);
   }
   void _set_string(const char *_str)
@@ -386,6 +394,9 @@ public:
     _set_string(_str, len);
   }
   void _set_long(sval_t v) { vtype = VT_LONG; num = v; }
+  void _set_pvoid(void *p) { vtype = VT_PVOID; pvoid = p; }
+  void _set_int64(int64 v) { vtype = VT_INT64; i64 = v; }
+  void _set_float(const ushort f[6]) { vtype = VT_FLOAT; memcpy(e, f, sizeof(e)); }
   //@}
 
   /// \name Setters
@@ -414,7 +425,7 @@ typedef qvector<idc_global_t> idc_vars_t; ///< vector of global idc variables
 
 /// Prototype of an external IDC function (implemented in C).
 /// \param argv  vector of input arguments. IDA will convert all arguments
-///              to types specified by extfun_t::args, except for #VT_WILD
+///              to types specified by ext_idcfunc_t::args, except for #VT_WILD
 /// \param r     return value of the function or exception
 /// \return 0 if ok, all other values indicate error.
 ///         the error code must be set with set_qerrno():
@@ -425,18 +436,22 @@ typedef error_t idaapi idc_func_t(idc_value_t *argv,idc_value_t *r);
 
 #define eExecThrow 90           ///< See return value of ::idc_func_t
 
-/// Element of functions table. See funcset_t::f
-struct extfun_t
+/// Element of functions table. See idcfuncs_t::funcs
+struct ext_idcfunc_t
 {
   const char *name;             ///< Name of function
-  idc_func_t *fp;               ///< Pointer to the Function
-  const char *args;             ///< Type of arguments. Terminated with 0
-                                ///< #VT_WILD means a function with arbitrary
-                                ///< number of arguments. Actual number of
-                                ///< arguments will be passed in res->num
+  idc_func_t *fptr;             ///< Pointer to the Function
+  const char *args;             ///< Type of arguments. Terminated with 0.
+                                ///< #VT_WILD at the end means a variadic function.
+                                ///< Actual number of arguments will be passed
+                                ///< in res->num in this case.
+  const idc_value_t *defvals;   ///< Default argument values.
+                                ///< Only the rightmost arguments may have
+                                ///< default values.
+  int ndefvals;                 ///< Number of default values.
   int flags;                    ///< \ref EXTFUN_
 /// \defgroup EXTFUN_ Function description flags
-/// Used by extfun_t::flags
+/// Used by ext_idcfunc_t::flags
 //@{
 #define EXTFUN_BASE  0x0001     ///< requires open database.
 #define EXTFUN_NORET 0x0002     ///< does not return. the interpreter may
@@ -447,10 +462,10 @@ struct extfun_t
 };
 
 /// Describes an array of IDC functions
-struct funcset_t
+struct idcfuncs_t
 {
-  int qnty;                     ///< Number of functions
-  extfun_t *f;                  ///< Function table
+  size_t qnty;                  ///< Number of functions
+  ext_idcfunc_t *funcs;         ///< Function table
 
   /// \name IDC Engine
   /// IDC engine requires the following functions (all of them may be NULL)
@@ -476,7 +491,7 @@ struct funcset_t
 
   /// Convert an address to a string.
   /// if this pointer is NULL, '%a' will be used.
-  size_t (idaapi *ea2str)(ea_t ea, char *buf, size_t bufsize);
+  size_t (idaapi *ea2str)(char *buf, size_t bufsize, ea_t ea);
 
   /// Should a variable name be accepted without declaration?.
   /// When the parser encounters an unrecognized variable, this callback is called.
@@ -484,7 +499,7 @@ struct funcset_t
   /// else the parser generates code to call to a set or get function,
   /// depending on the current context.
   /// If this pointer is NULL, undeclared variables won't be supported.
-  /// However, if 'getname' function is provided to the parser, it will be used
+  /// However, if 'resolver' object is provided to the parser, it will be used
   /// to resolve such names to constants at the compilation time.
   /// This callback is used by IDA to handle processor register names.
   bool (idaapi *undeclared_variable_ok)(const char *name);
@@ -496,15 +511,15 @@ struct funcset_t
   //@{
 
   /// Retrieve value of an undeclared variable.
-  /// Expected prototype: get(#VT_STR2 varname)
+  /// Expected prototype: get(#VT_STR varname)
   int get_unkvar;
 
   /// Store a value to an undeclared variable.
-  /// Expected prototype: set(#VT_WILD new_value, #VT_STR2 varname)
+  /// Expected prototype: set(#VT_WILD new_value, #VT_STR varname)
   int set_unkvar;
 
   /// Execute resolved function.
-  /// If 'getname' was used to resolve an unknown name to a constant in a function
+  /// If 'resolver' was used to resolve an unknown name to a constant in a function
   /// call context, such a call will be redirected here.
   /// Expected prototype: exec_resolved_func(#VT_LONG func, #VT_WILD typeinfo, ...)
   /// This callback is used in IDA for Appcall.
@@ -535,51 +550,101 @@ DECLARE_TYPE_AS_MOVABLE(idc_value_t);
 DECLARE_TYPE_AS_MOVABLE(idc_global_t);
 
 //------------------------------------------------------------------------
-
-/// Array of built-in IDA functions
-idaman funcset_t ida_export_data IDCFuncs;
-
-
-/// Add/remove a built-in IDC function.
-/// This function does not modify the predefined kernel functions
+/// Add an IDC function.
+/// This function does not modify the predefined kernel functions.
 /// Example:
 /// \code
-///  static const char myfunc5_args[] = { VT_LONG, VT_STR, 0 };
-///
 ///  static error_t idaapi myfunc5(idc_value_t *argv, idc_value_t *res)
 ///  {
 ///    msg("myfunc is called with arg0=%a and arg1=%s\n", argv[0].num, argv[1].str);
 ///    res->num = 5;     // let's return 5
 ///    return eOk;
 ///  }
+///  static const char myfunc5_args[] = { VT_LONG, VT_STR, 0 };
+///  static const ext_idcfunc_t myfunc_desc = { "MyFunc5", myfunc5, myfunc5_args, NULL, 0, EXTFUN_BASE };
 ///
 ///  // after this:
-///  set_idc_func("MyFunc5", myfunc5, myfunc5_args);
+///  add_idc_func(myfunc_desc);
 ///
 ///  // there is a new IDC function which can be called like this:
 ///  MyFunc5(0x123, "test");
 ///
 /// \endcode
-/// \param name           function name to modify
-/// \param fp             pointer to the function which will handle this IDC function.
-///                       == NULL: remove the specified function
-/// \param args           prototype of the function, zero terminated array of \ref VT_
-/// \param extfunc_flags  \ref EXTFUN_ or 0
+/// \param func function description block.
+/// \note If the function already exists, it will be replaced by the new function
 /// \return success
 
-idaman THREAD_SAFE bool ida_export set_idc_func_ex(
-        const char *name,
-        idc_func_t *fp,
-        const char *args,
-        int extfunc_flags);
+idaman THREAD_SAFE bool ida_export add_idc_func(const ext_idcfunc_t &func);
+
+
+/// Delete an IDC function
+///
+idaman THREAD_SAFE bool ida_export del_idc_func(const char *name);
+
+
+// Find an idc function that starts with the given prefix.
+// \param out    buffer for the output name
+// \param prefix prefix to search for
+// \param n      how many matches to skip
+// Returns: success
+idaman THREAD_SAFE bool ida_export find_idc_func(
+        qstring *out,
+        const char *prefix,
+        int n=0);
+
+
+/// Possible syntax element highlighting style names
+enum syntax_highlight_style
+{
+  HF_DEFAULT = 0,
+  HF_KEYWORD1 = 1,
+  HF_KEYWORD2 = 2,
+  HF_KEYWORD3 = 3,
+  HF_STRING = 4,
+  HF_COMMENT = 5,
+  HF_PREPROC = 6,
+  HF_NUMBER = 7,
+
+  HF_MAX,
+};
+#define HF_FIRST HF_KEYWORD1
+
+struct highlighter_cbs_t
+{
+  virtual ~highlighter_cbs_t() {}
+  virtual void idaapi set_style(int32 /*start*/, int32 /*len*/, syntax_highlight_style /*style*/) {}
+  virtual int32 idaapi prev_block_state() { return 0; }
+  virtual int32 idaapi cur_block_state() { return 0; }
+  virtual void idaapi set_block_state(int32 /*state*/) {}
+};
+
+/// Base class for syntax highligters
+struct syntax_highlighter_t
+{
+public:
+  virtual ~syntax_highlighter_t() {}
+  /// Function for extlang syntax highlighting
+  /// \param context         implementation specific context. can be NULL
+  /// \param ighlighter_cbs  structure with set of callbacks
+  /// \param text            part of text to colorize
+  void (idaapi *highlight_block)(
+        void *context,
+        highlighter_cbs_t *highlighter_cbs,
+        const qstring &text);
+};
+
 
 //------------------------------------------------------------------------
 /// External language (to support third party language interpreters)
 struct extlang_t
 {
   size_t size;                  ///< Size of this structure
-  uint32 flags;                 ///< Language features, currently 0
+  uint32 flags;                 ///< Language features
+#define EXTLANG_IDC 0x01
+  int32 refcnt;                 ///< Reference count
   const char *name;             ///< Language name
+  const char *fileext;          ///< File name extension for the language
+  syntax_highlighter_t *highlighter; // Language syntax highlighter
 
   /// Compile an expression.
   /// \param name         name of the function which will
@@ -587,83 +652,78 @@ struct extlang_t
   /// \param current_ea   current address. if unknown then #BADADDR
   /// \param expr         expression to compile
   /// \param[out] errbuf  error message if compilation fails
-  /// \param errbufsize   size of the error buffer
   /// \return success
-  bool (idaapi *compile)(
+  bool (idaapi *compile_expr)(
         const char *name,
         ea_t current_ea,
         const char *expr,
-        char *errbuf,
-        size_t errbufsize);
-
-  /// Evaluate a previously compiled expression.
-  /// \param name         function to run
-  /// \param nargs        number of input arguments
-  /// \param args         input arguments
-  /// \param[out] result  function result or exception
-  /// \param[out] errbuf  error message if evaluation fails
-  /// \param errbufsize   size of the error buffer
-  /// \return success
-  bool (idaapi *run)(
-        const char *name,
-        int nargs,
-        const idc_value_t args[],
-        idc_value_t *result,
-        char *errbuf,
-        size_t errbufsize);
-
-  /// Compile and evaluate an expression.
-  /// \param current_ea   current address. if unknown then BADADDR
-  /// \param expr         expression to evaluate
-  /// \param[out] rv      expression value or exception
-  /// \param[out] errbuf  error message if evaluation fails
-  /// \param errbufsize   size of the error buffer
-  /// \return success
-  bool (idaapi *calcexpr)(
-        ea_t current_ea,
-        const char *expr,
-        idc_value_t *rv,
-        char *errbuf,
-        size_t errbufsize);
+        qstring *errbuf);
 
   /// Compile (load) a file.
   /// \param file         file name
   /// \param[out] errbuf  error message if compilation fails
-  /// \param errbufsize   size of the error buffer
-  bool (idaapi *compile_file)(
-        const char *file,
-        char *errbuf,
-        size_t errbufsize);
+  bool (idaapi *compile_file)(const char *file, qstring *errbuf);
 
-  const char *fileext;          ///< File name extension for the language
+  /// Evaluate a previously compiled expression.
+  /// \param[out] result  function result or exception
+  /// \param name         function to call
+  /// \param nargs        number of input arguments
+  /// \param args         input arguments
+  /// \param[out] errbuf  error message if evaluation fails
+  /// \return success
+  bool (idaapi *call_func)(
+        idc_value_t *result,
+        const char *name,
+        const idc_value_t args[],
+        size_t nargs,
+        qstring *errbuf);
+
+  /// Compile and evaluate an expression.
+  /// \param[out] rv      expression value or exception
+  /// \param current_ea   current address. if unknown then BADADDR
+  /// \param expr         expression to evaluate
+  /// \param[out] errbuf  error message if evaluation fails
+  /// \return success
+  bool (idaapi *eval_expr)(
+        idc_value_t *rv,
+        ea_t current_ea,
+        const char *expr,
+        qstring *errbuf);
+
+  /// Compile and execute a string with statements.
+  /// (see also: eval_expr() which works with expressions)
+  /// \param str          input string to execute
+  /// \param[out] errbuf  error message
+  /// \return success
+  bool (idaapi *eval_snippet)(
+        const char *str,
+        qstring *errbuf);
 
   /// Create an object instance.
-  /// \param name        object class name
-  /// \param nargs       number of input arguments
-  /// \param args        input arguments
   /// \param result      created object or exception
+  /// \param name        object class name
+  /// \param args        input arguments
+  /// \param nargs       number of input arguments
   /// \param errbuf      error message if evaluation fails
-  /// \param errbufsize  size of the error buffer
   /// \return success
   bool (idaapi *create_object)(
-        const char *name,
-        int nargs,
-        const idc_value_t args[],
         idc_value_t *result,
-        char *errbuf,
-        size_t errbufsize);
+        const char *name,
+        const idc_value_t args[],
+        size_t nargs,
+        qstring *errbuf);
 
   /// Returns the attribute value of a given object from the global scope.
+  /// \param[out] result  attribute value
   /// \param obj          object (may be NULL)
   /// \param attr         attribute name.
   ///                     if NULL or empty string then the object instance name
   ///                     (i.e. class name) should be returned.
-  /// \param[out] result  attribute value
   /// \return success
   bool (idaapi *get_attr)(
+        idc_value_t *result,
         const idc_value_t *obj,
-        const char *attr,
-        idc_value_t *result);
+        const char *attr);
 
   /// Sets the attribute value of a given object in the global scope.
   /// \param obj    object (may be NULL)
@@ -673,126 +733,137 @@ struct extlang_t
   bool (idaapi *set_attr)(
         idc_value_t *obj,
         const char *attr,
-        idc_value_t *value);
+        const idc_value_t &value);
 
   /// Calls a member function.
+  /// \param[out] result  function result or exception
   /// \param obj          object instance
   /// \param name         method name to call
-  /// \param nargs        number of input arguments
   /// \param args         input arguments
-  /// \param[out] result  function result or exception
+  /// \param nargs        number of input arguments
   /// \param[out] errbuf  error message if evaluation fails
-  /// \param errbufsize   size of the error buffer
   /// \return success
   bool (idaapi *call_method)(
-    const idc_value_t *obj,
-    const char *name,
-    int nargs,
-    const idc_value_t args[],
-    idc_value_t *result,
-    char *errbuf,
-    size_t errbufsize);
-
-  /// Compile and execute a string with statements.
-  /// (see also: calcexpr() which works with expressions)
-  /// \param str          input string to execute
-  /// \param[out] errbuf  error message
-  /// \param errbufsize   size of the error buffer
-  /// \return success
-  bool (idaapi *run_statements)(
-    const char *str,
-    char *errbuf,
-    size_t errbufsize);
+        idc_value_t *result,
+        const idc_value_t *obj,
+        const char *name,
+        const idc_value_t args[],
+        size_t nargs,
+        qstring *errbuf);
 
   /// Compile (load) a file with processor module.
   /// If is absent then compile_file() is used.
-  /// \param file          processor module file name
   /// \param[out] procobj  created object or exception
+  /// \param path          processor module file name
   /// \param[out] errbuf   error message if compilation fails
-  /// \param errbufsize    size of the error buffer
   /// \retval true   success
   /// \retval false  if errbuf is empty then file has been
   ///                 loaded (compiled) successfully but
   ///                it doesn't contain processor module
   bool (idaapi *load_procmod)(
-        const char *file,
         idc_value_t *procobj,
-        char *errbuf,
-        size_t errbufsize);
+        const char *path,
+        qstring *errbuf);
 
   /// Unload previously loaded processor module.
-  /// \param file          processor module file name
+  /// \param path          processor module file name
   /// \param[out] errbuff  error message if compilation fails
-  /// \param errbufsize    size of the error buffer
   /// \return success
   bool (idaapi *unload_procmod)(
-        const char *file,
-        char *errbuf,
-        size_t errbufsize);
-};
-typedef qvector<const extlang_t *> extlangs_t; ///< vector of external language descriptions
+        const char *path,
+        qstring *errbuf);
 
-idaman ida_export_data const extlang_t *extlang; ///< current active external language
+  bool is_idc(void) const { return (flags & EXTLANG_IDC) != 0; }
+  void release(void) {}
+};
+
+typedef qvector<extlang_t *> extlangs_t; ///< vector of external language descriptions
+typedef qrefcnt_t<extlang_t> extlang_object_t;
+
+/// Get current active external language.
+
+idaman void *ida_export get_current_extlang(void); // do not use
+
+inline const extlang_object_t get_extlang(void)    // use this function
+{
+  return extlang_object_t((extlang_t *)get_current_extlang());
+}
 
 
 /// Install an external language interpreter.
 /// Any previously registered interpreter will be automatically unregistered.
 /// The installed extlang can be used in select_extlang().
 /// \param el  description of the new language. must point to static storage.
-/// \return success
+/// \return extlang id; -1 means failure and will happen if the extlang has
+///         already been installed
 
-idaman bool ida_export install_extlang(const extlang_t *el);
+idaman ssize_t ida_export install_extlang(extlang_t *el);
 
 
 /// Uninstall an external language interpreter.
 /// \return success
 
-idaman bool ida_export remove_extlang(const extlang_t *el);
+idaman bool ida_export remove_extlang(extlang_t *el);
 
 
 /// Selects the external language interpreter.
 /// The specified extlang must be registered before selecting it.
 /// It will be used to evaluate expressions entered in dialog boxes.
-/// It will also replace the calcexpr() and calcexpr_long() functions.
+/// It will also replace the eval_expr() and eval_expr_long() functions.
 /// \return success
 
-idaman bool ida_export select_extlang(const extlang_t *el);
+idaman bool ida_export select_extlang(extlang_t *el);
 
 
-/// Get the file extension for the current language
+/// Process all registered extlangs
+// \param ev     visitor object
+// \param select temporarily select extlang for the duration of the visit
+// \return 0 or the non-zero value returned by visit_extlang()
 
-inline const char *get_extlang_fileext(void)
+struct extlang_visitor_t
 {
-  const extlang_t *el = extlang;
-  if ( el != NULL && el->size > qoffsetof(extlang_t, fileext) )
-    return el->fileext;
-  return NULL;
-}
+  virtual ssize_t idaapi visit_extlang(extlang_t *extlang) = 0;
+};
+
+idaman ssize_t ida_export for_all_extlangs(extlang_visitor_t &ev, bool select=false);
 
 
-/// Get the list of the registered extlangs
+// Helper function to search for extlang
+enum find_extlang_kind_t
+{
+  FIND_EXTLANG_BY_EXT,
+  FIND_EXTLANG_BY_NAME,
+  FIND_EXTLANG_BY_IDX,
+};
 
-idaman const extlangs_t *ida_export get_extlangs();
+// do not use
+idaman void *ida_export find_extlang(const void *str, find_extlang_kind_t kind);
 
 
 /// Get the extlang that can handle the given file extension
 
-idaman const extlang_t *ida_export find_extlang_by_ext(const char *ext);
-
+inline extlang_object_t find_extlang_by_ext(const char *ext)
+{
+  return extlang_object_t((extlang_t *)find_extlang(ext, FIND_EXTLANG_BY_EXT));
+}
 
 /// Find an extlang by name
 
-idaman const extlang_t *ida_export find_extlang_by_name(const char *name);
+inline extlang_object_t find_extlang_by_name(const char *name)
+{
+  return extlang_object_t((extlang_t *)find_extlang(name, FIND_EXTLANG_BY_NAME));
+}
+
+/// Find an extlang by index
+
+inline extlang_object_t find_extlang_by_index(size_t idx)
+{
+  return extlang_object_t((extlang_t *)find_extlang(&idx, FIND_EXTLANG_BY_IDX));
+}
+
+
 
 //------------------------------------------------------------------------
-
-/// Get name of directory that contains IDC scripts.
-/// This directory is pointed by IDCPATH environment variable or
-/// it is in IDC subdirectory in IDA directory
-
-idaman THREAD_SAFE const char *ida_export get_idcpath(void);
-
-
 /// Set or append a header path.
 /// IDA looks for the include files in the appended header paths,
 /// then in the ida executable directory.
@@ -810,8 +881,8 @@ idaman THREAD_SAFE bool ida_export set_header_path(const char *path, bool add);
 /// Search for file in list of include directories, IDCPATH directory
 /// and the current directory.
 /// \param buf      buffer for the answer
-/// \param bufsize  buffer size
-/// \param file    file name without full path
+/// \param bufsize  size of buffer
+/// \param file     file name without full path
 /// \return NULL is file not found.
 ///          otherwise returns pointer to buf
 
@@ -823,216 +894,139 @@ idaman THREAD_SAFE char *ida_export get_idc_filename(
 
 /// Compile and execute "main" function from system file.
 /// \param file  file name with IDC function(s).
-///              The file will be searched in:
-///                      - the current directory
-///                      - IDA.EXE directory
-///                      - in PATH
+///              The file will be searched in the idc subdir of ida
 /// \param complain_if_no_file
 ///              - 1: display warning if the file is not found
 ///              - 0: don't complain if file doesn't exist
 /// \retval 1  ok, file is compiled and executed
 /// \retval 0  failure, compilation or execution error, warning is displayed
 
-idaman THREAD_SAFE bool ida_export dosysfile(bool complain_if_no_file, const char *file);
+idaman THREAD_SAFE bool ida_export exec_system_script(
+        const char *file,
+        bool complain_if_no_file=true);
 
 
 /// Compile and calculate an expression.
+/// \param res          pointer to result. The result will be converted
+///                     to 32/64bit number. Use eval_expr() if you
+///                     need the result of another type.
 /// \param where        the current linear address in the addressing space of the
 ///                     program being disassembled. it will be used to resolve
 ///                     names of local variables, etc.
 ///                     if not applicable, then should be #BADADDR
 /// \param line         a text line with IDC expression
-/// \param res          pointer to result. The result will be converted
-///                     to 32/64bit number. Use calcexpr() if you
-///                     need the result of another type.
 /// \param[out] errbuf  buffer for the error message
-/// \param errbufsize   size of errbuf
 /// \retval true   ok
 /// \retval false  error, see errbuf
 
-idaman bool ida_export calcexpr_long(
-        ea_t where,
-        const char *line,
+idaman bool ida_export eval_expr_long(
         sval_t *res,
-        char *errbuf,
-        size_t errbufsize);
-
-/// See calcexpr_long()
-
-inline bool idaapi calcexpr_long(
         ea_t where,
         const char *line,
+        qstring *errbuf=NULL);
+
+/// See eval_expr_long()
+
+inline bool idaapi eval_expr_long(
         uval_t *res,
-        char *errbuf,
-        size_t errbufsize)
+        ea_t where,
+        const char *line,
+        qstring *errbuf=NULL)
 {
-  return calcexpr_long(where, line, (sval_t *)res, errbuf, errbufsize);
+  return eval_expr_long((sval_t *)res, where, line, errbuf);
 }
 
 
 /// Compile and calculate an expression.
+/// \param rv           pointer to the result
 /// \param where        the current linear address in the addressing space of the
 ///                     program being disassembled. If will be used to resolve
 ///                     names of local variables etc.
 ///                     if not applicable, then should be #BADADDR.
 /// \param line         the expression to evaluate
-/// \param rv           pointer to the result
 /// \param[out] errbuf  buffer for the error message
-/// \param errbufsize   size of errbuf
 /// \retval true   ok
 /// \retval false  error, see errbuf
 
-idaman bool ida_export calcexpr(
+idaman bool ida_export eval_expr(
+        idc_value_t *rv,
         ea_t where,
         const char *line,
+        qstring *errbuf=NULL);
+
+
+/// Same as eval_expr(), but will always use the IDC interpreter regardless of the
+/// currently installed extlang.
+
+idaman bool ida_export eval_idc_expr(
         idc_value_t *rv,
-        char *errbuf,
-        size_t errbufsize);
-
-
-/// Same as calcexpr(), but will always use the IDC interpreter regardless of the
-/// currently installed extlang. One subtle difference: the current value of rv
-/// will be discarded while calcexpr() frees it before storing the return value.
-
-idaman bool ida_export calc_idc_expr(
         ea_t where,
         const char *buf,
-        idc_value_t *rv,
-        char *errbuf,
-        size_t errbufsize);
-
-
-/// Compile and execute IDC expression.
-/// \param line  a text line with IDC expression
-/// \retval 1    ok
-/// \retval 0    failure, a warning message is displayed
-
-idaman bool ida_export execute(const char *line);
+        qstring *errbuf=NULL);
 
 
 /// Compile a text file with IDC function(s).
 /// \param file         name of file to compile
 ///                     if NULL, then "File not found" is returned.
-/// \param cpl_flags    \ref CPL_ or 0
 /// \param[out] errbuf  buffer for the error message
-/// \param errbufsize   size of errbuf
+/// \param cpl_flags    \ref CPL_ or 0
 /// \retval true   ok
 /// \retval false  error, see errbuf
 
-idaman THREAD_SAFE bool ida_export CompileEx(
-        const char *file,
-        int cpl_flags,
-        char *errbuf,
-        size_t errbufsize);
-
-/// \defgroup CPL_ Compile IDC file flags
-/// Passed as 'cpl_flags' parameter to CompileEx()
+/// \defgroup CPL_ Flags for compile_idc_file()
 //@{
 #define CPL_DEL_MACROS 0x0001  ///< delete macros at the end of compilation
 #define CPL_USE_LABELS 0x0002  ///< allow program labels in the script
 #define CPL_ONLY_SAFE  0x0004  ///< allow calls of only thread-safe functions
 //@}
 
-
-/// Compile a text file with IDC functions
-/// (Also see CompileEx()).
-
-inline bool idaapi Compile(
+idaman THREAD_SAFE bool ida_export compile_idc_file(
         const char *file,
-        char *errbuf,
-        size_t errbufsize)
-{
-  return CompileEx(file, CPL_DEL_MACROS|CPL_USE_LABELS, errbuf, errbufsize);
-}
+        qstring *errbuf=NULL,
+        int cpl_flags = CPL_DEL_MACROS|CPL_USE_LABELS);
 
 
-/// Does the extlang_t::compile_file() callback exist?
-
-inline bool idaapi extlang_compile_file_exists(const extlang_t *el = NULL)
-{
-  if ( el == NULL )
-    el = extlang;
-  return el != NULL
-      && el->size > qoffsetof(extlang_t, compile_file)
-      && el->compile_file != NULL;
-}
-
-
-/// Compiles a script using the active extlang or with Compile() if no extlang is active
-
-inline bool compile_script_file(
-        const char *file,
-        char *errbuf,
-        size_t errbufsize)
-{
-  bool (idaapi *func)(const char *, char *, size_t);
-  func = extlang_compile_file_exists() ? extlang->compile_file : Compile;
-  return func(file, errbuf, errbufsize);
-}
-
-
-/// Unload processor module
-
-inline bool extlang_unload_procmod(
-        const char *file,
-        char *errbuf,
-        size_t errbufsize)
-{
-  if ( extlang != NULL
-    && extlang->size > qoffsetof(extlang_t, unload_procmod)
-    && extlang->unload_procmod != NULL )
-  {
-    return extlang->unload_procmod(file, errbuf, errbufsize);
-  }
-  return true;
-}
-
-
-/// Compiles a file using the appropriate extlang, otherwise Compile() is used.
-/// (extlang is determined based on the extension of the file)
-/// \param file         script file name (can't be NULL!)
-/// \param[out] errbuf  buffer for the error message
-/// \param errbufsize   size of errbuf
-/// \param el           the extlang that was used to compile the script.
-///                     NULL indicates that IDC was used.
-/// \retval true   ok
-/// \retval false  error, see errbuf
-
-idaman bool ida_export extlang_compile_file(
-        const char *file,
-        char *errbuf,
-        size_t errbufsize,
-        const extlang_t **el);
-
-
-/// Compile one text line with IDC function(s).
+/// Compile text with IDC function(s).
 /// \param line             line with IDC function(s) (can't be NULL!)
 /// \param[out] errbuf      buffer for the error message
-/// \param bufsize          size of errbuf
-/// \param _getname         callback function to get values of undefined variables
-///                         This function will be called if IDC function contains
+/// \param resolver         callback object to get values of undefined variables
+///                         This object will be called if IDC function contains
 ///                         references to undefined variables. May be NULL.
 /// \param only_safe_funcs  if true, any calls to functions without #EXTFUN_SAFE flag
 ///                         will lead to a compilation error.
 /// \retval true   ok
 /// \retval false  error, see errbuf
 
-idaman THREAD_SAFE bool ida_export CompileLineEx(
+struct idc_resolver_t
+{
+  virtual uval_t idaapi resolve_name(const char *name) = 0;
+};
+
+idaman THREAD_SAFE bool ida_export compile_idc_text(
         const char *line,
-        char *errbuf,
-        size_t bufsize,
-        uval_t (idaapi*_getname)(const char *name)=NULL,
+        qstring *errbuf=NULL,
+        idc_resolver_t *resolver=NULL,
         bool only_safe_funcs=false);
 
 
-/// Compile idc or extlang function
+/// Compile text with IDC statements.
+/// \param func             name of the function to create out of the snippet
+/// \param text             text to compile
+/// \param[out] errbuf      buffer for the error message
+/// \param resolver         callback object to get values of undefined variables
+///                         This object will be called if IDC function contains
+///                         references to undefined variables. May be NULL.
+/// \param only_safe_funcs  if true, any calls to functions without #EXTFUN_SAFE flag
+///                         will lead to a compilation error.
+/// \retval true   ok
+/// \retval false  error, see errbuf
 
-idaman bool ida_export compile_script_func(
-        const char *name,
-        ea_t current_ea,
-        const char *expr,
-        char *errbuf,
-        size_t errbufsize);
+idaman bool ida_export compile_idc_snippet(
+        const char *func,
+        const char *text,
+        qstring *errbuf=NULL,
+        idc_resolver_t *resolver=NULL,
+        bool only_safe_funcs=false);
 
 
 // Execution of IDC code can generate exceptions. Exception objects
@@ -1046,315 +1040,82 @@ idaman bool ida_export compile_script_func(
 //      description - text description of the runtime error
 
 /// Execute an IDC function.
-/// \param fname        function name. User-defined functions, built-in functions,
-///                     and plugin-defined functions are accepted.
-/// \param argsnum      number of parameters to pass to 'fname'.
-///                     This number should be equal to number of parameters
-///                     the function expects.
-/// \param args         array of parameters
 /// \param[out] result  pointer to idc_value_t to hold the return value of the function.
 ///                     If execution fails, this variable will contain
 ///                     the exception information.
 ///                     Can be NULL if return value is not required.
-/// \param[out] errbuf  buffer for the error message
-/// \param errbufsize   size of errbuf
-/// \retval true   ok
-/// \retval false  error, see errbuf
-
-idaman bool ida_export Run(
-        const char *fname,
-        int argsnum,
-        const idc_value_t args[],
-        idc_value_t *result,
-        char *errbuf,
-        size_t errbufsize);
-
-
-/// Execute idc or extlang function
-
-inline bool run_script_func(
-        const char *fname,
-        int argsnum,
-        const idc_value_t args[],
-        idc_value_t *result,
-        char *errbuf,
-        size_t errbufsize)
-{
-  bool (idaapi *func)(const char *, int, const idc_value_t[], idc_value_t *,
-                                                               char *, size_t);
-  func = extlang != NULL ? extlang->run : Run;
-  return func(fname, argsnum, args, result, errbuf, errbufsize);
-}
-
-
-
-/// Create an IDC object.
-/// \param name         class name. May be NULL for the built-in object_t class.
-/// \param argsnum      number of arguments to pass to object constructor.
-/// \param args         array of arguments
-/// \param[out] result  pointer to idc_value_t to hold the created object.
-///                     If execution fails, this variable will contain
-///                     the exception information.
-/// \param[out] errbuf  buffer for the error message
-/// \param errbufsize   size of errbuf
-/// \retval true   ok
-/// \retval false  error, see errbuf and exception info in 'result'
-
-idaman bool ida_export create_idc_object(
-        const char *name,
-        int argsnum,
-        const idc_value_t args[],
-        idc_value_t *result,
-        char *errbuf,
-        size_t errbufsize);
-
-
-/// Does the get_attr() extlang callback exist?
-
-inline bool idaapi extlang_get_attr_exists(void)
-{
-  const extlang_t *el = extlang;
-  return el != NULL
-      && el->size > qoffsetof(extlang_t, get_attr)
-      && el->get_attr != NULL;
-}
-
-
-/// Get idc or extlang object attribute
-
-inline bool get_script_attr(
-        const idc_value_t *obj,
-        const char *attr,
-        idc_value_t *result)
-{
-  return extlang_get_attr_exists() ? extlang->get_attr(obj, attr, result) : VarGetAttr(obj, attr, result) == eOk;
-}
-
-
-/// Does the set_attr() extlang callback exist?
-
-inline bool idaapi extlang_set_attr_exists(void)
-{
-  const extlang_t *el = extlang;
-  return el != NULL
-      && el->size > qoffsetof(extlang_t, set_attr)
-      && el->set_attr != NULL;
-}
-
-
-/// Set idc or extlang object attribute
-
-inline bool set_script_attr(
-        idc_value_t *obj,
-        const char *attr,
-        idc_value_t *value)
-{
-  return extlang_set_attr_exists() ? extlang->set_attr(obj, attr, value) : VarSetAttr(obj, attr, value) == eOk;
-}
-
-
-/// Does the create_object() extlang callback exist?
-
-inline bool idaapi extlang_create_object_exists(void)
-{
-  const extlang_t *el = extlang;
-  return el != NULL
-      && el->size > qoffsetof(extlang_t, create_object)
-      && el->create_object != NULL;
-}
-
-
-/// Create idc or extlang object
-
-inline bool create_script_object(
-        const char *name,
-        int nargs,
-        const idc_value_t args[],
-        idc_value_t *result,
-        char *errbuf,
-        size_t errbufsize)
-{
-  bool (idaapi *func)(const char *, int,
-                        const idc_value_t [], idc_value_t *, char *, size_t);
-  func = extlang_create_object_exists() ? extlang->create_object : create_idc_object;
-  return func(name, nargs, args, result, errbuf, errbufsize);
-}
-
-
-/// Call an IDC object method.
-/// \param obj          object. if NULL and name != NULL, a gvar or global func
-///                     specified by 'name' will be called.
-/// \param name         name of the method to call. if NULL, obj must be a function
-///                     reference. the referenced function will be called.
-///                     both obj and name can not be NULL.
-/// \param nargs        number of arguments to pass to method.
-/// \param args         array of arguments. 'this' argument will be supplied by ida.
-/// \param[out] result  pointer to idc_value_t to hold the created object.
-///                     If execution fails, this variable will contain
-///                     the exception information.
-/// \param[out] errbuf  buffer for the error message
-/// \param errbufsize   size of errbuf
-/// \retval true   ok
-/// \retval false  error, see errbuf and exception info in 'result'
-
-idaman bool ida_export call_idc_method(
-        const idc_value_t *obj,
-        const char *name,
-        int nargs,
-        const idc_value_t args[],
-        idc_value_t *result,
-        char *errbuf,
-        size_t errbufsize);
-
-
-/// Does the call_method() extlang callback exist?
-
-inline bool idaapi extlang_call_method_exists(void)
-{
-  const extlang_t *el = extlang;
-  return el != NULL
-    && el->size > qoffsetof(extlang_t, call_method)
-    && el->call_method != NULL;
-}
-
-
-/// Call a member function of a script object.
-/// \param obj          object instance
-/// \param name         method name to call
-/// \param nargs        number of input arguments
-/// \param args         input arguments
-/// \param[out] result  function result or exception
-/// \param[out] errbuf  error message if evaluation fails
-/// \param errbufsize   size of the error buffer
-/// \retval true   ok
-/// \retval false  error, see errbuf and exception info in 'result'
-
-inline bool idaapi call_script_method(
-        const idc_value_t *obj,
-        const char *name,
-        int nargs,
-        const idc_value_t args[],
-        idc_value_t *result,
-        char *errbuf,
-        size_t errbufsize)
-{
-  bool (idaapi *func)(const idc_value_t *, const char *, int,
-                      const idc_value_t [], idc_value_t *, char *, size_t);
-  func = extlang_call_method_exists() ? extlang->call_method : call_idc_method;
-  return func(obj, name, nargs, args, result, errbuf, errbufsize);
-}
-
-
-/// Does the extlang_t::run_statements callback exist?
-
-inline bool idaapi extlang_run_statements_exists(const extlang_t *elang = NULL)
-{
-  const extlang_t *el = elang == NULL ? extlang : elang;
-  return el != NULL
-    && el->size > qoffsetof(extlang_t, run_statements)
-    && el->run_statements != NULL;
-}
-
-/// Run statements using extlang.
-/// \param str          input string to execute
-/// \param[out] errbuf  error message if evaluation fails
-/// \param errbufsize   size of the error buffer
-/// \param elang        optional extlang to use.
-
-idaman bool ida_export run_statements(
-        const char *str,
-        char *errbuf,
-        size_t errbufsize,
-        const extlang_t *elang = NULL);
-
-
-/// Compile and execute IDC function(s) on one line of text.
-/// \param line         text of IDC functions
-/// \param func         function name to execute
-/// \param getname      callback function to get values of undefined variables
-///                     This function will be called if IDC function contains
-///                     references to a undefined variable. May be NULL.
-/// \param argsnum      number of parameters to pass to 'fname'
-///                     This number should be equal to the number of parameters
-///                     the function expects.
+/// \param fname        function name. User-defined functions, built-in functions,
+///                     and plugin-defined functions are accepted.
 /// \param args         array of parameters
-/// \param result       ptr to idc_value_t to hold result of the function.
-///                     If execution fails, this variable will contain
-///                     the exception information.
-///                     You may pass NULL if you are not interested in the returned
-///                     value.
+/// \param argsnum      number of parameters to pass to 'fname'.
+///                     This number should be equal to number of parameters
+///                     the function expects.
 /// \param[out] errbuf  buffer for the error message
-/// \param errbufsize  size of errbuf
+/// \param resolver     callback object to get values of undefined variables
+///                     This object will be called if IDC function contains
+///                     references to undefined variables. May be NULL.
 /// \retval true   ok
 /// \retval false  error, see errbuf
 
-idaman THREAD_SAFE bool ida_export ExecuteLine(
-                const char *line,
-                const char *func,
-                uval_t (idaapi*getname)(const char *name),
-                int argsnum,
-                const idc_value_t args[],
-                idc_value_t *result,                // may be NULL. Any previous
-                                                // value is DISCARDED (not freed)
-                char *errbuf,
-                size_t errbufsize);
+idaman bool ida_export call_idc_func(
+        idc_value_t *result,
+        const char *fname,
+        const idc_value_t args[],
+        size_t argsnum,
+        qstring *errbuf=NULL,
+        idc_resolver_t *resolver=NULL);
 
 
 /// Compile and execute IDC function(s) from file.
-/// \param file         text file containing text of IDC functions
-/// \param func         function name to execute
-/// \param argsnum      number of parameters to pass to 'fname'
-///                     This number should be equal to number of parameters
-///                     the function expects.
-/// \param args         array of parameters
 /// \param result       ptr to idc_value_t to hold result of the function.
 ///                     If execution fails, this variable will contain
 ///                     the exception information.
 ///                     You may pass NULL if you are not interested in the returned
 ///                     value.
+/// \param path         text file containing text of IDC functions
+/// \param func         function name to execute
+/// \param args         array of parameters
+/// \param argsnum      number of parameters to pass to 'fname'
+///                     This number should be equal to number of parameters
+///                     the function expects.
 /// \param[out] errbuf  buffer for the error message
-/// \param errbufsize   size of errbuf
 /// \retval true   ok
 /// \retval false  error, see errbuf
 
-idaman THREAD_SAFE bool ida_export ExecuteFile(
-                const char *file,
-                const char *func,
-                int argsnum,
-                const idc_value_t args[],
-                idc_value_t *result,                // may be NULL. Any previous
-                                                // value is DISCARDED (not freed)
-                char *errbuf,
-                size_t errbufsize);
+THREAD_SAFE inline bool exec_idc_script(
+        idc_value_t *result,
+        const char *path,
+        const char *func,
+        const idc_value_t args[],
+        size_t argsnum,
+        qstring *errbuf=NULL)
+{
+  if ( !compile_idc_file(path, errbuf) )
+    return false;
+  return call_idc_func(result, func, args, argsnum, errbuf);
+}
 
 
-/// Add a compiled IDC function to the pool of compiled functions.
-/// This function makes the input function available to be executed.
-/// \param name  name of the function
-/// \param narg  number of the function parameters
-/// \param body  compiled body of the function
-/// \param len   length of the function body in bytes.
-/// \return success (may fail on funcs that are being executed/compiled)
+/// Compile and execute IDC statements or expressions.
+/// \param result       ptr to idc_value_t to hold result of the function.
+///                     If execution fails, this variable will contain
+///                     the exception information.
+///                     You may pass NULL if you are not interested in the returned
+///                     value.
+/// \param line         body of IDC the function
+/// \param[out] errbuf  buffer for the error message
+/// \param resolver     callback object to get values of undefined variables
+///                     This object will be called if IDC function contains
+///                     references to undefined variables. May be NULL.
+/// \return success
+/// \note see also eval_idc_expr()
 
-idaman THREAD_SAFE bool ida_export set_idc_func_body(
-                const char *name,
-                int narg,
-                const uchar *body,
-                size_t len);
 
-
-/// Get the body of a compiled IDC function.
-/// \param name  name of the function
-/// \param narg  pointer to the number of the function parameters (out)
-/// \param len   out: length of the function body (may be NULL)
-/// \return pointer to the buffer with the function body.
-///         buffer will be allocated using qalloc().
-///         NULL indicates failure (no such defined function)
-
-idaman THREAD_SAFE uchar *ida_export get_idc_func_body(
-                const char *name,
-                int *narg,
-                size_t *len);
+idaman bool ida_export eval_idc_snippet(
+        idc_value_t *result,
+        const char *line,
+        qstring *errbuf=NULL,
+        idc_resolver_t *resolver=NULL);
 
 
 //------------------------------------------------------------------------
@@ -1365,15 +1126,28 @@ idaman THREAD_SAFE uchar *ida_export get_idc_func_body(
 idaman void ida_export setup_lowcnd_regfuncs(idc_func_t *getreg, idc_func_t *setreg);
 
 //------------------------------------------------------------------------
+/// Extract type & data from the idc_value_t instance that
+/// was passed to parse_config_value().
+///
+/// \param vtype pointer to storage that will hold the type (\ref IDPOPT_T)
+/// \param vdata pointer to storage that contains the value (see \ref IDPOPT_T
+///              for what type of data is pointed to.)
+/// \param v the value holder
+/// \return true in case of success, false if 'v' is of unexpected type
+inline bool get_idptype_and_data(int *vtype, const void **vdata, const idc_value_t &v)
+{
+  switch ( v.vtype )
+  {
+    case VT_STR:   *vtype = IDPOPT_STR, *vdata = v.c_str(); break;
+    case VT_LONG:  *vtype = IDPOPT_NUM; *vdata = &v.num; break;
+    case VT_WILD:  *vtype = IDPOPT_BIT; *vdata = &v.num; break;
+    case VT_INT64: *vtype = IDPOPT_I64; *vdata = &v.i64; break;
+    case VT_PVOID: *vtype = IDPOPT_CST; *vdata = v.pvoid; break;
+    default: return false;
+  }
+  return true;
+}
 
 
 
-#ifndef NO_OBSOLETE_FUNCS
-typedef idc_value_t value_t;
-idaman DEPRECATED error_t ida_export VarString(idc_value_t *v);
-idaman DEPRECATED bool ida_export set_idc_func(const char *name, idc_func_t *fp, const char *args);
-idaman DEPRECATED bool ida_export CompileLine(const char *line, char *errbuf, size_t errbufsize, uval_t (idaapi*_getname)(const char *name)=NULL);
-#endif
-
-#pragma pack(pop)
 #endif /* _EXPR_H */

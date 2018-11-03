@@ -45,7 +45,6 @@ static const asm_t gnuasm =
   "GNU assembler",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   ".org",       // org
   NULL,         // end
 
@@ -68,10 +67,6 @@ static const asm_t gnuasm =
   ".space %s",  // uninited arrays
   "=",          // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   ".",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -98,21 +93,20 @@ static const asm_t *const asms[] = { &gnuasm, NULL };
 //--------------------------------------------------------------------------
 netnode helper;
 ushort idpflags = IDP_STRICT;
-static ioport_t *ports = NULL;
-static size_t numports = 0;
-static char device[MAXSTR] = "";
+static ioports_t ports;
+static qstring device;
 static const char *const cfgname = "i960.cfg";
 
 static void load_symbols(void)
 {
-  free_ioports(ports, numports);
-  ports = read_ioports(&numports, cfgname, device, sizeof(device), NULL);
+  ports.clear();
+  read_ioports(&ports, &device, cfgname);
 }
 
 const char *find_sym(ea_t address)
 {
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? port->name : NULL;
+  const ioport_t *port = find_ioport(ports, address);
+  return port ? port->name.c_str() : NULL;
 }
 
 
@@ -120,18 +114,28 @@ const char *find_sym(ea_t address)
 inline void set_device_name(const char *dev)
 {
   if ( dev != NULL )
-    qstrncpy(device, dev, sizeof(device));
+    device = dev;
 }
 
-static void idaapi choose_device(TView *[],int)
+//--------------------------------------------------------------------------
+inline void choose_device()
 {
-  if ( choose_ioport_device(cfgname, device, sizeof(device), NULL) )
-  {
+  if ( choose_ioport_device(&device, cfgname) )
     load_symbols();
-  }
 }
 
-static const char *idaapi set_idp_options(const char *keyword,int value_type,const void *value)
+//--------------------------------------------------------------------------
+static int idaapi choose_device_cb(int, form_actions_t &)
+{
+  choose_device();
+  return 0;
+}
+
+//--------------------------------------------------------------------------
+static const char *idaapi set_idp_options(
+        const char *keyword,
+        int value_type,
+        const void *value)
 {
   static const char form[] =
     "HELP\n"
@@ -158,7 +162,7 @@ static const char *idaapi set_idp_options(const char *keyword,int value_type,con
 
   if ( keyword == NULL )
   {
-    AskUsingForm_c(form, choose_device, &idpflags);
+    ask_form(form, choose_device_cb, &idpflags);
     return IDPOPT_OK;
   }
   else
@@ -175,76 +179,69 @@ static const char *idaapi set_idp_options(const char *keyword,int value_type,con
 }
 
 //--------------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
 {
-  va_list va;
-  va_start(va, msgid);
+  switch ( code )
+  {
+    case idb_event::closebase:
+    case idb_event::savebase:
+      helper.supset(0,  device.c_str());
+      helper.altset(-1, idpflags);
+      break;
+  }
+  return 0;
+}
 
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ i960");
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::closebase:
-    case processor_t::savebase:
-      helper.supset(0,  device);
-      helper.altset(-1, idpflags);
+    case processor_t::ev_newfile:   // new file loaded
+      choose_device();
       break;
 
-    case processor_t::newfile:   // new file loaded
-      choose_device(NULL, 0);
-      break;
-
-    case processor_t::oldfile:   // old file loaded
+    case processor_t::ev_oldfile:   // old file loaded
       idpflags = helper.altval(-1);
       break;
 
-    case processor_t::newprc:
+    case processor_t::ev_newprc:
       {
         int n = va_arg(va, int);
-        inf.mf = (n > 1);
-        char buf[MAXSTR];
-        if ( helper.supval(0, buf, sizeof(buf)) > 0 )
-          set_device_name(buf);
+        bool keep_cfg = va_argi(va, bool);
+        if ( !keep_cfg )
+          inf.set_be((n > 1));
+        if ( helper.supstr(&device, 0) > 0 )
+          set_device_name(device.c_str());
         load_symbols();
       }
       break;
 
 // +++ TYPE CALLBACKS
-    case processor_t::decorate_name3:
+    case processor_t::ev_decorate_name:
       {
         qstring *outbuf  = va_arg(va, qstring *);
         const char *name = va_arg(va, const char *);
         bool mangle      = va_argi(va, bool);
         cm_t cc          = va_argi(va, cm_t);
-        return gen_decorate_name3(outbuf, name, mangle, cc) ? 2 : 0;
+        tinfo_t *type    = va_arg(va, tinfo_t *);
+        return gen_decorate_name(outbuf, name, mangle, cc, type) ? 1 : 0;
       }
 
-    case processor_t::max_ptr_size:
-      return 4+1;
+    case processor_t::ev_max_ptr_size:
+      return 4;
 
-    case processor_t::based_ptr:
-      {
-        /*unsigned int ptrt =*/ va_arg(va, unsigned int);
-        char **ptrname    = va_arg(va, char **);
-        *ptrname = NULL;
-        return 0;                       // returns: size of type
-      }
-
-    case processor_t::get_default_enum_size: // get default enum size
+    case processor_t::ev_get_default_enum_size: // get default enum size
                                 // args:  cm_t cm
                                 // returns: sizeof(enum)
       {
@@ -252,41 +249,136 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
         return inf.cc.size_e;
       }
 
-    case processor_t::calc_arglocs3:
+    case processor_t::ev_calc_arglocs:
       return -1;
 
-    case processor_t::use_stkarg_type3:
+    case processor_t::ev_use_stkarg_type:
+      return 0;
+
+    case processor_t::ev_use_regarg_type:
       return -1;
 
-    case processor_t::use_regarg_type3:
-      return -1;
-
-    case processor_t::get_fastcall_regs3:
-    case processor_t::get_thiscall_regs3:
+    case processor_t::ev_get_cc_regs:
       {
         callregs_t *callregs = va_arg(va, callregs_t *);
-        callregs->reset();
-        return 2;
+        cm_t cc = va_argi(va, cm_t);
+        if ( cc == CM_CC_FASTCALL || cc == CM_CC_THISCALL )
+        {
+          callregs->reset();
+          return 1;
+        }
       }
+      break;
 
-    case processor_t::calc_cdecl_purged_bytes2:// calculate number of purged bytes after call
+    case processor_t::ev_calc_cdecl_purged_bytes:// calculate number of purged bytes after call
       {
         // ea_t ea                     = va_arg(va, ea_t);
-        return 2;
+        return 0;
       }
 
-    case processor_t::get_stkarg_offset2:  // get offset from SP to the first stack argument
+    case processor_t::ev_get_stkarg_offset:  // get offset from SP to the first stack argument
                                 // args: none
                                 // returns: the offset
-      return 2;
+      return 0;
 
 // --- TYPE CALLBACKS
 
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i960_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        i960_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        i960_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        i960_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return i960_ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return i960_emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_realcvt:
+      {
+        void *m = va_arg(va, void *);
+        uint16 *e = va_arg(va, uint16 *);
+        uint16 swt = va_argi(va, uint16);
+        int code = ieee_realcvt(m, e, swt);
+        return code == 0 ? 1 : code;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
     default:
-      return handle_old_type_callbacks(msgid, va);
+      break;
   }
-  va_end(va);
-  return 1;
+  return 0;
 }
 
 //-----------------------------------------------------------------------
@@ -313,11 +405,20 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_I960,                    // id
-  PRN_HEX|PR_RNAMESOK|PR_SEGS|PR_USE32|PR_DEFSEG32|PR_TYPEINFO|PR_TINFO,
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_I960,              // id
+                          // flag
+    PRN_HEX
+  | PR_RNAMESOK
+  | PR_SEGS
+  | PR_USE32
+  | PR_DEFSEG32
+  | PR_TYPEINFO,
+                          // flag2
+    PR2_REALCVT           // the module has 'realcvt' event implementation
+  | PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -326,31 +427,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  NULL,                 // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  intel_data,           // generate ...                    data directive
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   ds,                   // first
   cs,                   // last
@@ -362,28 +440,13 @@ processor_t LPH =
 
   I960_null,
   I960_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   10,                   // int tbyte_size (0-doesn't exist)
-  ieee_realcvt,         // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 19 },     // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x);
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,sval_t v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   I960_ret,             // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

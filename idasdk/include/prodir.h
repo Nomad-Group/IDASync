@@ -7,11 +7,11 @@
 
 #ifndef _PRODIR_H
 #define _PRODIR_H
-#pragma pack(push, 1)
+
 
 /*! \file prodir.h
 
-  \brief Unified interface to qfindfirst64(),qfindnext64(),qfindclose64() functions.
+  \brief Unified interface to qfindfirst(),qfindnext(),qfindclose() functions.
 
   These are low level functions, it is better to use enumerate_files().
 */
@@ -110,6 +110,7 @@
     unsigned short ff_ftime;
     unsigned short ff_fdate;
     char           ff_name[MAXPATH];
+    qffblk_t(void) : ff_reserved(0) {}
   };
 #endif
 
@@ -136,7 +137,7 @@
 /// \param attr     the desired file types (#FA_DIREC or 0)
 /// \return 0 if found a file, other values mean error
 
-idaman THREAD_SAFE int ida_export qfindfirst64(
+idaman THREAD_SAFE int ida_export qfindfirst(
         const char *pattern,
         struct qffblk64_t *blk,
         int attr);
@@ -147,17 +148,17 @@ idaman THREAD_SAFE int ida_export qfindfirst64(
 ///             blk->ff_name will hold the next file name upon return.
 /// \return 0 if found the next file, other values mean error
 
-idaman THREAD_SAFE int ida_export qfindnext64(struct qffblk64_t *blk);
+idaman THREAD_SAFE int ida_export qfindnext(struct qffblk64_t *blk);
 
 /// Stop the file enumeration and free internal structures.
 /// \note there is no need to call this function manually, it is called
 ///       from the ::qffblk64_t destructor.
 /// \param blk  file enumeration structure
 
-idaman THREAD_SAFE void ida_export qfindclose64(struct qffblk64_t *blk);
+idaman THREAD_SAFE void ida_export qfindclose(struct qffblk64_t *blk);
 
 
-/// Common structure with 64-bit ff_fsize for 64-bit dir functions - see ::qffblk_t.
+/// Common structure with 64-bit ff_fsize - see ::qffblk_t.
 struct qffblk64_t
 {
   int ff_attrib;
@@ -169,19 +170,7 @@ struct qffblk64_t
   struct qffblk_t base;
 
   qffblk64_t(void) {}
-  ~qffblk64_t(void) { qfindclose64(this); }
+  ~qffblk64_t(void) { qfindclose(this); }
 };
 
-
-#ifndef NO_OBSOLETE_FUNCS
-#define ffblk                    qffblk_t
-#define findfirst(file,blk,attr) qfindfirst(file,blk,attr)
-#define findnext(blk)            qfindnext(blk)
-#define findclose(blk)           qfindclose(blk)
-idaman DEPRECATED THREAD_SAFE int ida_export qfindfirst(const char *pattern, qffblk_t *blk, int attr);
-idaman DEPRECATED THREAD_SAFE int ida_export qfindnext(qffblk_t *blk);
-idaman DEPRECATED THREAD_SAFE void ida_export qfindclose(qffblk_t *blk);
-#endif
-
-#pragma pack(pop)
 #endif // _PRODIR_H

@@ -4,6 +4,7 @@
 
 #include "../idaidp.hpp"
 #include "ins.hpp"
+#include <diskio.hpp>
 
 //------------------------------------------------------------------
 
@@ -137,10 +138,10 @@ struct addargs_t
 extern addargs_t aa;
 
 // Make sure that the 'aa' structure is up to date.
-void fill_additional_args(void);
+void fill_additional_args(const insn_t &insn);
 
 //------------------------------------------------------------------
-extern char device[];
+extern qstring device;
 extern int procnum; // 0 - dsp56k, 1 - dsp561xx, 2 - dsp563xx, 3 - dsp566xx
 
 inline bool is561xx(void) { return procnum == 1; }
@@ -159,33 +160,26 @@ inline bool psw_w(void)         { return (idpflags & IDP_PSW_W) != 0; }
 
 extern ea_t xmem;
 extern ea_t ymem;
-ea_t calc_mem(op_t &x);
+ea_t calc_mem(const insn_t &insn, const op_t &x);
 
 //------------------------------------------------------------------
-void interr(const char *module);
+void interr(const insn_t *insn, const char *module);
 
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi header(outctx_t &ctx);
+void idaapi footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);         // function to produce assume directives
+void idaapi segstart(outctx_t &ctx, segment_t *seg);
+void idaapi segend(outctx_t &ctx, segment_t *seg);
 
-void idaapi out(void);
-int  idaapi outspec(ea_t ea,uchar segtype);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi dsp56k_data(ea_t ea);
+int  idaapi ana(insn_t *insn);
+int  idaapi emu(const insn_t &insn);
 
 int  idaapi is_align_insn(ea_t ea);
-int  idaapi is_sp_based(const op_t &x);
+int  idaapi is_sp_based(const insn_t &insn, const op_t &x);
 
-int is_sane_insn(int nocrefs);
-int may_be_func(void);           // can a function start here?
+int is_sane_insn(const insn_t &insn, int nocrefs);
 
 void init_analyzer(void);
-const char *find_port(ea_t address);
+const ioport_t *find_port(ea_t address);
 
 #endif // _DSP56K_HPP

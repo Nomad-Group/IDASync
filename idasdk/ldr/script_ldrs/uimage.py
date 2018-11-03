@@ -1,9 +1,10 @@
 # a file loader for U-Boot "uImage" flash images
-# Copyright (c) 2011 Hex-Rays
+# Copyright (c) 2011-2015 Hex-Rays
 # ALL RIGHTS RESERVED.
 
 import idaapi
 from idc import *
+import zlib
 
 IH_TYPE_INVALID        = 0        # /* Invalid Image               */
 IH_TYPE_STANDALONE     = 1        # /* Standalone Program          */
@@ -89,23 +90,18 @@ def read_struct(li, struct):
     return s
 
 # -----------------------------------------------------------------------
-def accept_file(li, n):
+def accept_file(li, filename):
     """
     Check if the file is of supported format
 
     @param li: a file-like object which can be used to access the input data
-    @param n : format number. The function will be called with incrementing
-               number until it returns zero
+    @param filename: name of the file, if it is an archive member name then the actual file doesn't exist
     @return: 0 - no more supported formats
              string "name" - format name to display in the chooser dialog
              dictionary { 'format': "name", 'options': integer }
                options: should be 1, possibly ORed with ACCEPT_FIRST (0x8000)
                to indicate preferred format
     """
-
-    # we support only one format per file
-    if n > 0:
-        return 0
 
     header = read_struct(li, image_header)
     # check the signature
@@ -119,20 +115,24 @@ def accept_file(li, n):
           t = ImageTypeNames[t]
 
         if c >= len(CPUNames):
-          c = "unknown CPU(%d)" % c
+          cname = "unknown CPU(%d)" % c
         else:
-          c = CPUNames[c]
+          cname = CPUNames[c]
 
-        fmt = "%s (%s for %s)" % (RomFormatName, t, c)
-        c = header.ih_comp
-        if c != IH_COMP_NONE:
-          if c >= len (CompTypeNames):
-            c = "unknown compression(%d)"
+        fmt = "%s (%s for %s)" % (RomFormatName, t, cname)
+        comp = header.ih_comp
+        if comp != IH_COMP_NONE:
+          if comp >= len (CompTypeNames):
+            cmpname = "unknown compression(%d)"
           else:
-            c = "%s compressed" % CompTypeNames[c]
-          fmt += " [%s]" % c
+            cmpname = "%s compressed" % CompTypeNames[comp]
+          fmt += " [%s]" % cmpname
 
-        return fmt
+        proc = ''
+        if c < len(IDACPUNames):
+          proc = IDACPUNames[c]
+
+        return {'format': fmt, 'processor': proc}
 
     # unrecognized format
     return 0
@@ -154,24 +154,34 @@ def load_file(li, neflags, format):
         c = header.ih_arch
         cname = IDACPUNames[c]
         if cname == "":
-          Warning("Unsupported CPU")
+          warning("Unsupported CPU")
           return
 
-        if header.ih_comp != IH_COMP_NONE:
-          Warning("Cannot load compressed images")
+        if not header.ih_comp in (IH_COMP_NONE, IH_COMP_GZIP):
+          warning("Can only handle uncompressed or gzip-compressed images")
           return
 
-        idaapi.set_processor_type(cname, SETPROC_ALL|SETPROC_FATAL)
+        idaapi.set_processor_type(cname, SETPROC_LOADER)
 
         AddSeg(header.ih_load, header.ih_load + header.ih_size, 0, 1, idaapi.saRelPara, idaapi.scPub)
 
         # copy bytes to the database
-        li.file2base(ctypes.sizeof(header), header.ih_load, header.ih_load + header.ih_size, 0)
+
+        if header.ih_comp  == IH_COMP_NONE:
+          li.file2base(ctypes.sizeof(header), header.ih_load, header.ih_load + header.ih_size, 0)
+        else:
+          cdata = li.read(header.ih_size)
+          d = zlib.decompressobj(zlib.MAX_WBITS|32)
+          udata = d.decompress(cdata)
+          udata += d.flush()
+          # expand segment to fit uncompressed data
+          set_segment_bounds(header.ih_load, header.ih_load, header.ih_load+len(udata), SEGMOD_KEEP)
+          idaapi.put_bytes(header.ih_load, udata)
 
         if cname == "ARM" and (header.ih_ep & 1) != 0:
           # Thumb entry point
           header.ih_ep -= 1
-          SetReg(header.ih_ep, "T", 1)
+          split_sreg_range(header.ih_ep, "T", 1)
         idaapi.add_entry(header.ih_ep, header.ih_ep, "start", 1)
         print "Load OK"
         return 1

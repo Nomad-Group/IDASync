@@ -1,8 +1,38 @@
 #ifndef __WINDMP_COMMON__
 #define __WINDMP_COMMON__
 
+#include <pro.h>
 #include <diskio.hpp>
-#include <area.hpp>
+#include <range.hpp>
+
+#include "dbgeng.h"
+
+//--------------------------------------------------------------------------
+struct dbgeng_dll_t
+{
+  dbgeng_dll_t()
+    : pDebugCreate(NULL),
+      pDebugConnect(NULL),
+      dbgeng_hmod(NULL),
+      dbghlp_hmod(NULL)
+  {
+  }
+
+  // Debug Engine dll
+  typedef HRESULT (STDAPICALLTYPE *pDebugCreate_t)(REFIID InterfaceId, PVOID *Interface);
+  typedef HRESULT (STDAPICALLTYPE *pDebugConnect_t)(PCSTR RemoteOptions, REFIID InterfaceId, PVOID *Interface);
+
+  // Debug engine session creation functions
+  // (They are dynamically resolved)
+  pDebugCreate_t pDebugCreate;
+  pDebugConnect_t pDebugConnect;
+
+  HMODULE dbgeng_hmod;
+  HMODULE dbghlp_hmod;
+
+  bool load(HRESULT *last_hr, const char *dbgtools_path);
+  void unload();
+};
 
 //--------------------------------------------------------------------------
 // The following flags are set by the loader and are used to notify
@@ -36,15 +66,15 @@ struct IDebugControl4;
 void ldr_init_crashdump(IDebugControl4 *dbg_control);
 HRESULT read_process_memory(
         IDebugDataSpaces4 *space,
-        const areavec_t *inited_areas,
-        IN ULONG64  Offset,
-        OUT PVOID  Buffer,
-        IN ULONG  BufferSize,
+        const rangevec_t *inited_ranges,
+        IN ULONG64 Offset,
+        OUT PVOID Buffer,
+        IN ULONG BufferSize,
         OUT OPTIONAL PULONG BytesRead);
 
 bool get_minidump_mslist(
         HMODULE dbghlp_hmod,
         const char *dmpfile,
-        areavec_t *mslist);
+        rangevec_t *mslist);
 
 #endif

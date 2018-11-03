@@ -6,86 +6,87 @@
 
 #include "i196.hpp"
 
-//--------------------------------------------------------------------------
-
-void idaapi header( void )
+//----------------------------------------------------------------------
+class out_i196_t : public outctx_t
 {
-  gen_header(GH_PRINT_PROC_AND_ASM);
+  out_i196_t(void) : outctx_t(BADADDR) {} // not used
+public:
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_i196_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_i196_t)
+
+//--------------------------------------------------------------------------
+void idaapi i196_header(outctx_t &ctx)
+{
+  ctx.gen_header(GH_PRINT_PROC_AND_ASM);
 }
 
 //--------------------------------------------------------------------------
-
-void idaapi footer( void )
+void idaapi i196_footer(outctx_t &ctx)
 {
-  gen_cmt_line( "end of file" );
+  ctx.gen_cmt_line("end of file");
 }
 
 //--------------------------------------------------------------------------
-
-void idaapi segstart( ea_t ea )
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi i196_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  segment_t *Sarea = getseg( ea );
+  qstring name;
+  get_visible_segm_name(&name, Sarea);
+  ctx.gen_cmt_line(COLSTR("segment %s", SCOLOR_AUTOCMT), name.c_str());
 
-  char name[MAXNAMELEN];
-  get_segm_name(Sarea, name, sizeof(name));
-  gen_cmt_line( COLSTR("segment %s", SCOLOR_AUTOCMT), name );
-
-  ea_t org = ea - get_segm_base( Sarea );
+  ea_t org = ctx.insn_ea - get_segm_base(Sarea);
   if ( org != 0 )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), org);
-    gen_cmt_line("%s %s", ash.origin, buf);
+    ctx.gen_cmt_line("%s %s", ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-
-void idaapi segend( ea_t ea )
+//lint -esym(818, seg) could be made const
+void idaapi i196_segend(outctx_t &ctx, segment_t *seg)
 {
-  char name[MAXNAMELEN];
-  get_segm_name(getseg(ea-1), name, sizeof(name));
-  gen_cmt_line( "end of '%s'", name );
+  qstring name;
+  get_visible_segm_name(&name, seg);
+  ctx.gen_cmt_line("end of '%s'", name.c_str());
 }
 
 //----------------------------------------------------------------------
-
-void idaapi out( void )
+void out_i196_t::out_insn(void)
 {
-  char buf[MAXSTR];
+  out_mnemonic();
 
-  init_output_buffer(buf, sizeof(buf));
-  OutMnem();
+  out_one_operand(0);
 
-  out_one_operand( 0 );
-
-  if( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
-    out_symbol( ',' );
-    OutChar( ' ' );
-    out_one_operand( 1 );
+    out_symbol(',');
+    out_char(' ');
+    out_one_operand(1);
   }
 
-  if( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
-    out_symbol( ',' );
-    OutChar( ' ' );
-    out_one_operand( 2 );
+    out_symbol(',');
+    out_char(' ');
+    out_one_operand(2);
   }
 
-  if( isVoid( cmd.ea, uFlag, 0 ) )    OutImmChar( cmd.Op1 );
-  if( isVoid( cmd.ea, uFlag, 1 ) )    OutImmChar( cmd.Op2 );
-  if( isVoid( cmd.ea, uFlag, 2 ) )    OutImmChar( cmd.Op3 );
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine( buf );
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //----------------------------------------------------------------------
-static bool is_ext_insn(void)
+static bool is_ext_insn(const insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case I196_ebmovi:      // Extended interruptable block move
     case I196_ebr:         // Extended branch indirect
@@ -101,47 +102,51 @@ static bool is_ext_insn(void)
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop( op_t &x )
+bool out_i196_t::out_operand(const op_t &x)
 {
   uval_t v, v1;
 //  const char *ptr;
 
-  switch( x.type )
+  switch ( x.type )
   {
     case o_imm:
-      out_symbol( '#' );
-      OutValue( x, OOF_SIGNED | OOFW_IMM );
+      out_symbol('#');
+      out_value(x, OOF_SIGNED | OOFW_IMM);
       break;
 
     case o_indexed:
-      OutValue( x, OOF_ADDR|OOF_SIGNED|(is_ext_insn() ? OOFW_32 : OOFW_16) ); //.addr
+      out_value(x, OOF_ADDR|OOF_SIGNED|(is_ext_insn(insn) ? OOFW_32 : OOFW_16)); //.addr
       v = x.value;
-      out_symbol( '[' );
-      if ( v != 0 ) goto OUTPHRASE;
-      out_symbol( ']' );
+      out_symbol('[');
+      if ( v != 0 )
+        goto OUTPHRASE;
+      out_symbol(']');
       break;
 
     case o_indirect:
     case o_indirect_inc:
-      out_symbol( '[' );
+      out_symbol('[');
+      // fallthrough
 
     case o_mem:
     case o_near:
       v = x.addr;
 OUTPHRASE:
-      v1 = toEA( get_segreg(cmd.ea, (x.type == o_near) ? rVcs : rVds), v);
-      if( !out_name_expr( x, v1, v ) )
+      v1 = to_ea(get_sreg(insn.ea, (x.type == o_near) ? rVcs : rVds), v);
+      if ( !out_name_expr(x, v1, v ) )
       {
-        OutValue( x, (x.type == o_indexed ? 0 : OOF_ADDR) | OOF_NUMBER|OOFS_NOSIGN|
-          ((x.type == o_near) ? (is_ext_insn() ? OOFW_32 : OOFW_16) : OOFW_8) );
-        QueueSet( Q_noName, cmd.ea );
+        out_value(x, (x.type == o_indexed ? 0 : OOF_ADDR) | OOF_NUMBER|OOFS_NOSIGN|
+          ((x.type == o_near) ? (is_ext_insn(insn) ? OOFW_32 : OOFW_16) : OOFW_8));
+        remember_problem(PR_NONAME, insn.ea);
       }
 
-      if( x.type == o_indirect || x.type == o_indirect_inc ||
-          x.type == o_indexed )
+      if ( x.type == o_indirect
+        || x.type == o_indirect_inc
+        || x.type == o_indexed )
       {
-        out_symbol( ']' );
-        if( x.type == o_indirect_inc )    out_symbol( '+' );
+        out_symbol(']');
+        if ( x.type == o_indirect_inc )
+          out_symbol('+');
       }
       break;
 
@@ -149,11 +154,11 @@ OUTPHRASE:
       return 0;
 
     case o_bit:
-      out_symbol( char('0' + x.reg) );
+      out_symbol(char('0' + x.reg));
       break;
 
     default:
-      warning( "out: %a: bad optype %d", cmd.ea, x.type );
+      warning("out: %a: bad optype %d", insn.ea, x.type);
   }
 
   return 1;

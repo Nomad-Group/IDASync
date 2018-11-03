@@ -10,8 +10,6 @@
 
 #include <stdio.h>
 
-#pragma pack(push, 1)
-
 /*! \file diskio.hpp
 
   \brief File I/O functions for IDA
@@ -35,9 +33,9 @@ idaman THREAD_SAFE const char *ida_export idadir(const char *subdir);
 
 /// Search for IDA system file.
 /// This function searches for a file in:
-///   -# get_user_idadir() subdirectory
-///   -# ida (sub)directory
-///   -# current directory
+///   -# each directory specified by %IDAUSR%
+///   -# ida directory [+ subdir]
+/// and returns the first match.
 /// \param[out] buf  buffer for file name
 /// \param bufsize   size of output buffer
 /// \param filename  name of file to search
@@ -64,20 +62,39 @@ idaman THREAD_SAFE char *ida_export getsysfile(
 #define PLG_SUBDIR "plugins"
 //@}
 
-
 /// Get user ida related directory.
-///   - Under Linux: $HOME/.ida
-///   - Under Windows: Application Data\\Hex-Rays\\IDA Pro
-///
-/// If the directory did not exist, it will be created
+///   - if $IDAUSR is defined:
+///       - the first element in $IDAUSR
+///   - else
+///       - default user directory ($HOME/.idapro or %APPDATA%Hex-Rays/IDA Pro)
 
 idaman THREAD_SAFE const char *ida_export get_user_idadir(void);
+
+
+/// Get list of directories in which to find a specific IDA resource
+/// (see \ref SUBDIR). The order of the resulting list is as follows:
+/// - [$IDAUSR/subdir (0..N entries)]
+/// - $ENVVAR for backwards compatibility with some subdirs that could
+///           be overriden with environment variables, such as $IDASGN,
+///           $IDAIDS, $IDAIDC, and $IDATIL.
+/// - $IDADIR/subdir
+/// \param[out] dirs  output vector for directory names
+/// \param subdir     name of the resource to list
+/// \param flags      \ref IDA_SUBDIR_ bits
+/// \return number of directories appended to 'dirs'
+idaman THREAD_SAFE int ida_export get_ida_subdirs(qstrvec_t *dirs, const char *subdir, int flags=0);
+
+/// \defgroup IDA_SUBDIR_ Subdirectory modification flags
+/// Passed as 'flags' parameter to get_ida_subdirs()
+//@{
+#define IDA_SUBDIR_IDP 0x0001  ///< append the processor name as a subdirectory
+//@}
 
 
 /// Get a folder location by CSIDL (see \ref CSIDL).
 /// Path should be of at least MAX_PATH size
 
-idaman bool ida_export get_special_folder(int csidl, char *buf, size_t bufsize);
+idaman THREAD_SAFE bool ida_export get_special_folder(char *buf, size_t bufsize, int csidl);
 
 /// \defgroup CSIDL Common CSIDLs
 /// Passed as 'csidl' parameter to get_special_folder()
@@ -121,35 +138,7 @@ idaman THREAD_SAFE int ida_export enumerate_files(
         const char *path,
         const char *fname,
         int (idaapi*func)(const char *file,void *ud),
-        void *ud);
-
-
-/// Enumerate IDA system files.
-/// \param[out] answer  buffer to contain the file name for which func()!=0
-///                     (may be NULL)
-/// \param answer_size  size of 'answer'
-/// \param subdir       IDA subdirectory or NULL (see \ref SUBDIR)
-/// \param fname        mask of file names to enumerate
-/// \param func         callback function called for each file
-///                       - file: full file name (with path)
-///                       - ud: user data
-///                       - if returns non-zero value, the enumeration
-///                         is stopped and full path of the current file
-///                         is returned to the caller.
-/// \param ud           user data. this pointer will be passed to
-///                     the callback function
-/// \return zero or the code returned by 'func'
-
-inline THREAD_SAFE int idaapi enumerate_system_files(
-       char *answer,
-       size_t answer_size,
-       const char *subdir,
-       const char *fname,
-       int (idaapi*func)(const char *file,void *ud),
-       void *ud)
-{
-  return enumerate_files(answer, answer_size, idadir(subdir), fname, func, ud);
-}
+        void *ud=NULL);
 
 //-------------------------------------------------------------------------
 //      O P E N / R E A D / W R I T E / C L O S E   F I L E S
@@ -225,13 +214,6 @@ idaman THREAD_SAFE FILE *ida_export openM(const char *file);
 idaman THREAD_SAFE FILE *ida_export ecreate(const char *file);
 
 
-/// Open a new file for write in text mode or die, deny read/write.
-/// If a file exists, it will be removed.
-/// If a file cannot be opened, this function displays a message and exits.
-
-idaman THREAD_SAFE FILE *ida_export ecreateT(const char *file);
-
-
 /// Close a file or die.
 /// If a file cannot be closed, this function displays a message and exits.
 
@@ -261,11 +243,7 @@ idaman THREAD_SAFE void ida_export ewrite(FILE *fp, const void *buf, ssize_t siz
 /// \param fp   pointer to file
 /// \param pos  absolute position in the file
 
-idaman THREAD_SAFE void ida_export eseek(FILE *fp, int32 pos);
-
-/// Same as eseek(), but can handle larger files
-
-idaman THREAD_SAFE void ida_export eseek64(FILE *fp, qoff64_t pos);
+idaman THREAD_SAFE void ida_export eseek(FILE *fp, qoff64_t pos);
 
 //@}
 
@@ -276,11 +254,7 @@ idaman THREAD_SAFE void ida_export eseek64(FILE *fp, qoff64_t pos);
 /// Get length of file in bytes.
 /// \param fp  pointer to file
 
-idaman THREAD_SAFE uint32 ida_export qfsize(FILE *fp);
-
-/// Same as qfsize(), but can handle larger files
-
-idaman THREAD_SAFE uint64 ida_export qfsize64(FILE *fp);
+idaman THREAD_SAFE uint64 ida_export qfsize(FILE *fp);
 
 
 /// Change size of file or die.
@@ -288,40 +262,43 @@ idaman THREAD_SAFE uint64 ida_export qfsize64(FILE *fp);
 /// \param fp    pointer to file
 /// \param size  new size of file
 
-idaman THREAD_SAFE void ida_export echsize(FILE *fp,uint32 size);
-
-/// Same as echsize(), but can handle larger files
-
-idaman THREAD_SAFE void ida_export echsize64(FILE *fp,uint64 size);
+idaman THREAD_SAFE void ida_export echsize(FILE *fp, uint64 size);
 
 
 /// Get free disk space in bytes.
 /// \param path  name of any directory on the disk to get information about
 
-idaman THREAD_SAFE uint64 ida_export getdspace(const char *path);
+idaman THREAD_SAFE uint64 ida_export get_free_disk_space(const char *path);
 
 
 //-------------------------------------------------------------------------
-//      I / O  P O R T  D E F I N I T I O N S  F I L E
+//      I / O   P O R T   D E F I N I T I O N S   F I L E
 //-------------------------------------------------------------------------
 /// Describes an I/O port bit
 struct ioport_bit_t
 {
-  char *name;           ///< name of the bit (may be NULL!)
-  char *cmt;            ///< comment
+  qstring name;         ///< name of the bit
+  qstring cmt;          ///< comment
 };
-
-typedef ioport_bit_t ioport_bits_t[16]; ///< fixed size array of I/O port bits
+DECLARE_TYPE_AS_MOVABLE(ioport_bit_t);
+typedef qvector<ioport_bit_t> ioport_bits_t;
 
 /// Describes an I/O port
 struct ioport_t
 {
   ea_t address;         ///< address of the port
-  char *name;           ///< name of the port
-  char *cmt;            ///< comment
-  ioport_bits_t *bits;  ///< bit names
+  qstring name;         ///< name of the port
+  qstring cmt;          ///< comment
+  ioport_bits_t bits;   ///< bit names
   void *userdata;       ///< arbitrary data. initialized to NULL.
+
+  ioport_t()
+    : address(0), userdata(NULL)
+  {
+  }
 };
+DECLARE_TYPE_AS_MOVABLE(ioport_t);
+typedef qvector<ioport_t> ioports_t;
 
 /// Read i/o port definitions from a config file.
 ///
@@ -346,34 +323,30 @@ struct ioport_t
 ///
 /// \note It is permissible to have a symbol mapped to several addresses
 ///       but all addresses must be unique.
-/// \param[out] _numports  place to put the number of ports
-/// \param file            config file name
-/// \param default_device  contains device name to load. If default_device[0] == 0
+/// \param[out] ports      output vector
+/// \param device          contains device name to load. If default_device[0] == 0
 ///                        then the default device is determined by .default directive
 ///                        in the config file.
-/// \param dsize           sizeof(default_device)
+/// \param file            config file name
 /// \param callback        callback to call when the input line can't be parsed normally.
 ///                          - line: input line to parse
 ///                          - returns error message. if NULL, then the line is parsed ok.
-/// \return array of ioports
+/// \return -1 on error or size of vector
 
-idaman THREAD_SAFE ioport_t *ida_export read_ioports(
-        size_t *_numports,
+idaman THREAD_SAFE ssize_t ida_export read_ioports(
+        ioports_t *ports,
+        qstring *device,
         const char *file,
-        char *default_device,
-        size_t dsize,
-        const char *(idaapi* callback)(
-                const ioport_t *ports,
-                size_t numports,
-                const char *line));
+        const char *(idaapi *callback)(
+          const ioports_t &ports,
+          const char *line)=NULL);
 
 /// Allow the user to choose the ioport device.
-/// \param file            config file name
 /// \param[in,out] device  in: contains default device name. If default_device[0] == 0
 ///                        then the default device is determined by .default directive
 ///                        in the config file.
 ///                        out: the selected device name
-/// \param device_size     size of the 'device' buffer
+/// \param file            config file name
 /// \param parse_params    if present (non NULL), then defines a callback which
 ///                        will be called for all lines not starting with a dot (.)
 ///                        This callback may parse these lines are prepare a simple
@@ -386,13 +359,11 @@ idaman THREAD_SAFE ioport_t *ida_export read_ioports(
 ///                then no devices were found in the configuration file
 
 idaman THREAD_SAFE bool ida_export choose_ioport_device(
+        qstring *_device,
         const char *file,
-        char *device,
-        size_t device_size,
-        const char *(idaapi* parse_params)(
-                const char *line,
-                char *buf,
-                size_t bufsize));
+        const char *(idaapi *parse_params)(
+          qstring *buf,
+          const char *line)=NULL);
 
 /// See 'parse_params' parameter to choose_ioport_device()
 #define IOPORT_SKIP_DEVICE ((const char *)(-1))
@@ -400,21 +371,16 @@ idaman THREAD_SAFE bool ida_export choose_ioport_device(
 
 /// Find ioport in the array of ioports
 
-idaman THREAD_SAFE const ioport_t *ida_export find_ioport(const ioport_t *ports, size_t numports, ea_t address);
+idaman THREAD_SAFE const ioport_t *ida_export find_ioport(const ioports_t &ports, ea_t address);
 
 
 /// Find ioport bit in the array of ioports
 
-idaman THREAD_SAFE const ioport_bit_t *ida_export find_ioport_bit(const ioport_t *ports, size_t numports, ea_t address, size_t bit);
-
-
-/// Free ioports array. The 'userdata' field is not examined!
-
-idaman THREAD_SAFE void ida_export free_ioports(ioport_t *ports, size_t numports);
+idaman THREAD_SAFE const ioport_bit_t *ida_export find_ioport_bit(const ioports_t &ports, ea_t address, size_t bit);
 
 
 //-------------------------------------------------------------------------
-//      S Y S T E M  S P E C I F I C  C A L L S
+//      S Y S T E M   S P E C I F I C   C A L L S
 //-------------------------------------------------------------------------
 
 /// Execute a operating system command.
@@ -427,7 +393,7 @@ idaman THREAD_SAFE int ida_export call_system(const char *command);
 
 
 //-------------------------------------------------------------------------
-//       L O A D E R  I N P U T  S O U R C E  F U N C T I O N S
+//       L O A D E R   I N P U T   S O U R C E   F U N C T I O N S
 //-------------------------------------------------------------------------
 
 /// \name Loader Input Source
@@ -506,14 +472,6 @@ DEF_LREADBYTES(lread8bytes, uint64, 8)
 
 idaman char *ida_export qlgetz(
         linput_t *li,
-        int32 fpos,
-        char *buf,
-        size_t bufsize);
-
-/// Same as qlgetz(), but supports larger input
-
-idaman char *ida_export qlgetz64(
-        linput_t *li,
         int64 fpos,
         char *buf,
         size_t bufsize);
@@ -521,30 +479,18 @@ idaman char *ida_export qlgetz64(
 
 /// Get the input source size
 
-idaman int32 ida_export qlsize(linput_t *li);
-
-/// Same as qlsize(), but supports larger input
-
-idaman int64 ida_export qlsize64(linput_t *li);
+idaman int64 ida_export qlsize(linput_t *li);
 
 
 /// Set input source position.
 /// \return the new position (not 0 as fseek!)
 
-idaman int32 ida_export qlseek(linput_t *li, int32 pos, int whence=SEEK_SET);
-
-/// Same as qlseek(), but supports larger input
-
-idaman qoff64_t ida_export qlseek64(linput_t *li, qoff64_t pos, int whence=SEEK_SET);
+idaman qoff64_t ida_export qlseek(linput_t *li, qoff64_t pos, int whence=SEEK_SET);
 
 
 /// Get input source position
 
-inline int32 idaapi qltell(linput_t *li) { return qlseek(li, 0, SEEK_CUR); }
-
-/// Same as qltell(), but supports larger input
-
-inline int64 idaapi qltell64(linput_t *li) { return qlseek64(li, 0, SEEK_CUR); }
+inline int64 idaapi qltell(linput_t *li) { return qlseek(li, 0, SEEK_CUR); }
 
 
 /// Open loader input
@@ -583,8 +529,8 @@ struct generic_linput_t
   /// \name Warning
   /// The following two fields must be filled before calling create_generic_linput()
   //@{
-  uint32 filesize;      ///< input file size
-  uint32 blocksize;     ///< preferred block size to work with.
+  uint64 filesize;      ///< input file size
+  uint32 blocksize;     ///< preferred block size to work with
                         ///< read/write sizes will be in multiples of this number.
                         ///< for example, 4096 is a nice value
                         ///< blocksize 0 means that the filesize is unknown.
@@ -592,19 +538,9 @@ struct generic_linput_t
                         ///< also, seeks from the file end will fail.
                         ///< blocksize=-1 means error.
   //@}
-  virtual ssize_t idaapi read(off_t off, void *buffer, size_t nbytes) = 0;
+  virtual ssize_t idaapi read(qoff64_t off, void *buffer, size_t nbytes) = 0;
   DEFINE_VIRTUAL_DTOR(generic_linput_t)
 };
-
-/// Same as ::generic_linput_t but for larger input
-struct generic_linput64_t
-{
-  uint64 filesize;      ///< input file size
-  uint32 blocksize;     ///< preferred block size to work with
-  virtual ssize_t idaapi read64(qoff64_t off, void *buffer, size_t nbytes) = 0;
-  DEFINE_VIRTUAL_DTOR(generic_linput64_t)
-};
-
 
 /// Create a generic linput
 /// \param gl  linput description.
@@ -612,11 +548,6 @@ struct generic_linput64_t
 ///            using "delete gl;"
 
 idaman linput_t *ida_export create_generic_linput(generic_linput_t *gl);
-
-/// Same as create_generic_linput() but for larger input
-
-idaman linput_t *ida_export create_generic_linput64(generic_linput64_t *gl);
-
 
 /// Trivial memory linput
 
@@ -660,8 +591,8 @@ public:
   bool eof()
   {
     if ( lsize == 0 )
-      lsize = qlsize64(li);
-    return qltell64(li) >= lsize;
+      lsize = qlsize(li);
+    return qltell(li) >= lsize;
   }
 protected:
   linput_t *li;
@@ -674,8 +605,5 @@ private:
 // --------------------------------------------------------------------------
 
 #ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED int ida_export set_thread_priority(ushort pclass,int32 delta);
-idaman DEPRECATED THREAD_SAFE uint32 ida_export efilelength(FILE *fp);
 #endif
-#pragma pack(pop)
 #endif // _DISKIO_HPP

@@ -19,104 +19,94 @@ static const char *const RegNames[] =
 };
 
 //--------------------------------------------------------------------------
-predefined_t iregs[] =
+static predefined_t iregs[] =
 {
-        { 0x00, "Reserved_0",   NULL },
-        { 0x01, "Reserved_1",   NULL },
-        { 0x02, "Reserved_2",   NULL },
-        { 0x03, "Reserved_3",   NULL },
-        { 0x04, "imr",          "Interrupt mask register" },
-        { 0x05, "greg",         "Global memory allocation register" },
-        { 0x06, "ifr",          "Interrupt flag register" },
-        { 0x07, "pmst",         "Processor mode status register" },
-        { 0x08, "rptc",         "Repeat counter register" },
-        { 0x09, "brcr",         "Block repeat counter register" },
-        { 0x0A, "pasr",         "Block repeat program address start register" },
-        { 0x0B, "paer",         "Block repeat program address end register" },
-        { 0x0C, "treg0",        "Temp reg - multiplicand" },
-        { 0x0D, "treg1",        "Temp reg - dynamic shift count (5 bits)" },
-        { 0x0E, "treg2",        "Temp reg - bit pointer in dynamic bit test (4 bits)" },
-        { 0x0F, "dbmr",         "Dynamic bit manipulation register" },
-        { 0x10, "ar0",          NULL },
-        { 0x11, "ar1",          NULL },
-        { 0x12, "ar2",          NULL },
-        { 0x13, "ar3",          NULL },
-        { 0x14, "ar4",          NULL },
-        { 0x15, "ar5",          NULL },
-        { 0x16, "ar6",          NULL },
-        { 0x17, "ar7",          NULL },
-        { 0x18, "indx",         "Index register" },
-        { 0x19, "arcr",         "Auxiliary compare register" },
-        { 0x1A, "cbsr1",        "Circular buffer 1 start" },
-        { 0x1B, "cber1",        "Circular buffer 1 end" },
-        { 0x1C, "cbsr2",        "Circular buffer 2 start" },
-        { 0x1D, "cber2",        "Circular buffer 2 end" },
-        { 0x1E, "cbcr",         "Circular buffer control register" },
-        { 0x1F, "bmar",         "Block move address register" },
-        { 0x20, "drr",          "Data receive register" },
-        { 0x21, "dxr",          "Data transmit register" },
-        { 0x22, "spc",          "Serial port control register" },
-        { 0x23, "Reserved_23",  NULL },
-        { 0x24, "tim",          "Timer register" },
-        { 0x25, "prd",          "Period register" },
-        { 0x26, "tcr",          "Timer control register" },
-        { 0x27, "Reserved_27",  NULL },
-        { 0x28, "pdwsr",        "Program/Data S/W Wait-State register" },
-        { 0x29, "iowsr",        "I/O Port S/W Wait-State register" },
-        { 0x2A, "cwsr",         "Control S/W Wait-State register" },
-        { 0x2B, "Reserved_2b",  NULL },
-        { 0x2C, "Reserved_2c",  NULL },
-        { 0x2D, "Reserved_2d",  NULL },
-        { 0x2E, "Reserved_2e",  NULL },
-        { 0x2F, "Reserved_2f",  NULL },
-        { 0x30, "trcv",         "TDM Data receive register" },
-        { 0x31, "tdxr",         "TDM Data transmit register" },
-        { 0x32, "tspc",         "TDM Serial port control register" },
-        { 0x33, "tcsr",         "TDM channel select register" },
-        { 0x34, "trta",         "TDM Receive/Transmit address register" },
-        { 0x35, "trad",         "TDM Received address register" },
-        { 0x00, NULL     ,  NULL }
+  { 0x00, "Reserved_0",   NULL },
+  { 0x01, "Reserved_1",   NULL },
+  { 0x02, "Reserved_2",   NULL },
+  { 0x03, "Reserved_3",   NULL },
+  { 0x04, "imr",          "Interrupt mask register" },
+  { 0x05, "greg",         "Global memory allocation register" },
+  { 0x06, "ifr",          "Interrupt flag register" },
+  { 0x07, "pmst",         "Processor mode status register" },
+  { 0x08, "rptc",         "Repeat counter register" },
+  { 0x09, "brcr",         "Block repeat counter register" },
+  { 0x0A, "pasr",         "Block repeat program address start register" },
+  { 0x0B, "paer",         "Block repeat program address end register" },
+  { 0x0C, "treg0",        "Temp reg - multiplicand" },
+  { 0x0D, "treg1",        "Temp reg - dynamic shift count (5 bits)" },
+  { 0x0E, "treg2",        "Temp reg - bit pointer in dynamic bit test (4 bits)" },
+  { 0x0F, "dbmr",         "Dynamic bit manipulation register" },
+  { 0x10, "ar0",          NULL },
+  { 0x11, "ar1",          NULL },
+  { 0x12, "ar2",          NULL },
+  { 0x13, "ar3",          NULL },
+  { 0x14, "ar4",          NULL },
+  { 0x15, "ar5",          NULL },
+  { 0x16, "ar6",          NULL },
+  { 0x17, "ar7",          NULL },
+  { 0x18, "indx",         "Index register" },
+  { 0x19, "arcr",         "Auxiliary compare register" },
+  { 0x1A, "cbsr1",        "Circular buffer 1 start" },
+  { 0x1B, "cber1",        "Circular buffer 1 end" },
+  { 0x1C, "cbsr2",        "Circular buffer 2 start" },
+  { 0x1D, "cber2",        "Circular buffer 2 end" },
+  { 0x1E, "cbcr",         "Circular buffer control register" },
+  { 0x1F, "bmar",         "Block move address register" },
+  { 0x20, "drr",          "Data receive register" },
+  { 0x21, "dxr",          "Data transmit register" },
+  { 0x22, "spc",          "Serial port control register" },
+  { 0x23, "Reserved_23",  NULL },
+  { 0x24, "tim",          "Timer register" },
+  { 0x25, "prd",          "Period register" },
+  { 0x26, "tcr",          "Timer control register" },
+  { 0x27, "Reserved_27",  NULL },
+  { 0x28, "pdwsr",        "Program/Data S/W Wait-State register" },
+  { 0x29, "iowsr",        "I/O Port S/W Wait-State register" },
+  { 0x2A, "cwsr",         "Control S/W Wait-State register" },
+  { 0x2B, "Reserved_2b",  NULL },
+  { 0x2C, "Reserved_2c",  NULL },
+  { 0x2D, "Reserved_2d",  NULL },
+  { 0x2E, "Reserved_2e",  NULL },
+  { 0x2F, "Reserved_2f",  NULL },
+  { 0x30, "trcv",         "TDM Data receive register" },
+  { 0x31, "tdxr",         "TDM Data transmit register" },
+  { 0x32, "tspc",         "TDM Serial port control register" },
+  { 0x33, "tcsr",         "TDM channel select register" },
+  { 0x34, "trta",         "TDM Receive/Transmit address register" },
+  { 0x35, "trad",         "TDM Received address register" },
+  { 0x00, NULL,           NULL }
 };
 
-predefined_t c2_iregs[] =
+static predefined_t c2_iregs[] =
 {
-        { 0x00, "drr",          "Data receive register" },
-        { 0x01, "dxr",          "Data transmit register" },
-        { 0x02, "tim",          "Timer register" },
-        { 0x03, "prd",          "Period register" },
-        { 0x04, "imr",          "Interrupt mask register" },
-        { 0x05, "greg",         "Global memory allocation register" },
-        { 0x00, NULL     ,  NULL }
+  { 0x00, "drr",          "Data receive register" },
+  { 0x01, "dxr",          "Data transmit register" },
+  { 0x02, "tim",          "Timer register" },
+  { 0x03, "prd",          "Period register" },
+  { 0x04, "imr",          "Interrupt mask register" },
+  { 0x05, "greg",         "Global memory allocation register" },
+  { 0x00, NULL,           NULL }
 };
 
 //----------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...) // Various messages:
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       {
-        inf.wide_high_byte_first = 1;
+        inf.set_wide_high_byte_first(true);
         segment_t *sptr = get_first_seg();
         ea_t codeseg;
         if ( sptr != NULL )
         {
-          codeseg = sptr->startEA;
+          codeseg = sptr->start_ea;
           if ( codeseg-get_segm_base(sptr) == 0 )
           {
-            inf.beginEA = sptr->startEA;
-            inf.startIP = 0;
+            inf.start_ea = sptr->start_ea;
+            inf.start_ip = 0;
           }
         }
         else
@@ -132,22 +122,22 @@ static int idaapi notify(processor_t::idp_notify msgid, ...) // Various messages
         {
           segment_t s;
           uint32 size = 64 * 1024L;
-          s.startEA = freechunk(0,size,0xF);
-          s.endEA = s.startEA + size;
-          s.sel   = ushort(s.startEA >> 4);
+          s.start_ea = free_chunk(0,size,0xF);
+          s.end_ea = s.start_ea + size;
+          s.sel   = ushort(s.start_ea >> 4);
           s.align = saRelByte;
           s.comb  = scPub;
           add_segm_ex(&s, "dseg", NULL, ADDSEG_NOSREG);
           sel = s.sel;
-          data_start = s.startEA;
+          data_start = s.start_ea;
         }
         else
         {
           sel = s1->sel;
-          data_start = s1->startEA;
+          data_start = s1->start_ea;
         }
-        set_default_segreg_value(getseg(codeseg), rVds, sel);
-        split_srarea(inf.beginEA,rDP,0,SR_auto);
+        set_default_sreg_value(getseg(codeseg), rVds, sel);
+        split_sreg_range(inf.start_ea, rDP, 0, SR_auto);
         inf.nametype = NM_NAM_OFF;
 
 
@@ -155,45 +145,101 @@ static int idaapi notify(processor_t::idp_notify msgid, ...) // Various messages
         for ( ; ptr->name != NULL; ptr++ )
         {
           ea_t ea = data_start + ptr->addr;
-          doByte(ea,1);
+          create_byte(ea,1);
           set_name(ea, ptr->name);
-          if ( ptr->cmt != NULL ) set_cmt(ea, ptr->cmt, 1);
+          if ( ptr->cmt != NULL )
+            set_cmt(ea, ptr->cmt, true);
         }
       }
       break;
 
-    case processor_t::newprc:
+    case processor_t::ev_newprc:
       nprc = va_arg(va, int);
+      // bool keep_cfg = va_argi(va, bool);
       break;
 
-    case processor_t::oldfile:
-      inf.wide_high_byte_first = 1;     // to be able to work with old bases
+    case processor_t::ev_oldfile:
+      inf.set_wide_high_byte_first(true);     // to be able to work with old bases
       break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        tms_assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
 
     default:
       break;
   }
-  va_end(va);
-
-  return(1);
+  return code;
 }
 
 //-----------------------------------------------------------------------
 //              DSP Fixed Point COFF Assembler Version 6.20
 //              Copyright (c) 1987-1991  Texas Instruments Incorporated
 //-----------------------------------------------------------------------
-static const char *const dspasm_header[] = {
-".mmregs",
-NULL
+static const char *const dspasm_header[] =
+{
+  ".mmregs",
+  NULL
 };
 
-static const asm_t dspasm = {
+static const asm_t dspasm =
+{
   AS_COLON | ASH_HEXF0,
   0,
   "DSP Fixed Point COFF Assembler Version 6.20",
   0,
   dspasm_header,        // header lines
-  NULL,         // no bad instructions
   NULL,         // org
   ".end",
 
@@ -216,10 +262,6 @@ static const asm_t dspasm = {
   ".space 16*%s",// uninited arrays
   ".set",       // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -245,7 +287,8 @@ static const asm_t *const asms[] = { &dspasm, NULL };
 //-----------------------------------------------------------------------
 #define FAMILY "TMS320C5x series:"
 static const char *const shnames[] = { "TMS320C5", "TMS320C2", NULL };
-static const char *const lnames[] = {
+static const char *const lnames[] =
+{
   FAMILY"Texas Instruments TMS320C5x",
   "Texas Instruments TMS320C2x",
   NULL
@@ -258,7 +301,8 @@ static const uchar retcode_2[] = { 0x00, 0xFF };
 static const uchar retcode_3[] = { 0x3A, 0xBE };
 static const uchar retcode_4[] = { 0x38, 0xBE };
 
-static bytes_t retcodes[] = {
+static bytes_t retcodes[] =
+{
  { sizeof(retcode_1), retcode_1 },
  { sizeof(retcode_2), retcode_2 },
  { sizeof(retcode_3), retcode_3 },
@@ -271,11 +315,16 @@ static bytes_t retcodes[] = {
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_TMS,                     // id
-  PR_SEGS | PR_RNAMESOK | PR_SEGTRANS, // can use register names for byte names
-  16,                           // 8 bits in a byte for code segments
-  16,                           // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_TMS,               // id
+                          // flag
+    PR_SEGS
+  | PR_RNAMESOK           // can use register names for byte names
+  | PR_SEGTRANS,
+                          // flag2
+  0,
+  16,                     // 8 bits in a byte for code segments
+  16,                     // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -284,31 +333,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  std_gen_segm_footer,
-
-  tms_assumes,
-
-  ana,
-  emu,
-
-  out,
-  outop,
-  intel_data,
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  qnumber(RegNames),            // Number of registers
   RegNames,                     // Register names
-  NULL,                         // get abstract register
-
-  0,                            // Number of register files
-  NULL,                         // Register file names
-  NULL,                         // Register descriptions
-  NULL,                         // Pointer to CPU registers
+  qnumber(RegNames),            // Number of registers
 
   rVcs,                         // first
   rDP,                          // last
@@ -319,5 +345,5 @@ processor_t LPH =
   retcodes,
 
   0,TMS_last,
-  Instructions
+  Instructions,                 // instruc
 };

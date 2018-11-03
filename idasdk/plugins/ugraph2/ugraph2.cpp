@@ -47,7 +47,7 @@ static void combine_blocks(qflow_chart_t &fc, int n, int m)
   }
 
   // update the end address
-  bn.endEA = bm.endEA;
+  bn.end_ea = bm.end_ea;
 
   // correct the predecessors of successors of m to be n:
   for ( int j=0; j < bn.succ.size(); j++ )
@@ -132,8 +132,8 @@ static bool generate_combined_node_text(int n, text_t &text)
   areavec_t &vec = p->second;
   for ( int i=0; i < vec.size(); i++ )
   {
-    ea_t ea = vec[i].startEA;
-    gen_disasm_text(ea, vec[i].endEA, text, false);
+    ea_t ea = vec[i].start_ea;
+    gen_disasm_text(text, ea, vec[i].end_ea, false);
   }
   return true;
 }
@@ -143,7 +143,7 @@ static int idaapi idp_cb(void *, int code, va_list va)
 {
   switch ( code )
   {
-    case processor_t::preprocess_chart:
+    case processor_t::flow_chart_created:
                                 // gui has retrieved a function flow chart
                                 // in: qflow_chart_t *fc
                                 // returns: none
@@ -187,8 +187,8 @@ int idaapi init(void)
   if ( callui(ui_get_hwnd).vptr == NULL && !is_idaq() )
     return PLUGIN_SKIP;
 
-  hook_to_notification_point(HT_IDP, idp_cb, NULL);
-  hook_to_notification_point(HT_UI, ui_cb, NULL);
+  hook_to_notification_point(HT_IDP, idp_cb);
+  hook_to_notification_point(HT_UI, ui_cb);
 
   return PLUGIN_KEEP;
 }
@@ -196,14 +196,15 @@ int idaapi init(void)
 //--------------------------------------------------------------------------
 void idaapi term(void)
 {
-  unhook_from_notification_point(HT_IDP, idp_cb, NULL);
-  unhook_from_notification_point(HT_UI, ui_cb, NULL);
+  unhook_from_notification_point(HT_IDP, idp_cb);
+  unhook_from_notification_point(HT_UI, ui_cb);
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   info("This plugin is fully automatic");
+  return true;
 }
 
 //--------------------------------------------------------------------------

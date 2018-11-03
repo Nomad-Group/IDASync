@@ -206,6 +206,8 @@ struct mach_header_64 {
                                            platforms (e.g. i386) that don't
                                            require it. Only used in MH_EXECUTE
                                            filetypes. */
+#define MH_APP_EXTENSION_SAFE 0x02000000 /* The code was linked for use in an
+                                            application extension. */
 
 /*
  * The load commands directly follow the mach_header.  The total size of all
@@ -296,7 +298,8 @@ struct load_command {
 #define LC_DYLIB_CODE_SIGN_DRS   0x2B /* Code signing DRs copied from linked dylibs */
 #define LC_ENCRYPTION_INFO_64    0x2C /* 64-bit encrypted segment information */
 #define LC_LINKER_OPTION         0x2D /* linker options in MH_OBJECT files */
-
+#define LC_LINKER_OPTIMIZATION_HINT 0x2E /* optimization hints in MH_OBJECT files */
+#define LC_VERSION_MIN_WATCHOS 0x30 /* build for Watch min OS version */
 
 /*
  * A variable length string in a load command is represented by an lc_str
@@ -308,9 +311,6 @@ struct load_command {
  */
 union lc_str {
         uint32_t        offset; /* offset to the string */
-#ifndef __LP64__
-        char            *ptr;   /* pointer to the string */
-#endif 
 };
 
 /*

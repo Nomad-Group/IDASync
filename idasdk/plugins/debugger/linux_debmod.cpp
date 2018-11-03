@@ -28,6 +28,7 @@
 #include "linux_debmod.h"
 
 #ifdef __ANDROID__
+#  include <linux/elf.h>
 #  include "android.hpp"
 #  include "android.cpp"
 #else
@@ -35,6 +36,11 @@
 #endif
 
 #ifdef __ARM__
+
+#if !defined(__ARMUCLINUX__) && !defined(__EA64__)
+#define __HAVE_ARM_VFP__
+#endif
+
 #define user_regs_struct user_regs
 #define user_fpregs_struct user_fpregs
 static const uchar thumb16_bpt[] = { 0x10, 0xDE }; // UND #10
@@ -46,13 +52,40 @@ static const uchar thumb32_bpt[] = { 0xF0, 0xF7, 0x00, 0xA0 };
 // This bit is combined with the software bpt size to indicate
 // that 32bit bpt code should be used.
 #define USE_THUMB32_BPT 0x80
+static const uchar aarch64_bpt[] = AARCH64_BPT_CODE;
 #endif
 
+#ifdef __ARM__
+
+#if defined(__HAVE_ARM_VFP__) && !defined(PTRACE_GETVFPREGS)
+#define PTRACE_GETVFPREGS __ptrace_request(27)
+#define PTRACE_SETVFPREGS __ptrace_request(28)
+#endif
+
+#if !defined(__ANDROID__)
+struct user_vfp
+{
+  int64 fpregs[32];
+  int32 fpscr;
+};
+#endif
+typedef struct user_vfp user_vfp_regs_t;
 // Program counter register
-#if defined(__ARM__)
-#  define SPREG uregs[13]
-#  define PCREG uregs[15]
-#  define PCREG_IDX 15
+#  define PCREG_IDX R_PC
+#  if defined(__X64__)
+#    define AARCH64_X_REGS_NUM 31
+#    define LRREG_IDX 30
+#    define SPREG_IDX R_SP
+#    define CPSR_IDX  R_PSR
+#  else
+#    define SPREG uregs[R_13]
+#    define PCREG uregs[PCREG_IDX]
+#    ifdef __HAVE_ARM_VFP__
+#      define ARM_MAXREG R_D31
+#    else
+#      define ARM_MAXREG R_PSR
+#    endif
+#  endif
 #  define CLASS_OF_INTREGS ARM_RC_GENERAL
 #else
 #  define CLASS_OF_INTREGS (X86_RC_GENERAL|X86_RC_SEGMENTS)
@@ -73,13 +106,13 @@ static const uchar thumb32_bpt[] = { 0xF0, 0xF7, 0x00, 0xA0 };
 #  endif
 #endif
 
+#ifdef __ANDROID_X86__
+#define user_fpxregs_struct user_fxsr_struct
+#endif
+
 static char getstate(int tid);
 
 //--------------------------------------------------------------------------
-#ifndef WCONTINUED
-#define WCONTINUED 8
-#endif
-
 linux_debmod_t::linux_debmod_t(void) :
   ta(NULL),
   complained_shlib_bpt(false),
@@ -90,7 +123,8 @@ linux_debmod_t::linux_debmod_t(void) :
   npending_signals(0),
   may_run(false),
   requested_to_suspend(false),
-  in_event(false)
+  in_event(false),
+  nptl_base(BADADDR)
 {
   set_platform("linux");
 }
@@ -118,10 +152,16 @@ const char *get_ptrace_name(__ptrace_request request)
     case PTRACE_CONT:       return "PTRACE_CONT";      /* Continue the process.  */
     case PTRACE_KILL:       return "PTRACE_KILL";      /* Kill the process.  */
     case PTRACE_SINGLESTEP: return "PTRACE_SINGLESTEP";/* Single step the process. This is not supported on all machines.  */
+#ifdef PTRACE_GETREGS
     case PTRACE_GETREGS:    return "PTRACE_GETREGS";   /* Get all general purpose registers used by a processes. This is not supported on all machines.  */
     case PTRACE_SETREGS:    return "PTRACE_SETREGS";   /* Set all general purpose registers used by a processes. This is not supported on all machines.  */
     case PTRACE_GETFPREGS:  return "PTRACE_GETFPREGS"; /* Get all floating point registers used by a processes. This is not supported on all machines.  */
     case PTRACE_SETFPREGS:  return "PTRACE_SETFPREGS"; /* Set all floating point registers used by a processes. This is not supported on all machines.  */
+#endif
+#ifdef PTRACE_GETVFPREGS
+    case PTRACE_GETVFPREGS: return "PTRACE_GETVFPREGS"; /* Get all vfp registers used by a processes.  This is not supported on all machines.  */
+    case PTRACE_SETVFPREGS: return "PTRACE_SETVFPREGS"; /* Set all vfp registers used by a processes.  This is not supported on all machines.  */
+#endif
     case PTRACE_ATTACH:     return "PTRACE_ATTACH";    /* Attach to a process that is already running. */
     case PTRACE_DETACH:     return "PTRACE_DETACH";    /* Detach from a process attached to with PTRACE_ATTACH.  */
 #ifdef PTRACE_GETFPXREGS
@@ -130,8 +170,11 @@ const char *get_ptrace_name(__ptrace_request request)
 #endif
     case PTRACE_SYSCALL:    return "PTRACE_SYSCALL";   /* Continue and stop at the next (return from) syscall.  */
     case PTRACE_ARCH_PRCTL: return "PTRACE_ARCH_PRCTL";
+    case PTRACE_GETSIGINFO: return "PTRACE_GETSIGINFO";
     default:
-      return "?";
+      static char buf[MAXSTR];
+      qsnprintf(buf, sizeof(buf), "%d", request);
+      return buf;
   }
 }
 
@@ -142,16 +185,22 @@ static long qptrace(__ptrace_request request, pid_t pid, void *addr, void *data)
   if ( request != PTRACE_PEEKTEXT
     && request != PTRACE_PEEKUSER
     && (request != PTRACE_POKETEXT
-    && request != PTRACE_POKEDATA
-    && request != PTRACE_SETREGS
-    && request != PTRACE_GETREGS
-    && request != PTRACE_SETFPREGS
-    && request != PTRACE_GETFPREGS
-#ifdef PTRACE_GETFPXREGS
-    && request != PTRACE_SETFPXREGS
-    && request != PTRACE_GETFPXREGS
+     && request != PTRACE_POKEDATA
+#ifdef PTRACE_SETREGS
+     && request != PTRACE_SETREGS
+     && request != PTRACE_GETREGS
+     && request != PTRACE_SETFPREGS
+     && request != PTRACE_GETFPREGS
 #endif
-    || code != 0) )
+#ifdef PTRACE_GETVFPREGS
+     && request != PTRACE_GETVFPREGS
+     && request != PTRACE_SETVFPREGS
+#endif
+#ifdef PTRACE_GETFPXREGS
+     && request != PTRACE_SETFPXREGS
+     && request != PTRACE_GETFPXREGS
+#endif
+     || code != 0) )
   {
 //    int saved_errno = errno;
 //    msg("%s(%u, 0x%X, 0x%X) => 0x%X\n", get_ptrace_name(request), pid, addr, data, code);
@@ -162,25 +211,33 @@ static long qptrace(__ptrace_request request, pid_t pid, void *addr, void *data)
 
 //--------------------------------------------------------------------------
 #ifdef LDEB
-static void log(thread_info_t *ti, const char *format, ...)
+void linux_debmod_t::log(thid_t tid, const char *format, ...)
 {
-  if ( ti != NULL )
+  if ( tid != -1 )
   {
-    const char *name = "?";
-    switch ( ti->state )
+    thread_info_t *thif = get_thread(tid);
+    if ( thif == NULL )
     {
-      case RUNNING:        name = "RUN "; break;
-      case STOPPED:        name = "STOP"; break;
-      case DYING:          name = "DYIN"; break;
-      case DEAD:           name = "DEAD"; break;
+      msg("    %d:       ** missing **\n", tid);
     }
-    msg("    %d: %s %c%c S=%d U=%d ",
-        ti->tid,
-        name,
-        ti->waiting_sigstop ? 'W' : ' ',
-        ti->got_pending_status ? 'P' : ' ',
-        ti->suspend_count,
-        ti->user_suspend);
+    else
+    {
+      const char *name = "?";
+      switch ( thif->state )
+      {
+        case RUNNING:        name = "RUN "; break;
+        case STOPPED:        name = "STOP"; break;
+        case DYING:          name = "DYIN"; break;
+        case DEAD:           name = "DEAD"; break;
+      }
+      msg("    %d: %s %c%c S=%d U=%d ",
+          thif->tid,
+          name,
+          thif->waiting_sigstop ? 'W' : ' ',
+          thif->got_pending_status ? 'P' : ' ',
+          thif->suspend_count,
+          thif->user_suspend);
+    }
   }
   va_list va;
   va_start(va, format);
@@ -250,7 +307,7 @@ static void ldeb(const char *format, ...)
 }
 
 #else
-#define log(ti, format, args...)
+#define log(tid, format, args...)
 #define ldeb(format, args...) do {} while ( 0 )
 #define status_dstr(status) "?"
 #define strevent(status) ""
@@ -290,15 +347,33 @@ inline thread_info_t *linux_debmod_t::get_thread(thid_t tid)
 }
 
 //--------------------------------------------------------------------------
+#if defined(__ARM__) && defined(__X64__)
+inline bool ptrace_getregset(struct user_pt_regs *regset, thid_t tid)
+{
+  struct iovec iov;
+  iov.iov_base = regset;
+  iov.iov_len = sizeof (struct user_pt_regs);
+  return qptrace(PTRACE_GETREGSET, tid, (void *)NT_PRSTATUS, &iov) == 0;
+}
+#endif
+
+//--------------------------------------------------------------------------
 static ea_t get_ip(thid_t tid)
 {
+  ea_t ea;
+#if defined(__ARM__) && defined(__X64__)
+  struct user_pt_regs regset;
+  ea = ptrace_getregset(&regset, tid) ? regset.pc : BADADDR;
+#else
   const size_t pcreg_off = qoffsetof(user, regs) + qoffsetof(user_regs_struct, PCREG);
   // In case 64bit IDA (__EA64__=1) is debugging a 32bit process:
   //  - size of ea_t is 64 bit
   //  - qptrace() returns a 32bit long value
   // Here we cast the return value to unsigned long to prevent
   // extending of the sign bit when convert 32bit long value to 64bit ea_t
-  return (unsigned long)qptrace(PTRACE_PEEKUSER, tid, (void *)pcreg_off, 0);
+  ea = (unsigned long)qptrace(PTRACE_PEEKUSER, tid, (void *)pcreg_off, 0);
+#endif
+  return ea;
 }
 
 #include "linux_threads.cpp"
@@ -330,7 +405,7 @@ bool linux_debmod_t::del_pending_event(event_id_t id, const char *module_name)
 {
   for ( eventlist_t::iterator p=events.begin(); p != events.end(); ++p )
   {
-    if ( p->eid == id && strcmp(p->modinfo.name, module_name) == 0 )
+    if ( p->eid == id && streq(p->modinfo.name, module_name) )
     {
       events.erase(p);
       return true;
@@ -392,7 +467,7 @@ void linux_debmod_t::store_pending_signal(int _pid, int status)
       else
       {
         // we are handling an event from a thread we recently removed, ignore this
-        if ( std::find(ld->deleted_threads.begin(), ld->deleted_threads.end(), pid) != ld->deleted_threads.end() )
+        if ( ld->deleted_threads.has(pid) )
         {
           // do not store the signal but resume the thread and let it finish
           resume_dying_thread(pid, status);
@@ -492,38 +567,10 @@ bool linux_debmod_t::retrieve_pending_signal(pid_t *p_pid, int *status)
     npending_signals--;
     QASSERT(30186, npending_signals >= 0);
     ldeb("-------------------------------\n");
-    log(&p->second, "qwait (pending signal): %s (may_run=%d)\n", status_dstr(*status), may_run);
+    log(p->first, "qwait (pending signal): %s (may_run=%d)\n", status_dstr(*status), may_run);
   }
   lock_end();
   return got_pending_signal;
-}
-
-//--------------------------------------------------------------------------
-bool linux_debmod_t::emulate_retn(int tid)
-{
-  struct user_regs_struct regs;
-  qptrace(PTRACE_GETREGS, tid, 0, &regs);
-#ifdef __ARM__
-  // emulate BX LR
-  int tbit = regs.uregs[14] & 1;
-  regs.PCREG = regs.uregs[14] & ~1;    // PC <- LR
-  setflag(regs.uregs[16], 1<<5, tbit); // Set/clear T bit in PSR
-#else
-  if ( _read_memory(tid, regs.SPREG, &regs.PCREG, sizeof(regs.PCREG), false) != sizeof(regs.PCREG) )
-  {
-    log(NULL, "%d: reading return address from %a failed\n", tid, ea_t(regs.SPREG));
-    if ( tid == process_handle )
-      return false;
-    if ( _read_memory(process_handle, regs.SPREG, &regs.PCREG, sizeof(regs.PCREG), false) != sizeof(regs.PCREG) )
-    {
-      log(NULL, "%d: reading return address from %a failed (2)\n", process_handle, ea_t(regs.SPREG));
-      return false;
-    }
-  }
-  regs.SPREG += sizeof(regs.PCREG);
-  log(NULL, "%d: retn to %a\n", tid, ea_t(regs.PCREG));
-#endif
-  return qptrace(PTRACE_SETREGS, tid, 0, &regs) == 0;
 }
 
 //--------------------------------------------------------------------------
@@ -553,6 +600,7 @@ bool linux_debmod_t::read_asciiz(tid_t tid, ea_t ea, char *buf, size_t bufsize, 
 }
 
 //--------------------------------------------------------------------------
+// may add/del threads!
 bool linux_debmod_t::gen_library_events(int /*tid*/)
 {
   int s = events.size();
@@ -595,8 +643,8 @@ inline ea_t calc_bpt_event_ea(const debug_event_t *event)
   if ( event->exc.code == SIGTRAP || event->exc.code == SIGILL )
     return event->ea;
 #else
-  if ( event->exc.code == SIGTRAP
-   /* || event->exc.code == SIGSEGV */ ) // NB: there was a bug in 2.6.10 when int3 was reported as SIGSEGV instead of SIGTRAP
+  if ( event->exc.code == SIGTRAP )
+//  || event->exc.code == SIGSEGV ) // NB: there was a bug in linux 2.6.10 when int3 was reported as SIGSEGV instead of SIGTRAP
   {
     return event->ea - 1;               // x86 reports the address after the bpt
   }
@@ -648,7 +696,7 @@ bool linux_debmod_t::check_for_new_events(chk_signal_info_t *csi, bool *event_pr
     // we stick to the same thread (hopefully a new event arrives fast enough
     // if we are single stepping). if we first check pending events,
     // the user will be constantly switched from one thread to another.
-    csi->pid = check_for_signal(-1, &csi->status, 0);
+    csi->pid = check_for_signal(&csi->status, -1, 0);
     if ( csi->pid <= 0 )
     { // no new events, do we have any pending events?
       if ( retrieve_pending_signal(&csi->pid, &csi->status) )
@@ -662,12 +710,12 @@ bool linux_debmod_t::check_for_new_events(chk_signal_info_t *csi, bool *event_pr
       if ( csi->timeout_ms == 0 )
         return false;
       // ok, we will wait for new events for a while
-      csi->pid = check_for_signal(-1, &csi->status, csi->timeout_ms);
+      csi->pid = check_for_signal(&csi->status, -1, csi->timeout_ms);
       if ( csi->pid <= 0 )
         return false;
     }
     ldeb("-------------------------------\n");
-    log(get_thread(csi->pid), " => qwait: %s\n", status_dstr(csi->status));
+    log(csi->pid, " => qwait: %s\n", status_dstr(csi->status));
 
     // check for extended event,
     // if any the debugger event can be prepared
@@ -679,10 +727,10 @@ bool linux_debmod_t::check_for_new_events(chk_signal_info_t *csi, bool *event_pr
     // when an application creates many short living threads we may receive events
     // from a thread we already removed so, do not store this pending signal, just
     // ignore it
-    if ( std::find(deleted_threads.begin(), deleted_threads.end(), csi->pid) == deleted_threads.end() )
+    if ( !deleted_threads.has(csi->pid) )
     {
       // we are not interested in this pid
-      log(get_thread(csi->pid), "storing status %d\n", csi->status);
+      log(csi->pid, "storing status %d\n", csi->status);
       store_pending_signal(csi->pid, csi->status);
     }
     else
@@ -712,29 +760,36 @@ int linux_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
   pid_t tid = csi.pid;
   int status = csi.status;
 
-  thread_info_t *ti = get_thread(tid);
-  if ( ti == NULL )
+  thread_info_t *thif = get_thread(tid);
+  if ( thif == NULL )
   {
     // not our thread?!
     debdeb("EVENT FOR UNKNOWN THREAD %d, IGNORED...\n", tid);
     int sig = WIFSTOPPED(status) ? WSTOPSIG(status) : 0;
-    qptrace(PTRACE_CONT, tid, 0, (void*)(sig));
+    qptrace(PTRACE_CONT, tid, 0, (void*)(size_t)(sig));
     return false;
   }
-  QASSERT(30057, ti->state != STOPPED || exited || WIFEXITED(status) || WIFSIGNALED(status));
+  QASSERT(30057, thif->state != STOPPED || exited || WIFEXITED(status) || WIFSIGNALED(status));
+
+  event->tid = NO_EVENT; // start with empty event
 
   // if there was a pending event, it means that previously we did not resume
   // any threads, all of them are suspended
-  set_thread_state(*ti, STOPPED);
+  set_thread_state(*thif, STOPPED);
 
   dbg_freeze_threads(NO_THREAD);
   may_run = false;
 
   // debugger event could be prepared during the check_for_new_events
   if ( event_ready )
+    goto EVENT_READY; // report empty event to get called back immediately
+
+  // dbg_freeze_threads may delete some threads and render our 'thif' pointer invalid
+  thif = get_thread(tid);
+  if ( thif == NULL )
   {
-    event->tid = NO_EVENT;
-    goto EVENT_READY;
+    debdeb("thread %d disappeared after freezing?!...\n", tid);
+    goto EVENT_READY; // report empty event to get called back immediately
   }
 
   event->pid = process_handle;
@@ -747,7 +802,7 @@ int linux_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
   {
     siginfo_t info;
     qptrace(PTRACE_GETSIGINFO, tid, NULL, &info);
-    event->ea = (ea_t)info.si_addr;
+    event->ea = (ea_t)(size_t)info.si_addr;
   }
   else
   {
@@ -766,10 +821,10 @@ int linux_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
     event->exc.ea       = BADADDR;
     if ( code == SIGSTOP )
     {
-      if ( ti->waiting_sigstop )
+      if ( thif->waiting_sigstop )
       {
-        log(ti, "got pending SIGSTOP!\n");
-        ti->waiting_sigstop = false;
+        log(tid, "got pending SIGSTOP!\n");
+        thif->waiting_sigstop = false;
         goto RESUME; // silently resume the application
       }
       // convert SIGSTOP into simple PROCESS_SUSPEND, this will avoid
@@ -783,7 +838,7 @@ int linux_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
     if ( ei != NULL )
     {
       qsnprintf(event->exc.info, sizeof(event->exc.info), "got %s signal (%s)", ei->name.c_str(), ei->desc.c_str());
-      suspend = ei->break_on();
+      suspend = should_suspend_at_exception(event, ei);
       if ( !suspend && ei->handle() )
         code = 0;               // mask the signal
     }
@@ -802,7 +857,7 @@ int linux_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
       code = 0;
       if ( proc_ip == shlib_bpt.bpt_addr && shlib_bpt.bpt_addr != 0 )
       {
-        log(ti, "got shlib bpt %a\n", proc_ip);
+        log(tid, "got shlib bpt %a\n", proc_ip);
         // emulate return from function
         if ( !emulate_retn(tid) )
         {
@@ -811,28 +866,28 @@ int linux_debmod_t::get_debug_event(debug_event_t *event, int timeout_ms)
         }
         if ( !gen_library_events(tid) ) // something has changed in shared libraries?
         { // no, nothing has changed
-          log(ti, "nothing has changed in dlls\n");
+          log(tid, "nothing has changed in dlls\n");
 RESUME:
           if ( !requested_to_suspend && !in_event )
           {
             ldeb("autoresuming\n");
-//            QASSERT(30177, ti->state == STOPPED);
+//            QASSERT(30177, thif->state == STOPPED);
             resume_app(NO_THREAD);
             return false;
           }
-          log(ti, "app may not run, keeping it suspended (%s)\n",
+          log(tid, "app may not run, keeping it suspended (%s)\n",
                         requested_to_suspend ? "requested_to_suspend" :
                         in_event ? "in_event" : "has_pending_events");
           event->eid = PROCESS_SUSPEND;
           return true;
         }
-        log(ti, "gen_library_events ok\n");
+        log(tid, "gen_library_events ok\n");
         event->eid = NO_EVENT;
       }
       else if ( (proc_ip == birth_bpt.bpt_addr && birth_bpt.bpt_addr != 0)
              || (proc_ip == death_bpt.bpt_addr && death_bpt.bpt_addr != 0) )
       {
-        log(ti, "got thread bpt %a (%s)\n", proc_ip, proc_ip == birth_bpt.bpt_addr ? "birth" : "death");
+        log(tid, "got thread bpt %a (%s)\n", proc_ip, proc_ip == birth_bpt.bpt_addr ? "birth" : "death");
         size_t s = events.size();
         thread_handle = tid; // for ps_pdread
         // NB! if we don't do this, some running threads can interfere with thread_db
@@ -845,7 +900,7 @@ RESUME:
         }
         if ( s == events.size() )
         {
-          log(ti, "resuming after thread_bpt\n");
+          log(tid, "resuming after thread_bpt\n");
           goto RESUME;
         }
         event->eid = NO_EVENT;
@@ -855,13 +910,15 @@ RESUME:
         // according to the requirement of commdbg a LIBRARY_LOAD event
         // should not be reported with the same thread/IP immediately after
         // a BPT-related event (see idd.hpp)
-        // Here we put to the queue all already loaded (but not reported) 
+        // Here we put to the queue all already loaded (but not reported)
         // libraries to be sent _before_ BPT (do it only if ELF interpreter
         // is not yet loaded, otherwise LIBRARY_LOAD events will be generated
         // by shlib_bpt and thus they can not conflict with regular BPTs
         if ( interp.empty() )
+        {
           gen_library_events(tid);
-
+          thif = get_thread(tid);
+        }
         if ( !handle_hwbpt(event) )
         {
           if ( bpts.find(proc_ip) != bpts.end()
@@ -872,7 +929,7 @@ RESUME:
             event->bpt.kea = BADADDR;
             event->ea      = proc_ip;
           }
-          else if ( ti->single_step )
+          else if ( thif != NULL && thif->single_step )
           {
             event->eid = STEP;
           }
@@ -886,13 +943,16 @@ RESUME:
         }
       }
     }
-    ti->child_signum = code;
+    thif = get_thread(tid);
+    if ( thif == NULL )
+      goto EVENT_READY; // report empty event to get called back immediately
+    thif->child_signum = code;
     if ( !requested_to_suspend && evaluate_and_handle_lowcnd(event) )
       return false;
     if ( !suspend && event->eid == EXCEPTION )
     {
       log_exception(event, ei);
-      log(ti, "resuming after exception %d\n", code);
+      log(tid, "resuming after exception %d\n", code);
       goto RESUME;
     }
   }
@@ -908,21 +968,23 @@ RESUME:
     {
       event->exit_code = WEXITSTATUS(status);
     }
-    if ( threads.size() <= 1 || ti->tid == process_handle )
+    if ( threads.size() <= 1 || thif->tid == process_handle )
     {
       event->eid = PROCESS_EXIT;
       exited = true;
     }
     else
     {
-      log(ti, "got a thread exit\n");
+      log(tid, "got a thread exit\n");
       event->eid = NO_EVENT;
       dead_thread(event->tid, DEAD);
     }
   }
 EVENT_READY:
-  log(ti, "low got event: %s, signum=%d\n", debug_event_str(event), ti->child_signum);
-  ti->single_step = false;
+  log(tid, "low got event: %s, signum=%d\n", debug_event_str(event), thif->child_signum);
+  thif = get_thread(tid);
+  if ( thif != NULL )
+    thif->single_step = false;
   last_event = *event;
   return true;
 }
@@ -939,7 +1001,9 @@ gdecode_t idaapi linux_debmod_t::dbg_get_debug_event(debug_event_t *event, int t
       // get the first event and return it
       *event = events.front();
       events.pop_front();
-      log(NULL, "GDE1(handling_lowcnds.size()=%" FMT_Z "): %s\n", handling_lowcnds.size(), debug_event_str(event));
+      if ( event->eid == NO_EVENT )
+        continue;
+      log(-1, "GDE1(handling_lowcnds.size()=%" FMT_Z "): %s\n", handling_lowcnds.size(), debug_event_str(event));
       in_event = true;
       if ( handling_lowcnds.empty() )
       {
@@ -969,15 +1033,16 @@ static char getstate(int tid)
   char buf[QMAXPATH];
   qsnprintf(buf, sizeof(buf), "/proc/%u/status", tid);
   FILE *fp = fopenRT(buf);
+  qstring line;
   if ( fp == NULL
-    || qfgets(buf, sizeof(buf), fp) == NULL
-    || qfgets(buf, sizeof(buf), fp) == NULL )
+    || qgetline(&line, fp) < 0
+    || qgetline(&line, fp) < 0 )
   {
     // no file or file read error (e.g. was deleted after successful fopenRT())
     return ' ';
   }
   char st;
-  if ( qsscanf(buf, "State:  %c", &st) != 1 )
+  if ( qsscanf(line.c_str(), "State:  %c", &st) != 1 )
     INTERR(30060);
   qfclose(fp);
   return st;
@@ -1033,7 +1098,7 @@ int linux_debmod_t::dbg_freeze_threads(thid_t tid, bool exclude)
   while ( !queue.empty() )
   {
     int status = 0;
-    int stid = check_for_signal(-1, &status, exited ? -1 : 0);
+    int stid = check_for_signal(&status, -1, exited ? -1 : 0);
     if ( stid > 0 )
     {
       // if more signals are to arrive, enable the waiter
@@ -1071,8 +1136,8 @@ int linux_debmod_t::dbg_freeze_threads(thid_t tid, bool exclude)
   {
     if ( (p->first == tid) != exclude )
     {
-      thread_info_t &ti = p->second;
-      log(&ti, "suspendd (ip=%08a)\n", get_ip(ti.tid));
+      thid_t tid2 = p->first;
+      log(tid2, "suspendd (ip=%08a)\n", get_ip(tid2));
     }
   }
 #endif
@@ -1090,12 +1155,12 @@ int linux_debmod_t::dbg_thaw_threads(thid_t tid, bool exclude)
       continue;
 
     thread_info_t &ti = p->second;
-    log(&ti, "(ip=%08a) ", get_ip(ti.tid));
+    log(ti.tid, "(ip=%08a) ", get_ip(ti.tid));
 
     if ( ti.is_running() )
     {
       QASSERT(30188, ti.suspend_count == 0);
-      ldeb("already runnng\n");
+      ldeb("already running\n");
       continue;
     }
 
@@ -1128,7 +1193,8 @@ int linux_debmod_t::dbg_thaw_threads(thid_t tid, bool exclude)
 #ifdef LDEB
       char ostate = getstate(ti.tid);
 #endif
-      if ( qptrace(request, ti.tid, 0, (void *)ti.child_signum) != 0 && ti.state != DYING )
+      ldeb("really resuming\n");
+      if ( qptrace(request, ti.tid, 0, (void *)(size_t)(ti.child_signum)) != 0 && ti.state != DYING )
       {
         ldeb("    !! failed to resume thread (error %d)\n", errno);
         if ( getstate(ti.tid) != 'Z' )
@@ -1239,8 +1305,8 @@ bool linux_debmod_t::resume_app(thid_t tid)
   }
 
   return tid == NO_THREAD
-              ? resume_all_threads()
-              : dbg_thaw_threads(tid, false);
+       ? resume_all_threads()
+       : dbg_thaw_threads(tid, false);
 }
 
 // PTRACE_PEEKTEXT / PTRACE_POKETEXT operate on unsigned long values! (i.e. 4 bytes on x86 and 8 bytes on x64)
@@ -1297,7 +1363,7 @@ TRY_MEMFILE:
       if ( nbytes > (size - read_size) )
         nbytes = size - read_size;
       errno = 0;
-      unsigned long v = qptrace(PTRACE_PEEKTEXT, tid, (void *)(unsigned int)(ea-shift), 0);
+      unsigned long v = qptrace(PTRACE_PEEKTEXT, tid, (void *)(size_t)(ea-shift), 0);
       if ( errno != 0 )
       {
         ldeb("PEEKTEXT %d:%a => %s\n", tid, ea-shift, strerror(errno));
@@ -1369,7 +1435,7 @@ int linux_debmod_t::_write_memory(int tid, ea_t ea, const void *buffer, int size
     memcpy(&word, ptr, qmin(sizeof(word), nbytes)); // use memcpy() to read unaligned bytes
     if ( nbytes != PEEKSIZE )
     {
-      unsigned long old = qptrace(PTRACE_PEEKTEXT, tid, (void *)(unsigned long)(ea-shift), 0);
+      unsigned long old = qptrace(PTRACE_PEEKTEXT, tid, (void *)(size_t)(ea-shift), 0);
       if ( errno != 0 )
       {
         ok = 0;
@@ -1383,11 +1449,11 @@ int linux_debmod_t::_write_memory(int tid, ea_t ea, const void *buffer, int size
       word |= old & ~mask;
     }
     errno = 0;
-    qptrace(PTRACE_POKETEXT, process_handle, (void *)(unsigned long)(ea-shift), (void *)word);
+    qptrace(PTRACE_POKETEXT, process_handle, (void *)(size_t)(ea-shift), (void *)word);
     if ( errno )
     {
       errno = 0;
-      qptrace(PTRACE_POKEDATA, process_handle, (void *)(unsigned long)(ea-shift), (void *)word);
+      qptrace(PTRACE_POKEDATA, process_handle, (void *)(size_t)(ea-shift), (void *)word);
     }
     if ( errno )
     {
@@ -1440,6 +1506,9 @@ void linux_debmod_t::add_dll(ea_t base, asize_t size, const char *modname, const
   dlls_to_import.insert(ii.base);
 }
 
+//#define DIFV_DEB
+#include "../../plugins/dwarf/look_for_debug_file.cpp"
+
 //--------------------------------------------------------------------------
 bool linux_debmod_t::import_dll(image_info_t &ii, name_info_t &ni)
 {
@@ -1449,7 +1518,11 @@ bool linux_debmod_t::import_dll(image_info_t &ii, name_info_t &ni)
     image_info_t &ii;
     name_info_t &ni;
     dll_symbol_importer_t(linux_debmod_t *_ld, image_info_t &_ii, name_info_t &_ni)
-      : symbol_visitor_t(VISIT_SYMBOLS), ld(_ld), ii(_ii), ni(_ni) {}
+      : symbol_visitor_t(VISIT_SYMBOLS|VISIT_BUILDID|VISIT_DBGLINK),
+      ld(_ld),
+      ii(_ii),
+      ni(_ni)
+    {}
     int visit_symbol(ea_t ea, const char *name)
     {
       ea += ii.base;
@@ -1459,6 +1532,19 @@ bool linux_debmod_t::import_dll(image_info_t &ii, name_info_t &ni)
       // every 10000th name send a message to ida - we are alive!
       if ( (ni.addrs.size() % 10000) == 0 )
         ld->dmsg("");
+      return 0;
+    }
+    int visit_buildid(const char *buildid)
+    {
+      ii.buildid = buildid;
+      ld->debdeb("Build ID '%s' of '%s'\n", buildid, ii.fname.c_str());
+      return 0;
+    }
+    int visit_debuglink(const char *debuglink, uint32 crc)
+    {
+      ii.debuglink = debuglink;
+      ii.dl_crc = crc;
+      ld->debdeb("debuglink '%s' of '%s'\n", debuglink, ii.fname.c_str());
       return 0;
     }
   };
@@ -1493,7 +1579,25 @@ void linux_debmod_t::enum_names(const char *libname)
       }
       if ( stristr(ii.soname.c_str(), "libpthread") != NULL )
       { // keep nptl names in a separate list to be able to resolve them any time
+        nptl_base = ii.base;
         import_dll(ii, nptl_names);
+        // Try to locate file with the separate debug info.
+        // FIXME: should we check that libpthread lacks symbols for libthread_db?
+        // Library.so usually contains debuglink which points to itself,
+        // so we need to avoid to load library.so another time.
+        debug_info_file_visitor_t dif(
+                debug_file_directory.c_str(),
+                true,
+                ii.fname.c_str(),
+                ii.debuglink.c_str(),
+                ii.dl_crc,
+                ii.buildid.c_str());
+        if ( dif.accept() != 0 && ii.fname != dif.fullpath )
+        {
+          debdeb("load separate debug info '%s'\n", dif.fullpath);
+          image_info_t ii_deb(nptl_base, 0, dif.fullpath, "");
+          import_dll(ii_deb, nptl_names);
+        }
         pending_names.addrs.insert(pending_names.addrs.end(), nptl_names.addrs.begin(), nptl_names.addrs.end());
         pending_names.names.insert(pending_names.names.end(), nptl_names.names.begin(), nptl_names.names.end());
         for ( int i=0; i < nptl_names.names.size(); i++ )
@@ -1586,7 +1690,7 @@ void linux_debmod_t::cleanup(void)
 //--------------------------------------------------------------------------
 inline const char *skipword(const char *ptr)
 {
-  while ( !qisspace(*ptr) && *ptr !='\0' )
+  while ( !qisspace(*ptr) && *ptr != '\0' )
     ptr++;
   return ptr;
 }
@@ -1605,6 +1709,22 @@ static const memory_info_t *find_dll(const meminfo_vec_t &miv, const char *name)
 static memory_info_t *find_dll(meminfo_vec_t &miv, const char *name)
 {
   return CONST_CAST(memory_info_t *)(find_dll(CONST_CAST(const meminfo_vec_t &)(miv), name));
+}
+
+//--------------------------------------------------------------------------
+static const memory_info_t *find_basename_dll(const meminfo_vec_t &miv, const char *name)
+{
+  const char *dll_file = qbasename(name);
+  if ( dll_file != NULL )
+  {
+    for ( int i=0; i < miv.size(); i++ )
+    {
+      const char *miv_file = qbasename(miv[i].name.c_str());
+      if ( streq(miv_file, dll_file) )
+        return &miv[i];
+    }
+  }
+  return NULL;
 }
 
 //--------------------------------------------------------------------------
@@ -1667,15 +1787,12 @@ bool linux_debmod_t::add_shlib_bpt(const meminfo_vec_t &miv, bool attaching)
   }
 
   asize_t size = calc_module_size(miv, mi);
-  add_dll(mi->startEA, size, interp.c_str(), interp_soname.c_str());
+  add_dll(mi->start_ea, size, interp.c_str(), interp_soname.c_str());
 
-#ifdef __ANDROID__
-  return add_android_shlib_bpt(miv, attaching);
-#else
-  qnotused(attaching);
   // set bpt at r_brk
   enum_names(interp_soname.c_str()); // update the name list
-  ea_t ea = find_pending_name("_r_debug");
+  const char *bpt_name = "_r_debug";
+  ea_t ea = find_pending_name(bpt_name);
   if ( ea != BADADDR )
   {
     struct r_debug rd;
@@ -1705,20 +1822,29 @@ bool linux_debmod_t::add_shlib_bpt(const meminfo_vec_t &miv, bool attaching)
 
     for ( int i=0; i < qnumber(shlib_bpt_names); i++ )
     {
-      ea = find_pending_name(shlib_bpt_names[i]);
+      bpt_name = shlib_bpt_names[i];
+      ea = find_pending_name(bpt_name);
       if ( ea != BADADDR && ea != 0 )
       {
         if ( add_internal_bp(shlib_bpt, ea) )
           break;
-        debdeb("%a: could not set shlib bpt (name=%s)\n", ea, shlib_bpt_names[i]);
+        debdeb("%a: could not set shlib bpt (name=%s)\n", ea, bpt_name);
       }
     }
     if ( shlib_bpt.bpt_addr == 0 )
+    {
+#if defined(__ANDROID__) && !defined(__X64__)
+      // Last attempt for old Android,
+      // the modern Android doesn't need the special handling
+      return add_android_shlib_bpt(miv, attaching);
+#else
+      qnotused(attaching);
       return false;
-  }
-  debdeb("%a: added shlib bpt\n", shlib_bpt.bpt_addr);
-  return true;
 #endif
+    }
+  }
+  debdeb("%a: added shlib bpt (%s)\n", shlib_bpt.bpt_addr, bpt_name);
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -1753,7 +1879,7 @@ bool linux_debmod_t::handle_process_start(pid_t _pid, attach_mode_t attaching)
   int options = 0;
   if ( attaching == AMT_ATTACH_BROKEN )
     options = WNOHANG;
-  qwait(pid, &status, options); // (should succeed) consume SIGSTOP
+  qwait(&status, pid, options); // (should succeed) consume SIGSTOP
   debdeb("process pid/tid: %d\n", pid);
   may_run = false;
 
@@ -1789,13 +1915,20 @@ bool linux_debmod_t::handle_process_start(pid_t _pid, attach_mode_t attaching)
   if ( get_memory_info(miv, false) <= 0 )
     INTERR(30065);
 
+  if ( is_dll && find_dll(miv, input_file_path.c_str()) == NULL )
+  {
+    const memory_info_t *mi = find_basename_dll(miv, input_file_path.c_str());
+    if ( mi != NULL )
+      input_file_path = mi->name;
+  }
+
   const memory_info_t *mi = find_dll(miv, ev.modinfo.name);
   if ( mi != NULL )
   {
-    ev.modinfo.base = mi->startEA;
-    ev.modinfo.size = mi->endEA - mi->startEA;
+    ev.modinfo.base = mi->start_ea;
+    ev.modinfo.size = mi->end_ea - mi->start_ea;
     if ( !is_dll ) // exe files: rebase idb to the loaded address
-      ev.modinfo.rebase_to = mi->startEA;
+      ev.modinfo.rebase_to = mi->start_ea;
   }
   else
   {
@@ -1811,11 +1944,14 @@ bool linux_debmod_t::handle_process_start(pid_t _pid, attach_mode_t attaching)
   {
     ev.eid = PROCESS_ATTACH;
     enqueue_event(ev, IN_BACK);
-    // collect exported names from the main module
-    qstring soname;
-    get_soname(ev.modinfo.name, &soname);
-    image_info_t ii(ev.modinfo.base, ev.modinfo.size, ev.modinfo.name, soname);
-    import_dll(ii, pending_names);
+    if ( !qgetenv("IDA_SKIP_SYMS", NULL) )
+    {
+      // collect exported names from the main module
+      qstring soname;
+      get_soname(ev.modinfo.name, &soname);
+      image_info_t ii(ev.modinfo.base, ev.modinfo.size, ev.modinfo.name, soname);
+      import_dll(ii, pending_names);
+    }
   }
   return true;
 }
@@ -1862,8 +1998,9 @@ int idaapi linux_debmod_t::dbg_start_process(
 
 //--------------------------------------------------------------------------
 // 1-ok, 0-failed
-int idaapi linux_debmod_t::dbg_attach_process(pid_t _pid, int /*event_id*/)
+int idaapi linux_debmod_t::dbg_attach_process(pid_t _pid, int /*event_id*/, int flags)
 {
+  is_dll = (flags & DBG_PROC_IS_DLL) != 0;
   if ( qptrace(PTRACE_ATTACH, _pid, NULL, NULL) == 0
     && handle_process_start(_pid, AMT_ATTACH_NORMAL) )
   {
@@ -1883,10 +2020,12 @@ void linux_debmod_t::cleanup_signals(void)
     if ( p->second.waiting_sigstop )
     {
       thread_info_t &ti = p->second;
+      ldeb("cleanup_signals:\n");
+      log(ti.tid, "must be STOPPED\n");
       QASSERT(30181, ti.state == STOPPED);
       qptrace(PTRACE_CONT, ti.tid, 0, 0);
       int status;
-      int tid = check_for_signal(ti.tid, &status, -1);
+      int tid = check_for_signal(&status, ti.tid, -1);
       if ( tid != ti.tid )
         msg("%d: failed to clean up pending SIGSTOP\n", tid);
     }
@@ -1911,7 +2050,7 @@ int idaapi linux_debmod_t::dbg_detach_process(void)
 
   bool had_pid = false;
   bool ok = true;
-  log(NULL, "detach all threads.\n");
+  log(-1, "detach all threads.\n");
   for ( threads_t::iterator p=threads.begin(); ok && p != threads.end(); ++p )
   {
     thread_info_t &ti = p->second;
@@ -1919,14 +2058,14 @@ int idaapi linux_debmod_t::dbg_detach_process(void)
       had_pid = true;
 
     ok = qptrace(PTRACE_DETACH, ti.tid, NULL, NULL) == 0;
-    log(NULL, "detach tid %d: ok=%d\n", ti.tid, ok);
+    log(-1, "detach tid %d: ok=%d\n", ti.tid, ok);
   }
 
   if ( ok && !had_pid )
   {
     // if pid was not in the thread list, detach it separately
     ok = qptrace(PTRACE_DETACH, process_handle, NULL, NULL) == 0;
-    log(NULL, "detach pid %d: ok=%d\n", process_handle, ok);
+    log(-1, "detach pid %d: ok=%d\n", process_handle, ok);
   }
   if ( ok )
   {
@@ -2097,6 +2236,11 @@ int idaapi linux_debmod_t::dbg_add_bpt(bpttype_t type, ea_t ea, int len)
   {
     const uchar *bptcode = bpt_code.begin();
 #ifdef __ARM__
+# ifdef __X64__
+    if ( len < 0 )
+      len = bpt_code.size();
+    bptcode = aarch64_bpt;
+# else
     if ( len < 0 )
     { // unknown mode. we have to decide between thumb and arm bpts
       // ideally we would decode the instruction and try to determine its mode
@@ -2133,6 +2277,7 @@ int idaapi linux_debmod_t::dbg_add_bpt(bpttype_t type, ea_t ea, int len)
       len = 4;
       bptcode = thumb32_bpt;
     }
+# endif
 #else
     if ( len < 0 )
       len = bpt_code.size();
@@ -2199,7 +2344,7 @@ int idaapi linux_debmod_t::dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *ori
 
 //--------------------------------------------------------------------------
 // 1-ok, 0-failed
-int idaapi linux_debmod_t::dbg_thread_get_sreg_base(thid_t tid, int sreg_value, ea_t *pea)
+int idaapi linux_debmod_t::dbg_thread_get_sreg_base(ea_t *pea, thid_t tid, int sreg_value)
 {
 #ifdef __ARM__
   qnotused(tid);
@@ -2270,20 +2415,145 @@ int idaapi linux_debmod_t::dbg_set_resume_mode(thid_t tid, resume_mode_t resmod)
   return true;
 }
 
+#ifdef __ARM__
+# ifdef __X64__
 //--------------------------------------------------------------------------
-// 1-ok, 0-failed
+// AArch64
+//--------------------------------------------------------------------------
+bool linux_debmod_t::emulate_retn(int tid)
+{
+  struct user_pt_regs regset;
+  struct iovec iov;
+  iov.iov_base = &regset;
+  iov.iov_len = sizeof (struct user_pt_regs);
+  if ( qptrace(PTRACE_GETREGSET, tid, (void *)NT_PRSTATUS, &iov) != 0 )
+    return false;
+
+  // emulate BX LR
+  regset.pc = regset.regs[LRREG_IDX];    // PC <- LR
+
+  return qptrace(PTRACE_SETREGSET, tid, (void *)NT_PRSTATUS, &iov) == 0;
+}
+
+//--------------------------------------------------------------------------
 int idaapi linux_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t *values)
+{
+  if ( values == NULL || (clsmask & ARM_RC_GENERAL) == 0 )
+    return 0;
+
+  struct user_pt_regs regset;
+  if ( !ptrace_getregset(&regset, tid) )
+    return 0;
+
+  for ( int i=0; i < AARCH64_X_REGS_NUM; ++i )
+    values[i].ival = regset.regs[i];
+  values[SPREG_IDX].ival = regset.sp;
+  values[PCREG_IDX].ival = regset.pc;
+  values[CPSR_IDX ].ival = regset.pstate;   // 32-bit
+  return 1;
+}
+
+//--------------------------------------------------------------------------
+void patch_reg(struct user_pt_regs *regset, int idx, const regval_t *value)
+{
+  if ( idx < AARCH64_X_REGS_NUM )
+    regset->regs[idx] = value->ival;
+  else if ( idx == SPREG_IDX )
+    regset->sp = value->ival;
+  else if ( idx == PCREG_IDX )
+    regset->pc = value->ival;
+  else
+    regset->pstate = value->ival;   // 32-bit
+}
+
+//--------------------------------------------------------------------------
+int idaapi linux_debmod_t::dbg_write_register(thid_t tid, int reg_idx, const regval_t *value)
+{
+  if ( value == NULL || reg_idx < 0 || reg_idx > CPSR_IDX )
+    return 0;
+
+  struct user_pt_regs regset;
+  struct iovec iov;
+  iov.iov_base = &regset;
+  iov.iov_len = sizeof (struct user_pt_regs);
+  if ( qptrace(PTRACE_GETREGSET, tid, (void *)NT_PRSTATUS, &iov) != 0 )
+    return 0;
+
+  if ( reg_idx == PCREG_IDX )
+    ldeb("NEW EIP: %08" FMT_64 "X\n", value->ival);
+
+  patch_reg(&regset, reg_idx, value);
+
+  return qptrace(PTRACE_SETREGSET, tid, (void *)NT_PRSTATUS, &iov) == 0;
+}
+
+//--------------------------------------------------------------------------
+bool idaapi linux_debmod_t::write_registers(
+        thid_t tid,
+        int start,
+        int count,
+        const regval_t *values,
+        const int *indices)
 {
   if ( values == NULL )
     return 0;
 
-  struct user_regs_struct regs;
-  if ( qptrace(PTRACE_GETREGS, tid, 0, &regs) != 0 )
-    return false;
+  struct user_pt_regs regset;
+  struct iovec iov;
+  iov.iov_base = &regset;
+  iov.iov_len = sizeof (struct user_pt_regs);
+  if ( qptrace(PTRACE_GETREGSET, tid, (void *)NT_PRSTATUS, &iov) != 0 )
+    return 0;
 
-#ifdef __ARM__
+  for ( int i=0; i < count; ++i, ++values )
+  {
+    int idx = indices != NULL ? indices[i] : start + i;
+    if ( idx > CPSR_IDX )
+      return 0;
+    patch_reg(&regset, idx, values);
+  }
+
+  return qptrace(PTRACE_SETREGSET, tid, (void *)NT_PRSTATUS, &iov) == 0;
+}
+
+# else  // __ARM__ && !__X64__
+
+//--------------------------------------------------------------------------
+// ARM (32-bit)
+//--------------------------------------------------------------------------
+bool linux_debmod_t::emulate_retn(int tid)
+{
+  struct user_regs_struct regs;
+  qptrace(PTRACE_GETREGS, tid, 0, &regs);
+  // emulate BX LR
+  int tbit = regs.uregs[14] & 1;
+  regs.PCREG = regs.uregs[14] & ~1;    // PC <- LR
+  setflag(regs.uregs[16], 1<<5, tbit); // Set/clear T bit in PSR
+  return qptrace(PTRACE_SETREGS, tid, 0, &regs) == 0;
+}
+
+#ifdef __HAVE_ARM_VFP__
+//----------------------------------------------------------------------------
+static void convert_vfp_registers(regval_t *values, user_vfp_regs_t *registers)
+{
+  for ( int i = R_D0; i <= R_D31; i++ )
+    values[i].set_bytes((uchar*)(&registers->fpregs[i-R_D0]), sizeof(int64));
+  values[R_FPSCR].ival = registers->fpscr;
+}
+#endif
+
+//--------------------------------------------------------------------------
+int idaapi linux_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t *values)
+{
+  if ( values == NULL || (clsmask & ARM_RC_ALL) == 0 )
+    return 0;
+
   if ( (clsmask & ARM_RC_GENERAL) != 0 )
   {
+    struct user_regs_struct regs;
+    if ( qptrace(PTRACE_GETREGS, tid, 0, &regs) != 0 )
+      return 0;
+
     values[R_R0].ival     = regs.uregs[0];
     values[R_R1].ival     = regs.uregs[1];
     values[R_R2].ival     = regs.uregs[2];
@@ -2302,18 +2572,199 @@ int idaapi linux_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t 
     values[R_PC].ival     = regs.uregs[15];
     values[R_PSR].ival    = regs.uregs[16];
   }
-#elif defined(__X64__)
+
+#ifdef __HAVE_ARM_VFP__
+  if ( (clsmask & ARM_RC_VFP) != 0 )
+  {
+    user_vfp_regs_t vfp_regs;
+    memset(&vfp_regs, 0, sizeof(vfp_regs));
+    if ( qptrace(PTRACE_GETVFPREGS, tid, 0, &vfp_regs) != 0 && clsmask == ARM_RC_VFP )
+      return 0;
+
+    convert_vfp_registers(values, &vfp_regs);
+  }
+#endif
+
+  return 1;
+}
+
+//--------------------------------------------------------------------------
+int idaapi linux_debmod_t::dbg_write_register(thid_t tid, int reg_idx, const regval_t *value)
+{
+  struct user_regs_struct regs;
+  if ( value == NULL || reg_idx < 0 || reg_idx > ARM_MAXREG )
+    return 0;
+#ifdef __HAVE_ARM_VFP__
+  if ( reg_idx < R_D0 )
+  {
+#endif
+    if ( qptrace(PTRACE_GETREGS, tid, 0, &regs) != 0 )
+      return 0;
+
+    if ( reg_idx == PCREG_IDX )
+      ldeb("NEW EIP: %08" FMT_64 "X\n", value->ival);
+
+    // patch
+    regs.uregs[reg_idx] = value->ival;
+
+    return qptrace(PTRACE_SETREGS, tid, 0, &regs) == 0;
+#ifdef __HAVE_ARM_VFP__
+  }
+  else
+  {
+    user_vfp_regs_t vfp_regs;
+    memset(&vfp_regs, 0, sizeof(vfp_regs));
+    if ( qptrace(PTRACE_GETVFPREGS, tid, 0, &vfp_regs) != 0 )
+      return 0;
+
+    if ( reg_idx == R_FPSCR )
+      vfp_regs.fpscr = int32(value->ival);
+    else
+      vfp_regs.fpregs[reg_idx-R_D0] = *((int64*)(value->get_data()));
+
+    return qptrace(PTRACE_SETVFPREGS, tid, 0, &vfp_regs) == 0;
+  }
+#endif
+}
+
+//--------------------------------------------------------------------------
+bool idaapi linux_debmod_t::write_registers(
+        thid_t tid,
+        int start,
+        int count,
+        const regval_t *values,
+        const int *indices)
+{
+  if ( values == NULL )
+    return 0;
+
+  struct user_regs_struct regs;
+  if ( qptrace(PTRACE_GETREGS, tid, 0, &regs) != 0 )
+    return 0;
+#ifdef __HAVE_ARM_VFP__
+  user_vfp_regs_t vfp_regs;
+  bool have_vfp = true;
+  if ( qptrace(PTRACE_GETVFPREGS, tid, 0, &vfp_regs) != 0 )
+      have_vfp = false;
+#endif
+  for ( int i=0; i < count; ++i, ++values )
+  {
+    int idx = indices != NULL ? indices[i] : start + i;
+    if ( idx < R_D0 )
+    {
+      regs.uregs[idx] = values->ival;
+    }
+#ifdef __HAVE_ARM_VFP__
+    else if ( have_vfp )
+    {
+      if ( idx == R_FPSCR )
+        vfp_regs.fpscr = int32(values->ival);
+      else
+        vfp_regs.fpregs[idx-R_D0] = *((int64*)(values->get_data()));
+    }
+#endif
+  }
+
+  int code = qptrace(PTRACE_SETREGS, tid, 0, &regs);
+#ifdef __HAVE_ARM_VFP__
+  if ( have_vfp )
+    code = code || qptrace(PTRACE_SETVFPREGS, tid, 0, &vfp_regs);
+#endif
+  return code == 0;
+}
+
+# endif
+#else     // !__ARM__
+
+//--------------------------------------------------------------------------
+// X86/X64
+//--------------------------------------------------------------------------
+bool linux_debmod_t::emulate_retn(int tid)
+{
+  struct user_regs_struct regs;
+  qptrace(PTRACE_GETREGS, tid, 0, &regs);
+  if ( _read_memory(tid, regs.SPREG, &regs.PCREG, sizeof(regs.PCREG), false) != sizeof(regs.PCREG) )
+  {
+    log(-1, "%d: reading return address from %a failed\n", tid, ea_t(regs.SPREG));
+    if ( tid == process_handle )
+      return false;
+    if ( _read_memory(process_handle, regs.SPREG, &regs.PCREG, sizeof(regs.PCREG), false) != sizeof(regs.PCREG) )
+    {
+      log(-1, "%d: reading return address from %a failed (2)\n", process_handle, ea_t(regs.SPREG));
+      return false;
+    }
+  }
+  regs.SPREG += sizeof(regs.PCREG);
+  log(-1, "%d: retn to %a\n", tid, ea_t(regs.PCREG));
+  return qptrace(PTRACE_SETREGS, tid, 0, &regs) == 0;
+}
+
+//-------------------------------------------------------------------------
+enum
+{
+  TAG_VALID = 0,
+  TAG_ZERO = 1,
+  TAG_SPECIAL = 2,
+  TAG_EMPTY = 3,
+};
+
+//--------------------------------------------------------------------------
+int idaapi linux_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t *values)
+{
+  if ( values == NULL )
+    return 0;
+
+  struct user_regs_struct regs;
+  if ( qptrace(PTRACE_GETREGS, tid, 0, &regs) != 0 )
+    return false;
+
+#ifdef __X64__
+#define SRCREG_XAX rax
+#define SRCREG_XBX rbx
+#define SRCREG_XCX rcx
+#define SRCREG_XDX rdx
+#define SRCREG_XSI rsi
+#define SRCREG_XBP rbp
+#define SRCREG_XSP rsp
+#define SRCREG_XDI rdi
+#define SRCREG_XIP rip
+#define SRCREG_XCS cs
+#define SRCREG_XDS ds
+#define SRCREG_XES es
+#define SRCREG_XFS fs
+#define SRCREG_XGS gs
+#define SRCREG_XSS ss
+#else
+#define SRCREG_XAX eax
+#define SRCREG_XBX ebx
+#define SRCREG_XCX ecx
+#define SRCREG_XDX edx
+#define SRCREG_XSI esi
+#define SRCREG_XBP ebp
+#define SRCREG_XSP esp
+#define SRCREG_XDI edi
+#define SRCREG_XIP eip
+#define SRCREG_XCS xcs
+#define SRCREG_XDS xds
+#define SRCREG_XES xes
+#define SRCREG_XFS xfs
+#define SRCREG_XGS xgs
+#define SRCREG_XSS xss
+#endif
+
+#if defined(__EA64__)
   if ( (clsmask & X86_RC_GENERAL) != 0 )
   {
-    values[R_EAX].ival    = regs.rax;
-    values[R_EBX].ival    = regs.rbx;
-    values[R_ECX].ival    = regs.rcx;
-    values[R_EDX].ival    = regs.rdx;
-    values[R_ESI].ival    = regs.rsi;
-    values[R_EDI].ival    = regs.rdi;
-    values[R_EBP].ival    = regs.rbp;
-    values[R_ESP].ival    = regs.rsp;
-    values[R_EIP].ival    = regs.rip;
+    values[R_EAX].ival    = regs.SRCREG_XAX;
+    values[R_EBX].ival    = regs.SRCREG_XBX;
+    values[R_ECX].ival    = regs.SRCREG_XCX;
+    values[R_EDX].ival    = regs.SRCREG_XDX;
+    values[R_ESI].ival    = regs.SRCREG_XSI;
+    values[R_EDI].ival    = regs.SRCREG_XDI;
+    values[R_EBP].ival    = regs.SRCREG_XBP;
+    values[R_ESP].ival    = regs.SRCREG_XSP;
+    values[R_EIP].ival    = regs.SRCREG_XIP;
+#ifdef __X64__
     values[R64_R8 ].ival  = regs.r8;
     values[R64_R9 ].ival  = regs.r9;
     values[R64_R10].ival  = regs.r10;
@@ -2322,43 +2773,43 @@ int idaapi linux_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t 
     values[R64_R13].ival  = regs.r13;
     values[R64_R14].ival  = regs.r14;
     values[R64_R15].ival  = regs.r15;
+#endif // __X64__
     values[R_EFLAGS].ival = regs.eflags;
   }
   if ( (clsmask & X86_RC_SEGMENTS) != 0 )
   {
-    values[R_CS    ].ival = regs.cs;
-    values[R_DS    ].ival = regs.ds;
-    values[R_ES    ].ival = regs.es;
-    values[R_FS    ].ival = regs.fs;
-    values[R_GS    ].ival = regs.gs;
-    values[R_SS    ].ival = regs.ss;
+    values[R_CS    ].ival = regs.SRCREG_XCS;
+    values[R_DS    ].ival = regs.SRCREG_XDS;
+    values[R_ES    ].ival = regs.SRCREG_XES;
+    values[R_FS    ].ival = regs.SRCREG_XFS;
+    values[R_GS    ].ival = regs.SRCREG_XGS;
+    values[R_SS    ].ival = regs.SRCREG_XSS;
   }
 #else
   if ( (clsmask & X86_RC_GENERAL) != 0 )
   {
-    values[R_EAX   ].ival = uint32(regs.eax);
-    values[R_EBX   ].ival = uint32(regs.ebx);
-    values[R_ECX   ].ival = uint32(regs.ecx);
-    values[R_EDX   ].ival = uint32(regs.edx);
-    values[R_ESI   ].ival = uint32(regs.esi);
-    values[R_EDI   ].ival = uint32(regs.edi);
-    values[R_EBP   ].ival = uint32(regs.ebp);
-    values[R_ESP   ].ival = uint32(regs.esp);
-    values[R_EIP   ].ival = uint32(regs.eip);
+    values[R_EAX   ].ival = uint32(regs.SRCREG_XAX);
+    values[R_EBX   ].ival = uint32(regs.SRCREG_XBX);
+    values[R_ECX   ].ival = uint32(regs.SRCREG_XCX);
+    values[R_EDX   ].ival = uint32(regs.SRCREG_XDX);
+    values[R_ESI   ].ival = uint32(regs.SRCREG_XSI);
+    values[R_EDI   ].ival = uint32(regs.SRCREG_XDI);
+    values[R_EBP   ].ival = uint32(regs.SRCREG_XBP);
+    values[R_ESP   ].ival = uint32(regs.SRCREG_XSP);
+    values[R_EIP   ].ival = uint32(regs.SRCREG_XIP);
     values[R_EFLAGS].ival = uint32(regs.eflags);
   }
   if ( (clsmask & X86_RC_SEGMENTS) != 0 )
   {
-    values[R_CS    ].ival = uint32(regs.xcs);
-    values[R_DS    ].ival = uint32(regs.xds);
-    values[R_ES    ].ival = uint32(regs.xes);
-    values[R_FS    ].ival = uint32(regs.xfs);
-    values[R_GS    ].ival = uint32(regs.xgs);
-    values[R_SS    ].ival = uint32(regs.xss);
+    values[R_CS    ].ival = uint32(regs.SRCREG_XCS);
+    values[R_DS    ].ival = uint32(regs.SRCREG_XDS);
+    values[R_ES    ].ival = uint32(regs.SRCREG_XES);
+    values[R_FS    ].ival = uint32(regs.SRCREG_XFS);
+    values[R_GS    ].ival = uint32(regs.SRCREG_XGS);
+    values[R_SS    ].ival = uint32(regs.SRCREG_XSS);
   }
 #endif
 
-#ifndef __ARM__
 #ifdef __X64__
   // 64-bit version uses one struct to return xmm & fpu
   if ( (clsmask & (X86_RC_XMM|X86_RC_FPU|X86_RC_MMX)) != 0 )
@@ -2369,13 +2820,57 @@ int idaapi linux_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t 
 
     if ( (clsmask & (X86_RC_FPU|X86_RC_MMX)) != 0 )
     {
-      if ( (clsmask & X86_RC_FPU) != 0 )
+      bool fpu = (clsmask & X86_RC_FPU) != 0;
+      if ( fpu )
       {
         values[R_CTRL].ival = i387.cwd;
         values[R_STAT].ival = i387.swd;
         values[R_TAGS].ival = i387.ftw;
       }
-      read_fpu_registers(values, clsmask, i387.st_space, sizeof(i387.st_space)/8);
+      read_fpu_registers(
+              values,
+              clsmask,
+              i387.st_space, sizeof(i387.st_space)/8);
+
+      if ( fpu )
+      {
+        // fix 'ftag':
+        // ---
+        // Byte 4 is used for an abridged version of the x87 FPU Tag
+        // Word (FTW). The following items describe its usage:
+        // — For each j, 0 <= j <= 7, FXSAVE saves a 0 into bit j of
+        //   byte 4 if x87 FPU data register STj has a empty tag;
+        //   otherwise, FXSAVE saves a 1 into bit j of byte 4.
+        // (...)
+        // ---
+        // See also the opposite conversion when writing registers
+        // (look for 'abridged'.)
+        uchar abridged = values[R_TAGS].ival & 0xff;
+        int top = ((values[R_STAT].ival) >> 11) & 0x7;
+        ushort ftag = 0;
+        for ( int st_idx = 7; st_idx >= 0; --st_idx )
+        {
+          ushort tag = TAG_EMPTY;
+          const uchar *p = (const uchar *) &values[R_ST0 + st_idx].ival;
+          if ( (abridged & (1 << st_idx)) != 0 )
+          {
+            int actual_st = R_ST0 + ((st_idx + 8 - top) % 8);
+            p = (const uchar *) &values[actual_st].ival;
+            bool integer = (p[7] & 0x80) != 0;
+            uint32 exp = ((p[9] & 0x7f) << 8) | p[8];
+            uint32 frac0 = ((p[3] << 24) | (p[2] << 16) | (p[1] << 8) | p[0]);
+            uint32 frac1 = (((p[7] & 0x7f) << 24) | (p[6] << 16) | (p[5] << 8) | p[4]);
+            if ( exp == 0x7fff )
+              tag = TAG_SPECIAL;
+            else if ( exp == 0 )
+              tag = (frac0 == 0 && frac1 == 0 && !integer) ? TAG_ZERO : TAG_SPECIAL;
+            else
+              tag = integer ? TAG_VALID : TAG_SPECIAL;
+          }
+          ftag |= tag << (2 * st_idx);
+        }
+        values[R_TAGS].ival = ftag;
+      }
     }
     if ( (clsmask & X86_RC_XMM) != 0 )
     {
@@ -2413,19 +2908,7 @@ int idaapi linux_debmod_t::dbg_read_registers(thid_t tid, int clsmask, regval_t 
     read_fpu_registers(values, clsmask, i387.st_space, sizeof(i387.st_space)/8);
   }
 #endif
-#endif
   return true;
-}
-
-//--------------------------------------------------------------------------
-inline int get_reg_class(int idx)
-{
-#ifdef __ARM__
-  qnotused(idx);
-  return ARM_RC_GENERAL;
-#else
-  return get_x86_reg_class(idx);
-#endif
 }
 
 //--------------------------------------------------------------------------
@@ -2444,36 +2927,30 @@ static bool patch_reg_context(
   qnotused(x387);
 #endif
 
-#if defined(__ARM__)
-  qnotused(i387);
-  qnotused(x387);
-  if ( reg_idx >= qnumber(regs->uregs) || regs == NULL )
-    return false;
-  regs->uregs[reg_idx]  = value->ival;
-#else
-  int regclass = get_reg_class(reg_idx);
+  int regclass = get_x86_reg_class(reg_idx);
   if ( (regclass & (X86_RC_GENERAL|X86_RC_SEGMENTS)) != 0 )
   {
     if ( regs == NULL )
       return false;
     switch ( reg_idx )
     {
-#if defined(__X64__)
-      case R_CS:     regs->cs     = value->ival; break;
-      case R_DS:     regs->ds     = value->ival; break;
-      case R_ES:     regs->es     = value->ival; break;
-      case R_FS:     regs->fs     = value->ival; break;
-      case R_GS:     regs->gs     = value->ival; break;
-      case R_SS:     regs->ss     = value->ival; break;
-      case R_EAX:    regs->rax    = value->ival; break;
-      case R_EBX:    regs->rbx    = value->ival; break;
-      case R_ECX:    regs->rcx    = value->ival; break;
-      case R_EDX:    regs->rdx    = value->ival; break;
-      case R_ESI:    regs->rsi    = value->ival; break;
-      case R_EDI:    regs->rdi    = value->ival; break;
-      case R_EBP:    regs->rbp    = value->ival; break;
-      case R_ESP:    regs->rsp    = value->ival; break;
-      case R_EIP:    regs->rip    = value->ival; break;
+#if defined(__EA64__)
+      case R_CS:     regs->SRCREG_XCS = value->ival; break;
+      case R_DS:     regs->SRCREG_XDS = value->ival; break;
+      case R_ES:     regs->SRCREG_XES = value->ival; break;
+      case R_FS:     regs->SRCREG_XFS = value->ival; break;
+      case R_GS:     regs->SRCREG_XGS = value->ival; break;
+      case R_SS:     regs->SRCREG_XSS = value->ival; break;
+      case R_EAX:    regs->SRCREG_XAX = value->ival; break;
+      case R_EBX:    regs->SRCREG_XBX = value->ival; break;
+      case R_ECX:    regs->SRCREG_XCX = value->ival; break;
+      case R_EDX:    regs->SRCREG_XDX = value->ival; break;
+      case R_ESI:    regs->SRCREG_XSI = value->ival; break;
+      case R_EDI:    regs->SRCREG_XDI = value->ival; break;
+      case R_EBP:    regs->SRCREG_XBP = value->ival; break;
+      case R_ESP:    regs->SRCREG_XSP = value->ival; break;
+      case R_EIP:    regs->SRCREG_XIP = value->ival; break;
+#ifdef __X64__
       case R64_R8:   regs->r8     = value->ival; break;
       case R64_R9 :  regs->r9     = value->ival; break;
       case R64_R10:  regs->r10    = value->ival; break;
@@ -2482,22 +2959,23 @@ static bool patch_reg_context(
       case R64_R13:  regs->r13    = value->ival; break;
       case R64_R14:  regs->r14    = value->ival; break;
       case R64_R15:  regs->r15    = value->ival; break;
+#endif // __X64__
 #else
-      case R_CS:     regs->xcs    = value->ival; break;
-      case R_DS:     regs->xds    = value->ival; break;
-      case R_ES:     regs->xes    = value->ival; break;
-      case R_FS:     regs->xfs    = value->ival; break;
-      case R_GS:     regs->xgs    = value->ival; break;
-      case R_SS:     regs->xss    = value->ival; break;
-      case R_EAX:    regs->eax    = value->ival; break;
-      case R_EBX:    regs->ebx    = value->ival; break;
-      case R_ECX:    regs->ecx    = value->ival; break;
-      case R_EDX:    regs->edx    = value->ival; break;
-      case R_ESI:    regs->esi    = value->ival; break;
-      case R_EDI:    regs->edi    = value->ival; break;
-      case R_EBP:    regs->ebp    = value->ival; break;
-      case R_ESP:    regs->esp    = value->ival; break;
-      case R_EIP:    regs->eip    = value->ival; break;
+      case R_CS:     regs->SRCREG_XCS = value->ival; break;
+      case R_DS:     regs->SRCREG_XDS = value->ival; break;
+      case R_ES:     regs->SRCREG_XES = value->ival; break;
+      case R_FS:     regs->SRCREG_XFS = value->ival; break;
+      case R_GS:     regs->SRCREG_XGS = value->ival; break;
+      case R_SS:     regs->SRCREG_XSS = value->ival; break;
+      case R_EAX:    regs->SRCREG_XAX = value->ival; break;
+      case R_EBX:    regs->SRCREG_XBX = value->ival; break;
+      case R_ECX:    regs->SRCREG_XCX = value->ival; break;
+      case R_EDX:    regs->SRCREG_XDX = value->ival; break;
+      case R_ESI:    regs->SRCREG_XSI = value->ival; break;
+      case R_EDI:    regs->SRCREG_XDI = value->ival; break;
+      case R_EBP:    regs->SRCREG_XBP = value->ival; break;
+      case R_ESP:    regs->SRCREG_XSP = value->ival; break;
+      case R_EIP:    regs->SRCREG_XIP = value->ival; break;
 #endif
       case R_EFLAGS: regs->eflags = value->ival; break;
     }
@@ -2528,7 +3006,28 @@ static bool patch_reg_context(
       {
         case R_CTRL:   i387->cwd = value->ival; break;
         case R_STAT:   i387->swd = value->ival; break;
-        case R_TAGS:   i387->TAGS_REG = value->ival; break;
+        case R_TAGS:
+#ifdef __X64__
+          // => abridged
+          // See also the opposite conversion when reading registers
+          // (look for 'abridged'.)
+          //
+          // NOTE: This assumes that i387->swd _IS UP-TO-DATE_. If it
+          // has to be overwritten later in the same batch of updates,
+          // its new value won't be used here.
+          {
+            ushort expanded = value->ival;
+            uchar tags = 0;
+            int top = (i387->swd >> 11) & 0x7;
+            for ( int st_idx = 7; st_idx >= 0; --st_idx )
+              if ( ((expanded >> 2 * st_idx) & 3) != TAG_EMPTY )
+                tags |= uchar(1 << ((st_idx + 8 - top) % 8));
+            i387->TAGS_REG = tags;
+          }
+#else
+          i387->TAGS_REG = value->ival;
+#endif
+          break;
       }
     }
     else // FPU floating point register
@@ -2546,7 +3045,6 @@ static bool patch_reg_context(
     fpu_float += (reg_idx-R_MMX0) * sizeof(i387->st_space)/8;
     memcpy(fpu_float, value->get_data(), 8);
   }
-#endif
   return true;
 }
 
@@ -2558,7 +3056,7 @@ int idaapi linux_debmod_t::dbg_write_register(thid_t tid, int reg_idx, const reg
     return false;
 
   bool ret = false;
-  int regclass = get_reg_class(reg_idx);
+  int regclass = get_x86_reg_class(reg_idx);
   if ( (regclass & CLASS_OF_INTREGS) != 0 )
   {
     struct user_regs_struct regs;
@@ -2575,7 +3073,6 @@ int idaapi linux_debmod_t::dbg_write_register(thid_t tid, int reg_idx, const reg
 
     ret = qptrace(PTRACE_SETREGS, tid, 0, &regs) != -1;
   }
-#ifndef __ARM__
   else if ( (regclass & CLASSES_STORED_IN_FPREGS) != 0 )
   {
     struct user_fpregs_struct i387;
@@ -2600,21 +3097,20 @@ int idaapi linux_debmod_t::dbg_write_register(thid_t tid, int reg_idx, const reg
     ret = qptrace(PTRACE_SETFPXREGS, tid, 0, &x387) != -1;
   }
 #endif
-#endif
   return ret;
 }
 
 //--------------------------------------------------------------------------
 bool idaapi linux_debmod_t::write_registers(
-  thid_t tid,
-  int start,
-  int count,
-  const regval_t *values,
-  const int *indices)
+        thid_t tid,
+        int start,
+        int count,
+        const regval_t *values,
+        const int *indices)
 {
   struct user_regs_struct regs;
   struct user_fpregs_struct i387;
-#if !defined(__ARM__) && !defined( __X64__)
+#if !defined( __X64__)
   // only for 32-bit debugger we have to handle xmm registers separately
   struct user_fpxregs_struct x387;
 #define X387_PTR &x387
@@ -2622,17 +3118,15 @@ bool idaapi linux_debmod_t::write_registers(
 #define X387_PTR NULL
 #endif
   bool got_regs = false;
-#if !defined(__ARM__)
   bool got_i387 = false;
 #ifndef __X64__
   bool got_x387 = false;
-#endif
 #endif
 
   for ( int i=0; i < count; i++, values++ )
   {
     int idx = indices != NULL ? indices[i] : start+i;
-    int regclass = get_reg_class(idx);
+    int regclass = get_x86_reg_class(idx);
     if ( (regclass & CLASS_OF_INTREGS) != 0 )
     { // general register
       if ( !got_regs )
@@ -2642,7 +3136,6 @@ bool idaapi linux_debmod_t::write_registers(
         got_regs = true;
       }
     }
-#if !defined(__ARM__)
     else if ( (regclass & CLASSES_STORED_IN_FPREGS) != 0 )
     { // fpregs register
       if ( !got_i387 )
@@ -2663,7 +3156,6 @@ bool idaapi linux_debmod_t::write_registers(
       }
     }
 #endif
-#endif
     if ( !patch_reg_context(&regs, &i387, X387_PTR, idx, values) )
       return false;
   }
@@ -2671,7 +3163,6 @@ bool idaapi linux_debmod_t::write_registers(
   if ( got_regs && qptrace(PTRACE_SETREGS, tid, 0, &regs) == -1 )
     return false;
 
-#if !defined(__ARM__)
 #ifndef __X64__
   // The order of the following calls is VERY IMPORTANT so as PTRACE_SETFPXREGS
   // can spoil FPU registers.
@@ -2690,10 +3181,9 @@ bool idaapi linux_debmod_t::write_registers(
       return false;
   }
 
-#endif
-
   return true;
 }
+#endif // !__ARM__
 
 //--------------------------------------------------------------------------
 // find DT_SONAME of a elf image directly from the memory
@@ -2722,8 +3212,8 @@ bool linux_debmod_t::get_soname(const char *fname, qstring *soname)
 asize_t linux_debmod_t::calc_module_size(const meminfo_vec_t &miv, const memory_info_t *mi)
 {
   QASSERT(30067, miv.begin() <= mi && mi < miv.end());
-  ea_t start = mi->startEA;
-  ea_t end   = mi->endEA;
+  ea_t start = mi->start_ea;
+  ea_t end   = mi->end_ea;
   if ( end == 0 )
     return 0; // unknown size
   const qstring &name = mi->name;
@@ -2731,18 +3221,19 @@ asize_t linux_debmod_t::calc_module_size(const meminfo_vec_t &miv, const memory_
   {
     if ( name != mi->name )
       break;
-    end = mi->endEA;
+    end = mi->end_ea;
   }
   QASSERT(30068, end > start);
   return end - start;
 }
 
 //--------------------------------------------------------------------------
+// may add/del threads!
 void linux_debmod_t::handle_dll_movements(const meminfo_vec_t &_miv)
 {
   ldeb("handle_dll_movements\n");
 
-  // first, merge memory areas by module
+  // first, merge memory ranges by module
   meminfo_vec_t miv;
   for ( size_t i = 0, n = _miv.size(); i < n; ++i )
   {
@@ -2753,8 +3244,8 @@ void linux_debmod_t::handle_dll_movements(const meminfo_vec_t &_miv)
     if ( target != NULL )
     {
       // Found one. Let's make sure it contains our addresses.
-      target->extend(src.startEA);
-      target->extend(src.endEA);
+      target->extend(src.start_ea);
+      target->extend(src.end_ea);
     }
     else
     {
@@ -2802,7 +3293,7 @@ void linux_debmod_t::handle_dll_movements(const meminfo_vec_t &_miv)
       continue;
 
     // ignore if dll already exists
-    ea_t base = miv[i].startEA;
+    ea_t base = miv[i].start_ea;
     p = dlls.find(base);
     if ( p != dlls.end() )
       continue;
@@ -2830,27 +3321,27 @@ void linux_debmod_t::handle_dll_movements(const meminfo_vec_t &_miv)
 // if founds a 64-bit address in the mapfile
 bool linux_debmod_t::read_mapping(mapfp_entry_t *me)
 {
-  char line[2*MAXSTR];
-  if ( !qfgets(line, sizeof(line), mapfp) )
+  qstring line;
+  if ( qgetline(&line, mapfp) <= 0 )
     return false;
 
   me->ea1 = BADADDR;
   me->bitness = 0;
   int len = 0;
-  int code = qsscanf(line, "%a-%a %s %a %s %" FMT_64 "x%n",
+  int code = qsscanf(line.begin(), "%a-%a %s %a %s %" FMT_64 "x%n",
                      &me->ea1, &me->ea2, me->perm,
                      &me->offset, me->device, &me->inode, &len);
-  if ( code == 6 && len < sizeof(line) )
+  if ( code == 6 )
   {
-    const char *found = strchr(line, '-');
     me->bitness = 1;
-    if ( (found - line) > 8 )
+    size_t pos = line.find('-');
+    if ( pos != qstring::npos && pos > 8 )
     {
       me->bitness = 2;
       debapp_attrs.addrsize = 8;
     }
-    char *ptr = &line[len];
-    ptr = skipSpaces(ptr);
+    char *ptr = line.begin() + len;
+    ptr = skip_spaces(ptr);
     // remove trailing spaces and eventual (deleted) suffix
     static const char delsuff[] = " (deleted)";
     const int suflen = sizeof(delsuff) - 1;
@@ -2876,9 +3367,10 @@ int linux_debmod_t::get_memory_info(meminfo_vec_t &miv, bool suspend)
   rewind(mapfp);
   mapfp_entry_t me;
   qstrvec_t possible_interp;
+  int bitness = 1;
   while ( read_mapping(&me) )
   {
-    // skip empty areas
+    // skip empty ranges
     if ( me.empty() )
       continue;
 
@@ -2890,25 +3382,28 @@ int linux_debmod_t::get_memory_info(meminfo_vec_t &miv, bool suspend)
         possible_interp.push_back(me.fname);
     }
 
-    // for some reason linux lists some areas twice
+    // for some reason linux lists some ranges twice
     // ignore them
     int i;
     for ( i=0; i < miv.size(); i++ )
-      if ( miv[i].startEA == me.ea1 )
+      if ( miv[i].start_ea == me.ea1 )
         break;
     if ( i != miv.size() )
       continue;
 
     memory_info_t &mi = miv.push_back();
-    mi.startEA = me.ea1;
-    mi.endEA   = me.ea2;
+    mi.start_ea = me.ea1;
+    mi.end_ea   = me.ea2;
     mi.name.swap(me.fname);
 #ifdef __ANDROID__
     // android reports simple library names without path. try to find it.
     make_android_abspath(&mi.name);
 #endif
     mi.bitness = me.bitness;
-    //msg("%s: %a..%a. Bitness: %d\n", mi.name.c_str(), mi.startEA, mi.endEA, mi.bitness);
+    //msg("%s: %a..%a. Bitness: %d\n", mi.name.c_str(), mi.start_ea, mi.end_ea, mi.bitness);
+
+    if ( bitness < mi.bitness )
+      bitness = mi.bitness;
 
     if ( strchr(me.perm, 'r') != NULL )
       mi.perm |= SEGPERM_READ;
@@ -2938,21 +3433,26 @@ int linux_debmod_t::get_memory_info(meminfo_vec_t &miv, bool suspend)
       interp.qclear();
   }
 
+  // During the parsing of each memory segment we had just guessed the bitness.
+  // So fix now bitness of all memory segments
+  for ( int i = 0; i < miv.size(); i++ )
+    miv[i].bitness = bitness;
+
   if ( suspend )
     resume_all_threads();
   return 1;
 }
 
 //--------------------------------------------------------------------------
-int idaapi linux_debmod_t::dbg_get_memory_info(meminfo_vec_t &areas)
+int idaapi linux_debmod_t::dbg_get_memory_info(meminfo_vec_t &ranges)
 {
-  int code = get_memory_info(areas, false);
+  int code = get_memory_info(ranges, false);
   if ( code == 1 )
   {
-    if ( same_as_oldmemcfg(areas) )
+    if ( same_as_oldmemcfg(ranges) )
       code = -2;
     else
-      save_oldmemcfg(areas);
+      save_oldmemcfg(ranges);
   }
   return code;
 }
@@ -2962,10 +3462,17 @@ linux_debmod_t::~linux_debmod_t()
 }
 
 //--------------------------------------------------------------------------
-int idaapi linux_debmod_t::dbg_init(bool _debug_debugger)
+void idaapi linux_debmod_t::dbg_set_debugging(bool _debug_debugger)
 {
   debug_debugger = _debug_debugger;
+}
+
+//--------------------------------------------------------------------------
+int idaapi linux_debmod_t::dbg_init(void)
+{
   dbg_term(); // initialize various variables
+  qgetenv("DEBUG_FILE_DIRECTORY", &debug_file_directory);
+  debdeb("DEBUG_FILE_DIRECTORY=%s\n", debug_file_directory.c_str());
   return DBG_HAS_PROCGETINFO | DBG_HAS_DETACHPROC;
 }
 
@@ -2994,11 +3501,11 @@ bool idaapi linux_debmod_t::thread_get_fs_base(thid_t tid, int reg_idx, ea_t *pe
   {
     case R_FS:
       if ( ptrace (PTRACE_ARCH_PRCTL, tid, pea, ARCH_GET_FS) == 0 )
-    return true;
+        return true;
       break;
     case R_GS:
       if ( ptrace (PTRACE_ARCH_PRCTL, tid, pea, ARCH_GET_GS) == 0 )
-    return true;
+        return true;
       break;
     case R_CS:
     case R_DS:
@@ -3023,8 +3530,8 @@ int idaapi linux_debmod_t::handle_ioctl(int fn, const void *in, size_t, void **,
   {
     // this call is not used anymore
     char *fname = (char *)in;
-    qstatbuf64 st;
-    qstat64(fname, &st);
+    qstatbuf st;
+    qstat(fname, &st);
     int mode = st.qst_mode | S_IXUSR|S_IXGRP|S_IXOTH;
     chmod(fname, mode);
   }

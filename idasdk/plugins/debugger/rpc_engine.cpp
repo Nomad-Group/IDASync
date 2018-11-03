@@ -184,23 +184,19 @@ rpc_packet_t *rpc_engine_t::recv_request(void)
 //--------------------------------------------------------------------------
 // sends a request and waits for a reply
 // may occasionally sends another request based on the reply
-rpc_packet_t *rpc_engine_t::process_request(bytevec_t &req, bool must_login)
+rpc_packet_t *rpc_engine_t::process_request(bytevec_t &req, int preq_flags)
 {
-  bool only_events = req.empty();
   while ( true )
   {
     if ( !req.empty() )
     {
       int code = send_request(req);
-      if ( code != 0 )
+      if ( code != 0 || (preq_flags & PREQ_GET_EVENT) != 0 )
         return NULL;
 
       rpc_packet_t *rp = (rpc_packet_t *)req.begin();
-      if ( only_events && rp->code == RPC_EVOK )
-        return NULL;
-
       if ( rp->code == RPC_ERROR )
-        qexit(1);
+        qexit(1); // sent error packet, may die now
     }
 
     rpc_packet_t *rp = recv_request();
@@ -219,7 +215,7 @@ rpc_packet_t *rpc_engine_t::process_request(bytevec_t &req, bool must_login)
         return rp;
     }
 
-    if ( must_login )
+    if ( (preq_flags & PREQ_MUST_LOGIN) != 0 )
     {
       lprintf("Exploit packet has been detected\n");
 FAILURE:
@@ -304,7 +300,7 @@ int rpc_engine_t::handle_ioctl_packet(bytevec_t &req, const uchar *ptr, const uc
   if ( outsize > 0 )
     append_memory(req, outbuf, outsize);
   qfree(outbuf);
-  verb(("ioctl(%d) => %d\n", fn, code));
+//  verb(("ioctl(%d) => %d\n", fn, code));
   return RPC_OK;
 }
 

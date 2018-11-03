@@ -19,10 +19,18 @@ typedef UNICODE_STRING *PUNICODE_STRING;
 extern "C" char _RTL_CONSTANT_STRING_type_check(const WCHAR *s);
 // __typeof would be desirable here instead of sizeof.
 template <size_t N> class _RTL_CONSTANT_STRING_remove_const_template_class;
-template <> class _RTL_CONSTANT_STRING_remove_const_template_class<sizeof(char)>  {public: typedef  char T; };
-template <> class _RTL_CONSTANT_STRING_remove_const_template_class<sizeof(WCHAR)> {public: typedef WCHAR T; };
+template <> class _RTL_CONSTANT_STRING_remove_const_template_class<sizeof(char)>
+{
+public:
+  typedef char T;
+};
+template <> class _RTL_CONSTANT_STRING_remove_const_template_class<sizeof(WCHAR)>
+{
+public:
+  typedef WCHAR T;
+};
 #define _RTL_CONSTANT_STRING_remove_const_macro(s) \
-    (const_cast<_RTL_CONSTANT_STRING_remove_const_template_class<sizeof((s)[0])>::T*>(s))
+  (const_cast<_RTL_CONSTANT_STRING_remove_const_template_class<sizeof((s)[0])>::T*>(s))
 
 #define RTL_CONSTANT_STRING(s) \
 { \
@@ -31,46 +39,50 @@ template <> class _RTL_CONSTANT_STRING_remove_const_template_class<sizeof(WCHAR)
     _RTL_CONSTANT_STRING_remove_const_macro(s) \
 }
 
-typedef struct _OBJECT_ATTRIBUTES64 {
-    ULONG Length;
-    ULONG64 RootDirectory;
-    ULONG64 ObjectName;
-    ULONG Attributes;
-    ULONG64 SecurityDescriptor;
-    ULONG64 SecurityQualityOfService;
+typedef struct _OBJECT_ATTRIBUTES64
+{
+  ULONG Length;
+  ULONG64 RootDirectory;
+  ULONG64 ObjectName;
+  ULONG Attributes;
+  ULONG64 SecurityDescriptor;
+  ULONG64 SecurityQualityOfService;
 } OBJECT_ATTRIBUTES64;
 typedef OBJECT_ATTRIBUTES64 *POBJECT_ATTRIBUTES64;
 typedef CONST OBJECT_ATTRIBUTES64 *PCOBJECT_ATTRIBUTES64;
 
-typedef struct _OBJECT_ATTRIBUTES32 {
-    ULONG Length;
-    ULONG RootDirectory;
-    ULONG ObjectName;
-    ULONG Attributes;
-    ULONG SecurityDescriptor;
-    ULONG SecurityQualityOfService;
+typedef struct _OBJECT_ATTRIBUTES32
+{
+  ULONG Length;
+  ULONG RootDirectory;
+  ULONG ObjectName;
+  ULONG Attributes;
+  ULONG SecurityDescriptor;
+  ULONG SecurityQualityOfService;
 } OBJECT_ATTRIBUTES32;
 typedef OBJECT_ATTRIBUTES32 *POBJECT_ATTRIBUTES32;
 typedef CONST OBJECT_ATTRIBUTES32 *PCOBJECT_ATTRIBUTES32;
 
-typedef struct _OBJECT_ATTRIBUTES {
-    ULONG Length;
-    HANDLE RootDirectory;
-    PUNICODE_STRING ObjectName;
-    ULONG Attributes;
-    PVOID SecurityDescriptor;        // Points to type SECURITY_DESCRIPTOR
-    PVOID SecurityQualityOfService;  // Points to type SECURITY_QUALITY_OF_SERVICE
+typedef struct _OBJECT_ATTRIBUTES
+{
+  ULONG Length;
+  HANDLE RootDirectory;
+  PUNICODE_STRING ObjectName;
+  ULONG Attributes;
+  PVOID SecurityDescriptor;        // Points to type SECURITY_DESCRIPTOR
+  PVOID SecurityQualityOfService;  // Points to type SECURITY_QUALITY_OF_SERVICE
 } OBJECT_ATTRIBUTES;
 typedef OBJECT_ATTRIBUTES *POBJECT_ATTRIBUTES;
 typedef CONST OBJECT_ATTRIBUTES *PCOBJECT_ATTRIBUTES;
 
-#define InitializeObjectAttributes(p,n,a,r,s) { \
-    (p)->Length = sizeof(OBJECT_ATTRIBUTES);    \
-    (p)->RootDirectory = (r);                   \
-    (p)->Attributes = (a);                      \
-    (p)->ObjectName = (n);                      \
-    (p)->SecurityDescriptor = (s);              \
-    (p)->SecurityQualityOfService = NULL;       \
+#define InitializeObjectAttributes(p,n,a,r,s) \
+{                                             \
+    (p)->Length = sizeof(OBJECT_ATTRIBUTES);  \
+    (p)->RootDirectory = (r);                 \
+    (p)->Attributes = (a);                    \
+    (p)->ObjectName = (n);                    \
+    (p)->SecurityDescriptor = (s);            \
+    (p)->SecurityQualityOfService = NULL;     \
 }
 
 //
@@ -218,58 +230,53 @@ typedef struct _IO_STATUS_BLOCK
 //
 typedef VOID
 (NTAPI *PIO_APC_ROUTINE)(
-    IN PVOID ApcContext,
-    IN PIO_STATUS_BLOCK IoStatusBlock,
-    IN ULONG Reserved);
+        IN PVOID ApcContext,
+        IN PIO_STATUS_BLOCK IoStatusBlock,
+        IN ULONG Reserved);
 
 typedef NTSTATUS NTAPI NtSystemDebugControl_t(
-    IN SYSDBG_COMMAND Command,
-    IN PVOID InputBuffer OPTIONAL,
-    IN ULONG InputBufferLength,
-    OUT PVOID OutputBuffer OPTIONAL,
-    IN ULONG OutputBufferLength,
-    OUT PULONG ReturnLength OPTIONAL);
+        IN SYSDBG_COMMAND Command,
+        IN PVOID InputBuffer OPTIONAL,
+        IN ULONG InputBufferLength,
+        OUT PVOID OutputBuffer OPTIONAL,
+        IN ULONG OutputBufferLength,
+        OUT PULONG ReturnLength OPTIONAL);
 
 typedef NTSTATUS NTAPI NtLoadDriver_t(
-    IN PUNICODE_STRING DriverServiceName
-);
+        IN PUNICODE_STRING DriverServiceName);
 
 typedef NTSTATUS NTAPI NtUnloadDriver_t(
-    IN PUNICODE_STRING DriverServiceName
-);
+        IN PUNICODE_STRING DriverServiceName);
 
 typedef NTSTATUS NTAPI RtlAdjustPrivilege_t(
-    IN ULONG Privilege,
-    IN BOOLEAN NewValue,
-    IN BOOLEAN ForThread,
-    OUT PBOOLEAN OldValue
-);
+        IN ULONG Privilege,
+        IN BOOLEAN NewValue,
+        IN BOOLEAN ForThread,
+        OUT PBOOLEAN OldValue);
 
 typedef NTSTATUS NTAPI NtCreateFile_t(
-    OUT PHANDLE FileHandle,
-    IN ACCESS_MASK DesiredAccess,
-    IN POBJECT_ATTRIBUTES ObjectAttributes,
-    OUT PIO_STATUS_BLOCK IoStatusBlock,
-    IN PLARGE_INTEGER AllocationSize OPTIONAL,
-    IN ULONG FileAttributes,
-    IN ULONG ShareAccess,
-    IN ULONG CreateDisposition,
-    IN ULONG CreateOptions,
-    IN PVOID EaBuffer OPTIONAL,
-    IN ULONG EaLength
-);
+        OUT PHANDLE FileHandle,
+        IN ACCESS_MASK DesiredAccess,
+        IN POBJECT_ATTRIBUTES ObjectAttributes,
+        OUT PIO_STATUS_BLOCK IoStatusBlock,
+        IN PLARGE_INTEGER AllocationSize OPTIONAL,
+        IN ULONG FileAttributes,
+        IN ULONG ShareAccess,
+        IN ULONG CreateDisposition,
+        IN ULONG CreateOptions,
+        IN PVOID EaBuffer OPTIONAL,
+        IN ULONG EaLength);
 
 typedef NTSTATUS NTAPI NtDeviceIoControlFile_t(
-    IN HANDLE DeviceHandle,
-    IN HANDLE Event OPTIONAL,
-    IN PIO_APC_ROUTINE UserApcRoutine OPTIONAL,
-    IN PVOID UserApcContext OPTIONAL,
-    OUT PIO_STATUS_BLOCK IoStatusBlock,
-    IN ULONG IoControlCode,
-    IN PVOID InputBuffer,
-    IN ULONG InputBufferSize,
-    OUT PVOID OutputBuffer,
-    IN ULONG OutputBufferSize
-);
+        IN HANDLE DeviceHandle,
+        IN HANDLE Event OPTIONAL,
+        IN PIO_APC_ROUTINE UserApcRoutine OPTIONAL,
+        IN PVOID UserApcContext OPTIONAL,
+        OUT PIO_STATUS_BLOCK IoStatusBlock,
+        IN ULONG IoControlCode,
+        IN PVOID InputBuffer,
+        IN ULONG InputBufferSize,
+        OUT PVOID OutputBuffer,
+        IN ULONG OutputBufferSize);
 
 #endif // define WIN32_UNDOC_H

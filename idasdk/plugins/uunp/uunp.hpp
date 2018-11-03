@@ -1,6 +1,6 @@
 
-extern ea_t bp_gpa;      // address of GetProcAddress()
-extern area_t curmod;   // current module area
+extern ea_t bp_gpa;     // address of GetProcAddress()
+extern range_t curmod;  // current module range
 
 
 // Resource extractor function

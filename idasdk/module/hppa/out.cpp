@@ -155,7 +155,7 @@ static char *append_conds(
         char *ptr,
         char *end)
 {
-  if ( !d && table == D11 && (c==1 || c==5) )
+  if ( !d && table == D11 && (c == 1 || c == 5) )
     return NULL;
   while ( table->text != NULL )
   {
@@ -233,7 +233,7 @@ static char *append_cc(char *ptr, const char *end, int cc, bool isload)
 }
 
 //--------------------------------------------------------------------------
-static char *ldst_short(uint32 code, char *ptr, const char *end)
+static char *ldst_short(const insn_t &insn, uint32 code, char *ptr, const char *end)
 {
   int cc  = (code>>10) & 3;
   int m   = (code & BIT26) ? 1 : 0;
@@ -250,10 +250,10 @@ static char *ldst_short(uint32 code, char *ptr, const char *end)
     comp = h3_comp(u, m);
   }
   bool isload;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     default:
-      INTERR(10125);
+      INTERR(10125);    //-V796 no break
     case HPPA_cldd:
     case HPPA_cldw:
     case HPPA_ldb:
@@ -291,7 +291,7 @@ static char *ldst_short(uint32 code, char *ptr, const char *end)
 }
 
 //--------------------------------------------------------------------------
-static const char * const fpp_comp[] =
+static const char *const fpp_comp[] =
 {
   "false?",   // 0
   "false",    // 1
@@ -327,7 +327,7 @@ static const char * const fpp_comp[] =
   "true",     // 31
 };
 
-static const char * const fpp_test[] =
+static const char *const fpp_test[] =
 {
   "",      // 0
   "acc",   // 1
@@ -363,7 +363,7 @@ static const char * const fpp_test[] =
   NULL,    // 31
 };
 
-static const char * const fpp_sngop[] =
+static const char *const fpp_sngop[] =
 {
   "",         // 0 or sgl
   ",dbl",     // 1
@@ -381,11 +381,11 @@ inline char *append_fmt(int fmt, char *ptr, const char *end)
 }
 
 //--------------------------------------------------------------------------
-char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
+char *build_insn_completer(const insn_t &insn, uint32 code, char *buf, size_t bufsize)
 {
   char *ptr = buf;
   char *const end = buf + bufsize;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case HPPA_ldo:      // format 1 (special case)
     case HPPA_ldi:      // pseudo-op
@@ -428,7 +428,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
         case 0x13:      // ldw (mod)
         case 0x1B:      // stw (mod)
           {
-            sval_t off = cmd.itype == HPPA_ldw ? cmd.Op1.addr : cmd.Op2.addr;
+            sval_t off = insn.itype == HPPA_ldw ? insn.Op1.addr : insn.Op2.addr;
             APPEND(ptr, end, off < 0 ? ",mb" : ",ma");
           }
           break;
@@ -453,10 +453,10 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
         case 0x03:      // formats 4 & 5
         case 0x09:      // formats 39 & 41
         case 0x0B:      // formats 39 & 41
-          ptr = ldst_short(code, ptr, end);
+          ptr = ldst_short(insn, code, ptr, end);
           break;
         default:
-          interr("format1");
+          interr(insn, "format1");
       }
       break;
 
@@ -495,7 +495,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
         int f  = (code & BIT19) ? 1 : 0; //aux_cndf
         int d  = (code & BIT26) ? 1 : 0; //aux_cndd
         const cond_text_t *table = NULL;
-        switch ( cmd.itype )
+        switch ( insn.itype )
         {
           case HPPA_cmpclr:
           case HPPA_ds:
@@ -569,7 +569,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
               return NULL;   // disable carry conditions
             break;
           default:
-            interr("format8");
+            interr(insn, "format8");
         }
         ptr = append_conds(table, c, f, d, ptr, end);
       }
@@ -584,7 +584,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
           APPEND(ptr, end, ",tc");
         int c  = (code>>13) & 7;
         int f  = (code & BIT19) ? 1 : 0;
-        ptr = append_conds(cmd.itype == HPPA_subi ? D3 : D6, c, f, 0, ptr, end);
+        ptr = append_conds(insn.itype == HPPA_subi ? D3 : D6, c, f, 0, ptr, end);
       }
       break;
 
@@ -630,7 +630,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
 
     case HPPA_shrpd:    // formats 11 & 14
     case HPPA_shrpw:
-      ptr = append_conds(D13, (code>>13) & 7, 0, cmd.itype == HPPA_shrpd, ptr, end);
+      ptr = append_conds(D13, (code>>13) & 7, 0, insn.itype == HPPA_shrpd, ptr, end);
       break;
 
     case HPPA_extrd:    // formats 12 & 15
@@ -639,7 +639,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
     case HPPA_shrw:     // pseudo-op
       if ( (code & BIT21) == 0 )
         APPEND(ptr, end, ",u");
-      ptr = append_conds(D13, (code>>13) & 7, 0, cmd.itype == HPPA_extrd, ptr, end);
+      ptr = append_conds(D13, (code>>13) & 7, 0, insn.itype == HPPA_extrd, ptr, end);
       break;
 
     case HPPA_depd:     // formats 13 & 16
@@ -652,7 +652,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
         int nz = (code & BIT21) ? 1 : 0;
         int c  = (code>>13) & 7;
         int d = 0;
-        switch ( cmd.itype )
+        switch ( insn.itype )
         {
           case HPPA_depd:
           case HPPA_depdi:
@@ -661,9 +661,9 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
           case HPPA_depwi:
             break;
           default:
-            interr("format13");
+            interr(insn, "format13");
         }
-        if ( !nz && cmd.itype < HPPA_call )
+        if ( !nz && insn.itype < HPPA_call )
           APPEND(ptr, end, ",z");
         ptr = append_conds(D13, c, 0, d, ptr, end);
       }
@@ -676,7 +676,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
     case HPPA_movb:
     case HPPA_movib:
       {
-        int c  = (code>>13) & 7;
+        int c = (code>>13) & 7;
         int f = 0;
         const cond_text_t *table = psw_w() ? D8 : D6;
         switch ( opcode(code) )
@@ -692,6 +692,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
           case 0x23:            // cmpib
           case 0x2F:            // cmpb
             table = D3;
+            // fallthrough
           case 0x2A:            // addb
           case 0x2B:            // addib
             ++f;
@@ -704,7 +705,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
             table = D5;
             break;
           default:
-            interr("format17");
+            interr(insn, "format17");
         }
         ptr = append_conds(table, c, f, 0, ptr, end);
         if ( ptr == NULL )
@@ -726,7 +727,7 @@ char *build_insn_completer(uint32 code, char *buf, size_t bufsize)
       goto NULLIFY;
 
     case HPPA_b:        // format 20
-      if ( cmd.Op2.type != o_void )
+      if ( insn.Op2.type != o_void )
       {
         int subopcode = (code>>13) & 7;
         if ( subopcode >= 6 )
@@ -758,7 +759,7 @@ BVE:
         int subopcode = (code>>13) & 7;
         if ( subopcode != 6 && subopcode != 7 )
           return NULL;
-        if ( subopcode == 7 && cmd.itype == HPPA_bve )
+        if ( subopcode == 7 && insn.itype == HPPA_bve )
           APPEND(ptr, end, ",l");
         if ( (code & BIT31) != 0 )
           APPEND(ptr, end, (subopcode == 7) ? ",push" : ",pop");
@@ -891,7 +892,7 @@ BVE:
     case HPPA_pmdis:    // format 55
 NULLIFY2:
       {
-        int n  = (code & BIT26) ? 1 : 0;
+        int n = (code & BIT26) ? 1 : 0;
         if ( n != 0 )
           APPEND(ptr, end, ",n");
       }
@@ -904,7 +905,7 @@ NULLIFY2:
       {
         int uid = (code>> 6) & 7;
         ptr += qsnprintf(ptr, end-ptr, ",%d", uid);
-        ptr = ldst_short(code, ptr, end);
+        ptr = ldst_short(insn, code, ptr, end);
       }
       break;
 
@@ -1044,7 +1045,7 @@ NULLIFY2:
       break;
 
     default:
-      interr("build_insn_completer");
+      interr(insn, "build_insn_completer");
   }
   if ( ptr == NULL )
     return NULL;
@@ -1053,42 +1054,60 @@ NULLIFY2:
 }
 
 //----------------------------------------------------------------------
-static void out_bad_address(ea_t addr)
+class out_hppa_t : public outctx_t
+{
+  out_hppa_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void out_bad_address(ea_t addr);
+  void outreg(int r);
+  void out_ip_rel(int displ);
+  void out_memref(ea_t ea);
+  void resolve_possible_memref(const op_t &x);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+};
+CASSERT(sizeof(out_hppa_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_hppa_t)
+
+//----------------------------------------------------------------------
+void out_hppa_t::out_bad_address(ea_t addr)
 {
   out_tagon(COLOR_ERROR);
-  OutLong(addr, 16);
+  out_btoa(addr, 16);
   out_tagoff(COLOR_ERROR);
-  QueueSet(Q_noName, cmd.ea);
+  remember_problem(PR_NONAME, insn.ea);
 }
 
 //----------------------------------------------------------------------
-static void outreg(int r)
+void out_hppa_t::outreg(int r)
 {
   bool right = false;
   out_tagon(COLOR_REG);
   if ( r >= F0+32 && r < F0+64  // fpp register half
-    && cmd.itype != HPPA_fmpyadd
-    && cmd.itype != HPPA_fmpysub )
+    && insn.itype != HPPA_fmpyadd
+    && insn.itype != HPPA_fmpysub )
   {
     r -= 32;
     right = true;
   }
-  OutLine(ph.regNames[r]);
+  out_line(ph.reg_names[r]);
   if ( right )
-    OutChar('r');
+    out_char('r');
   out_tagoff(COLOR_REG);
 }
 
 //----------------------------------------------------------------------
-inline void out_ip_rel(int displ)
+void out_hppa_t::out_ip_rel(int displ)
 {
-  out_snprintf(COLSTR("%s+", SCOLOR_SYMBOL) COLSTR("%d", SCOLOR_NUMBER),
+  out_printf(COLSTR("%s+", SCOLOR_SYMBOL) COLSTR("%d", SCOLOR_NUMBER),
                ash.a_curip, displ);
 }
 
 //----------------------------------------------------------------------
-//lint -e{1764} could be declared const ref
-bool idaapi outop(op_t &x)
+bool out_hppa_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
@@ -1096,7 +1115,7 @@ bool idaapi outop(op_t &x)
       return 0;
 
     case o_imm:
-      OutValue(x, OOF_SIGNED|OOFS_IFSIGN|OOFW_IMM);
+      out_value(x, OOF_SIGNED|OOFS_IFSIGN|OOFW_IMM);
       break;
 
     case o_reg:
@@ -1106,7 +1125,7 @@ bool idaapi outop(op_t &x)
     case o_near:
       {
         ea_t ea = calc_mem(x.addr);
-        if ( ea == cmd.ea+4 )
+        if ( ea == insn.ea+4 )
           out_ip_rel(4);
         else if ( !out_name_expr(x, ea, ea) )
           out_bad_address(x.addr);
@@ -1114,12 +1133,12 @@ bool idaapi outop(op_t &x)
       break;
 
     case o_displ:
-      OutValue(x,OOF_ADDR|OOFS_IFSIGN|OOF_SIGNED|OOFW_32);
+      out_value(x, OOF_ADDR|OOFS_IFSIGN|OOF_SIGNED|OOFW_32);
       // no break
     case o_based:
 OUT_PHRASE:
       out_symbol('(');
-      if ( cmd.auxpref & aux_space )
+      if ( insn.auxpref & aux_space )
       {
         outreg(x.sid);
         out_symbol(',');
@@ -1133,22 +1152,22 @@ OUT_PHRASE:
       goto OUT_PHRASE;
 
     default:
-      interr("out");
+      interr(insn, "out");
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-static void out_memref(ea_t ea)
+void out_hppa_t::out_memref(ea_t ea)
 {
-  OutChar(' ');
+  out_char(' ');
   out_line(ash.cmnt, COLOR_AUTOCMT);
-  OutChar(' ');
-  if ( has_any_name(get_flags_novalue(ea)) )
+  out_char(' ');
+  if ( has_any_name(get_flags(ea)) )
   {
     qstring nbuf = get_colored_name(ea);
-    OutLine(nbuf.c_str());
+    out_line(nbuf.c_str());
   }
   else
   {
@@ -1157,58 +1176,60 @@ static void out_memref(ea_t ea)
     if ( int32(ea) == ea )
       ea = uint32(ea);
 #endif
-    out_snprintf("%0*a", 8, ea);
+    out_printf("%0*a", 8, ea);
   }
 }
 
 //----------------------------------------------------------------------
-static void resolve_possible_memref(const op_t &x)
+void out_hppa_t::resolve_possible_memref(const op_t &x)
 {
-  ea_t ea = calc_possible_memref(x);
+  ea_t ea = calc_possible_memref(insn, x);
   if ( ea != BADADDR )
     out_memref(ea);
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_hppa_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  // output instruction mnemonics
   char postfix[80];
-  OutMnem(16, build_insn_completer(get_long(cmd.ea), postfix, sizeof(postfix)));
+  uint32 code = get_dword(insn.ea);
+  char *pfx = build_insn_completer(insn, code, postfix, sizeof(postfix));
+  out_mnem(16, pfx);
+}
+
+//----------------------------------------------------------------------
+void out_hppa_t::out_insn(void)
+{
+  // output instruction mnemonics
+  out_mnemonic();
 
   int i;
   bool comma = false;
   for ( i=0; i < UA_MAXOP; i++ )
   {
-    if ( cmd.Operands[i].type == o_void )
+    if ( insn.ops[i].type == o_void )
       continue;
     if ( comma )
     {
       out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
     }
     comma = out_one_operand(i);
   }
 
-  for ( i=0; i < UA_MAXOP; i++ )
-    if ( isVoid(cmd.ea, uFlag, i) )
-      OutImmChar(cmd.Operands[i]);
+  out_immchar_cmts();
 
-  if ( cmd.Op1.type == o_displ )
-    resolve_possible_memref(cmd.Op1);
-  if ( cmd.Op2.type == o_displ )
-    resolve_possible_memref(cmd.Op2);
+  if ( insn.Op1.type == o_displ )
+    resolve_possible_memref(insn.Op1);
+  if ( insn.Op2.type == o_displ )
+    resolve_possible_memref(insn.Op2);
 
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(818, Srange) could be made const
+void idaapi hppa_segstart(outctx_t &ctx, segment_t *Srange)
 {
   const char *const predefined[] =
   {
@@ -1218,67 +1239,64 @@ void idaapi segstart(ea_t ea)
     ".comm",
   };
 
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) )
+  if ( is_spec_segm(Srange->type) )
     return;
 
-  char sname[MAXNAMELEN];
-  char sclas[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sname;
+  qstring sclas;
+  get_segm_name(&sname, Srange);
+  get_segm_class(&sclas, Srange);
 
-  int i;
-  for ( i=0; i < qnumber(predefined); i++ )
-    if ( strcmp(sname, predefined[i]) == 0 )
-      break;
-  if ( i != qnumber(predefined) )
-    printf_line(inf.indent, COLSTR("%s", SCOLOR_ASMDIR), sname);
-  else
-    printf_line(inf.indent,
-                COLSTR(".section %s", SCOLOR_ASMDIR) "" COLSTR("%s %s", SCOLOR_AUTOCMT),
-                sname,
-                ash.cmnt,
-                sclas);
+  if ( !print_predefined_segname(ctx, &sname, predefined, qnumber(predefined)) )
+    ctx.gen_printf(inf.indent,
+                   COLSTR(".section %s", SCOLOR_ASMDIR) "" COLSTR("%s %s", SCOLOR_AUTOCMT),
+                   sname.c_str(),
+                   ash.cmnt,
+                   sclas.c_str());
 }
 
 //--------------------------------------------------------------------------
-void idaapi assumes(ea_t ea)                // function to produce assume directives
+//lint -esym(1764, ctx) could be made const
+void idaapi hppa_assumes(outctx_t &ctx)                // function to produce assume directives
 {
-  if ( !inf.s_assume || got == BADADDR )
+  ea_t ea = ctx.insn_ea;
+  if ( (inf.outflags & OFLG_GEN_ASSUME) == 0 || got == BADADDR )
     return;
-  segreg_area_t sra;
-  if ( !get_srarea2(&sra, ea, DPSEG) || sra.startEA != ea )
+  sreg_range_t sra;
+  if ( !get_sreg_range(&sra, ea, DPSEG) || sra.start_ea != ea )
     return;
 
   if ( sra.val == BADSEL )
-    printf_line(inf.indent, COLSTR("%s %s is unknown", SCOLOR_ASMDIR),
-                ash.cmnt, ph.regNames[DPSEG]);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s %s is unknown", SCOLOR_ASMDIR),
+                   ash.cmnt, ph.reg_names[DPSEG]);
   else
-    printf_line(inf.indent, COLSTR("%s %s = %0*a", SCOLOR_ASMDIR),
-                ash.cmnt, ph.regNames[DPSEG], 8, got + sra.val);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s %s = %0*a", SCOLOR_ASMDIR),
+                   ash.cmnt, ph.reg_names[DPSEG], 8, got + sra.val);
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t)
+void idaapi hppa_segend(outctx_t &, segment_t *)
 {
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi hppa_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL);
+  ctx.gen_header(GH_PRINT_ALL);
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi hppa_footer(outctx_t &ctx)
 {
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
   const char *end = ash.end;
   if ( end == NULL )
-    printf_line(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
+    ctx.gen_printf(inf.indent, COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
   else
-    printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR)
-                  " "
-                  COLSTR("%s %s",SCOLOR_AUTOCMT), ash.end, ash.cmnt, name);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                   ash.end, ash.cmnt, name);
 }

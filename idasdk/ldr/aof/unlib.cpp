@@ -32,7 +32,8 @@ static char modname[MAXSTR] = "";
 static int mf = 0;
 
 //-----------------------------------------------------------------------
-local void fatal(const char *format,...) {
+local void fatal(const char *format,...)
+{
   if ( infile[0] != '\0' && modname[0] != '\0' )
     fprintf(stderr,"Fatal [%s] (%s): ",infile,modname);
   va_list va;
@@ -47,7 +48,8 @@ local void fatal(const char *format,...) {
   qexit(1);
 }
 
-void warning(const char *format,...) {
+void warning(const char *format,...)
+{
   fprintf(stderr,"Warning [%s] (%s): ",infile,modname);
   va_list va;
   va_start(va,format);
@@ -71,7 +73,8 @@ local void *read_chunk(FILE *fp, chunk_entry_t *ce, int32 i)
 {
   size_t idx = size_t(i);
   void *chunk = qnewarray(char,size_t(ce[idx].size));
-  if ( chunk == NULL ) nomem("chunk size %d",size_t(ce[idx].size));
+  if ( chunk == NULL )
+    nomem("chunk size %d",size_t(ce[idx].size));
   qfseek(fp,ce[idx].file_offset,SEEK_SET);
   if ( qfread(fp,chunk,size_t(ce[idx].size)) != ce[idx].size )
     fatal("Chunk read error: %s",strerror(errno));
@@ -109,59 +112,81 @@ int main(int argc,char *argv[])
     fatal("Usage: unlib libfile");
   qstrcpy(infile, argv[1], sizeof(infile));
   FILE *fp = qfopen(infile,"rb");
-  if ( fp == NULL ) fatal("Can't open library %s",infile);
+  if ( fp == NULL )
+    fatal("Can't open library %s",infile);
   chunk_header_t hd;
   if ( qfread(fp, &hd, sizeof(hd)) != sizeof(hd)
-        || (hd.ChunkFileId != AOF_MAGIC && hd.ChunkFileId != AOF_MAGIC_B) )
+    || (hd.ChunkFileId != AOF_MAGIC && hd.ChunkFileId != AOF_MAGIC_B) )
+  {
     fatal("Bad library format");
-  if ( hd.ChunkFileId == AOF_MAGIC_B ) {            // BIG ENDIAN
+  }
+  if ( hd.ChunkFileId == AOF_MAGIC_B )             // BIG ENDIAN
+  {
     mf = 1;
     hd.max_chunks = swap(hd.max_chunks);
     hd.num_chunks = swap(hd.num_chunks);
   }
 
   chunk_entry_t *ce = qnewarray(chunk_entry_t,size_t(hd.max_chunks));
-  if ( ce == NULL ) nomem("chunk entries (%d)",size_t(hd.max_chunks));
+  if ( ce == NULL )
+    nomem("chunk entries (%d)",size_t(hd.max_chunks));
   qfread(fp, ce, sizeof(chunk_entry_t)*size_t(hd.max_chunks));
-  if ( mf ) for ( i=0; i < hd.max_chunks; i++ ) swap_chunk_entry(ce+i);
+  if ( mf )
+    for ( i=0; i < hd.max_chunks; i++ )
+      swap_chunk_entry(ce+i);
 
   int vrsn = -1;
   int diry = -1;
   int data = 0;
-  for ( i=0; i < hd.max_chunks; i++ ) {
-    if ( ce[i].file_offset == 0 ) continue;
-    if ( strncmp(ce[i].chunkId,LIB_DIRY,sizeof(ce[i].chunkId)) == 0 ) diry = i;
-    if ( strncmp(ce[i].chunkId,LIB_VRSN,sizeof(ce[i].chunkId)) == 0 ) vrsn = i;
-    if ( strncmp(ce[i].chunkId,LIB_DATA,sizeof(ce[i].chunkId)) == 0 ) data++;
+  for ( i=0; i < hd.max_chunks; i++ )
+  {
+    if ( ce[i].file_offset == 0 )
+      continue;
+    if ( strncmp(ce[i].chunkId,LIB_DIRY,sizeof(ce[i].chunkId)) == 0 )
+      diry = i;
+    if ( strncmp(ce[i].chunkId,LIB_VRSN,sizeof(ce[i].chunkId)) == 0 )
+      vrsn = i;
+    if ( strncmp(ce[i].chunkId,LIB_DATA,sizeof(ce[i].chunkId)) == 0 )
+      data++;
   }
-  if ( diry == -1 ) fatal("Can't find library directory!");
-  if ( data == 0  ) fatal("No modules in the library!");
-  if ( vrsn == -1 ) fatal("Can't determine library version!");
+  if ( diry == -1 )
+    fatal("Can't find library directory!");
+  if ( data == 0 )
+    fatal("No modules in the library!");
+  if ( vrsn == -1 )
+    fatal("Can't determine library version!");
   uint32 *version = (uint32 *)read_chunk(fp,ce,vrsn);
-  if ( mf ) *version = swap(*version);
-  if ( *version != 1 ) fatal("Wrong library version (%ld)",*version);
+  if ( mf )
+    *version = swap(*version);
+  if ( *version != 1 )
+    fatal("Wrong library version (%ld)",*version);
   qfree(version);
 
   uint32 *dir = (uint32 *)read_chunk(fp,ce,diry);
   uint32 *end = dir + size_t(ce[diry].size/4);
   while ( dir < end )
   {
-    uint32 idx  = *dir++;
+    uint32 idx = *dir++;
     /* uint32 elen = */ *dir++;
     uint32 dlen = *dir++;
-    if ( mf ) {
+    if ( mf )
+    {
       idx = swap(idx);
       dlen = swap(dlen);
     }
-    if ( idx != 0 ) {
+    if ( idx != 0 )
+    {
       printf("%ld. %s\n",idx,dir);
       strncpy(modname,(char *)dir,sizeof(modname));
       modname[sizeof(modname)-1] = '\0';
       void *core = read_chunk(fp,ce,idx);
       outfp = qfopen(modname,"wb");
-      if ( outfp == NULL ) {
+      if ( outfp == NULL )
+      {
         warning("Can't open output file %s",modname);
-      } else {
+      }
+      else
+      {
         qfwrite(outfp,core,size_t(ce[size_t(idx)].size));
         qfclose(outfp);
       }

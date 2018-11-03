@@ -39,13 +39,14 @@
 // It only represents those registers that are explicitly specified
 // in instruction mnemonics.
 //
-const char *registerNames[] = {
-        "AR0", // Address register zero
-        "AR1", // Address register one.
-        //
-        // Special registers required by IDA kernel.
-        //
-        "VCS",
-        "VDS"
+const char *registerNames[] =
+{
+  "AR0", // Address register zero
+  "AR1", // Address register one.
+  //
+  // Special registers required by IDA kernel.
+  //
+  "VCS",
+  "VDS"
 };
 const int nregisterNames = sizeof(registerNames) / sizeof(*registerNames);

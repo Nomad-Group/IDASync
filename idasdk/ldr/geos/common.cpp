@@ -56,8 +56,10 @@ static char *geos2ibm(char *out, char *in, size_t insize)
   for ( int i=0; i < insize; i++ )
   {
     uchar c = *in++;
-    if ( !c ) break;
-    if ( c & 0x80 ) c = _GeosXlapp[c & 0x7F];
+    if ( !c )
+      break;
+    if ( c & 0x80 )
+      c = _GeosXlapp[c & 0x7F];
     *out++ = c;
   }
   *out = '\0';

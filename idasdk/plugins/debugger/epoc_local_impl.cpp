@@ -26,7 +26,7 @@ static bool init_plugin(void)
   if ( stricmp(buf, "epoc") != 0 )      // only EPOC files
     return false;
 
-  if ( ph.id != PLFM_ARM )              // only ARM
+  if ( ph.id != PLFM_ARM && ph.id != -1 ) // only ARM
     return false;
 
 //  is_dll = false;               // fixme: set it!

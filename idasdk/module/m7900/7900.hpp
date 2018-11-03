@@ -13,13 +13,13 @@
 
 #include "../idaidp.hpp"
 #include "ins.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 #define UAS_NOSPA        0x0001         // no space after comma
 #define UAS_SEGM         0x0002         // segments are named "segment XXX"
 
 
-// flags for cmd.auxpref
+// flags for insn.auxpref
 // operand prefix
 // 0x1 - .b
 // 0x2 - .w
@@ -30,21 +30,21 @@
 #define INSN_PREF_W 0x0002
 #define INSN_PREF_D 0x0004
 
-#define RAZOPER cmd.auxpref
+#define RAZOPER insn.auxpref
 
 //Detect status value
-#define getFlag_M get_segreg(cmd.ea, rfM)
-#define getFlag_X get_segreg(cmd.ea, rfX)
+#define getFlag_M get_sreg(insn.ea, rfM)
+#define getFlag_X get_sreg(insn.ea, rfX)
 
-#define getDT get_segreg(cmd.ea, rDT)
-#define getPG get_segreg(cmd.ea, rPG)
+#define getDT get_sreg(insn.ea, rDT)
+#define getPG get_sreg(insn.ea, rPG)
 
-#define getDPReg  get_segreg(cmd.ea, rDPReg)
+#define getDPReg  get_sreg(insn.ea, rDPReg)
 
-#define getDPR0  get_segreg(cmd.ea, rDPR0)
-#define getDPR1  get_segreg(cmd.ea, rDPR1)
-#define getDPR2  get_segreg(cmd.ea, rDPR2)
-#define getDPR3  get_segreg(cmd.ea, rDPR3)
+#define getDPR0  get_sreg(insn.ea, rDPR0)
+#define getDPR1  get_sreg(insn.ea, rDPR1)
+#define getDPR2  get_sreg(insn.ea, rDPR2)
+#define getDPR3  get_sreg(insn.ea, rDPR3)
 
 
 //----------------------------------------------------------------------
@@ -146,7 +146,7 @@ enum mitsubishi_registers { rA, rB, rE, rX, rY, rPC,
 
 
 
-enum eMode{ IMM_8=0, IMM_16, IMM_32, DIR_32, DIR_16, DIR_8 };
+enum eMode { IMM_8=0, IMM_16, IMM_32, DIR_32, DIR_16, DIR_8 };
 
 
 // TDIR_DIR       - Direct addressing mode DIR
@@ -158,14 +158,14 @@ enum eMode{ IMM_8=0, IMM_16, IMM_32, DIR_32, DIR_16, DIR_8 };
 // TDIR_L_INDIRECT_DIR   - Direct indirect long addressing mode L(DIR)
 // TDIR_L_INDIRECT_DIR_Y - Direct indirect long indexed Y addressing mode L(DIR),Y
 
-enum eTypeDIR{ TDIR_DIR=0, TDIR_DIR_X, TDIR_DIR_Y, TDIR_INDIRECT_DIR,
-               TDIR_INDIRECT_DIR_X, TDIR_INDIRECT_DIR_Y, TDIR_L_INDIRECT_DIR, TDIR_L_INDIRECT_DIR_Y };
+enum eTypeDIR { TDIR_DIR=0, TDIR_DIR_X, TDIR_DIR_Y, TDIR_INDIRECT_DIR,
+                TDIR_INDIRECT_DIR_X, TDIR_INDIRECT_DIR_Y, TDIR_L_INDIRECT_DIR, TDIR_L_INDIRECT_DIR_Y };
 
 
 // TSP_SP         - Stack pointer relative addressing mode(SR)
 // TSP_INDEX_SP_Y - Stack pointer relative indexed Y addressing mode((SR),Y)
 
-enum eTypeSP{TSP_SP=0, TSP_INDEX_SP_Y };
+enum eTypeSP { TSP_SP=0, TSP_INDEX_SP_Y };
 
 
 // TAB_ABS    - Absolute addressing mode(ABS)
@@ -177,27 +177,22 @@ enum eTypeSP{TSP_SP=0, TSP_INDEX_SP_Y };
 // TAB_L_INDIRECTED_ABS - Absolute indirect long addressing mode(L(ABS))
 // TAB_INDIRECTED_ABS_X - Absolute indexed X indirect addressing mode((ABS,X))
 
-enum eTypeAB{ TAB_ABS=0, TAB_ABS_X, TAB_ABS_Y, TAB_ABL, TAB_ABL_X,
-              TAB_INDIRECTED_ABS, TAB_L_INDIRECTED_ABS, TAB_INDIRECTED_ABS_X };
+enum eTypeAB { TAB_ABS=0, TAB_ABS_X, TAB_ABS_Y, TAB_ABL, TAB_ABL_X,
+               TAB_INDIRECTED_ABS, TAB_L_INDIRECTED_ABS, TAB_INDIRECTED_ABS_X };
 
 
 //------------------------------------------------------------------------
-extern char device[];
-extern char deviceparams[];
+extern qstring device;
 
 struct ioport_bit_t;
-bool mitsubishi_find_ioport_bit(int port, int bit);
 //------------------------------------------------------------------------
-void    idaapi header(void);
-void    idaapi footer(void);
+void    idaapi m7900_header(outctx_t &ctx);
+void    idaapi m7900_footer(outctx_t &ctx);
 
-void    idaapi gen_segm_header(ea_t ea);
+void    idaapi m7900_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi ana(void);
-int     idaapi emu(void);
-void    idaapi out(void);
-bool    idaapi outop(op_t &op);
-
+int     idaapi ana(insn_t *_insn);
+int     idaapi emu(const insn_t &insn);
 
 inline void TRACE1(const char *szStr)
 {
@@ -225,7 +220,7 @@ inline void TRACE(uint32 /*Data*/)
 inline int GETBIT(uval_t Data, int bit)
 {
  uint32 TempByte = (uint32)Data;
- return (((TempByte>>bit)&0x01));
+ return (TempByte>>bit)&0x01;
 }
 
 #endif

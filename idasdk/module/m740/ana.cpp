@@ -204,9 +204,10 @@ static const struct opcode opcodes[] =
   { m740_wit,        0xC2,        A_IMPL          }
 };
 
-struct opcode_flag {
-    uint16 insn;
-    uchar  flags;
+struct opcode_flag
+{
+  uint16 insn;
+  uchar  flags;
 #define MEM_R    OP_ADDR_R    // read access
 #define MEM_W    OP_ADDR_W    // write access
 };
@@ -251,7 +252,7 @@ inline static void set_op_reg(op_t &op, uint16 reg)
 {
   op.type = o_reg;
   op.reg = reg;
-  op.dtyp = dt_word; // XXX not sure
+  op.dtype = dt_word; // XXX not sure
 }
 
 // a shortcut to make our live easier
@@ -262,16 +263,16 @@ inline static void set_op_addr(op_t &op, ea_t addr)
 {
   op.type = o_near;
   op.addr = addr;
-  op.dtyp = dt_code;
+  op.dtype = dt_code;
 }
 
 // fill operand as a displacement between a memory address and a register contents
-inline static void set_op_displ(int addr, uint16 reg, char d_typ = dt_byte)
+inline static void set_op_displ(insn_t &insn, int addr, uint16 reg, char d_typ = dt_byte)
 {
-  cmd.Op1.type = o_displ;
-  cmd.Op1.addr = addr;
-  cmd.Op1.reg = reg;
-  cmd.Op1.dtyp = d_typ;
+  insn.Op1.type = o_displ;
+  insn.Op1.addr = addr;
+  insn.Op1.reg = reg;
+  insn.Op1.dtype = d_typ;
 }
 
 // fill operand as a data address
@@ -279,7 +280,7 @@ inline static void set_op_mem(op_t &op, int addr, const uchar flags = 0, char d_
 {
   op.type = o_mem;
   op.addr = addr;
-  op.dtyp = d_typ;
+  op.dtype = d_typ;
   op.specflag1 = flags;
 }
 
@@ -288,60 +289,60 @@ inline static void set_op_imm(op_t &op, int imm)
 {
   op.type = o_imm;
   op.value = imm;
-  op.dtyp = dt_byte;
+  op.dtype = dt_byte;
 }
 
-// fill the cmd structure according to the addressing mode of the
+// fill the insn structure according to the addressing mode of the
 // current analyzed instruction
-static void fill_cmd(m740_addr_mode_t addr, const uchar flags = 0)
+static void fill_insn(insn_t &insn, m740_addr_mode_t addr, const uchar flags = 0)
 {
   switch ( addr )
   {
     case A_IMM:            // immediate
-      set_op_imm(cmd.Op1, ua_next_byte());
+      set_op_imm(insn.Op1, insn.get_next_byte());
       break;
 
     case A_ACC:            // accumulator
-      set_op_acc(cmd.Op1);
+      set_op_acc(insn.Op1);
       break;
 
     case A_ZP:            // zero page
-      if ( cmd.itype == m740_ldm )  // special case
+      if ( insn.itype == m740_ldm )  // special case
       {
-        set_op_imm(cmd.Op1, ua_next_byte());
-        set_op_mem(cmd.Op2, ua_next_byte(), flags);
+        set_op_imm(insn.Op1, insn.get_next_byte());
+        set_op_mem(insn.Op2, insn.get_next_byte(), flags);
       }
       else
       {
-        set_op_mem(cmd.Op1, ua_next_byte(), flags);
+        set_op_mem(insn.Op1, insn.get_next_byte(), flags);
       }
       break;
 
     case A_ZPX:            // zero page X
-      set_op_displ(ua_next_byte(), rX);
-      cmd.auxpref |= INSN_DISPL_ZPX;
+      set_op_displ(insn, insn.get_next_byte(), rX);
+      insn.auxpref |= INSN_DISPL_ZPX;
       break;
 
     case A_ZPY:            // zero page Y
-      set_op_displ(ua_next_byte(), rY);
-      cmd.auxpref |= INSN_DISPL_ZPY;
+      set_op_displ(insn, insn.get_next_byte(), rY);
+      insn.auxpref |= INSN_DISPL_ZPY;
       break;
 
     case A_ABS:            // absolute
-      if ( cmd.itype == m740_jmp || cmd.itype == m740_jsr )
-        set_op_addr(cmd.Op1, ua_next_word());
+      if ( insn.itype == m740_jmp || insn.itype == m740_jsr )
+        set_op_addr(insn.Op1, insn.get_next_word());
       else
-        set_op_mem(cmd.Op1, ua_next_word(), flags);
+        set_op_mem(insn.Op1, insn.get_next_word(), flags);
       break;
 
     case A_ABSX:        // absolute X
-      set_op_displ(ua_next_word(), rX);
-      cmd.auxpref |= INSN_DISPL_ABSX;
+      set_op_displ(insn, insn.get_next_word(), rX);
+      insn.auxpref |= INSN_DISPL_ABSX;
       break;
 
     case A_ABSY:        // absolute Y
-      set_op_displ(ua_next_word(), rY);
-      cmd.auxpref |= INSN_DISPL_ABSY;
+      set_op_displ(insn, insn.get_next_word(), rY);
+      insn.auxpref |= INSN_DISPL_ABSY;
       break;
 
     case A_IMPL:        // implied
@@ -349,50 +350,50 @@ static void fill_cmd(m740_addr_mode_t addr, const uchar flags = 0)
       break;
 
     case A_REL:            // relative
-      set_op_addr(cmd.Op1, (signed char) ua_next_byte() + cmd.ea + 2);
+      set_op_addr(insn.Op1, (signed char) insn.get_next_byte() + insn.ea + 2);
       break;
 
     case A_INDX:        // indirect X
-      set_op_displ(ua_next_byte(), rX, dt_word);
-      cmd.auxpref |= INSN_DISPL_INDX;
+      set_op_displ(insn, insn.get_next_byte(), rX, dt_word);
+      insn.auxpref |= INSN_DISPL_INDX;
       break;
 
     case A_INDY:        // indirect Y
-      set_op_displ(ua_next_byte(), rY, dt_word);
-      cmd.auxpref |= INSN_DISPL_INDY;
+      set_op_displ(insn, insn.get_next_byte(), rY, dt_word);
+      insn.auxpref |= INSN_DISPL_INDY;
       break;
 
     case A_INDABS:        // indirect absolute
-      set_op_mem(cmd.Op1, ua_next_word(), flags, dt_word);
-      cmd.Op1.specflag1 |= OP_ADDR_IND;
+      set_op_mem(insn.Op1, insn.get_next_word(), flags, dt_word);
+      insn.Op1.specflag1 |= OP_ADDR_IND;
       break;
 
     case A_ZPIND:        // zero page indirect
-      set_op_mem(cmd.Op1, ua_next_byte(), 0, dt_word);
-      cmd.Op1.specflag1 |= OP_ADDR_IND;
+      set_op_mem(insn.Op1, insn.get_next_byte(), 0, dt_word);
+      insn.Op1.specflag1 |= OP_ADDR_IND;
       break;
 
     case A_SP:            // special page
-      set_op_addr(cmd.Op1, ua_next_byte() | 0xFF00);
-      cmd.Op1.specflag1 |= OP_ADDR_SP;
+      set_op_addr(insn.Op1, insn.get_next_byte() | 0xFF00);
+      insn.Op1.specflag1 |= OP_ADDR_SP;
       break;
 
     case A_ZPB:            // zero page bit
-      set_op_mem(cmd.Op2, ua_next_byte(), flags, dt_word);
+      set_op_mem(insn.Op2, insn.get_next_byte(), flags, dt_word);
       break;
 
     case A_ACCB:        // accumulator bit
-      set_op_acc(cmd.Op2);
+      set_op_acc(insn.Op2);
       break;
 
     case A_ACCBREL:        // accumulator bit relative
-      set_op_acc(cmd.Op2);
-      set_op_addr(cmd.Op3, (signed char) ua_next_byte() + cmd.ea + 2);
+      set_op_acc(insn.Op2);
+      set_op_addr(insn.Op3, (signed char) insn.get_next_byte() + insn.ea + 2);
       break;
 
     case A_ZPBREL:        // zero page bit relative
-      set_op_mem(cmd.Op2, ua_next_byte(), flags);
-      set_op_addr(cmd.Op3, (signed char) ua_next_byte() + cmd.ea + 3);
+      set_op_mem(insn.Op2, insn.get_next_byte(), flags);
+      set_op_addr(insn.Op3, (signed char) insn.get_next_byte() + insn.ea + 3);
       break;
 
     default:
@@ -425,7 +426,7 @@ static uchar get_opcode_flags(const uint16 insn)
 
 // detect special instructions, whose we can't detect using the table and the
 // get_opcode() routine
-static bool ana_special(int byte)
+static bool ana_special(insn_t &insn, int byte)
 {
   bool special = false;
 
@@ -447,17 +448,17 @@ static bool ana_special(int byte)
     { m740_seb, 0x0F,    A_ZPB     }
   };
 
-  for ( int i = 0; i < qnumber(specials); i++)
+  for ( int i = 0; i < qnumber(specials); i++ )
   {
     int t = (uchar) byte - specials[i].val;
     if ( (t % 0x20) != 0 )
         continue;
 
-    cmd.itype = specials[i].insn;
+    insn.itype = specials[i].insn;
 
-    set_op_imm(cmd.Op1, t / 0x20);
-    cmd.Op1.specflag1 |= OP_IMM_BIT;
-    fill_cmd(specials[i].addr, get_opcode_flags(specials[i].insn));
+    set_op_imm(insn.Op1, t / 0x20);
+    insn.Op1.specflag1 |= OP_IMM_BIT;
+    fill_insn(insn, specials[i].addr, get_opcode_flags(specials[i].insn));
     special = true;
     break;
   }
@@ -466,13 +467,15 @@ static bool ana_special(int byte)
 }
 
 // analyze an instruction
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
+  insn_t &insn = *_insn;
+
   bool special;
   int byte;
 
-  byte = ua_next_byte();
-  special = ana_special(byte);
+  byte = insn.get_next_byte();
+  special = ana_special(insn, byte);
 
   if ( !special )
   {
@@ -480,9 +483,9 @@ int idaapi ana(void)
     if ( op == NULL )        // unmatched insn
         return 0;
 
-    cmd.itype = op->insn;
-    fill_cmd(op->addr, get_opcode_flags(op->insn));
+    insn.itype = op->insn;
+    fill_insn(insn, op->addr, get_opcode_flags(op->insn));
   }
 
-  return cmd.size;
+  return insn.size;
 }

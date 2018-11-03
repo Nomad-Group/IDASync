@@ -40,9 +40,10 @@ static void idaapi term(void)
 }
 
 //--------------------------------------------------------------------------
-static void idaapi run(int)
+static bool idaapi run(size_t)
 {
   info("This plugin is fully automatic");
+  return true;
 }
 
 //--------------------------------------------------------------------------

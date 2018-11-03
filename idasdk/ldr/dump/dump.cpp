@@ -39,17 +39,25 @@ inline uint32 oct(char *&word)
   return strtoul(word, &word, 8);
 }
 
-//#define FAILED  do { msg(            "failed at %d (input file line %d)\n", __LINE__, nl); return 0; } while ( 0 )
-#define FAILED  return deb(IDA_DEBUG_LDR,"failed at %d (input file line %d)\n", __LINE__, nl), 0
+#define FAILED                                 \
+  do                                           \
+  {                                            \
+    deb(IDA_DEBUG_LDR,                         \
+        "failed at %d (input file line %d)\n", \
+        __LINE__,                              \
+        nl);                                   \
+    return 0;                                  \
+  } while ( false )
 
 //--------------------------------------------------------------------------
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *,
+        linput_t *li,
+        const char *)
 {
   char line[MAXSTR];
   char *words[MAXSTR];
-
-  if ( n )
-    return 0;
 
   // We try to interpret the input file as a text
   // file with a dump format, i.e. all lines should look like
@@ -146,7 +154,7 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
   if ( nontrivial_line_count == 0 || has_star )
     FAILED;
 
-  qstrncpy(fileformatname, "Dump file", MAX_FILE_FORMAT_NAME);
+  *fileformatname = "Dump file";
   return 1;
 }
 
@@ -300,7 +308,7 @@ void idaapi load_file(linput_t *li, ushort _neflag, const char * /*fileformatnam
     if ( use32 )
     {
       set_segm_addressing(getseg(sea), 1);
-      if ( ph.id == PLFM_386 ) inf.lflags |= LFLG_PC_FLAT;
+      inf.lflags |= LFLG_PC_FLAT;
     }
     set_default_dataseg(sel);
   }
@@ -312,7 +320,8 @@ void idaapi load_file(linput_t *li, ushort _neflag, const char * /*fileformatnam
 loader_t LDSC =
 {
   IDP_INTERFACE_VERSION,
-  LDRF_RELOAD,               // loader flags
+  LDRF_REQ_PROC              // requires the target processor to the set
+| LDRF_RELOAD,               // supports reloading the input file
 //
 //      check input file format. if recognized, then return 1
 //      and fill 'fileformatname'.
@@ -328,5 +337,6 @@ loader_t LDSC =
 //      this function may be absent.
 //
   NULL,
-  NULL
+  NULL,
+  NULL,
 };

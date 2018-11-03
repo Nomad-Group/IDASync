@@ -23,7 +23,7 @@ static const char wanted_name[] = "Remote Windows debugger";
 #include <idp.hpp>
 #include <idd.hpp>
 #include <ua.hpp>
-#include <area.hpp>
+#include <range.hpp>
 #include <loader.hpp>
 #include <kernwin.hpp>
 #include "tcpip.h"
@@ -31,7 +31,25 @@ static const char wanted_name[] = "Remote Windows debugger";
 #include "rpc_client.h"
 #include "rpc_debmod.h"
 
-rpc_debmod_t g_dbgmod(DEFAULT_PLATFORM_NAME);
+class win32_rpc_debmod_t : public rpc_debmod_t
+{
+  typedef rpc_debmod_t inherited;
+public:
+  win32_rpc_debmod_t(const char *default_platform)
+    : rpc_debmod_t(default_platform) {}
+
+  virtual bool idaapi open_remote(const char *hostname, int port_number, const char *password)
+  {
+    char path[QMAXPATH];
+    get_input_file_path(path, sizeof(path));
+    pdb_file_path = path;
+    return inherited::open_remote(hostname, port_number, password);
+  }
+
+  qstring pdb_file_path;
+};
+
+win32_rpc_debmod_t g_dbgmod(DEFAULT_PLATFORM_NAME);
 #include "common_stub_impl.cpp"
 
 #include "pc_local_impl.cpp"

@@ -47,7 +47,7 @@ OAK_Dsp_copy,           //1111  Copy aX-accumulator
 // ---
 OAK_Dsp_norm,           //Normalize
 OAK_Dsp_divs,           //Division Step
-// ALB subcodes 
+// ALB subcodes
 OAK_Dsp_set,            //000  Set Bit-field
 OAK_Dsp_rst,            //001  Reset Bit-field
 OAK_Dsp_chng,           //010  Change Bit-field
@@ -61,7 +61,7 @@ OAK_Dsp_maxd,           //Maximum between Data Memory Location and Accumulator
 OAK_Dsp_max,            //Maximum between Two Accumulators
 OAK_Dsp_min,            //Minimum between Two Accumulators
 OAK_Dsp_lim,            //Limit Accumulator     (lim aX[, aX])
-// MUL subcodes 
+// MUL subcodes
 OAK_Dsp_mpy,            //000  Multiply
 OAK_Dsp_mpysu,          //001  Multiply Signed by Unsigned
 OAK_Dsp_mac,            //010  Multiply and Accumulate Previous Product

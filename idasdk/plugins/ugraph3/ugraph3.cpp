@@ -13,9 +13,8 @@
 int idaapi init(void)
 {
   // unload us if text mode, no graph are there
-  if ( callui(ui_get_hwnd).vptr == NULL && !is_idaq() )
+  if ( !is_idaq() )
     return PLUGIN_SKIP;
-
   return PLUGIN_OK;
 }
 
@@ -25,21 +24,22 @@ void idaapi term(void)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   ea_t ea1, ea2;
-  if ( !read_selection(&ea1, &ea2) )
+  if ( !read_range_selection(NULL, &ea1, &ea2) )
   {
-    warning("Please select an area before running the plugin");
-    return;
+    warning("Please select a range before running the plugin");
+    return true;
   }
   unmark_selection();
 
   // fixme: how to specify multiple ranges?
 
-  areavec_t ranges;
-  ranges.push_back(area_t(ea1, ea2));
+  rangevec_t ranges;
+  ranges.push_back(range_t(ea1, ea2));
   open_disasm_window("Selected range", &ranges);
+  return true;
 }
 
 //--------------------------------------------------------------------------

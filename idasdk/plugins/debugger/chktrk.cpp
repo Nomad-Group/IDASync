@@ -26,10 +26,10 @@ bool metrotrk_t::handle_notification(uchar seq, void *) // standalone version
   {
     case TrkOSNotifyCreated:
       {
-        uint16 item     = extract_int16(i);
+        uint16 item = extract_int16(i);
         QASSERT(30006, item == TrkOSDLLItem);
-        pid             = extract_int32(i);
-        tid             = extract_int32(i);
+        pid = extract_int32(i);
+        tid = extract_int32(i);
         uint32 codeaddr = extract_int32(i);
         uint32 dataaddr = extract_int32(i);
         qstring name    = extract_pstr(i);

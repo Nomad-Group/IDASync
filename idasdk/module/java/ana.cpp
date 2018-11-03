@@ -13,21 +13,21 @@
 #include "java.hpp"
 
 //----------------------------------------------------------------------
-static int LoadIndex(void)
+static int LoadIndex(insn_t &insn)
 {
   ushort top;
 
-  cmd.Op1.type = o_mem;
-//  cmd.Op1.ref = 0;
-  cmd.Op1.offb = char(cmd.size);
-  top = cmd.wid ? ua_next_word() : ua_next_byte();
-  cmd.Op1.addr = top;
-  if ( ((cmd.Op1.dtyp == dt_qword || cmd.Op1.dtyp == dt_double) && !++top)
+  insn.Op1.type = o_mem;
+//  insn.Op1.ref = 0;
+  insn.Op1.offb = char(insn.size);
+  top = insn.wid ? insn.get_next_word() : insn.get_next_byte();
+  insn.Op1.addr = top;
+  if ( ((insn.Op1.dtype == dt_qword || insn.Op1.dtype == dt_double) && !++top)
     || top >= curSeg.DataSize )
   {
-    if ( !debugmode)
-      return 0 ;
-    ++cmd.Op1.ref;
+    if ( !debugmode )
+      return 0;
+    ++insn.Op1.ref;
   }
   return 1;
 }
@@ -57,26 +57,26 @@ enum CIC_param
   C_TypeName,
 };
 
-static int ConstLoad(CIC_param ctype)
+static int ConstLoad(insn_t &insn, CIC_param ctype)
 {
   const_desc_t cntopis;
   uchar i;
 
-  cmd.Op1.type = o_cpool;
-//  cmd.Op1.ref = 0;
+  insn.Op1.type = o_cpool;
+//  insn.Op1.ref = 0;
 
-  if ( !cmd.Op1.cp_ind )
+  if ( !insn.Op1.cp_ind )
     goto dmpchk;  //NULL Ptr
 
-  if ( !LoadOpis(cmd.Op1.cp_ind, 0, &cntopis) )
+  if ( !LoadOpis(insn.Op1.cp_ind, 0, &cntopis) )
     goto dmpchk;
 
   CASSERT(offsetof(const_desc_t,flag) == (offsetof(const_desc_t,type) + sizeof(uchar) )
        && (sizeof(cntopis.type) == sizeof(uchar))
        && (sizeof(cntopis.flag) == sizeof(uchar))
-       && (sizeof(cmd.Op1.cp_type) >= (2*sizeof(uchar)))
-       && (sizeof(ushort) == sizeof(cmd.Op1.cp_type)));
-  cmd.Op1.cp_type = *((ushort *)&cntopis.type);
+       && (sizeof(insn.Op1.cp_type) >= (2*sizeof(uchar)))
+       && (sizeof(ushort) == sizeof(insn.Op1.cp_type)));
+  insn.Op1.cp_type = *((ushort *)&cntopis.type);
   i = cntopis.type;
 
   switch ( ctype )
@@ -91,14 +91,14 @@ static int ConstLoad(CIC_param ctype)
         case CONSTANT_Class:
           if ( !(cntopis.flag & HAS_CLSNAME) )
             goto wrnret;
-          cmd.Op1.addr  = 0x10001ul * (ushort)fmt_fullname;
+          insn.Op1.addr = 0x10001ul * (ushort)fmt_fullname;
 loadref1:
-          cmd.xtrn_ip   = cntopis.ref_ip;
+          insn.xtrn_ip = cntopis.ref_ip;
           //PASS THRU
         case CONSTANT_Integer:
         case CONSTANT_Float:
         case CONSTANT_String:
-          cmd.Op1.value = cntopis.value;  // for string index to Utf8
+          insn.Op1.value = cntopis.value;  // for string index to Utf8
           return 1;                      // or TWO index for other
         default:
           break;
@@ -116,9 +116,9 @@ loadref1:
       if ( (cntopis.flag & NORM_FIELD) != NORM_FIELD )
         goto wrnret;
 loadref2:
-      cmd.xtrn_ip   = cntopis.ref_ip;
+      insn.xtrn_ip = cntopis.ref_ip;
 load2:
-      copy_const_to_opnd(cmd.Op1, cntopis); // for string index to Utf8
+      copy_const_to_opnd(insn.Op1, cntopis); // for string index to Utf8
       return 1;
 
     case C_Interface:
@@ -138,7 +138,7 @@ methodchk:
         break;
       if ( !(cntopis.flag & HAS_TYPEDSCR) )
         goto wrnret;
-      cmd.Op1.addr = ((uint32)fmt_dscr << 16) | (ushort)fmt_classname;
+      insn.Op1.addr = ((uint32)fmt_dscr << 16) | (ushort)fmt_classname;
       goto loadref1; //load 1 ind.
 
     case C_TypeName:
@@ -146,66 +146,68 @@ methodchk:
         break;
       if ( !(cntopis.flag & (HAS_TYPEDSCR | HAS_CLSNAME)) )
         goto wrnret;
-      cmd.Op1.addr = ((uint32)fmt_cast << 16) | (ushort)
+      insn.Op1.addr = ((uint32)fmt_cast << 16) | (ushort)
                                             ((cntopis.flag & HAS_CLSNAME) ?
                                                fmt_fullname : fmt_classname);
       goto loadref1; //load 1 ind.
 
     default:
-      warning("Illegal CIC call (%x)\n", ctype);
+      warning("Illegal CIC call (%x)", ctype);
       return 0;
   }
 dmpchk:
   if ( !debugmode )
     return 0;
-  ++cmd.Op1.ref;
+  ++insn.Op1.ref;
 wrnret:
-  ++cmd.Op1.ref;
-  cmd.Op1.addr_shorts.low = cmd.Op1.cp_ind;    // for dmp out
+  ++insn.Op1.ref;
+  insn.Op1.addr_shorts.low = insn.Op1.cp_ind;    // for dmp out
   return 1;
 }
 
 //----------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
-  CIC_param ctype;
-  segment_t *s = getMySeg(cmd.ea); // also set curSeg
+  insn_t &insn = *_insn;
 
-  if ( s->type != SEG_CODE || cmd.ip >= curSeg.CodeSize )
+  CIC_param ctype;
+  segment_t *s = getMySeg(insn.ea); // also set curSeg
+
+  if ( s->type != SEG_CODE || insn.ip >= curSeg.CodeSize )
   {
     warning("Can't decode non-code fragment!");
     return 0;
   }
 
-  cmd.Op1.dtyp = dt_void;
-  cmd.wid = cmd.swit = 0;
-  cmd.Op1.ref = 0;
+  insn.Op1.dtype = dt_void;
+  insn.wid = insn.swit = 0;
+  insn.Op1.ref = 0;
 
-  cmd.itype = ua_next_byte();
-  if ( cmd.itype == j_wide )
+  insn.itype = insn.get_next_byte();
+  if ( insn.itype == j_wide )
   {
-    cmd.itype = ua_next_byte();
-    if ( cmd.itype == j_iinc
-      || (cmd.itype >= j_iload && cmd.itype <= j_aload)
-      || (cmd.itype >= j_istore && cmd.itype <= j_astore)
-      || cmd.itype == j_ret )
+    insn.itype = insn.get_next_byte();
+    if ( insn.itype == j_iinc
+      || (insn.itype >= j_iload && insn.itype <= j_aload)
+      || (insn.itype >= j_istore && insn.itype <= j_astore)
+      || insn.itype == j_ret )
     {
-      cmd.wid = 1; //_w
+      insn.wid = 1; //_w
     }
     else
     {
       if ( !debugmode )
         return 0;
-      cmd.size = 1;
-      cmd.itype = j_wide;
+      insn.size = 1;
+      insn.itype = j_wide;
     }
   }
 
-  if ( cmd.itype >= j_lastnorm )
+  if ( insn.itype >= j_lastnorm )
   {
     if ( !debugmode )
       return 0;
-    if ( cmd.itype < j_quick_last )
+    if ( insn.itype < j_quick_last )
     {
       static const uchar redefcmd[j_quick_last - j_lastnorm] =
       {
@@ -237,95 +239,95 @@ int idaapi ana(void)
         j_putfield                //j_putfield_quick_w
       };
 
-      cmd.wid = 2; //_quick;
-      switch ( cmd.itype )
+      insn.wid = 2; //_quick;
+      switch ( insn.itype )
       {
         case j_getstatic2_quick:
         case j_putstatic2_quick:
         case j_getfield2_quick:
         case j_putfield2_quick:
-          cmd.wid = 3;  //2_quick
+          insn.wid = 3;  //2_quick
           break;
         case j_invokevirtual_quick_w:
         case j_getfield_quick_w:
         case j_putfield_quick_w:
-          cmd.wid = 4;  //_quick_w
+          insn.wid = 4;  //_quick_w
           break;
         default:
           break;
       }
-      cmd.itype = redefcmd[cmd.itype - j_lastnorm];
+      insn.itype = redefcmd[insn.itype - j_lastnorm];
     }
-    else if ( cmd.itype < j_software )
+    else if ( insn.itype < j_software )
     {
       return 0;
     }
     else
     {
-      cmd.itype -= (j_software - j_a_software);
+      insn.itype -= (j_software - j_a_software);
     }
   }
 //---
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     default:
       {
         uint refs, ref2f;
 
-        if ( cmd.itype >= j_iload_0 && cmd.itype <= j_aload_3 )
+        if ( insn.itype >= j_iload_0 && insn.itype <= j_aload_3 )
         {
-          refs = (cmd.itype - j_iload_0) % 4;
-          ref2f = (cmd.itype - j_iload_0) / 4;
+          refs = (insn.itype - j_iload_0) % 4;
+          ref2f = (insn.itype - j_iload_0) / 4;
           ref2f = ref2f == ((j_lload_0 - j_iload_0) / 4)
                || ref2f == ((j_dload_0 - j_iload_0) / 4);
           goto refer;
         }
-        if ( cmd.itype >= j_istore_0 && cmd.itype <= j_astore_3 )
+        if ( insn.itype >= j_istore_0 && insn.itype <= j_astore_3 )
         {
-          refs = (cmd.itype - j_istore_0) % 4;
-          ref2f = (cmd.itype - j_istore_0) / 4;
+          refs = (insn.itype - j_istore_0) % 4;
+          ref2f = (insn.itype - j_istore_0) / 4;
           ref2f = ref2f == ((j_lstore_0 - j_istore_0) / 4)
                || ref2f == ((j_dstore_0 - j_istore_0) / 4);
 refer:
-          cmd.Op1.addr = curSeg.DataBase + (ushort)refs;
-          cmd.Op1.ref = (uchar)(ref2f + 1);
+          insn.Op1.addr = curSeg.DataBase + (ushort)refs;
+          insn.Op1.ref = (uchar)(ref2f + 1);
           if ( (ushort)(refs + ref2f) >= curSeg.DataSize )
-            cmd.Op1.ref |= 0x80;
+            insn.Op1.ref |= 0x80;
           break;
         }
       } // end refs/refx
-      if ( cmd.itype < j_ifeq || cmd.itype > j_jsr )
+      if ( insn.itype < j_ifeq || insn.itype > j_jsr )
         break;
     case j_ifnull:
     case j_ifnonnull:
-      cmd.Op1.addr = (short)ua_next_word();
+      insn.Op1.addr = (short)insn.get_next_word();
 b_near:
-      cmd.Op1.type = o_near;
-      cmd.Op1.offb = 1;
-      cmd.Op1.addr += cmd.ip;
-      if ( cmd.Op1.addr >= curSeg.CodeSize )
+      insn.Op1.type = o_near;
+      insn.Op1.offb = 1;
+      insn.Op1.addr += insn.ip;
+      if ( insn.Op1.addr >= curSeg.CodeSize )
         goto set_bad_ref;
       break;
 
     case j_goto_w:
     case j_jsr_w:
-      cmd.Op1.addr = ua_next_long();
+      insn.Op1.addr = insn.get_next_dword();
       goto b_near;
 
     case j_bipush:
-      cmd.Op1.dtyp = dt_byte;
-      cmd.Op1.value = (char)ua_next_byte();
+      insn.Op1.dtype = dt_byte;
+      insn.Op1.value = (char)insn.get_next_byte();
       goto setdat;
     case j_sipush:
-      cmd.Op1.dtyp = dt_word;
-      cmd.Op1.value = (short)ua_next_word();
+      insn.Op1.dtype = dt_word;
+      insn.Op1.value = (short)insn.get_next_word();
 setdat:
-      cmd.Op1.type = o_imm;
-      cmd.Op1.offb = 1;
+      insn.Op1.type = o_imm;
+      insn.Op1.offb = 1;
       break;
 
     case j_ldc:
-      cmd.Op1.cp_ind = ua_next_byte();
+      insn.Op1.cp_ind = insn.get_next_byte();
       ctype = C_4byte;
       goto constchk;
     case j_ldcw:
@@ -334,9 +336,9 @@ setdat:
     case j_ldc2w:
       ctype = C_8byte;
 const2w:
-      cmd.Op1.cp_ind = ua_next_word();
+      insn.Op1.cp_ind = insn.get_next_word();
 constchk:
-      if ( !ConstLoad(ctype) )
+      if ( !ConstLoad(insn, ctype) )
         return 0;
       break;
 
@@ -344,21 +346,21 @@ constchk:
     case j_putstatic:
     case j_getfield:
     case j_putfield:
-      if ( cmd.wid > 1 )       //_quick form
+      if ( insn.wid > 1 )       //_quick form
       {
-        cmd.Op1.type = o_imm;
-        cmd.Op1.ref = 2;        //#data
-        cmd.Op1.offb = 1;
-        if ( cmd.wid == 4 )
+        insn.Op1.type = o_imm;
+        insn.Op1.ref = 2;        //#data
+        insn.Op1.offb = 1;
+        if ( insn.wid == 4 )
         {
-          cmd.Op1.dtyp = dt_word;
-          cmd.Op1.value = ua_next_word();
+          insn.Op1.dtype = dt_word;
+          insn.Op1.value = insn.get_next_word();
         }
         else
         {
-          cmd.Op1.dtyp = dt_byte;
-          cmd.Op1.value = ua_next_byte();
-          ++cmd.size;           // SKIP
+          insn.Op1.dtype = dt_byte;
+          insn.Op1.value = insn.get_next_byte();
+          ++insn.size;           // SKIP
         }
         break;
       }
@@ -381,29 +383,30 @@ constchk:
       goto fictarg;
     case j_invokevirtual:
     case j_a_invokevirtualobject:
-      cmd.Op2.dtyp = dt_void;
-      if ( cmd.wid > 1 )
+      insn.Op2.dtype = dt_void;
+      if ( insn.wid > 1 )
       {
-        if ( cmd.wid == 4 )
+        if ( insn.wid == 4 )
         {
 fictarg:
-          cmd.Op1.value = ua_next_word(); //???
-          cmd.Op1.dtyp = dt_word;
+          insn.Op1.value = insn.get_next_word(); //???
+          insn.Op1.dtype = dt_word;
         }
         else
         {
-          cmd.Op2.type = o_imm;
-          cmd.Op1.ref = 2;        //#data
-          cmd.Op1.dtyp = cmd.Op2.dtyp = dt_byte;
-          cmd.Op1.value = ua_next_byte();
-          cmd.Op2.offb = 2;
-          cmd.Op2.value = ua_next_byte();
+          insn.Op2.type = o_imm;
+          insn.Op1.ref = 2;        //#data
+          insn.Op1.dtype = insn.Op2.dtype = dt_byte;
+          insn.Op1.value = insn.get_next_byte();
+          insn.Op2.offb = 2;
+          insn.Op2.value = insn.get_next_byte();
         }
-        cmd.Op1.offb = 1;
-        cmd.Op1.type = o_imm;
-        cmd.Op1.ref = 2;        //#data
+        insn.Op1.offb = 1;
+        insn.Op1.type = o_imm;
+        insn.Op1.ref = 2;        //#data
         break;
       }
+      // fallthrough
     case j_invokespecial:
     case j_invokestatic:
     case j_invokedynamic:
@@ -411,33 +414,33 @@ fictarg:
       goto const2w;
     case j_invokeinterface:
       ctype = C_Interface;
-      cmd.Op1.cp_ind = ua_next_word();
-      cmd.Op2.type = o_imm;
-      cmd.Op2.ref = 1;          //not descriptor
-      cmd.Op2.dtyp = dt_byte;
-      cmd.Op2.value = ua_next_byte();
-      if ( cmd.wid > 1 )
+      insn.Op1.cp_ind = insn.get_next_word();
+      insn.Op2.type = o_imm;
+      insn.Op2.ref = 1;          //not descriptor
+      insn.Op2.dtype = dt_byte;
+      insn.Op2.value = insn.get_next_byte();
+      if ( insn.wid > 1 )
       {
-        cmd.Op3.type = o_imm;
-        cmd.Op3.ref = 2;        //#data
-        cmd.Op3.value = ua_next_byte();
-        cmd.Op3.offb = 4;
-        cmd.Op3.dtyp = dt_byte;
+        insn.Op3.type = o_imm;
+        insn.Op3.ref = 2;        //#data
+        insn.Op3.value = insn.get_next_byte();
+        insn.Op3.offb = 4;
+        insn.Op3.dtype = dt_byte;
       }
       else
       {
-        ++cmd.size;  //reserved
-        cmd.Op3.dtyp = dt_void;
+        ++insn.size;  //reserved
+        insn.Op3.dtype = dt_void;
       }
       goto constchk;
 
     case j_multianewarray:
-      cmd.Op1.cp_ind = ua_next_word();
-      cmd.Op2.type = o_imm;
-      cmd.Op2.ref = 1;         // not descriptor
-      cmd.Op2.dtyp = dt_byte;
-      cmd.Op2.value = ua_next_byte();
-      if ( cmd.Op2.value == 0 && !debugmode )
+      insn.Op1.cp_ind = insn.get_next_word();
+      insn.Op2.type = o_imm;
+      insn.Op2.ref = 1;         // not descriptor
+      insn.Op2.dtype = dt_byte;
+      insn.Op2.value = insn.get_next_byte();
+      if ( insn.Op2.value == 0 && !debugmode )
         return 0;
       ctype = C_Type;
       goto constchk;
@@ -445,44 +448,44 @@ fictarg:
     case j_iinc:
     case j_iload:
     case j_istore:
-      cmd.Op1.dtyp = dt_dword;
+      insn.Op1.dtype = dt_dword;
       goto memref;
     case j_lload:
     case j_lstore:
-      cmd.Op1.dtyp = dt_qword;
+      insn.Op1.dtype = dt_qword;
       goto memref;
     case j_fload:
     case j_fstore:
-      cmd.Op1.dtyp = dt_float;
+      insn.Op1.dtype = dt_float;
       goto memref;
     case j_dload:
     case j_dstore:
-      cmd.Op1.dtyp = dt_double;
+      insn.Op1.dtype = dt_double;
       goto memref;
     case j_aload:
     case j_astore:
-      cmd.Op1.dtyp = dt_string;
+      insn.Op1.dtype = dt_string;
       goto memref;
     case j_ret:
-      cmd.Op1.dtyp = dt_code;
+      insn.Op1.dtype = dt_code;
 memref:
-      if ( !LoadIndex() )
+      if ( !LoadIndex(insn) )
         return 0;
-      if ( cmd.itype == j_iinc )
+      if ( insn.itype == j_iinc )
       {
-        cmd.Op2.type = o_imm;
-        cmd.Op2.ref = 0;
-        cmd.Op2.offb = (uchar)cmd.size;
+        insn.Op2.type = o_imm;
+        insn.Op2.ref = 0;
+        insn.Op2.offb = (uchar)insn.size;
 //\\??? Это надо???
-        if ( cmd.wid )
+        if ( insn.wid )
         {
-          cmd.Op2.dtyp = dt_word;
-          cmd.Op2.value = (short)ua_next_word();
+          insn.Op2.dtype = dt_word;
+          insn.Op2.value = (short)insn.get_next_word();
         }
         else
         {
-          cmd.Op2.dtyp = dt_byte;
-          cmd.Op2.value = (char)ua_next_byte();
+          insn.Op2.dtype = dt_byte;
+          insn.Op2.value = (char)insn.get_next_byte();
         }
       }
       break;
@@ -493,81 +496,81 @@ memref:
         int32 count;
         uint32 top;
 
-        cmd.swit = 1;
-        for ( top = (4  - uint32((cmd.ip + cmd.size) % 4)) & 3; top; top-- )
+        insn.swit = 1;
+        for ( top = (4 - uint32((insn.ip + insn.size) % 4)) & 3; top; top-- )
         {
-          if ( ua_next_byte() )
+          if ( insn.get_next_byte() )
           {
             if ( !debugmode )
               return 0;
-            cmd.swit |= 0100;
+            insn.swit |= 0100;
           }
         }
-        cmd.Op3.type = o_near;
-        cmd.Op3.offb = (uchar)cmd.size;
-        cmd.Op3.addr = ua_next_long();
-        cmd.Op3.addr += cmd.ip;
-        cmd.Op3.ref = 0;
+        insn.Op3.type = o_near;
+        insn.Op3.offb = (uchar)insn.size;
+        insn.Op3.addr = insn.get_next_dword();
+        insn.Op3.addr += insn.ip;
+        insn.Op3.ref = 0;
 
-        if ( cmd.Op3.addr >= curSeg.CodeSize )
+        if ( insn.Op3.addr >= curSeg.CodeSize )
         {
           if ( !debugmode )
             return 0;
-          ++cmd.Op3.ref;
+          ++insn.Op3.ref;
         }
 
-        cmd.swit |= 2;  // start out arguments
+        insn.swit |= 2;  // start out arguments
 
-        count = ua_next_long();
-        if ( cmd.itype == j_tableswitch )
+        count = insn.get_next_dword();
+        if ( insn.itype == j_tableswitch )
         {
-          cmd.Op1.type  = o_imm;
-          cmd.Op1.dtyp  = dt_dword;
-          cmd.Op1.value = count;  // minimal value
-          cmd.Op2.ref   = 0;
-          cmd.Op2.type  = o_imm;
-          cmd.Op2.dtyp  = dt_dword;
-          count = (uint32(cmd.Op2.value = ua_next_long()) - count + 1);
+          insn.Op1.type  = o_imm;
+          insn.Op1.dtype = dt_dword;
+          insn.Op1.value = count;  // minimal value
+          insn.Op2.ref   = 0;
+          insn.Op2.type  = o_imm;
+          insn.Op2.dtype = dt_dword;
+          count = (uint32(insn.Op2.value = insn.get_next_dword()) - count + 1);
         }
-        cmd.Op3.value = count;
-        cmd.Op2.addr = cmd.ip + cmd.size;
-        top = uint32(curSeg.CodeSize - cmd.ip);
+        insn.Op3.value = count;
+        insn.Op2.addr = insn.ip + insn.size;
+        top = uint32(curSeg.CodeSize - insn.ip);
         while ( count-- )
         {
-          if ( cmd.itype == j_lookupswitch )
-            ua_next_long(); // skip pairs;
-          if ( (cmd.ip + ua_next_long()) >= curSeg.CodeSize )
+          if ( insn.itype == j_lookupswitch )
+            insn.get_next_dword(); // skip pairs;
+          if ( (insn.ip + insn.get_next_dword()) >= curSeg.CodeSize )
           {
             if ( !debugmode )
               return 0;
-            cmd.swit |= 0200;
+            insn.swit |= 0200;
           }
-          if ( (uint32)cmd.size >= top)
+          if ( (uint32)insn.size >= top )
             return 0;
         }
       }
       break;
 
     case j_newarray:
-      cmd.Op1.type = o_array;       // type!
-      cmd.Op1.offb = 1;
-      cmd.Op1.cp_type = ua_next_byte();
-      if ( cmd.Op1.cp_type < T_BOOLEAN || (uchar)cmd.Op1.cp_type > T_LONG )
+      insn.Op1.type = o_array;       // type!
+      insn.Op1.offb = 1;
+      insn.Op1.cp_type = insn.get_next_byte();
+      if ( insn.Op1.cp_type < T_BOOLEAN || (uchar)insn.Op1.cp_type > T_LONG )
       {
 set_bad_ref:
         if ( !debugmode )
           return 0;
-        ++cmd.Op1.ref;
+        ++insn.Op1.ref;
       }
       break;
-  } // switch ( cmd.itype )
+  } // switch ( insn.itype )
 
-  return cmd.size;
+  return insn.size;
 }
 
 //----------------------------------------------------------------------
-//lint -e{1764} Reference parameter 'x' could be declared const ref
-bool idaapi can_have_type(op_t &x)
+
+bool idaapi can_have_type(const op_t &x)
 {
   if ( x.type == o_cpool )
     return (uchar)x.cp_type == CONSTANT_Integer

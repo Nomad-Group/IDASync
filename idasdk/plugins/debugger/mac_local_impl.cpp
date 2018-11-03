@@ -1,8 +1,6 @@
-// Can not include this file, compilation errors under linux:
-//#include "../../ldr/mach-o/common.h"
-#define MACHO_NODE "$ macho"    // supval(0) - mach_header
-
 #include <loader.hpp>
+
+#include "macho_rebase.cpp"
 
 //--------------------------------------------------------------------------
 // installs or uninstalls debugger specific idc functions
@@ -14,16 +12,23 @@ inline bool register_idc_funcs(bool)
 //--------------------------------------------------------------------------
 void idaapi rebase_if_required_to(ea_t new_base)
 {
+  // not a shared cache lib: it's safe to just use the imagebase
   ea_t base = get_imagebase();
   if ( base == 0 )
   {
     // old databases don't have it set; use info from netnode
     netnode n(MACHO_NODE);
     if ( exist(n) )
-      base = n.altval(-1);
+      base = n.altval(MACHO_ALT_IMAGEBASE);
   }
-  if ( base != BADADDR && new_base != BADADDR && base != new_base )
+
+  if ( base != BADADDR
+    && new_base != BADADDR
+    && base != new_base
+    && !rebase_scattered_segments(new_base) )
+  {
     rebase_or_warn(base, new_base);
+  }
 }
 
 //--------------------------------------------------------------------------
@@ -50,7 +55,7 @@ static bool init_plugin(void)
     return false;
   if ( stricmp(buf, "macho") != 0 )     // only Mach-O files
     return false;
-  if ( ph.id != TARGET_PROCESSOR )
+  if ( ph.id != TARGET_PROCESSOR && ph.id != -1 )
     return false;
 
   return true;

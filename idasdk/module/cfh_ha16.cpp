@@ -5,42 +5,39 @@
 
 #include <fixup.hpp>
 
-int cfh_ha16_id;  // id of fixup handler
-int ref_ha16_id;  // id of refinfo handler
-
 //--------------------------------------------------------------------------
 // 'apply' a fixup: take it into account while analyzing the file
 // usually it consists of converting the operand into an offset expression
 static bool idaapi ha16_apply(
-        ea_t ea,
-        const fixup_data_t *fdp,
-        ea_t item_start,
+        const fixup_handler_t * /*fh*/,
+        ea_t item_ea,
+        ea_t fixup_ea,
         int opnum,
-        bool is_macro)
+        bool is_macro,
+        const fixup_data_t &fd)
 {
-  if ( isUnknown(get_flags_novalue(item_start)) )
-    do16bit(ea, 2);
+  if ( is_unknown(get_flags(item_ea)) )
+    create_16bit_data(fixup_ea, 2);
 
   refinfo_t ri;
-  ri.base   = get_fixup_base(ea, fdp);
-  ri.target = ri.base + fdp->off;
-  ri.tdelta = fdp->displacement;
+  ri.base   = fd.get_base();
+  ri.target = ri.base + fd.off;
+  ri.tdelta = fd.displacement;
   ri.flags = REFINFO_CUSTOM;
 
   if ( is_macro )
   { // it is a macro instruction, check for the second fixup within it
-    fixup_data_t low;
-    ea_t end = get_item_end(item_start);
+    fixup_data_t fdl;
+    ea_t end = get_item_end(item_ea);
     while ( true )
     {
-      ea = get_next_fixup_ea(ea);
-      if ( ea >=  end )
+      fixup_ea = get_next_fixup_ea(fixup_ea);
+      if ( fixup_ea >=  end )
         return false; // could not find the fixup for the low part
-      get_fixup(ea, &low);
-      if ( low.get_type() == FIXUP_LOW16 )
+      if ( fdl.get(fixup_ea) && fdl.get_type() == FIXUP_LOW16 )
         break; // found the pair!
     }
-//    if ( int16(low.off + low.displacement) < 0 )
+//    if ( int16(fdl.off + fdl.displacement) < 0 )
 //      ri->tdelta -= 0x10000;
     ri.flags = REF_OFF32;
     ri.target = BADADDR;
@@ -50,30 +47,49 @@ static bool idaapi ha16_apply(
     ri.set_type(ref_ha16_id);
     ri.flags |= REFINFO_CUSTOM;
   }
-  op_offset_ex(item_start, opnum, &ri);
+  if ( ph.adjust_refinfo(&ri, fixup_ea, opnum, fd) < 0 )
+    return false;
+  op_offset_ex(item_ea, opnum, &ri);
   return true;
 }
 
 //--------------------------------------------------------------------------
-// move the fixup from one location to another (called when the program is rebased)
-static void idaapi ha16_move(ea_t ea, fixup_data_t *fdp, adiff_t delta)
+static uval_t idaapi ha16_get_value(const fixup_handler_t * /*fh*/, ea_t ea)
 {
-  fdp->off += delta;
-  put_word(ea, (fdp->off>>16)+1);
-  set_fixup(ea, fdp);
+  // we can't get the exact value of this fixup as it depends on the low
+  // part
+  return get_word(ea) << 16;
+}
+
+//----------------------------------------------------------------------------
+static bool idaapi ha16_patch_value(
+        const fixup_handler_t * /*fh*/,
+        ea_t ea,
+        const fixup_data_t &fd)
+{
+  // compensate signed low part
+  ea_t expr = fd.off + fd.displacement + 0x8000;
+#ifdef __EA64__
+  // in the case of 32-bit reloc we have to check overflow,
+  // for simplicity we don't do.
+  // overflow = is32bit_reloc && expr > UINT_MAX;
+#endif
+  put_word(ea, expr >> 16 );
+  return true;
 }
 
 //--------------------------------------------------------------------------
-static const custom_fixup_handler_t cfh_ha16 =
+// ALPHA module includes this file but do not use fixup handler.
+static fixup_handler_t QUNUSED cfh_ha16 =
 {
-  sizeof(custom_fixup_handler_t),
-  "HIGHA16",                    // Format name, must be unique
-  0,                            // properties (currently 0)
-  2,                            // size in bytes
-  NULL,                         // get_base, use standard formula
-  NULL,                         // get_desc, use the format name
-  ha16_apply,
-  ha16_move,
+  sizeof(fixup_handler_t),
+  "HIGHA16",                    // name
+  0,                            // props
+  2, 0, 0, 0,                   // size, width, shift
+  REFINFO_CUSTOM,               // reftype
+  ha16_apply,                   // apply
+  ha16_get_value,               // get_value
+  ha16_patch_value,             // patch_value
 };
 
 
@@ -85,56 +101,38 @@ inline bool was_displacement_generated(const char *buf)
 }
 
 //--------------------------------------------------------------------------
-// generate offset expression for HA16 refinfo
-static int idaapi ha16_gen_expr(
-        ea_t /*ea*/,
-        int n,
-        refinfo_t * /*ri*/,
-        ea_t from,
-        adiff_t * /*opval*/,
-        char *buf,
-        size_t bufsize,
-        char * /*format*/,
-        size_t /*formatsize*/,
-        ea_t * /*target*/,
-        ea_t *fullvalue,
-        int getn_flags)
+// get reference data from ri,
+// check compliance of opval and the full value
+static bool idaapi ha16_calc_reference_data(
+        ea_t *target,
+        ea_t *base,
+        ea_t /*from*/,
+        const refinfo_t &ri,
+        adiff_t opval)
 {
-  ea_t ref = *fullvalue;
-
-#ifdef _TRICORE_HPP
-#define HIS_FUN COLSTR("@HIS", SCOLOR_KEYWORD) "("
-  size_t fsz = sizeof(HIS_FUN) - 1;
-  qstrncpy(buf, HIS_FUN, bufsize);
-  buf += fsz;
-  bufsize -= fsz;
-  ssize_t len = get_name_expr(from, n, ref, BADADDR, buf, bufsize, getn_flags);
-  if ( len == 0 )
-    btoa(buf, bufsize, ref, 16);
-  qstrncat(buf, ")", bufsize);
-#undef HIS_FUN
-#else
-  ssize_t len = get_name_expr(from, n, ref, BADADDR, buf, bufsize, getn_flags);
-  if ( len > 0 )
-  { // if complex expression has been created, add parenthesis
-    if ( was_displacement_generated(buf) )
-    {
-      qstring expr;
-      expr.append(COLSTR("(", SCOLOR_SYMBOL));
-      expr.append(buf);
-      expr.append(COLSTR(")", SCOLOR_SYMBOL));
-      qstrncpy(buf, expr.begin(), bufsize);
-    }
-  }
-  else
+  if ( ri.target == BADADDR
+    || ri.base == BADADDR
+    || ri.is_subtract() )
   {
-    btoa(buf, bufsize, ref, 16);
+    return false;
   }
-  qstrncat(buf, COLSTR("@ha", SCOLOR_KEYWORD), bufsize);
-#endif
-  // always return 'simple expression' to avoid parenthesis around the
-  // generated expression
-  return 1;
+  ea_t fullvalue = ri.target + ri.tdelta - ri.base;
+  int16 calc_opval = (fullvalue >> 16) & 0xFFFF;
+  if ( (fullvalue & 0x8000) != 0 )
+    calc_opval += 1;
+  if ( calc_opval != int16(opval) )
+    return false;
+
+  *target = ri.target;
+  *base = ri.base;
+  return true;
+}
+
+//--------------------------------------------------------------------------
+// simple format
+static void idaapi ha16_get_format(qstring *format)
+{
+  *format = COLSTR("%s@ha", SCOLOR_KEYWORD);
 }
 
 //--------------------------------------------------------------------------
@@ -143,8 +141,8 @@ static const custom_refinfo_handler_t ref_ha16 =
   sizeof(custom_refinfo_handler_t),
   "HIGHA16",
   "high adjusted 16 bits of 32-bit offset",
-  0,                    // properties (currently 0)
-  NULL,                 // calc_basevalue, use ::calc_refinfo_basevalue
-  NULL,                 // calc_target, use ::calc_refinfo_target
-  ha16_gen_expr,
+  0,                        // properties (currently 0)
+  NULL,                     // gen_expr
+  ha16_calc_reference_data, // calc_reference_data
+  ha16_get_format,          // get_format
 };

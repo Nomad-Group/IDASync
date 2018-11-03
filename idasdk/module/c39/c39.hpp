@@ -28,26 +28,23 @@
 #else
 #define ENUM8BIT
 #endif
-enum C39_registers ENUM8BIT { rNULLReg,
-        rA, rX,rY,
-        rVcs, rVds};
+enum C39_registers ENUM8BIT
+{
+  rNULLReg,
+  rA,
+  rX, rY,
+  rVcs, rVds
+};
 
-#if IDP_INTERFACE_VERSION > 37
-extern char deviceparams[];
-extern char device[];
-#endif
+extern qstring deviceparams;
+extern qstring device;
 
 //------------------------------------------------------------------------
-void    idaapi C39_header(void);
-void    idaapi C39_footer(void);
-
-void    idaapi C39_segstart(ea_t ea);
-
-int     idaapi C39_ana(void);
-int     idaapi C39_emu(void);
-void    idaapi C39_out(void);
-bool    idaapi C39_outop(op_t &op);
-
-void    idaapi C39_data(ea_t ea);
+void    idaapi C39_header(outctx_t &ctx);
+void    idaapi C39_footer(outctx_t &ctx);
+void    idaapi C39_segstart(outctx_t &ctx, segment_t *seg);
+int     idaapi C39_ana(insn_t *insn);
+int     idaapi C39_emu(const insn_t &insn);
+void    idaapi C39_data(outctx_t &ctx, bool analyze_only);
 
 #endif

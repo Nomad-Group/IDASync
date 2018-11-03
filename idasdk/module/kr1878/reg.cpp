@@ -3,7 +3,7 @@
 #include "kr1878.hpp"
 #include <diskio.hpp>
 #include <entry.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //--------------------------------------------------------------------------
 static const char *const register_names[] =
@@ -50,7 +50,6 @@ static const interrupt_t ints[] =
 //-----------------------------------------------------------------------
 static const asm_t motasm =
 {
-//   AS_ASCIIC
    ASH_HEXF4    // $34
   |ASD_DECF0    // 34
   |ASB_BINF2    // %01010
@@ -63,7 +62,6 @@ static const asm_t motasm =
   "Angstrem KR1878VE1 Assembler",
   0,
   NULL,         // header lines
-  NULL,         // bad instructions
   "org",        // org
   "end",        // end
 
@@ -86,10 +84,6 @@ static const asm_t motasm =
   "ds %s",      // uninited arrays
   "equ",        // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "*",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -129,7 +123,6 @@ static const asm_t gas =
   "GNU-like hypothetical assembler",
   0,
   NULL,         // header lines
-  NULL,         // bad instructions
   ".org",       // org
   NULL,         // end
 
@@ -152,10 +145,6 @@ static const asm_t gas =
   ".space %s",  // uninited arrays
   "=",          // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   ".",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -190,45 +179,43 @@ static const asm_t *const asms[] = { &motasm, &gas, NULL };
 static ea_t AdditionalSegment(int size, int offset, const char *name)
 {
   segment_t s;
-  s.startEA = freechunk(0x100000, size, 0xF);
-  s.endEA   = s.startEA + size;
-  s.sel     = allocate_selector((s.startEA-offset) >> 4);
+  s.start_ea = free_chunk(0x100000, size, 0xF);
+  s.end_ea   = s.start_ea + size;
+  s.sel     = allocate_selector((s.start_ea-offset) >> 4);
   s.type    = SEG_DATA;
   add_segm_ex(&s, name, "DATA", ADDSEG_NOSREG|ADDSEG_OR_DIE);
-  return s.startEA - offset;
+  return s.start_ea - offset;
 }
 
 inline ea_t get_start(const segment_t *s)
 {
-  return s ? s->startEA : BADADDR;
+  return s ? s->start_ea : BADADDR;
 }
 
 //--------------------------------------------------------------------------
-static ioport_t *xports = NULL;
-static size_t numxports = 0;
-static char device[MAXSTR];
+static ioports_t ports;
+static qstring device;
 netnode helper;
 ea_t xmem;
 
-const char *find_port(ea_t address)
+const ioport_t *find_port(ea_t address)
 {
-  const ioport_t *port = find_ioport(xports, numxports, address);
-  return port ? port->name : NULL;
+  return find_ioport(ports, address);
 }
 
 static void read_kr1878_cfg(void)
 {
-  xports = read_ioports(&numxports, "kr1878.cfg", device, sizeof(device), NULL);
-  for ( size_t i=0; i < numxports; i++ )
+  read_ioports(&ports, &device, "kr1878.cfg");
+  for ( size_t i=0; i < ports.size(); i++ )
   {
-    ioport_t *p = xports + i;
-    ea_t ea = xmem + p->address;
-    const char *name = p->name;
+    const ioport_t &p = ports[i];
+    ea_t ea = xmem + p.address;
+    const char *name = p.name.c_str();
     ea_t nameea = get_name_ea(BADADDR, name);
     if ( nameea != ea )
     {
       set_name(nameea, "");
-      if ( !set_name(ea, name, SN_NOWARN) )
+      if ( !set_name(ea, name, SN_NOCHECK|SN_NOWARN) )
         set_cmt(ea, name, 0);
     }
   }
@@ -238,65 +225,79 @@ static void set_device_name(const char *dev)
 {
   if ( dev )
   {
-    qstrncpy(device, dev, sizeof(device));
+    device = dev;
     read_kr1878_cfg();
   }
 }
 
 const char *idaapi set_idp_options(const char *keyword,int /*value_type*/,const void * /*value*/)
 {
-  if ( keyword != NULL ) return IDPOPT_BADKEY;
-  if ( choose_ioport_device("kr1878.cfg", device, sizeof(device), NULL) )
+  if ( keyword != NULL )
+    return IDPOPT_BADKEY;
+  if ( choose_ioport_device(&device, "kr1878.cfg") )
     read_kr1878_cfg();
   return IDPOPT_OK;
 }
 
-//--------------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+//-----------------------------------------------------------------------
+// We always return "yes" because of the messy problem that
+// there are additional operands with wrong operand number (always 1)
+static bool idaapi can_have_type(const op_t &)
 {
-  va_list va;
-  va_start(va, msgid);
+  return true;
+}
 
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
+{
+  switch ( code )
+  {
+    case idb_event::savebase:
+    case idb_event::closebase:
+      helper.supset(0, device.c_str());
+      break;
+  }
+  return 0;
+}
 
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
 //      __emit__(0xCC);   // debugger trap
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ kr1878");
       init_analyzer();
-      inf.s_assume = 1;
-    default:
+      setflag(inf.outflags, OFLG_GEN_ASSUME, 1);
       break;
 
-    case processor_t::term:
-      free_ioports(xports, numxports);
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::newfile:      // new file loaded
+    case processor_t::ev_newfile:      // new file loaded
       {
         for ( int i=0; i < qnumber(ints); i++ )
         {
-          ea_t ea = inf.minEA + ints[i].offset;
-          if ( !isLoaded(ea) ) continue;
+          ea_t ea = inf.min_ea + ints[i].offset;
+          if ( !is_loaded(ea) )
+            continue;
           add_entry(ea, ea, ints[i].name, true);
         }
 
         segment_t *s0 = get_first_seg();
         if ( s0 != NULL )
         {
-          segment_t *s1 = get_next_seg(s0->startEA);
+          segment_t *s1 = get_next_seg(s0->start_ea);
           set_segm_name(s0, "CODE");
           for ( int i = as; i <= vDS; i++ )
           {
-            set_default_segreg_value(s0, i, BADSEL);
-            set_default_segreg_value(s1, i, BADSEL);
+            set_default_sreg_value(s0, i, BADSEL);
+            set_default_sreg_value(s1, i, BADSEL);
           }
         }
         xmem = AdditionalSegment(0x100, 0, "MEM");
@@ -304,41 +305,130 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
       read_kr1878_cfg();
       break;
 
-    case processor_t::oldfile:      // old file loaded
+    case processor_t::ev_oldfile:      // old file loaded
       xmem = get_start(get_segm_by_name("MEM"));
+      if ( helper.supstr(&device, 0) > 0 )
+        set_device_name(device.c_str());
+      break;
+
+    case processor_t::ev_is_sane_insn:
       {
-        char buf[MAXSTR];
-        if ( helper.supval(0, buf, sizeof(buf)) > 0 )
-          set_device_name(buf);
+        const insn_t *insn = va_arg(va, insn_t *);
+        int nocrefs = va_arg(va, int);
+        return is_sane_insn(*insn, nocrefs) == 1 ? 1 : -1;
       }
-      break;
 
-    case processor_t::savebase:
-    case processor_t::closebase:
-      helper.supset(0, device);
-      break;
-
-    case processor_t::is_sane_insn:
-      return is_sane_insn(va_arg(va, int));
-
-    case processor_t::may_be_func:
+    case processor_t::ev_may_be_func:
                                 // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
+                                // arg: instruction
                                 // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
-      return may_be_func();
-  }
-  va_end(va);
-  return 1;
-}
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        return may_be_func(*insn);
+      }
 
-//-----------------------------------------------------------------------
-// We always return "yes" because of the messy problem that
-// there are additional operands with wrong operand number (always 1)
-static bool idaapi can_have_type(op_t &)
-{
-  return true;
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        kr1878_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        kr1878_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        kr1878_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        kr1878_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        kr1878_assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
+  }
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -355,14 +445,17 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_KR1878,                  // id
-  PRN_HEX               // hex numbers
-  | PR_ALIGN            // data items must be aligned
-  | PR_BINMEM           // segmentation is done by the processor mode
-  | PR_SEGS,            // has segment registers
-  16,                           // 16 bits in a byte for code segments
-  8,                           // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_KR1878,            // id
+                          // flag
+    PRN_HEX               // hex numbers
+  | PR_ALIGN              // data items must be aligned
+  | PR_BINMEM             // segmentation is done by the processor mode
+  | PR_SEGS,              // has segment registers
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  16,                     // 16 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -371,31 +464,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  assumes,              // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  kr1878_data,          // generate ...                    data directive
-  NULL,                 // compare operands
-  can_have_type,        // can_have_type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   as,                   // first
   vDS,                  // last
@@ -407,28 +477,13 @@ processor_t LPH =
 
   KR1878_null,
   KR1878_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 0 },      // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  is_sp_based,          // int (*is_sp_based)(op_t &x);
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,long v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   KR1878_rts,            // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

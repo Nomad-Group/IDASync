@@ -10,6 +10,7 @@
 #else    // __NT__
 #  include <errno.h>
 #  include <sys/socket.h>
+#  include <sys/select.h>
 #endif
 
 #ifdef __NT__
@@ -41,7 +42,7 @@
        if ( rc != -1 || errno != EINTR ) \
          return rc;                      \
      }                                   \
-     while (true)
+     while ( true )
 #  define SOCKLEN_T  socklen_t
 #  define SOCKBUF_T  void *
 #endif
@@ -96,6 +97,36 @@ namespace DONT_USE_FUNCS
   inline int select(int, fd_set *, fd_set *, fd_set *, struct timeval *) { return 0; }
 }
 using namespace DONT_USE_FUNCS;
+
+//-------------------------------------------------------------------------
+/// Get the IPv4 or IPv6 address corresponding to the given host.
+///
+/// Note: under Windows CE, only IPv4 is supported.
+///
+/// \param out should be of type 'sockaddr_in' or 'sockaddr_in6', depending
+///            on the value of 'family'.
+/// \param name the host name.
+/// \param family either AF_INET or AF_INET6.
+/// \param port a port number, or 0 for none.
+/// \return true on success, false otherwise
+idaman bool ida_export qhost2addr_(
+        void *out,
+        const char *name,
+        ushort family,
+        ushort port = 0);
+
+//-------------------------------------------------------------------------
+inline bool qhost2addr(struct sockaddr_in *out, const char *name, ushort port = 0)
+{
+  return qhost2addr_(out, name, AF_INET, port);
+}
+
+//-------------------------------------------------------------------------
+inline bool qhost2addr(struct sockaddr_in6 *out, const char *name, ushort port = 0)
+{
+  return qhost2addr_(out, name, AF_INET6, port);
+}
+
 
 #undef SIG_SAFE_CALL
 #undef SOCKLEN_T

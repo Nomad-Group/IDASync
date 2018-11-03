@@ -10,7 +10,7 @@
 #include <ctype.h>
 #include "pic.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //--------------------------------------------------------------------------
 static const char *register_names[] =
@@ -54,7 +54,6 @@ static const asm_t mpalc =
   "Microchip's MPALC",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   "org",        // org
   "end",        // end
 
@@ -77,10 +76,6 @@ static const asm_t mpalc =
   "res %s",     // uninited arrays
   "equ",        // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "$",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -137,9 +132,8 @@ ea_t map_port(ea_t from)
 }
 
 //--------------------------------------------------------------------------
-static ioport_t *ports = NULL;
-static size_t numports = 0;
-char device[MAXSTR] = "";
+static ioports_t ports;
+qstring device;
 static const char *cfgname = "pic12.cfg";
 
 inline void get_cfg_filename(char *buf, size_t bufsize)
@@ -151,11 +145,11 @@ inline void get_cfg_filename(char *buf, size_t bufsize)
 static void create_mappings(void)
 {
   free_mappings();
-  for ( int i=0; i < numports; i++ )
+  for ( int i=0; i < ports.size(); i++ )
   {
-    const char *name = ports[i].name;
+    const char *name = ports[i].name.c_str();
     ea_t nameea = get_name_ea(BADADDR, name);
-    if ( nameea != BADADDR && nameea > dataseg)
+    if ( nameea != BADADDR && nameea > dataseg )
       add_mapping(ports[i].address, nameea-dataseg);
   }
 }
@@ -164,14 +158,14 @@ static void create_mappings(void)
 static ea_t AddSegment(ea_t start, size_t size, ea_t base, const char *name, uchar type)
 {
   segment_t s;
-  s.startEA = start;
-  s.endEA   = start + size;
+  s.start_ea = start;
+  s.end_ea   = start + size;
   s.sel     = allocate_selector(base >> 4);
   s.type    = type;
   s.align   = saRelByte;
   s.comb    = scPub;
   add_segm_ex(&s, name, NULL, ADDSEG_NOSREG|ADDSEG_OR_DIE);
-  return s.startEA;
+  return s.start_ea;
 }
 
 //----------------------------------------------------------------------
@@ -190,7 +184,7 @@ static bool handle_area(ea_t start, ea_t end, const char *name, const char *acla
   else if ( strcmp(aclass, "DATA") == 0 )
   {
     if ( dataseg == BADADDR )
-      dataseg = freechunk(0, 0x1000, -0xF);
+      dataseg = free_chunk(0, 0x1000, -0xF);
     uchar type = stristr(name, "FSR") != NULL ? SEG_IMEM : SEG_DATA;
     AddSegment(dataseg + start, end-start, dataseg, name, type);
   }
@@ -207,8 +201,8 @@ static bool handle_area(ea_t start, ea_t end, const char *name, const char *acla
 #include "../iocommon.cpp"
 static void load_symbols_without_infotype(int /*respect_args*/)
 {
-  free_ioports(ports, numports);
-  ports = read_ioports(&numports, cfgname, device, sizeof(device), callback);
+  ports.clear();
+  read_ioports(&ports, &device, cfgname, callback);
   create_mappings();
 }
 
@@ -220,21 +214,21 @@ static void load_symbols(int respect_args)
 
 const char *find_sym(ea_t address)
 {
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? port->name : NULL;
+  const ioport_t *port = find_ioport(ports, address);
+  return port ? port->name.c_str() : NULL;
 }
 
-const ioport_bit_t *find_bits(ea_t address)
+const ioport_bits_t *find_bits(ea_t address)
 {
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? (*port->bits) : NULL;
+  const ioport_t *port = find_ioport(ports, address);
+  return port ? (&port->bits) : NULL;
 }
 
 const char *find_bit(ea_t address, int bit)
 {
   address = map_port(address);
-  const ioport_bit_t *b = find_ioport_bit(ports, numports, address, bit);
-  return b ? b->name : NULL;
+  const ioport_bit_t *b = find_ioport_bit(ports, address, bit);
+  return b ? b->name.c_str() : NULL;
 }
 
 //----------------------------------------------------------------------
@@ -243,32 +237,32 @@ static void apply_symbols(void)
   free_mappings();
   if ( dataseg != BADADDR )
   {
-    for ( int i=0; i < numports; i++ )
+    for ( int i=0; i < ports.size(); i++ )
     {
       ea_t ea = calc_data_mem(ports[i].address);
       segment_t *s = getseg(ea);
       if ( s == NULL || s->type != SEG_IMEM )
         continue;
-      doByte(ea, 1);
-      const char *name = ports[i].name;
-      if ( !set_name(ea, name, SN_NOWARN) )
+      create_byte(ea, 1);
+      const char *name = ports[i].name.c_str();
+      if ( !set_name(ea, name, SN_NOCHECK|SN_NOWARN) )
         set_cmt(ea, name, 0);
     }
-    for ( segment_t *d = getseg(dataseg); d != NULL; d = get_next_seg(d->startEA) )
+    for ( segment_t *d = getseg(dataseg); d != NULL; d = get_next_seg(d->start_ea) )
     {
       if ( d->type != SEG_IMEM )
         continue;
-      ea_t ea = d->startEA;
-      ea_t dataend = d->endEA;
+      ea_t ea = d->start_ea;
+      ea_t dataend = d->end_ea;
       while ( 1 )
       {
         ea = next_unknown(ea, dataend);
         if ( ea == BADADDR )
           break;
-        ea_t end = nextthat(ea, dataend, f_isHead, NULL);
+        ea_t end = next_that(ea, dataend, f_is_head);
         if ( end == BADADDR )
           end = dataend;
-        doByte(ea, end-ea);
+        create_byte(ea, end-ea);
       }
     }
     create_mappings();
@@ -278,13 +272,13 @@ static void apply_symbols(void)
 //------------------------------------------------------------------
 static void setup_device(int lrespect_info)
 {
-  if ( choose_ioport_device(cfgname, device, sizeof(device), parse_area_line0) )
+  if ( choose_ioport_device(&device, cfgname, parse_area_line0) )
   {
     // we don't pass IORESP_PORT because that would rename bytes in the code segment
     // we'll handle port renaming ourselves
     if ( display_infotype_dialog(IORESP_ALL, &lrespect_info, cfgname) )
     {
-      set_device_name(device, lrespect_info & ~IORESP_PORT);
+      set_device_name(device.c_str(), lrespect_info & ~IORESP_PORT);
       if ( (lrespect_info & IORESP_PORT) != 0 )
          apply_symbols();
     }
@@ -294,7 +288,7 @@ static void setup_device(int lrespect_info)
 //----------------------------------------------------------------------
 static ea_t AdditionalSegment(size_t size, ea_t offset, const char *name)
 {
-  ea_t start = freechunk(0, size, -0xF);
+  ea_t start = free_chunk(0, size, -0xF);
   return AddSegment(start, size, start - offset, name, SEG_IMEM) - offset;
 }
 
@@ -312,40 +306,114 @@ static const proctype_t ptypes[] =
   PIC16
 };
 
+//--------------------------------------------------------------------------
+static int idaapi choose_device(int, form_actions_t &)
+{
+  if ( choose_ioport_device(&device, cfgname) )
+  {
+    load_symbols(IORESP_ALL);
+    apply_symbols();
+  }
+  return 0;
+}
+
+static const char *idaapi set_idp_options(const char *keyword,int value_type,const void *value)
+{
+  if ( keyword == NULL )
+  {
+    if ( ptype != PIC16 )
+    {
+      static const char form[] =
+        "HELP\n"
+        "PIC specific options\n"
+        "\n"
+        " Use macro instructions\n"
+        "\n"
+        "       If this option is on, IDA will try to combine several instructions\n"
+        "       into a macro instruction\n"
+        "       For example,\n"
+        "\n"
+        "               comf    x,1\n"
+        "               incf    x,w\n"
+        "\n"
+        "       will be replaced by\n"
+        "\n"
+        "               negf    x,d\n"
+        "\n"
+        "ENDHELP\n"
+        "PIC specific options\n"
+        "\n"
+        " <Use ~m~acro instructions:C>>\n"
+        "\n"
+        " <~C~hoose device name:B:0::>\n"
+        "\n"
+        "\n";
+      ask_form(form, &idpflags, choose_device);
+    }
+    else
+    {
+      static const char form[] =
+        "PIC specific options\n"
+        "\n"
+        " <~C~hoose device name:B:0::>\n"
+        "\n"
+        "\n";
+      ask_form(form, choose_device);
+    }
+    return IDPOPT_OK;
+  }
+  else
+  {
+    if ( value_type != IDPOPT_BIT )
+      return IDPOPT_BADTYPE;
+    if ( strcmp(keyword, "PIC_MACRO") == 0 )
+    {
+      setflag(idpflags, IDP_MACRO, *(int*)value != 0);
+      return IDPOPT_OK;
+    }
+    return IDPOPT_BADKEY;
+  }
+}
+
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
+{
+  switch ( code )
+  {
+    case idb_event::closebase:
+    case idb_event::savebase:
+      helper.altset(0,  ea2node(dataseg));
+      helper.altset(-1, idpflags);
+      helper.supset(0,  device.c_str());
+      break;
+  }
+  return 0;
+}
 
 //----------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ pic");
-      helper.supval(0, device, sizeof(device));
-    default:
+      helper.supstr(&device, 0);
       break;
 
-    case processor_t::term:
+    case processor_t::ev_term:
       free_mappings();
-      free_ioports(ports, numports);
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::newfile:   // new file loaded
+    case processor_t::ev_newfile:   // new file loaded
       {
         segment_t *s0 = get_first_seg();
         if ( s0 != NULL )
         {
-          ea_t firstEA = s0->startEA;
+          ea_t firstEA = s0->start_ea;
           if ( ptype == PIC12 || ptype == PIC14 )
           {
             set_segm_name(s0, "CODE");
@@ -359,42 +427,36 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
           s0 = getseg(firstEA);
           if ( s0 != NULL )
           {
-            set_default_segreg_value(s0, BANK, 0);
-            set_default_segreg_value(s0, PCLATH, 0);
-            set_default_segreg_value(s0, PCLATU, 0);
+            set_default_sreg_value(s0, BANK, 0);
+            set_default_sreg_value(s0, PCLATH, 0);
+            set_default_sreg_value(s0, PCLATU, 0);
           }
           segment_t *s1 = getseg(dataseg);
           if ( s1 != NULL )
           {
-            set_default_segreg_value(s1, BANK, 0);
-            set_default_segreg_value(s1, PCLATH, 0);
-            set_default_segreg_value(s1, PCLATU, 0);
+            set_default_sreg_value(s1, BANK, 0);
+            set_default_sreg_value(s1, PCLATH, 0);
+            set_default_sreg_value(s1, PCLATU, 0);
           }
         }
       }
       break;
 
-    case processor_t::oldfile:   // old file loaded
+    case processor_t::ev_oldfile:   // old file loaded
       idpflags = (ushort)helper.altval(-1);
-      dataseg  = helper.altval(0);
+      dataseg  = node2ea(helper.altval(0));
       load_symbols_without_infotype(IORESP_PORT);
-      for ( segment_t *s=get_first_seg(); s != NULL; s=get_next_seg(s->startEA) )
+      for ( segment_t *s=get_first_seg(); s != NULL; s=get_next_seg(s->start_ea) )
       {
-        if ( s->defsr[PCLATH-ph.regFirstSreg] == BADSEL )
-          s->defsr[PCLATH-ph.regFirstSreg] = 0;
+        if ( s->defsr[PCLATH-ph.reg_first_sreg] == BADSEL )
+          s->defsr[PCLATH-ph.reg_first_sreg] = 0;
       }
       break;
 
-    case processor_t::closebase:
-    case processor_t::savebase:
-      helper.altset(0,  dataseg);
-      helper.altset(-1, idpflags);
-      helper.supset(0,  device);
-      break;
-
-    case processor_t::newprc:    // new processor type
+    case processor_t::ev_newprc:    // new processor type
       {
         int n = va_arg(va, int);
+        // bool keep_cfg = va_argi(va, bool);
         static bool set = false;
         if ( set )
           return 0;
@@ -416,9 +478,8 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
           case PIC16:
             register_names[BANK] = "bsr";
             cfgname = "pic16.cfg";
-            idpflags = 0;
             ph.cnbits = 8;
-            ph.regLastSreg = PCLATU;
+            ph.reg_last_sreg = PCLATU;
             break;
           default:
             error("interr in setprc");
@@ -427,81 +488,119 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
       }
       break;
 
-    case processor_t::newasm:    // new assembler type
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        pic_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        pic_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        pic_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        pic_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        pic_assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_data:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        bool analyze_only = va_argi(va, bool);
+        pic_data(*ctx, analyze_only);
+        return 1;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_get_frame_retsize:
+      {
+        int *frsize = va_arg(va, int *);
+        const func_t *pfn = va_arg(va, const func_t *);
+        *frsize = PIC_get_frame_retsize(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
       break;
-
-    case processor_t::newseg:    // new segment
-      break;
-
   }
-  va_end(va);
-  return 1;
-}
-
-//--------------------------------------------------------------------------
-static void idaapi choose_device(TView *[],int)
-{
-  if ( choose_ioport_device(cfgname, device, sizeof(device), NULL) )
-  {
-    load_symbols(IORESP_ALL);
-    apply_symbols();
-  }
-}
-
-static const char *idaapi set_idp_options(const char *keyword,int value_type,const void *value)
-{
-  if ( keyword == NULL )
-  {
-    if ( ptype != PIC16) {
-      static const char form[] =
-"HELP\n"
-"PIC specific options\n"
-"\n"
-" Use macro instructions\n"
-"\n"
-"       If this option is on, IDA will try to combine several instructions\n"
-"       into a macro instruction\n"
-"       For example,\n"
-"\n"
-"               comf    x,1\n"
-"               incf    x,w\n"
-"\n"
-"       will be replaced by\n"
-"\n"
-"               negf    x,d\n"
-"\n"
-"ENDHELP\n"
-"PIC specific options\n"
-"\n"
-" <Use ~m~acro instructions:C>>\n"
-"\n"
-" <~C~hoose device name:B:0::>\n"
-"\n"
-"\n";
-      AskUsingForm_c(form, &idpflags, choose_device);
-    }
-    else
-    {
-      static const char form[] =
-"PIC specific options\n"
-"\n"
-" <~C~hoose device name:B:0::>\n"
-"\n"
-"\n";
-      AskUsingForm_c(form, choose_device);
-    }
-    return IDPOPT_OK;
-  }
-  else
-  {
-    if ( value_type != IDPOPT_BIT ) return IDPOPT_BADTYPE;
-    if ( strcmp(keyword, "PIC_MACRO") == 0 )
-    {
-      setflag(idpflags, IDP_MACRO, *(int*)value != 0);
-      return IDPOPT_OK;
-    }
-    return IDPOPT_BADKEY;
-  }
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -524,11 +623,18 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_PIC,                     // id
-  PRN_HEX | PR_SEGS | PR_SGROTHER | PR_STACK_UP | PR_RNAMESOK,
-  12,                           // 12/14/16 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_PIC,               // id
+                          // flag
+    PRN_HEX
+  | PR_SEGS
+  | PR_SGROTHER
+  | PR_STACK_UP
+  | PR_RNAMESOK,
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  12,                     // 12/14/16 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -537,31 +643,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  assumes,              // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  data,                 // generate ...                    data
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   BANK,                 // first
   PCLATH,               // last
@@ -573,30 +656,13 @@ processor_t LPH =
 
   PIC_null,
   PIC_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 0, 0, 0 },       // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  is_sp_based,          // Check whether the operand is relative to stack pointer
-  create_func_frame,    // create frame of newly created function
-  PIC_get_frame_retsize, // Get size of function return address in bytes
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   PIC_return,           // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };
-
-

@@ -5,6 +5,7 @@
 
 #include <err.h>
 #include <name.hpp>
+#include <expr.hpp>
 #include <segment.hpp>
 #include <typeinf.hpp>
 
@@ -82,11 +83,11 @@ bool lock_end(void)
 
 //--------------------------------------------------------------------------
 void report_idc_error(
-      rpc_engine_t *,
-      ea_t ea,
-      error_t code,
-      ssize_t errval,
-      const char *errprm)
+        rpc_engine_t *,
+        ea_t ea,
+        error_t code,
+        ssize_t errval,
+        const char *errprm)
 {
   // Copy errval/errprm to the locations expected by qstrerror()
   if ( errprm != NULL && errprm != get_error_string(0) )
@@ -96,9 +97,7 @@ void report_idc_error(
   else
     set_error_data(0, errval);
 
-  char buf[MAXSTR];
-  qstrerror(code, buf, sizeof(buf));
-  warning("AUTOHIDE NONE\n%a: %s", ea, buf);
+  warning("AUTOHIDE NONE\n%a: %s", ea, qstrerror(code));
 }
 
 //--------------------------------------------------------------------------
@@ -142,22 +141,25 @@ int idaapi s_eval_lowcnd(thid_t tid, ea_t ea)
   return g_dbgmod.dbg_eval_lowcnd(tid, ea);
 }
 
-int idaapi s_process_get_info(int n,
-                              const char *input,
-                              process_info_t *info)
+int idaapi s_get_processes(procinfo_vec_t *proclist)
 {
-  return g_dbgmod.dbg_process_get_info(n, input, info);
+  return g_dbgmod.dbg_get_processes(proclist);
 }
 
-int idaapi s_init(bool _debug_debugger)
+void idaapi s_set_debugging(bool _debug_debugger)
+{
+  g_dbgmod.dbg_set_debugging(_debug_debugger);
+}
+
+int idaapi s_init(void)
 {
   g_dbgmod.debugger_flags = debugger.flags;
-  return g_dbgmod.dbg_init(_debug_debugger);
+  return g_dbgmod.dbg_init();
 }
 
-int idaapi s_attach_process(pid_t process_id, int event_id)
+int idaapi s_attach_process(pid_t process_id, int event_id, int flags)
 {
-  int rc = g_dbgmod.dbg_attach_process(process_id, event_id);
+  int rc = g_dbgmod.dbg_attach_process(process_id, event_id, flags);
   return rc;
 }
 
@@ -211,11 +213,9 @@ ssize_t idaapi s_write_memory(ea_t ea, const void *buffer, size_t size)
   return g_dbgmod.dbg_write_memory(ea, buffer, size);
 }
 
-int idaapi s_thread_get_sreg_base(thid_t thread_id,
-                                  int sreg_value,
-                                  ea_t *ea)
+int idaapi s_thread_get_sreg_base(ea_t *ea, thid_t thread_id, int sreg_value)
 {
-  return g_dbgmod.dbg_thread_get_sreg_base(thread_id, sreg_value, ea);
+  return g_dbgmod.dbg_thread_get_sreg_base(ea, thread_id, sreg_value);
 }
 
 ea_t idaapi s_map_address(ea_t ea, const regval_t *regs, int regnum)
@@ -224,9 +224,9 @@ ea_t idaapi s_map_address(ea_t ea, const regval_t *regs, int regnum)
 }
 
 //---------------------------------------------------------------------------
-int idaapi s_get_memory_info(meminfo_vec_t &areas)
+int idaapi s_get_memory_info(meminfo_vec_t &ranges)
 {
-  return g_dbgmod.dbg_get_memory_info(areas);
+  return g_dbgmod.dbg_get_memory_info(ranges);
 }
 
 //---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ int idaapi s_start_process(
 }
 
 //--------------------------------------------------------------------------
-int idaapi s_open_file(const char *file, uint32 *fsize, bool readonly)
+int idaapi s_open_file(const char *file, uint64 *fsize, bool readonly)
 {
   return g_dbgmod.dbg_open_file(file, fsize, readonly);
 }
@@ -260,13 +260,13 @@ void idaapi s_close_file(int fn)
 }
 
 //--------------------------------------------------------------------------
-ssize_t idaapi s_read_file(int fn, uint32 off, void *buf, size_t size)
+ssize_t idaapi s_read_file(int fn, qoff64_t off, void *buf, size_t size)
 {
   return g_dbgmod.dbg_read_file(fn, off, buf, size);
 }
 
 //--------------------------------------------------------------------------
-ssize_t idaapi s_write_file(int fn, uint32 off, const void *buf, size_t size)
+ssize_t idaapi s_write_file(int fn, qoff64_t off, const void *buf, size_t size)
 {
   return g_dbgmod.dbg_write_file(fn, off, buf, size);
 }
@@ -308,11 +308,12 @@ int idaapi s_cleanup_appcall(thid_t tid)
 }
 
 //--------------------------------------------------------------------------
-int idaapi s_ioctl(int fn,
-                   const void *buf,
-                   size_t size,
-                   void **poutbuf,
-                   ssize_t *poutsize)
+int idaapi s_ioctl(
+        int fn,
+        const void *buf,
+        size_t size,
+        void **poutbuf,
+        ssize_t *poutsize)
 {
   return g_dbgmod.handle_ioctl(fn, buf, size, poutbuf, poutsize);
 }
@@ -339,6 +340,12 @@ int idaapi s_rexec(const char *cmdline)
 void idaapi s_get_debapp_attrs(debapp_attrs_t *out_pattrs)
 {
   g_dbgmod.dbg_get_debapp_attrs(out_pattrs);
+}
+
+//--------------------------------------------------------------------------
+bool idaapi s_get_srcinfo_path(qstring *path, ea_t base)
+{
+  return g_dbgmod.dbg_get_srcinfo_path(path, base);
 }
 
 //--------------------------------------------------------------------------
@@ -374,7 +381,7 @@ void init_dbg_idcfuncs(bool init)
      DEBUGGER_ID == DEBUGGER_ID_X86_IA32_BOCHS
   qnotused(init);
 #else
-  setup_lowcnd_regfuncs(init ? GetRegValue : NULL ,
-                        init ? SetRegValue : NULL);
+  setup_lowcnd_regfuncs(init ? idc_get_reg_value : NULL,
+                        init ? idc_set_reg_value : NULL);
 #endif
 }

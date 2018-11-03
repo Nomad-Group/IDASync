@@ -139,7 +139,7 @@ DSP56_vsl,          // Viterbi Shift Left
 DSP56_wait,         // Wait for Interrupt or DMA Request (Low-Power Standby)
 DSP56_zero,         // Zero Extend Accumulator
 DSP56_swi,          // Software Interrupt (only for 56000)
-DSP56_pmov,         // Pseudo cmd
+DSP56_pmov,         // Pseudo insn
 DSP56_last,
 
 };

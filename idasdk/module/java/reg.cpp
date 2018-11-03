@@ -14,6 +14,7 @@
 #include <diskio.hpp>
 #include <ieee.h>
 #include "npooluti.hpp"
+#include "notify_codes.hpp"
 
 uint32 idpflags = IDFM__DEFAULT;
 
@@ -22,45 +23,39 @@ static int start_asm_list;
 //-----------------------------------------------------------------------
 #ifdef __debug__
 NORETURN void _destroyed(const char *from)
-#else
-NORETURN void _destroyed(void)
-#endif
 {
-  error("Database is corrupted!"
-#ifdef __debug__
-                               " [at: %s]", from
-#endif
-
-                                                );
+  error("Database is corrupted! [at: %s]", from);
 }
 
 //-----------------------------------------------------------------------
-//UNCOMPAT
-#ifdef __debug__
 NORETURN void _faterr(uchar mode, const char *from)
-#else
-NORETURN void _faterr(uchar mode)
-#endif
 {
-  error("Internal error (%s)"
-#ifdef __debug__
-                               " [at: %s]"
-#endif
-        , mode ? "compatibility" : "idp"
-#ifdef __debug__
-        , from
-#endif
-       );
+  error("Internal error (%s) [at: %s]",
+        mode ? "compatibility" : "idp",
+        from);
 }
+#else
+//-----------------------------------------------------------------------
+NORETURN void _destroyed(void)
+{
+  error("Database is corrupted!");
+}
+
+//-----------------------------------------------------------------------
+NORETURN void _faterr(uchar mode)
+{
+  error("Internal error (%s)", mode ? "compatibility" : "idp");
+}
+#endif
 
 //-----------------------------------------------------------------------
 static void sm_validate(const SegInfo *si)
 {
-  ea_t segTopEA = si->startEA + si->CodeSize;
+  ea_t segTopEA = si->start_ea + si->CodeSize;
   netnode temp(si->smNode);
-  nodeidx_t nid = temp.sup1st();
+  nodeidx_t nid = temp.supfirst();
 
-  if ( (ea_t)nid < si->startEA )
+  if ( (ea_t)nid < si->start_ea )
     goto destroyed;
 
   do
@@ -69,9 +64,9 @@ static void sm_validate(const SegInfo *si)
       goto destroyed;
     if ( temp.supval(nid, NULL, 0) != sizeof(sm_info_t) )
       goto destroyed;
-    if ( !isHead(get_flags_novalue((ea_t)nid)) )
+    if ( !is_head(get_flags((ea_t)nid)) )
     {
-      QueueSet(Q_head, (ea_t)nid);
+      remember_problem(PR_HEAD, (ea_t)nid);
       static bool displayed_nl = false;
       if ( !displayed_nl )
       {
@@ -79,9 +74,9 @@ static void sm_validate(const SegInfo *si)
         msg("\n");
       }
       msg("StackMap refers to nonHead offset %X in Method#%u\n",
-          (uint32)((ea_t)nid - si->startEA), si->id.Number);
+          (uint32)((ea_t)nid - si->start_ea), si->id.Number);
     }
-    nid = temp.supnxt(nid);
+    nid = temp.supnext(nid);
   }
   while ( nid != BADNODE );
   return;
@@ -98,12 +93,12 @@ void coagulate_unused_data(const SegInfo *ps)
   ea_t ea = ps->DataBase;
   for ( ea_t top = ea + ps->DataSize; ea < top; ea++ )
   {
-    if ( isHead(get_flags_novalue(ea))
+    if ( is_head(get_flags(ea))
       && get_first_dref_to(ea) == BADADDR )
     {
       ConstantNode.chardel(ea, UR_TAG);  // unicode renaming support
       del_global_name(ea);
-      do_unknown(ea, DOUNK_SIMPLE);
+      del_items(ea, DELIT_SIMPLE);
       ++size;
       ea_t to;
       while ( (to=get_first_dref_from(ea)) != BADADDR )
@@ -111,258 +106,49 @@ void coagulate_unused_data(const SegInfo *ps)
     }
     else if ( size )
     {
-      do_data_ex(ea-size, alignflag(), size, BADNODE);
+      create_data(ea-size, align_flag(), size, BADNODE);
       size = 0;
     }
   }
   if ( size )
-    do_data_ex(ea-size, alignflag(), size, BADNODE);
+    create_data(ea-size, align_flag(), size, BADNODE);
 }
 
 //--------------------------------------------------------------------------
 //--------------------------------------------------------------------------
 static int idaapi out_asm_file(
         FILE *fp,
-        const char *line,
+        const qstring &line,
         bgcolor_t,
         bgcolor_t)
 {
-  if ( line != NULL )
-  {
-    char buf[MAXSTR];
+  qstring qbuf;
+  tag_remove(&qbuf, line);
+  size_t len = qbuf.length();
+  size_t chk = len;
 
-    tag_remove(line, buf, sizeof(buf));
-    if ( inf.s_entab )
-      entab(buf);
-    size_t len = strlen(buf), chk = len;
-
-    if ( len && buf[len-1] == '\\' )
-      --len;
-    if ( qfwrite(fp, buf, len) != len )
-      return 0;
-    if ( (chk == len && qfputc('\n', fp) == EOF) )
-      return 0;
-  }
+  if ( qbuf.last() == '\\' )
+    --len;
+  if ( qfwrite(fp, qbuf.c_str(), len) != len )
+    return 0;
+  if ( chk == len && qfputc('\n', fp) == EOF )
+    return 0;
   return 1;
 }
 
-//--------------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...) // Various messages:
-{
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int retcode = invoke_callbacks(HT_IDP, msgid, va);
-  if ( retcode )
-    goto done;
-
-  ++retcode;  // = 1;
-
-  switch ( msgid )
-  {
-    case processor_t::init:
-      inf.mf = 1;       //reverse byte!
-      break;
-
-    case processor_t::rename:
-      va_arg(va, ea_t);
-      for ( char const *pn, *p = va_arg(va, const char *);
-          (pn = strchr(p, '\\')) != NULL;
-          p = pn+1 )
-      {
-        if ( *++pn != 'u' )
-        {
-inv_name:
-          --retcode;  // 0
-          warning("Backslash is accepted only as a unicode escape sequence in names");
-          break;
-        }
-        for ( int i = 0; i < 4; i++ )
-          if ( !qisxdigit((uchar)*++pn) )
-            goto inv_name;
-      }
-      break;
-
-    case processor_t::newfile:
-      if ( inf.filetype != f_LOADER )
-      {
-        database_flags |= DBFL_KILL; // clean up the database files
-        error("The input file does not have a supported Java file format");
-      }
-      myBase(va_arg(va, char *));
-      inf.lowoff  = inf.highoff = BADADDR;
-      break;
-
-    case processor_t::oldfile:
-      myBase(NULL);
-      break;
-
-    case processor_t::closebase:
-      memset(&curClass, 0, sizeof(curClass));
-    case processor_t::term:
-      qfree(tsPtr);
-      qfree(smBuf);
-      qfree(annBuf);
-      if ( msgid == processor_t::term )
-        break;
-      tsPtr   = NULL;
-      smBuf   = NULL;
-      annBuf  = NULL;
-      // no break
-    case processor_t::savebase:
-      ConstantNode.altset(CNA_IDPFLAGS, (ushort)idpflags);
-      break;
-
-#ifdef __debug__
-    case processor_t::newprc:
-      if ( va_arg(va, int) == 1 )     // debug mode
-      {
-        ph.flag &= ~(PR_DEFNUM | PR_NOCHANGE);
-        ph.flag |= PRN_HEX;
-        if ( inf.margin == 77 && !inf.binSize && !inf.s_showpref )
-        {
-          ++inf.s_showpref;
-          --debugmode;
-        }
-        else
-        {
-          ++debugmode;
-        }
-      }
-      else                            // normal node
-      {
-        ph.flag &= ~PR_DEFNUM;
-        ph.flag |= (PRN_DEC | PR_NOCHANGE);
-        if ( debugmode == -1
-          && inf.s_showpref
-          && !inf.binSize
-          && inf.margin == 77 )
-        {
-          inf.s_showpref = 0;
-        }
-        debugmode = 0;
-      }
-      break;
-#endif
-
-    case processor_t::loader:
-      {
-        linput_t *li = va_arg(va, linput_t *);
-        FILE *f = qlfile(li);
-        QASSERT(10082, f != NULL);
-        loader(f, va_argi(va, bool));
-        retcode = 0;
-      }
-      if ( start_asm_list )
-        set_target_assembler(1);
-      break;
-
-    case processor_t::out_src_file_lnnum:
-      if ( jasmin() )
-      {
-        va_arg(va, const char *); // skip file name
-        printf_line(2, COLSTR(".line %" FMT_Z, SCOLOR_ASMDIR), va_arg(va, size_t));
-        ++retcode;  // = 2
-      }
-      break;
-
-    case processor_t::gen_asm_or_lst:
-      {
-        static bool mode_changed = false;
-
-        if ( va_argi(va, bool) )          // starting (else end of generation )
-        {
-          va_arg(va, FILE *);             // output file (skip)
-          bool isasm = va_argi(va, bool); // assembler-true, listing-false
-          if ( isasm && (idpflags & IDF_CONVERT) )
-          {
-            va_arg(va, int);              // flags of gen_file() (skip)
-            *va_arg(va, gen_outline_t**) = out_asm_file;
-            idpflags |= IDM_OUTASM;
-          }
-          if ( isasm == jasmin() )
-            break;    // need change mode?
-        }
-        else                              // end of generation.
-        {
-          idpflags &= ~IDM_OUTASM;
-          if ( !mode_changed )
-            break;        // mode changed?
-        }
-        mode_changed = !mode_changed;
-        set_target_assembler(!inf.asmtype);
-      }
-      break;
-
-    case processor_t::get_autocmt:
-      {
-        char *buf = va_arg(va, char *);
-        if ( make_locvar_cmt(buf, va_arg(va, size_t)) )
-          retcode = 2;
-      }
-      break;
-
-    case processor_t::auto_empty:
-      if ( !(curClass.extflg & XFL_C_DONE) ) // kernel BUGs
-      {
-        curClass.extflg |= XFL_C_DONE;
-        msg("JavaLoader finalization stage...");
-        for ( int n = curClass.MethodCnt; n; n-- )
-        {
-          SegInfo si;
-          if ( ClassNode.supval(-n, &si, sizeof(si)) != sizeof(si) )
-            DESTROYED("postprocess");
-          if ( si.smNode || si.DataSize )
-          {
-            showAddr(si.startEA);
-            if ( si.smNode )
-              sm_validate(&si);
-            if ( si.DataSize )
-              coagulate_unused_data(&si);
-          }
-        }
-        ConstantNode.supset(CNS_CLASS, &curClass, sizeof(curClass));  // all chgs
-        sm_node = 0; // anebale work (out) with StackMap
-        msg("OK\n");
-      }
-    default:
-      break;
-  }
-  va_end(va);
-done:
-  return retcode;
-}
+//----------------------------------------------------------------------
+static void idaapi func_header(outctx_t &ctx, func_t *) { ctx.ctxflags |= CTXF_LABEL_OK; }
+static void idaapi func_footer(outctx_t &, func_t *) {}
+static bool idaapi java_specseg(outctx_t &ctx, uchar)    { java_data(ctx, false); return false; }
 
 //----------------------------------------------------------------------
 //  floating point conversion
-static int idaapi j_realcvt(void *m, eNE e, ushort swt)
+int idaapi j_realcvt(void *m, eNE e, ushort swt)
 {
-  inf.mf = 0;
+  inf.set_be(false);
   int i = ieee_realcvt(m, e, swt);
-  inf.mf = 1;
+  inf.set_be(true);
   return i;
-}
-
-//----------------------------------------------------------------------
-void check_float_const(ea_t ea, void *m, char len)
-{
-  if ( !has_cmt(get_flags_novalue(ea)) && j_realcvt(m, NULL, (uchar)len) < 0 )
-  {
-    char cmt[2+5*5+2], *p = cmt;
-
-    *p++ = '0';
-    *p++ = 'x';
-    do
-      p += qsnprintf(p, 5, "%04X", ((ushort *)m)[uchar(len)]);
-    while ( --len >= 0 );
-    QueueSet(Q_att, ea);
-    append_cmt(ea, cmt, false);
-  }
 }
 
 //----------------------------------------------------------------------
@@ -430,7 +216,7 @@ static const char *idaapi set_idp_options(
   {
     ushort tmp = (idpflags >> 16) & IDM__REQMASK;
     ushort flags = idpflags;
-    if ( AskUsingForm_c(form, &flags, &tmp) )
+    if ( ask_form(form, &flags, &tmp) )
     {
       int32 old = idpflags;
       idpflags = (flags & ~(IDM__REQMASK << 16)) | (tmp << 16);
@@ -460,7 +246,7 @@ static const char *idaapi set_idp_options(
     { "JAVA_UNKATTR_WARNING",  IDM_WARNUNK  },
   };
 
-  for ( int i=0 ; i < qnumber(keywords); i++ )
+  for ( int i=0; i < qnumber(keywords); i++ )
   {
     if ( strcmp(keywords[i].name, keyword) == 0 )
     {
@@ -479,11 +265,6 @@ static const char *idaapi set_idp_options(
 }
 
 //----------------------------------------------------------------------
-static void idaapi func_header(func_t *) {}
-static void idaapi func_footer(func_t *) {}
-static bool idaapi java_specseg(ea_t ea, uchar)    { java_data(ea); return false; }
-
-//----------------------------------------------------------------------
 static const asm_t jasmin_asm =
 {
   AS_COLON | ASH_HEXF3 | ASO_OCTF1 | ASD_DECF0 | AS_ONEDUP | ASB_BINF3,
@@ -491,7 +272,6 @@ static const asm_t jasmin_asm =
   "Jasmin assembler",
   0,        // no help screen
   NULL,     // header
-  NULL,     // bad instructions
   NULL,     // origin
   NULL,     // end of file
 
@@ -517,10 +297,6 @@ static const asm_t jasmin_asm =
   NULL,         //".reserv  %s",  // uninited data (reserve space)
   " = ",        // equ
   NULL,         // seg prefix
-  NULL,         // preline for checkarg
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg operations
-  NULL,         // XlatAsciiOutput
   NULL,         // a_curip
   func_header,  // func header
   func_footer,  // func footer
@@ -547,7 +323,6 @@ static const asm_t jasmin_asm =
   NULL,    // high16
   NULL,    // a_include_fmt
   NULL,    // a_vstruc_fmt
-  NULL,    // a_3byte
   NULL,    // a_rva
 };
 
@@ -559,7 +334,6 @@ static const asm_t list_asm =
   "User friendly listing",
   0,        // no help screen
   NULL,     // header
-  NULL,     // bad instructions
   NULL,     // origin
   NULL,     // end of file
 
@@ -585,10 +359,6 @@ static const asm_t list_asm =
   NULL,         //".reserv  %s",  // uninited data (reserve space)
   " = ",        // equ
   NULL,         // seg prefix
-  NULL,         // preline for checkarg
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg operations
-  NULL,         // XlatAsciiOutput
   NULL,         // a_curip
   func_header,  // func header
   func_footer,  // func footer
@@ -615,14 +385,13 @@ static const asm_t list_asm =
   NULL,    // high16
   NULL,    // a_include_fmt
   NULL,    // a_vstruc_fmt
-  NULL,    // a_3byte
   NULL,    // a_rva
 };
 
 //-----------------------------------------------------------------------
 static const asm_t *const asms[] = { &jasmin_asm, &list_asm, NULL };
 
-static const char *const RegNames[] = { "vars" , "optop", "frame", "cs", "ds" };
+static const char *const RegNames[] = { "vars", "optop", "frame", "cs", "ds" };
 
 #define FAMILY "Java Virtual Machine:"
 
@@ -637,9 +406,9 @@ static const char *const shnames[] =
 
 static const char *const lnames[] =
 {
-  FAMILY"java",
+  FAMILY"Java",
 #ifdef __debug__
-  "java full (IBM PC, debug mode)",
+  "Java full (IBM PC, debug mode)",
 #endif
   NULL
 };
@@ -667,16 +436,353 @@ static const bytes_t retcodes[] =
   { 0, NULL }
 };
 
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
+{
+  switch ( code )
+  {
+    case idb_event::closebase:
+      memset(&curClass, 0, sizeof(curClass));
+      // no break
+    case idb_event::savebase:
+      ConstantNode.altset(CNA_IDPFLAGS, (ushort)idpflags);
+      break;
+
+    case idb_event::auto_empty:
+      if ( !(curClass.extflg & XFL_C_DONE) ) // kernel BUGs
+      {
+        curClass.extflg |= XFL_C_DONE;
+        msg("JavaLoader finalization stage...");
+        for ( int n = curClass.MethodCnt; n; n-- )
+        {
+          SegInfo si;
+          if ( ClassNode.supval(-n, &si, sizeof(si)) != sizeof(si) )
+            DESTROYED("postprocess");
+          if ( si.smNode || si.DataSize )
+          {
+            show_addr(si.start_ea);
+            if ( si.smNode )
+              sm_validate(&si);
+            if ( si.DataSize )
+              coagulate_unused_data(&si);
+          }
+        }
+        ConstantNode.supset(CNS_CLASS, &curClass, sizeof(curClass));  // all chgs
+        sm_node = 0; // anebale work (out) with StackMap
+        msg("OK\n");
+      }
+      break;
+  }
+  return 0;
+}
+
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int retcode = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
+      inf.set_be(true);       //reverse byte!
+      break;
+
+    case processor_t::ev_rename:
+      va_arg(va, ea_t);
+      for ( char const *pn, *p = va_arg(va, const char *);
+            (pn = strchr(p, '\\')) != NULL;
+            p = pn+1 )
+      {
+        if ( *++pn != 'u' )
+        {
+inv_name:
+          --retcode;  // 0
+          warning("Backslash is accepted only as a unicode escape sequence in names");
+          break;
+        }
+        for ( int i = 0; i < 4; i++ )
+          if ( !qisxdigit((uchar)*++pn) )
+            goto inv_name;
+      }
+      break;
+
+    case processor_t::ev_newfile:
+      if ( inf.filetype != f_LOADER )
+      {
+        set_database_flag(DBFL_KILL);    // clean up the database files
+        error("The input file does not have a supported Java file format");
+      }
+      myBase(va_arg(va, char *));
+      inf.lowoff = inf.highoff = BADADDR;
+      break;
+
+    case processor_t::ev_oldfile:
+      myBase(NULL);
+      break;
+
+    case processor_t::ev_term:
+      unhook_from_notification_point(HT_IDB, idb_callback);
+      qfree(tsPtr);
+      qfree(smBuf);
+      qfree(annBuf);
+      break;
+
+#ifdef __debug__
+    case processor_t::ev_newprc:
+      {
+        int procnum = va_arg(va, int);
+        bool keep_cfg = va_argi(va, bool);
+        if ( procnum == 1 )     // debug mode
+        {
+          ph.flag &= ~(PR_DEFNUM | PR_NOCHANGE);
+          ph.flag |= PRN_HEX;
+          if ( inf.margin == 77 && !inf.bin_prefix_size && !inf.show_line_pref() )
+          {
+            if ( !keep_cfg )
+              inf.set_show_line_pref(true);
+            --debugmode;
+          }
+          else
+          {
+            ++debugmode;
+          }
+        }
+        else                            // normal node
+        {
+          ph.flag &= ~PR_DEFNUM;
+          ph.flag |= (PRN_DEC | PR_NOCHANGE);
+          if ( debugmode == -1
+            && inf.show_line_pref()
+            && !inf.bin_prefix_size
+            && inf.margin == 77
+            && !keep_cfg )
+          {
+            inf.show_line_pref(false);
+          }
+          debugmode = 0;
+        }
+      }
+      break;
+#endif
+
+    case java_module_t::ev_load_file:
+      {
+        linput_t *li = va_arg(va, linput_t *);
+        FILE *f = qlfile(li);
+        QASSERT(10082, f != NULL);
+        bool manual = va_argi(va, bool);
+        loader(f, manual);
+        retcode = 0;
+      }
+      if ( start_asm_list )
+        set_target_assembler(1);
+      break;
+
+    case processor_t::ev_gen_src_file_lnnum:
+      if ( jasmin() )
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        va_arg(va, const char *); // skip file name
+        size_t lineno = va_arg(va, size_t);
+        ctx->gen_printf(2, COLSTR(".line %" FMT_Z, SCOLOR_ASMDIR), lineno);
+        retcode = 1;
+      }
+      break;
+
+    case processor_t::ev_gen_asm_or_lst:
+      {
+        static bool mode_changed = false;
+
+        if ( va_argi(va, bool) )          // starting (else end of generation )
+        {
+          va_arg(va, FILE *);             // output file (skip)
+          bool isasm = va_argi(va, bool); // assembler-true, listing-false
+          if ( isasm && (idpflags & IDF_CONVERT) )
+          {
+            va_arg(va, int);              // flags of gen_file() (skip)
+            *va_arg(va, gen_outline_t**) = out_asm_file;
+            idpflags |= IDM_OUTASM;
+          }
+          if ( isasm == jasmin() )
+            break;    // need change mode?
+        }
+        else                              // end of generation.
+        {
+          idpflags &= ~IDM_OUTASM;
+          if ( !mode_changed )
+            break;        // mode changed?
+        }
+        mode_changed = !mode_changed;
+        set_target_assembler(!inf.asmtype);
+      }
+      break;
+
+    case processor_t::ev_get_autocmt:
+      {
+        qstring *buf = va_arg(va, qstring *);
+        const insn_t *insn = va_arg(va, insn_t *);
+        if ( make_locvar_cmt(buf, *insn) )
+          retcode = 1;
+      }
+      break;
+
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        java_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        java_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        java_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        java_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_data:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        bool analyze_only = va_argi(va, bool);
+        java_data(*ctx, analyze_only);
+        return 1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
+    case processor_t::ev_realcvt:
+      {
+        void *m = va_arg(va, void *);
+        uint16 *e = va_arg(va, uint16 *);
+        uint16 swt = va_argi(va, uint16);
+        int code = j_realcvt(m, e, swt);
+        return code == 0 ? 1 : code;
+      }
+
+    case processor_t::ev_gen_map_file:
+      {
+        int *nlines = va_arg(va, int *);
+        FILE *fp = va_arg(va, FILE *);
+        int code = gen_map_file(fp);
+        if ( code == -1 )
+          return -1;
+        *nlines = code;
+        return 1;
+      }
+
+    case processor_t::ev_extract_address:
+      {
+        ea_t *out_ea = va_arg(va, ea_t *);
+        ea_t screen_ea = va_arg(va, ea_t);
+        const char *str = va_arg(va, const char *);
+        size_t pos = va_arg(va, size_t);
+        ea_t ea = get_ref_addr(screen_ea, str, pos);
+        if ( ea == BADADDR )
+          return -1;
+        if ( ea == (BADADDR-1) )
+          return 0;
+        *out_ea = ea;
+        return 1;
+      }
+
+    case processor_t::ev_out_special_item:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        uchar seg_type = va_argi(va, uchar);
+        java_specseg(*ctx, seg_type);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
+      break;
+  }
+  return retcode;
+}
+
 //-----------------------------------------------------------------------
 //      Processor Definition
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,
-  PLFM_JAVA,
-  PRN_DEC | PR_RNAMESOK | PR_NOCHANGE | PR_NO_SEGMOVE,
-  8,                  // 8 bits in a byte for code segments
-  8,                  // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_JAVA,              // id
+                          // flag
+    PRN_DEC
+  | PR_RNAMESOK
+  | PR_NOCHANGE
+  | PR_NO_SEGMOVE,
+                          // flag2
+    PR2_REALCVT           // the module has 'realcvt' event implementation
+  | PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -685,31 +791,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  NULL,
-
-  ana,
-  emu,
-
-  out,
-  outop,
-  java_data,
-  NULL,          //  cmp_opnd,  // 0 if not cmp 1 if eq
-  can_have_type, //(&op)  int : 1 -yes 0-no
-
-  qnumber(RegNames),  // Number of registers
   RegNames,           // Regsiter names
-  NULL,               // get abstract register
-
-  0,                  // Number of register files
-  NULL,               // Register file names
-  NULL,               // Register descriptions
-  NULL,               // Pointer to CPU registers
+  qnumber(RegNames),  // Number of registers
 
   rVcs,rVds,
   0,                  // size of a segment register
@@ -719,24 +802,9 @@ processor_t LPH =
   retcodes,
 
   0,j_last,
-  Instructions,
-  NULL,               // isFarJump or Call
-  NULL,               //  Offset Generation Function. Usually NULL.
+  Instructions,       // instruc
   0,                  // size of tbyte
-  j_realcvt,
   {0,7,15,0},         // real width
-  NULL,               // is this instruction switch
-  gen_map_file,       // generate map-file
-  get_ref_addr,       // extract address from a string
-  NULL,               // is_sp_based
-  NULL,               // create_func_frame
-  NULL,               // get_func_retsize
-  NULL,               // gen_stkvar_def
-  java_specseg,       // out special segments
   j_ret,              // icode_return
-  set_idp_options,    // Set IDP options
-  NULL,               // Is alignment instruction?
   NULL,               // Micro virtual machine description
-  0,                  // high_fixup_bits
 };
-

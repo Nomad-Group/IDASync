@@ -9,117 +9,110 @@
 static bool flow;        // флажок стопа
 //----------------------------------------------------------------------
 // поставим использование/изменение операндов
-static void near TouchArg(op_t &x,int isAlt,int isload)
+static void handle_operand(const insn_t &insn, const op_t &x, bool is_forced, bool isload)
 {
-ea_t ea = toEA(codeSeg(x.addr,x.n), x.addr);
-  switch ( x.type ) {
-  // эта часть не используется !
-  case o_void:  break;
-  // тут тоже нечего делать
-  case o_reg:           break;
+  ea_t ea = map_code_ea(insn, x);
+  switch ( x.type )
+  {
+    // эта часть не используется !
+    case o_void:
+      break;
+    // тут тоже нечего делать
+    case o_reg:
+      break;
 
-  // попробуем рассматривать как смещение
-  case o_displ: // если не форсирован и помечен смещением
-                                if ( !isAlt && isOff(uFlag,x.n) ){
-                        // если изменяется - поставим переменную
-                                                if ( ! isload ) doVar(ea);
-                                                // добавим ссылку на память
-                                                ua_add_dref(x.offb,ea,isload ? dr_R : dr_W);
-                                }
-                                break;
+    // попробуем рассматривать как смещение
+    case o_displ: // если не форсирован и помечен смещением
+      if ( !is_forced && is_off(get_flags(insn.ea), x.n) )
+      {
+        // добавим ссылку на память
+        insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+      }
+      break;
 
-  // непосредственный операнд
-  case o_imm:   // непосредственный не может меняться
-                if ( ! isload ) goto badTouch;
-                // поставим флажок непосредственного операнда
-                doImmd(cmd.ea);
-                // если не форсирован
-                if( !isAlt){
-                        if ( isOff(uFlag,x.n) ||
-                             ( (x.specflag1&URB_ADDR) &&
-                               (!isDefArg(uFlag,x.n))
-                             )
-                        ){
-                                if ( !isOff(uFlag,x.n) )
-                                        set_op_type(cmd.ea,offflag(),x.n);
-                                // это смещение !
-                                ua_add_dref(x.offb,ea,dr_O);
-                                                }
-                }
-                break;
+    // непосредственный операнд
+    case o_imm:
+      // непосредственный не может меняться
+      if ( !isload )
+        goto badTouch;
+      // поставим флажок непосредственного операнда
+      set_immd(insn.ea);
+      // если не форсирован
+      if ( !is_forced )
+      {
+        flags_t F = get_flags(insn.ea);
+        if ( is_off(F, x.n)
+          || (x.specflag1 & URB_ADDR) != 0 && !is_defarg(F, x.n) )
+        {
+          if ( !is_off(F, x.n) )
+            op_plain_offset(insn.ea, x.n, 0);
+          // это смещение !
+          insn.add_dref(ea, x.offb, dr_O);
+        }
+      }
+      break;
 
-  // переход или вызов
-  case o_near:  // это вызов ? (или переход)
-                                if ( InstrIsSet(cmd.itype,CF_CALL) ){
-                                        // поставим ссылку на код
-                                        ua_add_cref(x.offb,ea,fl_CN);
-                                        // это функция без возврата ?
-#if IDP_INTERFACE_VERSION > 37
-                                        flow = func_does_return(ea);
-#else
-                    // получим описатель функции
-                                        func_t *pfn = get_func(ea);
-                                        // если функция описана и не имеет возврата - остановим
-                                        if ( pfn != NULL && (pfn->flags & FUNC_NORET)  ) flow = false;
-#endif
-                                }
-                                else ua_add_cref(x.offb,ea,fl_JN);
-                break;
+    // переход или вызов
+    case o_near:
+      // это вызов ? (или переход)
+      if ( has_insn_feature(insn.itype,CF_CALL) )
+      {
+        // поставим ссылку на код
+        insn.add_cref(ea, x.offb, fl_CN);
+        // это функция без возврата ?
+        flow = func_does_return(ea);
+      }
+      else
+      {
+        insn.add_cref(ea, x.offb, fl_JN);
+      }
+      break;
 
-  // ссылка на память
-  case o_mem:   // сделаем данные по указанному адресу
-                ua_dodata2(x.offb, ea, x.dtyp);
-                // если изменяется - поставим переменную
-                if ( ! isload ) doVar(ea);
-                // добавим ссылку на память
-                ua_add_dref(x.offb,ea,isload ? dr_R : dr_W);
-                break;
+    // ссылка на память
+    case o_mem:
+      // сделаем данные по указанному адресу
+      insn.create_op_data(ea, x);
+      // добавим ссылку на память
+      insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+      break;
 
-  // прочее - сообщим ошибку
-  default:
+    // прочее - сообщим ошибку
+    default:
 badTouch:
-#if IDP_INTERFACE_VERSION > 37
-                warning("%a %s,%d: bad optype %d",
-                                cmd.ea, cmd.get_canon_mnem(),
-#else
-                warning("%08lX %s,%d: bad optype (%x)",
-                                cmd.ea,(char far *)Instructions[cmd.itype].name,
-#endif
-                                x.n, x.type);
-    break;
+      warning("%a %s,%d: bad optype %d",
+                      insn.ea, insn.get_canon_mnem(),
+                      x.n, x.type);
+      break;
   }
 }
 
 //----------------------------------------------------------------------
 // емулятер
-int idaapi mn102_emu(void)
+int idaapi mn102_emu(const insn_t &insn)
 {
-#if IDP_INTERFACE_VERSION > 37
-uint32 Feature = cmd.get_canon_feature();
-#else
-uint32 Feature = Instructions[cmd.itype].feature;
-uFlag = getFlags(cmd.ea);
-#endif
+  uint32 Feature = insn.get_canon_feature();
   // получим типы операндов
-  int flag1 = is_forced_operand(cmd.ea, 0);
-  int flag2 = is_forced_operand(cmd.ea, 1);
-  int flag3 = is_forced_operand(cmd.ea, 2);
+  bool flag1 = is_forced_operand(insn.ea, 0);
+  bool flag2 = is_forced_operand(insn.ea, 1);
+  bool flag3 = is_forced_operand(insn.ea, 2);
 
   flow = ((Feature & CF_STOP) == 0);
 
   // пометим ссылки двух операндов
-  if ( Feature & CF_USE1) TouchArg(cmd.Op1, flag1, 1 );
-  if ( Feature & CF_USE2) TouchArg(cmd.Op2, flag2, 1 );
-  if ( Feature & CF_USE3) TouchArg(cmd.Op3, flag3, 1 );
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, flag1, true);
+  if ( Feature & CF_USE2 ) handle_operand(insn, insn.Op2, flag2, true);
+  if ( Feature & CF_USE3 ) handle_operand(insn, insn.Op3, flag3, true);
   // поставим переход в очередь
-  if ( Feature & CF_JUMP) QueueSet(Q_jumps,cmd.ea );
+  if ( Feature & CF_JUMP )
+    remember_problem(PR_JUMP, insn.ea);
 
   // поставим изменения
-  if ( Feature & CF_CHG1) TouchArg(cmd.Op1, flag1, 0 );
-  if ( Feature & CF_CHG2) TouchArg(cmd.Op2, flag2, 0 );
-  if ( Feature & CF_CHG3) TouchArg(cmd.Op3, flag3, 0 );
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, flag1, false);
+  if ( Feature & CF_CHG2 ) handle_operand(insn, insn.Op2, flag2, false);
+  if ( Feature & CF_CHG3 ) handle_operand(insn, insn.Op3, flag3, false);
   // если не стоп - продолжим на след. инструкции
-  if ( flow) ua_add_cref(0,cmd.ea+cmd.size,fl_F );
+  if ( flow )
+    add_cref(insn.ea, insn.ea+insn.size, fl_F);
 
-  return(1);
+  return 1;
 }

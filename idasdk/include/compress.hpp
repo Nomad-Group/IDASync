@@ -4,8 +4,6 @@
 
 #include <diskio.hpp>
 
-#pragma pack(push, 1)
-
 /*! \file compress.hpp
 
   \brief Data compression functions
@@ -34,7 +32,7 @@ idaman THREAD_SAFE int ida_export zip_inflate(
 
 /// Process zip file and enumerate all files stored in it
 /// \param zipfile    name of zip file
-/// \param _callback  callback for each file. params:
+/// \param callback   callback for each file. params:
 ///                     - ud:          user data
 ///                     - offset:      offset in the zip file
 ///                     - method:      compression method (\ref compression_methods)
@@ -46,22 +44,22 @@ idaman THREAD_SAFE int ida_export zip_inflate(
 
 idaman THREAD_SAFE int ida_export process_zipfile(
         const char *zipfile,
-        int (idaapi *_callback)(
-                         void *ud,
-                         int32 offset,
-                         int method,
-                         uint32 csize,
-                         uint32 ucsize,
-                         uint32 attributes,
-                         const char *filename),
-        void *ud);
+        int (idaapi *callback)(
+          void *ud,
+          qoff64_t offset,
+          int method,
+          uint64 csize,
+          uint64 ucsize,
+          uint32 attributes,
+          const char *filename),
+        void *ud = NULL);
 
 
 /// Search for specified entry in zip file, and calls the
 /// callback with it, if found.
 /// \param zipfile    name of zip file
 /// \param entry      entry in zip file. E.g., "path/to/entry.dat"
-/// \param _callback  callback for each file. params:
+/// \param callback   callback for each file. params:
 ///                     - ud:          user data
 ///                     - offset:      offset in the zip file
 ///                     - method:      compression method (\ref compression_methods)
@@ -75,47 +73,15 @@ idaman THREAD_SAFE int ida_export process_zipfile(
 idaman THREAD_SAFE int ida_export process_zipfile_entry(
         const char *zipfile,
         const char *entry,
-        int (idaapi *_callback)(
-                         void *ud,
-                         int32 offset,
-                         int method,
-                         uint32 csize,
-                         uint32 ucsize,
-                         uint32 attributes,
-                         const char *filename),
-        void *ud,
-        bool case_sensitive = true);
-
-
-/// See process_zipfile()
-
-idaman THREAD_SAFE int ida_export process_zipfile64(
-        const char *zipfile,
         int (idaapi *callback)(
-                         void *ud,
-                         qoff64_t offset,
-                         int method,
-                         uint64 csize,
-                         uint64 ucsize,
-                         uint32 attributes,
-                         const char *filename),
-        void *ud);
-
-
-/// See process_zipfile_entry()
-
-idaman THREAD_SAFE int ida_export process_zipfile_entry64(
-        const char *zipfile,
-        const char *entry,
-        int (idaapi *callback)(
-                         void *ud,
-                         qoff64_t offset,
-                         int method,
-                         uint64 csize,
-                         uint64 ucsize,
-                         uint32 attributes,
-                         const char *filename),
-        void *ud,
+          void *ud,
+          qoff64_t offset,
+          int method,
+          uint64 csize,
+          uint64 ucsize,
+          uint32 attributes,
+          const char *filename),
+        void *ud = NULL,
         bool case_sensitive = true);
 
 /// \defgroup PKZ_ Compression error codes
@@ -170,5 +136,4 @@ idaman THREAD_SAFE linput_t *ida_export create_zip_linput(
         ssize_t insize=-1,
         linput_close_code_t loc=LOC_CLOSE);
 
-#pragma pack(pop)
 #endif

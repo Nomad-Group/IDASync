@@ -10,21 +10,38 @@
 
 #include "tms.hpp"
 
+// simple wrapper class for syntactic sugar of member functions
+// this class may have only simple member functions.
+// virtual functions and data fields are forbidden, otherwise the class
+// layout may change
+class out_tms320c5_t : public outctx_t
+{
+  out_tms320c5_t(void) : outctx_t(BADADDR) {} // not used
+  void set_has_phrase(void) { user_data = (void*)1; }
+  bool has_phrase() const { return user_data != NULL; }
+public:
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void outreg(int r) { out_register(ph.reg_names[r]); }
+  void OutDecimal(uval_t x);
+  int  outnextar(const op_t &o, bool comma);
+  bool shouldIndent(void) const;
+  void outphraseAr(void);
+  void OutImmVoid(const op_t &x);
+};
+CASSERT(sizeof(out_tms320c5_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_tms320c5_t)
+
+//----------------------------------------------------------------------
 static const char *const phrases[] =
 {
-  "*",    "*-", "*+", "?",
-  "*br0-","*0-","*0+","*br0+"
+  "*",     "*-",  "*+",  "?",
+  "*br0-", "*0-", "*0+", "*br0+"
 };
 
-static int hasphrase;
 //----------------------------------------------------------------------
-inline void OutReg(int rgnum)
-{
-  out_register(ph.regNames[rgnum]);
-}
-
-//----------------------------------------------------------------------
-static void OutDecimal(uval_t x)
+void out_tms320c5_t::OutDecimal(uval_t x)
 {
   char buf[40];
   qsnprintf(buf, sizeof(buf), "%" FMT_EA "u", x);
@@ -32,9 +49,9 @@ static void OutDecimal(uval_t x)
 }
 
 //----------------------------------------------------------------------
-bool is_mpy(void)
+bool is_mpy(const insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS_mpy:       // Multiply
     case TMS_mpya:      // Multiply and Accumulate Previous Product
@@ -49,158 +66,164 @@ bool is_mpy(void)
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_tms320c5_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
-  case o_reg:
-        OutReg(x.reg);
-        break;
-  case o_phrase:
-        QASSERT(10087, (x.phrase>>4) < qnumber(phrases));
-        out_line(phrases[x.phrase>>4],COLOR_SYMBOL);
-        hasphrase = 1;
-        break;
-  case o_imm:
-        switch ( x.sib ) {
-          default:
+    case o_reg:
+      outreg(x.reg);
+      break;
+    case o_phrase:
+      QASSERT(10087, (x.phrase>>4) < qnumber(phrases));
+      out_line(phrases[x.phrase>>4], COLOR_SYMBOL);
+      set_has_phrase();
+      break;
+    case o_imm:
+      switch ( x.sib )
+      {
+        default:
+          {
+            if ( !isC2() )
+              out_symbol('#');
+            flags_t saved = F;
+            if ( !is_defarg(F, x.n)
+              && (is_mpy(insn) || is_invsign(insn.ea, F, x.n)) )
             {
-              if ( !isC2() ) out_symbol('#');
-              flags_t saved = uFlag;
-              if ( !isDefArg(uFlag,x.n)
-                   && (is_mpy() || is_invsign(cmd.ea, uFlag, x.n))
-                 ) uFlag |= decflag();
-              OutValue(x,OOFW_16|(is_mpy() ? OOF_SIGNED : 0));
-              uFlag = saved;
+              F |= dec_flag();
             }
+            int outflags = OOFW_16|(is_mpy(insn) ? OOF_SIGNED : 0);
+            out_value(x, outflags);
+            F = saved;
+          }
+          break;
+        case 1:
+          out_value(x, OOF_NUMBER|OOFS_NOSIGN);
+          break;
+        case 2:
+        case 3:
+          OutDecimal(x.value);
+          break;
+      }
+      break;
+    case o_near:
+      if ( insn.itype == TMS_blpd )
+        out_symbol('#');
+      // fallthrough
+    case o_mem:
+      {
+        if ( insn.itype == TMS_bldd && x.sib )
+          out_symbol('#');
+        ea_t v = map_ea(insn, x, x.type == o_near);
+        bool rptb_tail = false;
+        uval_t addr = x.addr;
+        if ( insn.itype == TMS_rptb && is_tail(get_flags(v)) )
+        {
+          // small hack to display end_loop-1 instead of before_end_loop+1
+          v++;
+          addr++;
+          rptb_tail = true;
+        }
+        bool ok = out_name_expr(x, v, addr);
+        if ( !ok )
+        {
+          out_value(x, OOF_ADDR|OOF_NUMBER|OOFS_NOSIGN|OOFW_16);
+          remember_problem(PR_NONAME, insn.ea);
+        }
+        else
+        {
+          if ( rptb_tail )
+          {
+            out_symbol('-');
+            out_line("1", COLOR_NUMBER);
+          }
+        }
+      }
+      break;
+    case o_void:
+      return 0;
+    case o_bit:
+      {
+        static const char *const bitnames[] =
+        {
+          "intm", "ovm", "cnf", "sxm",
+          "hm", "tc", "xf", "c"
+        };
+        out_keyword(bitnames[uchar(x.value)]);
+      }
+      break;
+    case o_cond:
+      {
+        int mask = int(x.value>>0) & 0xF;
+        int cond = int(x.value>>4) & 0xF;
+        int comma = 1;
+        out_tagon(COLOR_KEYWORD);
+        switch ( (mask>>2) & 3 )      // Z L
+        {
+          case 0:
+            comma = 0;
             break;
           case 1:
-            OutValue(x,OOF_NUMBER|OOFS_NOSIGN);
+            out_line((cond>>2)&1 ? "lt" : "gt");
             break;
           case 2:
-//            if ( x.value == 0 ) return 0;
-            OutDecimal(x.value);
+            out_line((cond>>2)&2 ? "eq" : "neq");
             break;
           case 3:
-            OutDecimal(x.value);
+            switch ( (cond>>2)&3 )
+            {
+              case 2: out_line("geq"); break;
+              case 3: out_line("leq"); break;
+            }
             break;
         }
-        break;
-  case o_near:
-        if ( cmd.itype == TMS_blpd ) out_symbol('#');
-  case o_mem:
+        if ( mask & 1 )               // C
         {
-          if ( cmd.itype == TMS_bldd && x.sib ) out_symbol('#');
-          ea_t base = (x.type == o_mem)
-                        ? dataSeg_op(x.n)
-                        : codeSeg(x.addr,x.n);
-          ea_t v = toEA(base,x.addr);
-          bool rptb_tail = false;
-          if ( cmd.itype == TMS_rptb && isTail(get_flags_novalue(v)) )
-          {
-            // small hack to display end_loop-1 instead of before_end_loop+1
-            v++;
-            x.addr++;
-            rptb_tail = true;
-          }
-          bool ok = out_name_expr(x, v, x.addr);
-          if ( rptb_tail ) x.addr--;
-          if ( !ok )
-          {
-            OutValue(x, OOF_ADDR|OOF_NUMBER|OOFS_NOSIGN|OOFW_16);
-            QueueSet(Q_noName, cmd.ea);
-          }
-          else
-          {
-            if ( rptb_tail )
-            {
-              out_symbol('-');
-              out_line("1", COLOR_NUMBER);
-            }
-          }
+          if ( comma )
+            out_char(',');
+          if ( (cond & 1) == 0 )
+            out_char('n');
+          out_char('c');
+          comma = 1;
         }
-        break;
-  case o_void:
-        return 0;
-  case o_bit:
+        if ( mask & 2 )               // V
         {
-          static const char *const bitnames[] =
-          {
-            "intm","ovm","cnf","sxm",
-            "hm","tc","xf","c"
-          };
-          out_keyword(bitnames[uchar(x.value)]);
+          if ( comma )
+            out_char(',');
+          if ( (cond & 2) == 0 )
+            out_char('n');
+          out_char('o');
+          out_char('v');
+          comma = 1;
         }
-        break;
-  case o_cond:
+        static const char *const TP[] = { "bio", "tc", "ntc", NULL };
+        const char *ptr = TP[int(x.value>>8) & 3];
+        if ( ptr != NULL )
         {
-          int mask = int(x.value>>0) & 0xF;
-          int cond = int(x.value>>4) & 0xF;
-          int comma = 1;
-          out_tagon(COLOR_KEYWORD);
-          switch ( (mask>>2) & 3 )      // Z L
-          {
-            case 0:
-              comma = 0;
-              break;
-            case 1:
-              OutLine( (cond>>2)&1 ? "lt" : "gt" );
-              break;
-            case 2:
-              OutLine( (cond>>2)&2 ? "eq" : "neq" );
-              break;
-            case 3:
-              switch( (cond>>2)&3 )
-              {
-                case 2: OutLine("geq"); break;
-                case 3: OutLine("leq"); break;
-              }
-              break;
-          }
-          if ( mask & 1 )               // C
-          {
-            if ( comma ) OutChar(',');
-            if ( (cond & 1) == 0 ) OutChar('n');
-            OutChar('c');
-            comma = 1;
-          }
-          if ( mask & 2 )               // V
-          {
-            if ( comma ) OutChar(',');
-            if ( (cond & 2) == 0 ) OutChar('n');
-            OutChar('o');
-            OutChar('v');
-            comma = 1;
-          }
-          static const char *const TP[] = { "bio","tc","ntc",NULL };
-          const char *ptr = TP[int(x.value>>8) & 3];
-          if ( ptr != NULL )
-          {
-            if ( comma )
-              OutChar(',');
-            OutLine(ptr);
-          }
-          out_tagoff(COLOR_KEYWORD);
+          if ( comma )
+            out_char(',');
+          out_line(ptr);
         }
-        break;
-  default:
-        warning("out: %a: bad optype %d",cmd.ea,x.type);
-        break;
+        out_tagoff(COLOR_KEYWORD);
+      }
+      break;
+    default:
+      warning("out: %a: bad optype %d", insn.ea, x.type);
+      break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-static int outnextar(const op_t &o,int comma)
+int out_tms320c5_t::outnextar(const op_t &o, bool comma)
 {
   if ( o.type == o_phrase && (o.phrase & 8) != 0 )
   {
     if ( comma )
     {
       out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
     }
-    OutReg(rAr0+(o.phrase&7));
+    outreg(rAr0+(o.phrase&7));
     return 1;
   }
   return 0;
@@ -219,14 +242,16 @@ static int isDelayed(ushort code)
 // F??? RETCD 1111 11TP ZLVC ZLVC      Return conditional delayed
 // F??? BCNDD 1111 00TP ZLVC ZLVC + 1  Branch conditional delayed
   ushort subcode;
-  switch ( code>>12 ) {
+  switch ( code>>12 )
+  {
     case 7:
       subcode = (code >> 7);
       return subcode == 0xFB || subcode == 0xFD || subcode == 0xFF;
     case 0xB:
       return code == 0xBE21u || code == 0xBE3Du;
     case 0xF:
-      if ( code == 0xFF00 ) return 1;
+      if ( code == 0xFF00 )
+        return 1;
       subcode = (code & 0x0C00);
       return subcode != 0x400;
   }
@@ -237,69 +262,73 @@ static int isDelayed(ushort code)
 ea_t prevInstruction(ea_t ea)
 {
   ea--;
-  if ( !isCode(get_flags_novalue(ea)) )
+  if ( !is_code(get_flags(ea)) )
     ea--;
   return ea;
 }
 
-//inline int isXC2(ushort code) { return (code & 0xFC00) == 0xF400; }
 //----------------------------------------------------------------------
-static int shouldIndent(void)
+bool out_tms320c5_t::shouldIndent(void) const
 {
-  if ( isC2() ) return 0;                       // TMS320C2 - no indention
-  if ( !isFlow(uFlag) ) return 0;               // no previous instructions
-  ea_t ea = prevInstruction(cmd.ea);
-  flags_t F = get_flags_novalue(ea);
-  if ( !isCode(F) ) return 0;
-  if ( isDelayed((ushort)get_full_byte(ea)) ) return 1;
-  if ( cmd.size == 2 )                          // our instruction is long
+  if ( isC2() )
+    return false;                               // TMS320C2 - no indention
+  if ( !is_flow(F) )
+    return false;                               // no previous instructions
+  ea_t ea = prevInstruction(insn.ea);
+  flags_t flags = get_flags(ea);
+  if ( !is_code(flags) )
+    return false;
+  if ( isDelayed((ushort)get_wide_byte(ea)) )
+    return true;
+  if ( insn.size == 2 )                         // our instruction is long
   {
-//    if ( isXC2(get_full_byte(prevInstruction(ea))) ) return 1;
     ; // nothing to do
   }
   else
   {                                             // our instruction short
-    if ( (cmd.ea-ea) == 2 )                     // prev instruction long
-      return 0;                                 // can't be executed in delayed manner
-    if ( !isFlow(F) ) return 0;                 // no prev instr...
+    if ( (insn.ea-ea) == 2 )                    // prev instruction long
+      return false;                             // can't be executed in delayed manner
+    if ( !is_flow(flags) )
+      return false;                             // no prev instr...
     ea = prevInstruction(ea);
-    F = get_flags_novalue(ea);
+    flags = get_flags(ea);
   }
-  return isCode(F) && isDelayed((ushort)get_full_byte(ea));
+  return is_code(flags) && isDelayed((ushort)get_wide_byte(ea));
 }
 
 
 //----------------------------------------------------------------------
-static void outphraseAr(void)
+void out_tms320c5_t::outphraseAr(void)
 {
   ea_t ar;
-  if ( find_ar(&ar) )
+  if ( find_ar(insn, &ar) )
   {
     char buf[MAXSTR];
-    ea2str(ar, buf, sizeof(buf));
-    out_snprintf(COLSTR(" %s(%s)",SCOLOR_AUTOCMT), ash.cmnt, buf);
+    ea2str(buf, sizeof(buf), ar);
+    out_printf(COLSTR(" %s(%s)", SCOLOR_AUTOCMT), ash.cmnt, buf);
   }
 }
 
 //----------------------------------------------------------------------
-static void OutImmVoid(op_t &x)
+void out_tms320c5_t::OutImmVoid(const op_t &x)
 {
   static int tmsfunny = -1;
   if ( tmsfunny == -1 )
     tmsfunny = qgetenv("TMSFIX");
-  if ( !tmsfunny ) return;
+  if ( !tmsfunny )
+    return;
   if ( x.type == o_imm )
   {
     if ( x.value != 0 )
     {
       int v = int(short(x.value) * 10000L / 0x7FFF);
-      OutChar(' ');
+      out_char(' ');
       out_tagon(COLOR_AUTOCMT);
-      OutLine(ash.cmnt);
-      OutChar(' ');
+      out_line(ash.cmnt);
+      out_char(' ');
       if ( v < 0 )
       {
-        OutChar('-');
+        out_char('-');
         v = -v;
       }
       char buf[10];
@@ -307,126 +336,125 @@ static void OutImmVoid(op_t &x)
         qstrncpy(buf, "1.0000", sizeof(buf));
       else
         qsnprintf(buf, sizeof(buf), "0.%04d", v);
-      OutLine(buf);
+      out_line(buf);
       out_tagoff(COLOR_AUTOCMT);
     }
   }
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_tms320c5_t::out_insn(void)
 {
-  char buf[MAXSTR];
+  if ( shouldIndent() )
+    out_char(' ');
+  out_mnemonic();
 
-  hasphrase = 0;
+  bool comma = insn.Op1.shown() && out_one_operand(0);
 
-  init_output_buffer(buf, sizeof(buf));
-  if ( shouldIndent() ) OutChar(' ');
-  OutMnem();
-
-  int comma = cmd.Op1.shown() && out_one_operand(0);
-
-  if ( cmd.Op2.shown() && cmd.Op2.type != o_void )
+  if ( insn.Op2.shown() && insn.Op2.type != o_void )
   {
     if ( comma )
     {
       out_tagon(COLOR_SYMBOL);
-      OutChar(',');
+      out_char(',');
       out_tagoff(COLOR_SYMBOL);
-      OutChar(' ');
+      out_char(' ');
     }
     out_one_operand(1);
   }
 
-  if ( cmd.Op1.type == o_phrase ) comma |= outnextar(cmd.Op1,comma);
-  if ( cmd.Op2.type == o_phrase )          outnextar(cmd.Op2,comma);
+  if ( insn.Op1.type == o_phrase )
+    if ( outnextar(insn.Op1, comma) )
+      comma = true;
+  if ( insn.Op2.type == o_phrase )
+    outnextar(insn.Op2, comma);
 
-  if ( isVoid(cmd.ea,uFlag,0) ) OutImmVoid(cmd.Op1);
-  if ( isVoid(cmd.ea,uFlag,1) ) OutImmVoid(cmd.Op2);
+  out_immchar_cmts();
 
-  if ( hasphrase ) outphraseAr();
+  if ( has_phrase() )
+    outphraseAr();
 
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX);
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -e{818} seg could be const
+void idaapi segstart(outctx_t &ctx, segment_t *seg)
 {
-  segment_t *Sarea = getseg(ea);
-  char sname[MAXNAMELEN];
-  get_segm_name(Sarea, sname, sizeof(sname));
+  qstring sname;
+  get_visible_segm_name(&sname, seg);
 
-  printf_line(inf.indent, COLSTR(".sect \"%s\"",SCOLOR_ASMDIR), sname);
-  if ( inf.s_org )
+  ctx.gen_printf(inf.indent, COLSTR(".sect \"%s\"", SCOLOR_ASMDIR), sname.c_str());
+  if ( (inf.outflags & OFLG_GEN_ORG) != 0 )
   {
-    ea_t org = ea - get_segm_base(Sarea);
+    ea_t org = seg->start_ea - get_segm_base(seg);
     if ( org != 0 )
     {
       char buf[MAX_NUMBUF];
       btoa(buf, sizeof(buf), org);
-      printf_line(inf.indent, COLSTR("%s .org %s",SCOLOR_AUTOCMT),
-                  ash.cmnt, buf);
+      ctx.gen_printf(inf.indent, COLSTR("%s .org %s", SCOLOR_AUTOCMT),
+                     ash.cmnt, buf);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   if ( ash.end != NULL )
   {
-    MakeNull();
-    char *ptr = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
-      APPCHAR(ptr, end, ' ');
-      APPEND(ptr, end, name.begin());
+      ctx.out_char(' ');
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi tms_assumes(ea_t ea)
+//lint -e{1764} ctx could be const
+void idaapi tms_assumes(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( !inf.s_assume || seg == NULL )
+  if ( (inf.outflags & OFLG_GEN_ASSUME) == 0 || seg == NULL )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
   if ( seg == NULL
     || seg->type == SEG_XTRN
     || seg->type == SEG_DATA
-    || !inf.s_assume )
+    || (inf.outflags & OFLG_GEN_ASSUME) == 0 )
   {
     return;
   }
 
-  segreg_area_t sra;
-  if ( !get_srarea2(&sra, ea, rDP) )
+  sreg_range_t sra;
+  if ( !get_sreg_range(&sra, ea, rDP) )
     return;
-  bool show = sra.startEA == ea;
+  bool show = sra.start_ea == ea;
   if ( show )
   {
-    segreg_area_t prev_sra;
-    if ( get_prev_srarea(&prev_sra, ea, rDP) )
+    sreg_range_t prev_sra;
+    if ( get_prev_sreg_range(&prev_sra, ea, rDP) )
       show = sra.val != prev_sra.val;
   }
   if ( seg_started || show )
-    printf_line(inf.indent,COLSTR("%s --- assume DP %04a",SCOLOR_AUTOCMT), ash.cmnt, sra.val);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s --- assume DP %04a", SCOLOR_AUTOCMT),
+                   ash.cmnt, sra.val);
 }

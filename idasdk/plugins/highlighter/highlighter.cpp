@@ -21,8 +21,7 @@
 static gdecode_t idaapi my_get_debug_event(debug_event_t *event, int timeout_ms);
 
 // Pointer to old callback
-static gdecode_t (idaapi* old_get_debug_event)(debug_event_t *, int)
-  = my_get_debug_event;
+static gdecode_t (idaapi *old_get_debug_event)(debug_event_t *, int) = my_get_debug_event;
 
 // List of executed addresses
 typedef std::set<ea_t> easet_t;
@@ -44,21 +43,23 @@ static const int prefix_width = 1;
 static const char highlight_prefix[] = { COLOR_INV, ' ', COLOR_INV, 0 };
 
 static void idaapi get_user_defined_prefix(
+        qstring *buf,
         ea_t ea,
         int lnnum,
         int indent,
-        const char *line,
-        char *buf,
-        size_t bufsize)
+        const char *line)
 {
-  buf[0] = '\0';        // empty prefix by default
+  buf->qclear();        // empty prefix by default
 
   // We want to display the prefix only the lines which
   // contain the instruction itself
 
-  if ( indent != -1 ) return;           // a directive
-  if ( line[0] == '\0' ) return;        // empty line
-  if ( tag_advance(line,1)[-1] == ash.cmnt[0] ) return; // comment line...
+  if ( indent != -1 )
+    return;           // a directive
+  if ( line[0] == '\0' )
+    return;        // empty line
+  if ( tag_advance(line,1)[-1] == ash.cmnt[0] )
+    return; // comment line...
 
   // We don't want the prefix to be printed again for other lines of the
   // same instruction/data. For that we remember the line number
@@ -70,7 +71,7 @@ static void idaapi get_user_defined_prefix(
     return;
 
   if ( execset.find(ea) != execset.end() )
-    qstrncpy(buf, highlight_prefix, bufsize);
+    *buf = highlight_prefix;
 
 
   // Remember the address and line number we produced the line prefix for:
@@ -91,16 +92,17 @@ bool switch_event_getter(void)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   info("AUTOHIDE NONE\n"
        "This is the highlighter plugin.\n"
        "It highlights executed instructions if a debug event occurs at them.\n"
        "The plugins is fully automatic and has no parameters.\n");
+  return true;
 }
 
 //--------------------------------------------------------------------------
-static int idaapi callback(void *, int notification_code, va_list)
+static ssize_t idaapi callback(void *, int notification_code, va_list)
 {
   // We set our debug event handler at the beginning and remove it at the end
   // of a debug session
@@ -123,14 +125,14 @@ static int idaapi callback(void *, int notification_code, va_list)
 //--------------------------------------------------------------------------
 int idaapi init(void)
 {
-  hook_to_notification_point(HT_DBG, callback, NULL);
+  hook_to_notification_point(HT_DBG, callback);
   return PLUGIN_KEEP;
 }
 
 //--------------------------------------------------------------------------
 void idaapi term(void)
 {
-  unhook_from_notification_point(HT_DBG, callback, NULL);
+  unhook_from_notification_point(HT_DBG, callback);
 }
 
 //--------------------------------------------------------------------------

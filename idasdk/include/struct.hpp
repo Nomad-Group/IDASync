@@ -14,11 +14,8 @@
 #ifndef _STRUCT_HPP
 #define _STRUCT_HPP
 #include <bytes.hpp>
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
 
 #define STRUC_SEPARATOR '.'     ///< structname.fieldname
-
-struct til_t;
 
 /// Describes a member of an assembly level structure
 class member_t
@@ -53,6 +50,7 @@ public:
 };
 
 /// Information about a structure type (assembly level)
+//-V:struc_t:730 not all members of a class are initialized inside the constructor
 class struc_t
 {
 protected:
@@ -60,7 +58,7 @@ protected:
                         ///< use add_struc() and get_struc()
 public:
   tid_t id;             ///< struct id
-  size_t memqty;        ///< number of members
+  uint32 memqty;        ///< number of members
   member_t *members;    ///< only defined members are stored here.
                         ///< there may be gaps between members.
   ushort age;           ///< not used
@@ -98,6 +96,8 @@ public:
   /// Is the structure collapsed?
   /// Use \ref set_struc_hidden to change the hidden status
   bool is_hidden(void)    const { return (props & SF_HIDDEN) != 0; }
+  /// Is this structure a function frame?
+  bool is_frame(void)     const { return (props & SF_FRAME) != 0; }
   /// See #SF_ALIGN
   int get_alignment(void) const { return (props & SF_ALIGN) >> 7; }
   /// Is a ghost copy of a local type?
@@ -140,7 +140,7 @@ idaman uval_t ida_export get_last_struc_idx(void);
 /// Get previous struct index.
 /// \return #BADADDR if resulting index is negative, otherwise idx - 1
 
-inline uval_t get_prev_struc_idx(uval_t idx) { return (idx==BADNODE) ? idx : idx - 1; }
+inline uval_t get_prev_struc_idx(uval_t idx) { return idx == BADNODE ? idx : idx - 1; }
 
 
 /// Get next struct index.
@@ -170,14 +170,14 @@ idaman struc_t *ida_export get_struc(tid_t id);
 
 inline tid_t get_struc_id(const char *name)
 {
-  tid_t id = netnode(name);
+  tid_t id = node2ea(netnode(name));
   return get_struc(id) == NULL ? BADADDR : id;
 }
 
 
 /// Get struct name by id
 
-inline ssize_t get_struc_name(qstring *out, tid_t id) { return netnode(id).get_name(out); }
+inline ssize_t get_struc_name(qstring *out, tid_t id) { return getnode(id).get_name(out); }
 
 inline qstring get_struc_name(tid_t id)
 {
@@ -188,7 +188,7 @@ inline qstring get_struc_name(tid_t id)
 
 /// Get struct comment
 
-inline ssize_t get_struc_cmt(tid_t id, bool repeatable, char *buf, size_t bufsize) { return netnode(id).supstr(repeatable != 0, buf, bufsize); }
+inline ssize_t get_struc_cmt(qstring *buf, tid_t id, bool repeatable) { return getnode(id).supstr(buf, repeatable != 0); }
 
 
 /// Get struct size (also see get_struc_size(tid_t))
@@ -232,10 +232,11 @@ idaman ea_t ida_export get_struc_first_offset(const struc_t *sptr);
 
 inline ea_t get_max_offset(struc_t *sptr)
 {
-  if ( sptr == NULL ) return 0; // just to avoid GPF
+  if ( sptr == NULL )
+    return 0; // just to avoid GPF
   return sptr->is_union()
-                ? sptr->memqty
-                : get_struc_size(sptr);
+       ? sptr->memqty
+       : get_struc_size(sptr);
 }
 
 //@}
@@ -274,34 +275,34 @@ idaman member_t *ida_export get_member(const struc_t *sptr, asize_t offset);
 
 /// Get a member by its name, like "field44"
 
-idaman member_t *ida_export get_member_by_name(const struc_t *sptr,const char *membername);
+idaman member_t *ida_export get_member_by_name(const struc_t *sptr, const char *membername);
 
 
 /// Get a member by its fully qualified name, "struct.field"
 
-idaman member_t *ida_export get_member_by_fullname(const char *fullname, struc_t **sptr_place);
+idaman member_t *ida_export get_member_by_fullname(struc_t **sptr_place, const char *fullname);
 
 
 /// Get a member's fully qualified name, "struct.field"
 
-inline ssize_t idaapi get_member_fullname(qstring *out, tid_t mid) { return netnode(mid).get_name(out); }
+inline ssize_t idaapi get_member_fullname(qstring *out, tid_t mid) { return getnode(mid).get_name(out); }
 
 
 /// Get name of structure member
 
-idaman ssize_t ida_export get_member_name2(qstring *out, tid_t mid);
+idaman ssize_t ida_export get_member_name(qstring *out, tid_t mid);
 
-inline qstring get_member_name2(tid_t mid)
+inline qstring get_member_name(tid_t mid)
 {
   qstring name;
-  get_member_name2(&name, mid);
+  get_member_name(&name, mid);
   return name;
 }
 
 
 /// Get comment of structure member
 
-inline ssize_t idaapi get_member_cmt(tid_t mid, bool repeatable, char *buf, size_t bufsize) { return netnode(mid).supstr(repeatable != 0, buf, bufsize); }
+inline ssize_t idaapi get_member_cmt(qstring *buf, tid_t mid, bool repeatable) { return getnode(mid).supstr(buf, repeatable != 0); }
 
 
 /// Get size of structure member.
@@ -397,12 +398,12 @@ enum struc_error_t
 ///                   the last member in the structure
 
 idaman struc_error_t ida_export add_struc_member(
-                  struc_t *sptr,
-                  const char *fieldname,
-                  ea_t offset,
-                  flags_t flag,
-                  const opinfo_t *mt,
-                  asize_t nbytes);
+        struc_t *sptr,
+        const char *fieldname,
+        ea_t offset,
+        flags_t flag,
+        const opinfo_t *mt,
+        asize_t nbytes);
 
 
 /// Delete member at given offset
@@ -438,24 +439,24 @@ idaman bool ida_export expand_struc(struc_t *sptr, ea_t offset, adiff_t delta, b
 
 /// Update struct information in the database (internal function)
 
-idaman void ida_export save_struc2(struc_t *sptr, bool may_update_ltypes=true);
+idaman void ida_export save_struc(struc_t *sptr, bool may_update_ltypes=true);
 
 
 /// Hide/unhide a struct type
 inline void idaapi set_struc_hidden(struc_t *sptr, bool is_hidden)
 {
   setflag(sptr->props, SF_HIDDEN, is_hidden);
-  save_struc2(sptr, false);
+  save_struc(sptr, false);
 }
 
 /// Add/remove a struct type from the struct list
 inline void idaapi set_struc_listed(struc_t *sptr, bool is_listed)
 {
   setflag(sptr->props, SF_NOLIST, !is_listed);
-  save_struc2(sptr, false);
+  save_struc(sptr, false);
 }
 
-/// Member type information (return values for set_member_tinfo2())
+/// Member type information (return values for set_member_tinfo())
 enum smt_code_t
 {
   SMT_BADARG = -6,   ///< bad parameters
@@ -472,7 +473,7 @@ enum smt_code_t
 
 /// Get tinfo for given member
 
-idaman bool ida_export get_member_tinfo2(const member_t *mptr, tinfo_t *tif);
+idaman bool ida_export get_member_tinfo(tinfo_t *tif, const member_t *mptr);
 
 
 /// Delete tinfo for given member
@@ -487,7 +488,7 @@ idaman bool ida_export del_member_tinfo(struc_t *sptr, member_t *mptr);
 /// \param tif     type info
 /// \param flags   \ref SET_MEMTI_
 
-idaman smt_code_t ida_export set_member_tinfo2(
+idaman smt_code_t ida_export set_member_tinfo(
         struc_t *sptr,
         member_t *mptr,
         uval_t memoff,
@@ -495,28 +496,29 @@ idaman smt_code_t ida_export set_member_tinfo2(
         int flags);
 
 /// \defgroup SET_MEMTI_ Set member tinfo flags
-/// Passed as 'flags' parameter to set_member_tinfo2()
+/// Passed as 'flags' parameter to set_member_tinfo()
 //@{
 #define SET_MEMTI_MAY_DESTROY 0x0001 ///< may destroy other members
 #define SET_MEMTI_COMPATIBLE  0x0002 ///< new type must be compatible with the old
 #define SET_MEMTI_FUNCARG     0x0004 ///< mptr is function argument (can not create arrays)
 #define SET_MEMTI_BYTIL       0x0008 ///< new type was created by the type subsystem
+#define SET_MEMTI_USERTI      0x0010 ///< user-specified type
 //@}
 
 
 /// Try to get tinfo for given member - if failed, generate a tinfo using information about the
 /// member id from the disassembly
 
-idaman bool ida_export get_or_guess_member_tinfo2(const member_t *mptr, tinfo_t *tif);
+idaman bool ida_export get_or_guess_member_tinfo(tinfo_t *tif, const member_t *mptr);
 
 
 /// Get operand type info for member
 
-inline opinfo_t *retrieve_member_info(const member_t *mptr, opinfo_t *buf)
+inline opinfo_t *retrieve_member_info(opinfo_t *buf, const member_t *mptr)
 {
   if ( mptr == NULL )
     return NULL;
-  return get_opinfo(mptr->id, 0, mptr->flag, buf);
+  return get_opinfo(buf, mptr->id, 0, mptr->flag);
 }
 
 
@@ -543,12 +545,12 @@ inline bool is_dummy_member_name(const char *name)
 /// Check if the specified member id points to a struct member
 
 inline member_t *idaapi get_member_by_id(
-        qstring *out,
+        qstring *out_mname, // note: id 'out_mname' is important for SWiG
         tid_t mid,
         struc_t **sptr_place)
 {
-  if ( get_member_fullname(out, mid) > 0 )
-    return get_member_by_fullname(out->begin(), sptr_place);
+  if ( get_member_fullname(out_mname, mid) > 0 )
+    return get_member_by_fullname(sptr_place, out_mname->begin());
   return NULL;
 }
 
@@ -585,11 +587,11 @@ struct ida_local struct_field_visitor_t
 //--------------------------------------------------------------------------
 /// Visit structure fields in a stroff expression or in a reference to a struct data variable.
 /// This function can be used to enumerate all components of an expression like 'a.b.c'.
-/// \param sfv      visitor object
-/// \param path     struct path (path[0] contains the initial struct id)
-/// \param plen     len
-/// \param disp     offset into structure
-/// \param appzero  should visit field at offset zero?
+/// \param sfv           visitor object
+/// \param path          struct path (path[0] contains the initial struct id)
+/// \param plen          len
+/// \param[in,out] disp  offset into structure
+/// \param appzero       should visit field at offset zero?
 
 idaman flags_t ida_export visit_stroff_fields(
         struct_field_visitor_t &sfv,
@@ -621,18 +623,4 @@ inline void save_structs(void) {}
 
 //------------------------------------------------------------------------
 
-#ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED void ida_export save_struc(struc_t *sptr); // update struct information in the database (internal function)
-idaman DEPRECATED bool ida_export get_or_guess_member_type(const member_t *mptr, type_t *type, size_t tsize);
-idaman DEPRECATED bool ida_export get_member_ti(const member_t *mptr, type_t *buf, size_t bufsize);
-idaman DEPRECATED bool ida_export set_member_ti(struc_t *sptr, member_t *mptr, const type_t *type, int flags);
-inline DEPRECATED bool del_ti(struc_t *sptr, member_t *mptr) { return del_member_tinfo(sptr, mptr); }
-idaman DEPRECATED bool ida_export get_or_guess_member_tinfo(const member_t *mptr, qtype *type, qtype *fields);
-idaman DEPRECATED bool ida_export get_member_tinfo(const member_t *mptr, qtype *buf, qtype *fields);
-idaman DEPRECATED bool ida_export set_member_tinfo(const til_t *til, struc_t *sptr, member_t *mptr, uval_t memoff, const type_t *type, const p_list *fields, int flags);
-idaman DEPRECATED ssize_t ida_export get_member_name(tid_t mid, char *buf, size_t bufsize);
-#endif
-
-
-#pragma pack(pop)
 #endif // _STRUCT_HPP

@@ -12,15 +12,18 @@ static void swap_exec(exec &ex)
 }
 
 //--------------------------------------------------------------------------
-int get_aout_file_format_index(linput_t *li)
+int get_aout_file_format_index(linput_t *li, exec *_ex)
 {
-  exec ex;
+  exec &ex = *_ex;
   register int i = 0;
-  if ( qlread(li, &ex, sizeof(ex)) != sizeof(ex) ) return false;
+  if ( qlread(li, &ex, sizeof(ex)) != sizeof(ex) )
+    return false;
 
-  if ( N_BADMAG(ex) ) {
+  if ( N_BADMAG(ex) )
+  {
     swap_exec(ex);
-    switch ( N_MACHTYPE(ex) ) {
+    switch ( N_MACHTYPE(ex) )
+    {
       case M_386_NETBSD:
       case M_68K_NETBSD:
       case M_68K4K_NETBSD:
@@ -38,7 +41,8 @@ int get_aout_file_format_index(linput_t *li)
     }
   }
 
-  switch ( N_MAGIC(ex) ) {
+  switch ( N_MAGIC(ex) )
+  {
     case NMAGIC:
       ++i;
     case CMAGIC:
@@ -48,7 +52,8 @@ int get_aout_file_format_index(linput_t *li)
     case OMAGIC:
       ++i;
     case QMAGIC:
-      if ( N_MACHTYPE(ex) == M_SPARC ) break; // SPARC uses different TXTOFF
+      if ( N_MACHTYPE(ex) == M_SPARC )
+        break; // SPARC uses different TXTOFF
 
 #ifdef DEBUG
       msg("magic=%04x text=%08x data=%08x symsize=%08x txtoff=%08x sum=%08x // qlsize=%08x\n", N_MAGIC(ex), ex.a_text, ex.a_data,

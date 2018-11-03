@@ -8,7 +8,7 @@
 //
 
 #include <string>
-#include <area.hpp>
+#include <range.hpp>
 #include <idd.hpp>
 #include "consts.h"
 
@@ -34,7 +34,7 @@ inline bytevec_t prepare_rpc_packet(uchar code)
   return bytevec_t((char *)&rp, sizeof(rp));
 }
 
-void finalize_packet(bytevec_t &cmd);
+void finalize_packet(bytevec_t &pkt);
 const char *get_rpc_name(int code);
 
 inline void append_str(bytevec_t &s, const char *str)
@@ -61,6 +61,19 @@ inline char *extract_str(const uchar **pptr, const uchar *end)
   return (char*)str;
 }
 
+inline bool extract_qstr(const uchar **pptr, const uchar *end, qstring *out)
+{
+  const uchar *str = *pptr;
+  const uchar *ptr = str;
+  do
+    if ( ptr >= end )
+      return false;
+  while ( *ptr++ != '\0' );
+  out->append((const char*)str, ptr-str);
+  *pptr = ptr;
+  return true;
+}
+
 inline void append_type(bytevec_t &s, const type_t *str)
 {
   append_str(s, (char *)str);
@@ -71,6 +84,9 @@ void extract_type(tinfo_t *tif, const uchar **ptr, const uchar *end);
 
 void extract_memory_info(const uchar **ptr, const uchar *end, memory_info_t *info);
 void append_memory_info(bytevec_t &s, const memory_info_t *info);
+
+void extract_scattered_segm(const uchar **ptr, const uchar *end, scattered_segm_t *ss);
+void append_scattered_segm(bytevec_t &s, const scattered_segm_t *ss);
 
 // We pass ea_t as a 64-bit quantity (to be able to debug 32-bit programs with ida64)
 // adding 1 to the address ensures that BADADDR is passed correctly.
@@ -131,8 +147,8 @@ inline void extract_breakpoint(const uchar **ptr, const uchar *end, e_breakpoint
 }
 void extract_module_info(const uchar **ptr, const uchar *end, module_info_t *info);
 void append_module_info(bytevec_t &s, const module_info_t *info);
-void extract_process_info(const uchar **ptr, const uchar *end, process_info_t *info);
-void append_process_info(bytevec_t &s, const process_info_t *info);
+void extract_process_info_vec(const uchar **ptr, const uchar *end, procinfo_vec_t *procs);
+void append_process_info_vec(bytevec_t &s, const procinfo_vec_t *procs);
 
 void extract_call_stack(const uchar **ptr, const uchar *end, call_stack_t *trace);
 void append_call_stack(bytevec_t &s, const call_stack_t &trace);

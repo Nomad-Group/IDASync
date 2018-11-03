@@ -24,7 +24,7 @@
 // processor registers
 enum CR16_registers
 {
- rNULLReg, 
+ rNULLReg,
  rR0, rR1, rR2, rR3, rR4, rR5, rR6, rR7,
  rR8, rR9, rR10, rR11, rR12, rR13, rRA, rSP,
  // special registers
@@ -33,21 +33,17 @@ enum CR16_registers
  rVcs, rVds
 };
 
-
-extern char deviceparams[];
-extern char device[];
+//------------------------------------------------------------------------
+extern qstring deviceparams;
+extern qstring device;
 
 //------------------------------------------------------------------------
-void    idaapi CR16_header(void);
-void    idaapi CR16_footer(void);
+void    idaapi CR16_header(outctx_t &ctx);
+void    idaapi CR16_footer(outctx_t &ctx);
 
-void    idaapi CR16_segstart(ea_t ea);
+void    idaapi CR16_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi CR16_ana(void);
-int     idaapi CR16_emu(void);
-void    idaapi CR16_out(void);
-bool    idaapi CR16_outop(op_t &op);
-
-void    idaapi CR16_data(ea_t ea);
+int     idaapi CR16_ana(insn_t *_insn);
+int     idaapi CR16_emu(const insn_t &insn);
 
 #endif

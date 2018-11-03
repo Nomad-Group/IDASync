@@ -4,7 +4,7 @@
 
 #include <pro.h>
 #include <fpro.h>
-#include <area.hpp>
+#include <range.hpp>
 #include <idd.hpp>
 #include "wince.hpp"
 #include "xscale/Breakpoint.h"
@@ -53,13 +53,14 @@ static bool is_ce500(void)
          && ver.dwPlatformId == VER_PLATFORM_WIN32_CE
          && ver.dwMajorVersion >= 5;
   }
-  return ce500 == 0 ? false : true;
+  return ce500 != 0;
 }
 
-typedef struct _MODULEINFO {
-    LPVOID lpBaseOfDll;
-    DWORD SizeOfImage;
-    LPVOID EntryPoint;
+typedef struct _MODULEINFO
+{
+  LPVOID lpBaseOfDll;
+  DWORD SizeOfImage;
+  LPVOID EntryPoint;
 } MODULEINFO, *LPMODULEINFO;
 
 typedef DWORD WINAPI VirtualQueryEx_t(HANDLE hProcess, LPCVOID lpAddress, PMEMORY_BASIC_INFORMATION lpBuffer, DWORD dwLength);
@@ -95,30 +96,26 @@ static void init_cefuncs(void)
 
 //--------------------------------------------------------------------------
 bool win32_debmod_t::create_process(
-    const char *path,
-    const char *args,
-    const char * /*startdir*/,
-    bool is_gui,
-    PROCESS_INFORMATION *ProcessInformation)
+        const char *path,
+        const char *args,
+        const char * /*startdir*/,
+        bool is_gui,
+        bool /* hide_window */,
+        PROCESS_INFORMATION *ProcessInformation)
 {
-  wchar_t wpath[MAXSTR];
-  wchar_t wargs_buffer[MAXSTR];
-  wchar_t *wargs = NULL;
+  qwstring wpath;
+  qwstring wargs;
   if ( args != NULL )
-  {
-    cwstr(wargs_buffer, args, qnumber(wargs_buffer));
-    wargs = wargs_buffer;
-  }
-  cwstr(wpath, path, qnumber(wpath));
+    utf8_utf16(&wargs, args);
+  utf8_utf16(&wpath, path);
+  DWORD flags = (is_gui ? 0 : CREATE_NEW_CONSOLE) | DEBUG_ONLY_THIS_PROCESS | DEBUG_PROCESS;
   return CreateProcess(
-          wpath,                               // pointer to name of executable module
-          wargs,                               // pointer to command line string
+          wpath.c_str(),                       // pointer to name of executable module
+          wargs.begin(),                       // pointer to command line string
           NULL,                                // pointer to process security attributes
           NULL,                                // pointer to thread security attributes
           FALSE,                               // handle inheritance flag
-           (is_gui ? 0 : CREATE_NEW_CONSOLE)   // creation flags
-          |DEBUG_ONLY_THIS_PROCESS
-          |DEBUG_PROCESS,
+          flags,                               // creation flags
           NULL,                                // pointer to new environment block
           NULL,                                // pointer to current directory name
           NULL,                                // pointer to STARTUPINFO
@@ -363,7 +360,7 @@ uint32 win32_debmod_t::calc_imagesize(ea_t ea)
     }
     else
     {
-      modbase_to_entry_t mbh = {ea, };
+      modbase_to_entry_t mbh = { ea };
       int code = for_each_module(pid, &get_module_by_base, &mbh);
       if ( code == 1 )
         hMod = mbh.me.hModule;
@@ -492,16 +489,16 @@ bool win32_debmod_t::get_dll_exports(
 // we never write there
 bool win32_debmod_t::may_write(ea_t ea)
 {
-  static area_t forbidden_area;
-  if ( forbidden_area.startEA == 0 )
+  static range_t forbidden_range;
+  if ( forbidden_range.start_ea == 0 )
   {
     wince_module_t coredll;
     find_module_by_name("coredll", &coredll);
     common_e32_lite &e32 = get_e32(&coredll);
-    forbidden_area.startEA = e32.vbase;
-    forbidden_area.endEA   = e32.vbase + e32.vsize;
+    forbidden_range.start_ea = e32.vbase;
+    forbidden_range.end_ea   = e32.vbase + e32.vsize;
   }
-  if ( ea >= 0x80000000 || forbidden_area.contains(ea) )
+  if ( ea >= 0x80000000 || forbidden_range.contains(ea) )
   {
     SetLastError(ERROR_ACCESS_DENIED);
     return false;
@@ -516,11 +513,11 @@ WINBASEAPI
 BOOL
 WINAPI
 VirtualProtectEx(
-    IN  HANDLE hProcess,
-    IN  LPVOID lpAddress,
-    IN  SIZE_T dwSize,
-    IN  DWORD flNewProtect,
-    OUT PDWORD lpflOldProtect)
+        IN  HANDLE hProcess,
+        IN  LPVOID lpAddress,
+        IN  SIZE_T dwSize,
+        IN  DWORD flNewProtect,
+        OUT PDWORD lpflOldProtect)
 {
   if ( _VirtualProtectEx )
     return _VirtualProtectEx(hProcess, lpAddress, dwSize, flNewProtect, lpflOldProtect);
@@ -534,15 +531,17 @@ VirtualProtectEx(
 static DWORD PhysToVirt(DWORD dwPhysOffset)
 {
 // reverse map physical address to virtual.
-    for (DWORD ixPage= 0x800 ; ixPage < 0xa00 ; ixPage++)
+  for ( DWORD ixPage= 0x800; ixPage < 0xa00; ixPage++ )
+  {
+    DWORD dwEntry= ((DWORD*)0xfffd0000)[ixPage];
+    if ( ((dwEntry&3) == 2)
+      && ((dwEntry&0xfff00000) == (dwPhysOffset&0xfff00000)) )
     {
-        DWORD dwEntry= ((DWORD*)0xfffd0000)[ixPage];
-        if ( ((dwEntry&3)==2 )
-            && ((dwEntry&0xfff00000)==(dwPhysOffset&0xfff00000)))
-            return (dwPhysOffset&0xfffff)|(ixPage<<20);
+      return (dwPhysOffset&0xfffff)|(ixPage<<20);
     }
-//    debug("Physical address %08lx is not mapped\n", dwPhysOffset);
-    return 0;
+  }
+//  debug("Physical address %08lx is not mapped\n", dwPhysOffset);
+  return 0;
 }
 
 //--------------------------------------------------------------------------
@@ -587,7 +586,7 @@ static bool is_kernpage_used(ea_t ea, uint *size)
 
     int ix2ndPage = (ea>>12) & 0xff;
     int dw2ndEntry = ((DWORD*)virt_2nd_tlb)[ix2ndPage];
-    if ( (dw2ndEntry & 3) ==1 )
+    if ( (dw2ndEntry & 3) == 1 )
     {
       // large page
       return true;
@@ -603,21 +602,21 @@ static bool is_kernpage_used(ea_t ea, uint *size)
 }
 
 //--------------------------------------------------------------------------
-struct area_info_t
+struct range_info_t
 {
   ea_t end;
   bool used;
-  area_info_t(void) {}
-  area_info_t(ea_t ea, bool b) : end(ea), used(b) {}
+  range_info_t(void) {}
+  range_info_t(ea_t ea, bool b) : end(ea), used(b) {}
 };
 
-typedef std::map<ea_t, area_info_t> areas_t;
-static areas_t kernel_areas;
+typedef std::map<ea_t, range_info_t> ranges_t;
+static ranges_t kernel_ranges;
 
 //--------------------------------------------------------------------------
-static ea_t find_process_area_end(ea_t ea, ea_t *next_process_area)
+static ea_t find_process_range_end(ea_t ea, ea_t *next_process_range)
 {
-  *next_process_area = BADADDR;
+  *next_process_range = BADADDR;
   bool exiting = g_global_server == NULL
     || ((win32_debmod_t *)g_global_server->get_debugger_instance())->exiting;
 
@@ -628,8 +627,8 @@ static ea_t find_process_area_end(ea_t ea, ea_t *next_process_area)
     for ( int i=0; i < process_objcnt; i++ )
     {
       o32_lite &o32 = process_o32_ptr[i];
-      if ( ea < o32.rva+process_vbase && *next_process_area == BADADDR )
-        *next_process_area = process_vbase + o32.rva;
+      if ( ea < o32.rva+process_vbase && *next_process_range == BADADDR )
+        *next_process_range = process_vbase + o32.rva;
       else if ( rva >= o32.rva && rva < o32.rva + o32.vsize )
       {
         ea = slot + process_vbase + o32.rva + o32.vsize;
@@ -654,7 +653,7 @@ static ea_t find_region_end(ea_t ea, bool *used)
   if ( (ea < 0x80000000) || ((ea & 0xfe000000) == 0xc2000000) )
   {
     ea_t next;
-    ea_t end = find_process_area_end(ea, &next);
+    ea_t end = find_process_range_end(ea, &next);
     if ( end != BADADDR )
     {
       *used = true;
@@ -712,29 +711,29 @@ stopscan:
   else // we suppose that the kernel memory layout does not change
   {
     int use, i;
-    if ( kernel_areas.empty() )
+    if ( kernel_ranges.empty() )
     {
-      static const area_t used[] =
+      static const range_t used[] =
       {
-        area_t(0xFFFD0000, 0xFFFD4000),
-        area_t(0xFFFF0000, 0xFFFFCC00),
+        range_t(0xFFFD0000, 0xFFFD4000),
+        range_t(0xFFFF0000, 0xFFFFCC00),
       };
-      static const area_t free[] =
+      static const range_t free[] =
       {
-        area_t(0xFFF00000, 0xFFFD0000),
-        area_t(0xFFFD4000, 0xFFFF0000),
+        range_t(0xFFF00000, 0xFFFD0000),
+        range_t(0xFFFD4000, 0xFFFF0000),
       };
       for ( i=0; i < qnumber(used); i++ )
-        kernel_areas[used[i].startEA] = area_info_t(used[i].endEA, true);
+        kernel_ranges[used[i].start_ea] = range_info_t(used[i].end_ea, true);
 
       for ( i=0; i < qnumber(free); i++ )
-        kernel_areas[free[i].startEA] = area_info_t(free[i].endEA, false);
+        kernel_ranges[free[i].start_ea] = range_info_t(free[i].end_ea, false);
     }
 
-    areas_t::iterator p = kernel_areas.find(ea);
-    if ( p != kernel_areas.end() )
+    ranges_t::iterator p = kernel_ranges.find(ea);
+    if ( p != kernel_ranges.end() )
     {
-      area_info_t &ai = p->second;
+      range_info_t &ai = p->second;
       use = ai.used;
       ea = ai.end;
     }
@@ -754,10 +753,10 @@ stopscan:
           break;
         ea += size;
       }
-      area_info_t ai;
+      range_info_t ai;
       ai.end = ea;
       ai.used = use;
-      kernel_areas[sea] = ai;
+      kernel_ranges[sea] = ai;
     }
     *used = use;
     return ea;
@@ -769,11 +768,10 @@ WINBASEAPI
 SIZE_T
 WINAPI
 VirtualQueryEx(
-    IN HANDLE hProcess,
-    IN LPCVOID lpAddress,
-    OUT PMEMORY_BASIC_INFORMATION lpBuffer,
-    IN SIZE_T dwLength
-    )
+        IN HANDLE hProcess,
+        IN LPCVOID lpAddress,
+        OUT PMEMORY_BASIC_INFORMATION lpBuffer,
+        IN SIZE_T dwLength)
 {
 
   if ( _VirtualQueryEx )
@@ -855,30 +853,20 @@ bool win32_debmod_t::set_debug_hook(ea_t)
 }
 
 //--------------------------------------------------------------------------
-bool win32_debmod_t::add_thread_areas(
-  HANDLE process_handle,
-  thid_t tid,
-  images_t &thread_areas,
-  images_t &class_areas)
-{
-  return false;
-}
-
-//--------------------------------------------------------------------------
-bool win32_debmod_t::get_mapped_filename(
-  HANDLE process_handle,
-  ea_t imagebase,
-  char *buf,
-  size_t bufsize)
+bool win32_debmod_t::add_thread_ranges(
+        HANDLE process_handle,
+        thid_t tid,
+        images_t &thread_ranges,
+        images_t &class_ranges)
 {
   return false;
 }
 
 //--------------------------------------------------------------------------
 bool win32_debmod_t::get_pe_export_name_from_process(
-  ea_t imagebase,
-  char *name,
-  size_t namesize)
+        eanat_t imagebase,
+        char *name,
+        size_t namesize)
 {
   return false;
 }
@@ -897,14 +885,14 @@ bool win32_debmod_t::enable_hwbpts()
 
 //--------------------------------------------------------------------------
 // map process slot to slot 0
-ea_t win32_debmod_t::pstos0(ea_t ea)
+eanat_t win32_debmod_t::pstos0(eanat_t ea)
 {
   return ::pstos0(ea);
 }
 
 //--------------------------------------------------------------------------
 // map slot 0 to the process slot
-ea_t win32_debmod_t::s0tops(ea_t ea)
+eanat_t win32_debmod_t::s0tops(eanat_t ea)
 {
   return ::s0tops(ea);
 }

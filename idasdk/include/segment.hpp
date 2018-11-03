@@ -9,10 +9,8 @@
 #define _SEGMENT_HPP
 
 #include <ida.hpp>
-#include <area.hpp>             // segments are range of addresses
+#include <range.hpp>            // segments are range of addresses
                                 // with characteristics
-
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
 
 /*! \file segment.hpp
 
@@ -53,11 +51,8 @@
 /// \defgroup seg Segments
 /// \copybrief segment.hpp
 
-/// Area control block for segments
-idaman areacb_t ida_export_data segs;
 
-
-/// Maximum number of segment registers is 16 (see srarea.hpp)
+/// Maximum number of segment registers is 16 (see segregs.hpp)
 #define SREG_NUM 16
 
 
@@ -70,7 +65,7 @@ idaman areacb_t ida_export_data segs;
 //@{
 
 /// Describes a program segment
-class segment_t : public area_t
+class segment_t : public range_t
 {
 public:
   /// Constructor
@@ -233,18 +228,18 @@ public:
   bool is_ephemeral_segm(void) const
     { return (flags & (SFL_DEBUG|SFL_LOADER)) == SFL_DEBUG; }
 
-/* 26 */  sel_t sel;            ///< segment selector - should be unique. You can't
+/* 28 */  sel_t sel;            ///< segment selector - should be unique. You can't
                                 ///< change this field after creating the segment.
                                 ///< Exception: 16bit OMF files may have several
                                 ///< segments with the same selector, but this is not
                                 ///< good (no way to denote a segment exactly)
                                 ///< so it should be fixed in the future.
 
-/* 30 */  sel_t defsr[SREG_NUM];///< default segment register values.
+/* 32 */  sel_t defsr[SREG_NUM];///< default segment register values.
                                 ///< first element of this array keeps information
-                                ///< about value of \ph{regFirstSreg}
+                                ///< about value of \ph{reg_first_sreg}
 
-/* 94 */  uchar type;           ///< segment type (see \ref SEG_).
+/* 96 */  uchar type;           ///< segment type (see \ref SEG_).
                                 ///< The kernel treats different segment types differently.
                                 ///< Segments marked with '*' contain no instructions
                                 ///< or data and are not declared as 'segments' in
@@ -270,7 +265,7 @@ public:
 #define SEG_MAX_SEGTYPE_CODE SEG_IMEM
 //@}
 
-/* 95 */  bgcolor_t color;      ///< the segment color
+/* 100 */ bgcolor_t color;      ///< the segment color
 
   /// Update segment information. You must call this function after modification
   /// of segment characteristics. Note that not all fields of segment structure
@@ -279,7 +274,13 @@ public:
   inline bool update(void);
 
 
-}; // total 99 bytes
+}; // total 104/192 bytes
+
+#ifdef __EA64__
+CASSERT(sizeof(segment_t) == 192);
+#else
+CASSERT(sizeof(segment_t) == 104);
+#endif
 
 /// See #SFL_HIDDEN
 inline bool is_visible_segm(segment_t *s) { return s->is_visible_segm(); }
@@ -303,6 +304,12 @@ idaman bool ida_export is_spec_segm(uchar seg_type);
 idaman bool ida_export is_spec_ea(ea_t ea);
 
 
+/// Lock segment pointer
+/// Locked pointers are guaranteed to remain valid until they are unlocked.
+/// Ranges with locked pointers can not be deleted or moved.
+
+idaman void ida_export lock_segm(const segment_t *segm, bool lock);
+
 /// Helper class to lock a segment pointer so it stays valid
 class lock_segment
 {
@@ -310,19 +317,16 @@ class lock_segment
 public:
   lock_segment(const segment_t *_segm) : segm(_segm)
   {
-    areacb_t_lock_area(&segs, segm);
+    lock_segm(segm, true);
   }
   ~lock_segment(void)
   {
-    areacb_t_unlock_area(&segs, segm);
+    lock_segm(segm, false);
   }
 };
 
 /// Is a segment pointer locked?
-inline bool is_segm_locked(const segment_t *segm)
-{
-  return areacb_t_get_area_locks(&segs, segm) > 0;
-}
+idaman bool ida_export is_segm_locked(const segment_t *segm);
 
 //@} seg_t
 
@@ -345,7 +349,7 @@ inline bool is_segm_locked(const segment_t *segm)
 
 /// Get description of selector (0..get_selector_qty()-1)
 
-idaman bool ida_export getn_selector(int n, sel_t *sel, ea_t *base);
+idaman bool ida_export getn_selector(sel_t *sel, ea_t *base, int n);
 
 
 /// Get number of defined selectors
@@ -412,15 +416,20 @@ idaman void ida_export del_selector(sel_t selector);
 /// \return paragraph the specified selector is mapped to.
 ///          if there is no mapping, returns 'selector'.
 
-idaman ea_t ida_export ask_selector(sel_t selector);    // returns paragraph
+idaman ea_t ida_export sel2para(sel_t selector);
 
 
 /// Get mapping of a selector as a linear address.
 /// \param selector  number of selector to translate to linear address
 /// \return linear address the specified selector is mapped to.
-///          if there is no mapping, returns toEA(selector,0);
+///          if there is no mapping, returns to_ea(selector,0);
 
-idaman ea_t ida_export sel2ea(sel_t selector);  // returns linear address
+inline ea_t idaapi sel2ea(sel_t selector)
+{
+  if ( selector == BADSEL )
+    return BADADDR;
+  return to_ea(sel2para(selector), 0);
+}
 
 
 /// Find a selector that has mapping to the specified paragraph.
@@ -439,7 +448,7 @@ idaman sel_t ida_export find_selector(ea_t base);
 ///                - para: selector mapping
 /// \return 0 or code returned by 'func'.
 
-idaman int ida_export enumerate_selectors(int (idaapi* func)(sel_t sel,ea_t para));
+idaman int ida_export enumerate_selectors(int (idaapi *func)(sel_t sel,ea_t para));
 
 
 /// Enumerate all segments with the specified selector.
@@ -457,9 +466,9 @@ idaman int ida_export enumerate_selectors(int (idaapi* func)(sel_t sel,ea_t para
 /// \return #BADADDR or the value returned by the callback function 'func'
 
 idaman ea_t ida_export enumerate_segments_with_selector(
-                                sel_t selector,
-                                ea_t (idaapi* func)(segment_t *s,void *ud),
-                                void *ud);
+        sel_t selector,
+        ea_t (idaapi *func)(segment_t *s, void *ud),
+        void *ud=NULL);
 
 
 /// Get pointer to segment structure.
@@ -487,13 +496,13 @@ idaman segment_t *ida_export get_segm_by_sel(sel_t selector);
 /// mode or another segment base address.
 /// \param s       pointer to filled segment structure.
 ///                segment selector should have proper mapping (see set_selector()).
-///                  - if s.startEA==#BADADDR then s.startEA <- get_segm_base(&s)
-///                  - if s.endEA==#BADADDR, then a segment up to the next segment
+///                  - if s.start_ea==#BADADDR then s.start_ea <- get_segm_base(&s)
+///                  - if s.end_ea==#BADADDR, then a segment up to the next segment
 ///                    will be created (if the next segment doesn't exist, then
 ///                    1 byte segment will be created).
-///                  - if the s.endEA < s.startEA, then fail.
-///                  - if s.endEA is too high and the new segment would overlap
-///                    the next segment, s.endEA is adjusted properly.
+///                  - if the s.end_ea < s.start_ea, then fail.
+///                  - if s.end_ea is too high and the new segment would overlap
+///                    the next segment, s.end_ea is adjusted properly.
 /// \param name    name of new segment. may be NULL.
 ///                if specified, the segment is immediately renamed
 /// \param sclass  class of the segment. may be NULL.
@@ -524,6 +533,9 @@ idaman bool ida_export add_segm_ex(
                                 ///< too many gaps lead to a virtual array failure.
                                 ///< it can not hold more than ~1000 gaps.
 #define ADDSEG_SPARSE   0x0020  ///< use sparse storage method for the new segment
+#define ADDSEG_NOAA     0x0040  ///< do not mark new segment for auto-analysis
+#define ADDSEG_IDBENC   0x0080  ///< 'name' and 'sclass' are given in the IDB encoding;
+                                ///< non-ASCII bytes will be decoded accordingly
 //@}
 
 
@@ -540,7 +552,7 @@ idaman bool ida_export add_segm_ex(
 ///                if paragraph can't fit in 16bit, then a new selector is
 ///                allocated and mapped to the paragraph.
 /// \param start   start address of the segment.
-///                if start==#BADADDR then start <- toEA(para,0).
+///                if start==#BADADDR then start <- to_ea(para,0).
 /// \param end     end address of the segment. end address should be higher than
 ///                start address. For emulate empty segments, use #SEG_NULL segment
 ///                type. If the end address is lower than start address, then fail.
@@ -564,11 +576,13 @@ idaman bool ida_export add_segm_ex(
 /// \retval 1  ok
 /// \retval 0  failed, a warning message is displayed
 
-idaman bool ida_export add_segm(ea_t para,
+idaman bool ida_export add_segm(
+        ea_t para,
         ea_t start,
         ea_t end,
         const char *name,
-        const char *sclass);
+        const char *sclass,
+        int flags=0);
 
 
 /// Delete a segment.
@@ -596,14 +610,14 @@ idaman bool ida_export del_segm(ea_t ea, int flags);
 
 /// Get number of segments
 
-inline int get_segm_qty(void){ return segs.get_area_qty(); }
+idaman int ida_export get_segm_qty(void);
 
 
 /// Get pointer to segment by linear address.
 /// \param ea  linear address belonging to the segment
 /// \return NULL or pointer to segment structure
 
-inline segment_t *getseg(ea_t ea) { return (segment_t *)(segs.get_area(ea)); }
+idaman segment_t *ida_export getseg(ea_t ea);
 
 
 /// Get pointer to segment by its number.
@@ -612,18 +626,25 @@ inline segment_t *getseg(ea_t ea) { return (segment_t *)(segs.get_area(ea)); }
 /// \param n  segment number in the range (0..get_segm_qty()-1)
 /// \returns NULL or pointer to segment structure
 
-inline segment_t *getnseg(int n){ return (segment_t *)(segs.getn_area(n)); }
+idaman segment_t *ida_export getnseg(int n);
+
+
+/// Get number of segment by address.
+/// \param ea  linear address belonging to the segment
+/// \return -1 if no segment occupies the specified address.
+///         otherwise returns number of the specified segment (0..get_segm_qty()-1)
+idaman int ida_export get_segm_num(ea_t ea);
 
 
 /// Get pointer to the next segment
-inline segment_t *get_next_seg(ea_t ea) { return (segment_t *)segs.next_area_ptr(ea); }
+idaman segment_t *ida_export get_next_seg(ea_t ea);
 /// Get pointer to the previous segment
-inline segment_t *get_prev_seg(ea_t ea) { return (segment_t *)segs.prev_area_ptr(ea); }
+idaman segment_t *ida_export get_prev_seg(ea_t ea);
 
 /// Get pointer to the first segment
-inline segment_t *get_first_seg(void) { return (segment_t *)segs.first_area_ptr(); }
+idaman segment_t *ida_export get_first_seg(void);
 /// Get pointer to the last segment
-inline segment_t *get_last_seg(void) { return (segment_t *)segs.last_area_ptr(); }
+idaman segment_t *ida_export get_last_seg(void);
 
 
 /// Get pointer to segment by its name.
@@ -696,8 +717,8 @@ idaman bool ida_export move_segm_start(ea_t ea, ea_t newstart, int mode);
 /// This function moves all information to the new address.
 /// It fixes up address sensitive information in the kernel.
 /// The total effect is equal to reloading the segment to the target address.
-/// SDK: For the module dependent address sensitive information, \ph{move_segm} is called.
 /// For the file format dependent address sensitive information, loader_t::move_segm is called.
+/// Also IDB notification event idb_event::segm_moved is called.
 /// \param s      segment to move
 /// \param to     new segment start address
 /// \param flags  \ref MSF_
@@ -713,6 +734,10 @@ idaman int ida_export move_segm(segment_t *s, ea_t to, int flags=0);
 #define MSF_LDKEEP    0x0004    ///< keep the loader in the memory (optimization)
 #define MSF_FIXONCE   0x0008    ///< call loader only once with the special calling method.
                                 ///< valid for rebase_program(). see loader_t::move_segm.
+#define MFS_NETMAP    0x0010    ///< change inf.netdelta if possible (this is faster)
+                                ///< valid for rebase_program()
+#define MSF_PRIORITY  0x0020    ///< loader segments will overwrite any existing debugger segments when moved.
+                                ///< valid for move_segm()
 //@}
 
 /// \defgroup MOVE_SEGM_ Move segment result codes
@@ -751,12 +776,12 @@ idaman int ida_export change_segment_status(segment_t *s, bool is_deb_segm);
 /// \defgroup CSS_ Change segment status result codes
 /// Return values for change_segment_status()
 //@{
-#define CSS_OK      0           ///< ok
-#define CSS_NODBG  -1           ///< debugger is not running
-#define CSS_NOAREA -2           ///< could not find corresponding memory area
-#define CSS_NOMEM  -3           ///< not enough memory (might be because the segment
+#define CSS_OK       0          ///< ok
+#define CSS_NODBG   -1          ///< debugger is not running
+#define CSS_NORANGE -2          ///< could not find corresponding memory range
+#define CSS_NOMEM   -3          ///< not enough memory (might be because the segment
                                 ///< is too big)
-#define CSS_BREAK  -4           ///< memory reading process stopped by user
+#define CSS_BREAK   -4          ///< memory reading process stopped by user
 //@}
 
 
@@ -807,7 +832,7 @@ inline void term_groups(void) {}
 /// \return 1   ok
 /// \return 0   too many groups (see #MAX_GROUPS)
 
-idaman int ida_export set_group_selector(sel_t grp,sel_t sel);
+idaman int ida_export set_group_selector(sel_t grp, sel_t sel);
 
 #define MAX_GROUPS      8   ///< max number of segment groups
 
@@ -859,7 +884,7 @@ idaman sel_t ida_export get_group_selector(sel_t grpsel);
 /// all references will pass  through the translation mechanism and go to the
 /// correct segment.
 ///
-/// Segment translation works only for code segments (see codeSeg())
+/// Segment translation works only for code segments (see map_code_ea())
 //@{
 //-------------------------------------------------------------------------
 
@@ -876,34 +901,27 @@ idaman bool ida_export add_segment_translation(ea_t segstart, ea_t mappedseg);
 
 /// Set new translation list.
 /// \param segstart  start address of the segment to add translation to
-/// \param transmap  array of segment start addresses for the translation list.
-///                  The first element of array contains number of segments.
-///                  If transmap==NULL, then translation list is deleted.
+/// \param transmap  vector of segment start addresses for the translation list.
+///                  If transmap is empty, the translation list is deleted.
 /// \retval 1  ok
 /// \retval 0  too many translations or bad segstart
 
-idaman bool ida_export set_segment_translations(ea_t segstart, const ea_t *transmap);
+idaman bool ida_export set_segment_translations(ea_t segstart, const eavec_t &transmap);
 
 
 /// Delete the translation list
+/// \param segstart  start address of the segment to delete translation list
 
-inline bool del_segment_translations(ea_t ea)
-{
-  return set_segment_translations(ea, NULL);
-}
+idaman void ida_export del_segment_translations(ea_t segstart);
 
 
 /// Get segment translation list.
+/// \param transmap  vector of segment start addresses for the translation list
 /// \param segstart  start address of the segment to get information about
-/// \param buf       buffer for the answer
-/// \param bufsize   size of the buffer in bytes
-/// \return  NULL if no translation list, bad segstart, or small or bad buffer.
-///          otherwise returns translation list.
-///          the first element of the list contains number of segments.
+/// \return  -1 if no translation list or bad segstart.
+///          otherwise returns size of translation list.
 
-idaman ea_t *ida_export get_segment_translations(ea_t segstart,
-                                                 ea_t *buf,
-                                                 int bufsize);
+idaman ssize_t ida_export get_segment_translations(eavec_t *transmap, ea_t segstart);
 //@} seg_trans
 
 //-------------------------------------------------------------------------
@@ -930,47 +948,32 @@ idaman ea_t *ida_export get_segment_translations(ea_t segstart,
 //-------------------------------------------------------------------------
 
 /// Get segment comment.
+/// \param buf         buffer for the comment
 /// \param s           pointer to segment structure
 /// \param repeatable  0: get regular comment.
 ///                    1: get repeatable comment.
-/// \return NULL or segment comment (The caller must qfree() the result)
+/// \return size of comment or -1
 
-inline char *get_segment_cmt(const segment_t *s, bool repeatable)
-{
-  return segs.get_area_cmt(s,repeatable);
-}
+idaman ssize_t ida_export get_segment_cmt(qstring *buf, const segment_t *s, bool repeatable);
 
 
 /// Set segment comment.
 /// \param s           pointer to segment structure
 /// \param cmt         comment string, may be multiline (with '\n').
 ///                    maximal size is 4096 bytes.
+///                    Use empty str ("") to delete comment
 /// \param repeatable  0: set regular comment.
 ///                    1: set repeatable comment.
 ///
 
-inline void set_segment_cmt(segment_t *s,const char *cmt, bool repeatable)
-{
-  segs.set_area_cmt(s,cmt,repeatable);
-}
-
-
-/// Delete segment comment.
-/// \param s           pointer to segment structure
-/// \param repeatable  0: delete regular comment.
-///                    1: delete repeatable comment.
-
-inline void del_segment_cmt(segment_t *s, bool repeatable)
-{
-  segs.del_area_cmt(s, repeatable);
-}
+idaman void ida_export set_segment_cmt(const segment_t *s, const char *cmt, bool repeatable);
 
 
 /// Generate segment footer line as a comment line.
 /// This function may be used in IDP modules to generate segment footer
 /// if the target assembler doesn't have 'ends' directive.
 
-idaman void ida_export std_gen_segm_footer(ea_t ea);
+idaman void ida_export std_out_segm_footer(struct outctx_t &ctx, segment_t *seg);
 
 //@} seg_cmt
 
@@ -982,79 +985,58 @@ idaman void ida_export std_gen_segm_footer(ea_t ea);
 /// Various ways to retrieve the name of a segment
 //@{
 
-/// See set_segm_name()
-
-idaman AS_PRINTF(2, 0) int ida_export vset_segm_name(
-        segment_t *s,
-        const char *format,
-        va_list va);
-
 /// Rename segment.
-/// The new name is validated (see validate_name3).
+/// The new name is validated (see validate_name).
 /// A segment always has a name. If you hadn't specified a name,
 /// the kernel will assign it "seg###" name where ### is segment number.
 /// \param s       pointer to segment (may be NULL)
-/// \param format  new name, printf() style format string
+/// \param name    new segment name
+/// \param flags   ADDSEG_IDBENC or 0
 /// \retval 1  ok, name is good and segment is renamed
 /// \retval 0  failure, name is bad or segment is NULL
 
-AS_PRINTF(2, 3) inline int set_segm_name(segment_t *s, const char *format, ...)
-{
-  va_list va;
-  va_start(va, format);
-  int code = vset_segm_name(s, format, va);
-  va_end(va);
-  return code;
-}
+idaman int ida_export set_segm_name(
+        segment_t *s,
+        const char *name,
+        int flags=0);
 
 
 /// Get true segment name by pointer to segment.
-/// \param s        pointer to segment
 /// \param buf      output buffer. can not be NULL
-/// \param bufsize  output buffersize
+/// \param s        pointer to segment
+/// \param flags    0-return name as is; 1-substitute bad symbols with _
+///                 1 corresponds to GN_VISIBLE
 /// \return size of segment name (-1 if s==NULL)
 
-idaman ssize_t ida_export get_true_segm_name(const segment_t *s, char *buf, size_t bufsize);
+idaman ssize_t ida_export get_segm_name(qstring *buf, const segment_t *s, int flags=0);
 
 
 /// Get segment name by pointer to segment.
-/// \param s        pointer to segment
 /// \param buf      output buffer. can not be NULL
-/// \param bufsize  output buffersize
+/// \param s        pointer to segment
 /// \return size of segment name (-1 if s==NULL)
 
-idaman ssize_t ida_export get_segm_name(const segment_t *s, char *buf, size_t bufsize);
-
-
-/// Get segment name by linear address.
-/// \param ea        any linear address within the segment
-/// \param buf       output buffer. can not be NULL
-/// \param bufsize   output buffersize
-/// \return size of segment name (-1 if s==NULL)
-
-inline ssize_t idaapi get_segm_name(ea_t ea, char *buf, size_t bufsize)
+inline ssize_t idaapi get_visible_segm_name(qstring *buf, const segment_t *s)
 {
-  return get_segm_name(getseg(ea), buf, bufsize);
+  return get_segm_name(buf, s, 1);
 }
 
 
 /// Get colored segment name expression in the form (segname + displacement).
+/// \param buf      output buffer to hold segment expression
 /// \param from     linear address of instruction operand or data referring to
 ///                 the name. This address will be used to get fixup information,
 ///                 so it should point to exact position of operand in the
 ///                 instruction.
 /// \param sel      value to convert to segment expression
-/// \param buf      output buffer to hold segment expression
-/// \param bufsize  size of the output buffer
-/// \return NULL-can't convert to segment expression.
-///          otherwise pointer to 'buf'
+/// \return size of segment expression or -1
 
-char *get_segm_expr(ea_t from, sel_t sel, char *buf, size_t bufsize);
+ssize_t get_segm_expr(qstring *buf, ea_t from, sel_t sel);
 
 //@} seg_name
 
 //-------------------------------------------------------------------------
-//      S E G M E N T   C L A S S E S  A N D  T Y P E S
+//      S E G M E N T   C L A S S E S   A N D   T Y P E S
 //-------------------------------------------------------------------------
 /// \defgroup seg_type Segment classes and types
 /// \ingroup seg
@@ -1063,12 +1045,11 @@ char *get_segm_expr(ea_t from, sel_t sel, char *buf, size_t bufsize);
 
 /// Get segment class.
 /// Segment class is arbitrary text (max 8 characters).
-/// \param s        pointer to segment
 /// \param buf      output buffer. can not be NULL.
-/// \param bufsize  output buffersize
+/// \param s        pointer to segment
 /// \return size of segment class (-1 if s==NULL or bufsize<=0)
 
-idaman ssize_t ida_export get_segm_class(const segment_t *s, char *buf, size_t bufsize);
+idaman ssize_t ida_export get_segm_class(qstring *buf, const segment_t *s);
 
 
 /// Set segment class.
@@ -1084,7 +1065,7 @@ idaman ssize_t ida_export get_segm_class(const segment_t *s, char *buf, size_t b
 /// \retval 1  ok, name is good and segment is renamed
 /// \retval 0  failure, name is NULL or bad or segment is NULL
 
-idaman int ida_export set_segm_class(segment_t *s, const char *sclass);
+idaman int ida_export set_segm_class(segment_t *s, const char *sclass, int flags=0);
 
 
 /// Get segment type.
@@ -1124,8 +1105,8 @@ idaman const char *ida_export get_segment_combination(uchar comb);
 
 /// Get segment base paragraph.
 /// Segment base paragraph may be converted to segment base linear address
-/// using toEA() function.
-/// In fact, toEA(get_segm_para(s), 0) == get_segm_base(s).
+/// using to_ea() function.
+/// In fact, to_ea(get_segm_para(s), 0) == get_segm_base(s).
 /// \param s  pointer to segment
 /// \return 0 if s == NULL,
 ///          the segment base paragraph
@@ -1180,9 +1161,9 @@ inline bool is_ephemeral_segm(ea_t ea)
 }
 
 //-------------------------------------------------------------------------
-inline ea_t correct_address(ea_t ea, ea_t from, ea_t to, ea_t size)
+inline ea_t correct_address(ea_t ea, ea_t from, ea_t to, ea_t size, bool skip_check=false)
 {
-  if ( ea >= from && ea < from+size )
+  if ( skip_check || (ea >= from && ea < from+size) )
     ea += to - from;
   return ea;
 }
@@ -1201,12 +1182,4 @@ idaman adiff_t ida_export segm_adjust_diff(const segment_t *s, adiff_t delta);
 /// Truncate an address depending on the segment
 idaman ea_t ida_export segm_adjust_ea(const segment_t *s, ea_t ea);
 
-#ifndef NO_OBSOLETE_FUNCS
-#define SEGDEL_PERM   0x0001 // permanently, i.e. disable addresses
-#define SEGDEL_KEEP   0x0002 // keep information (code & data, etc)
-#define SEGDEL_SILENT 0x0004 // be silent
-#define SEGDEL_KEEP0  0x0008 // flag for internal use, don't set
-#endif
-
-#pragma pack(pop)
 #endif // _SEGMENT_HPP

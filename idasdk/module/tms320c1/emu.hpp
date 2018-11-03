@@ -35,6 +35,6 @@
 #ifndef _IDP_TMS320C1X_EMU_CPP
 #define _IDP_TMS320C1X_EMU_CPP
 
-extern int idaapi emu(void);
+extern int idaapi emu(const insn_t &insn);
 
 #endif  // _IDP_TMS320C1X_EMU_CPP

@@ -9,7 +9,7 @@
 #include <bytes.hpp>
 #include <offset.hpp>
 #include <segment.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <fixup.hpp>
 #include <entry.hpp>
 #include <auto.hpp>
@@ -43,18 +43,26 @@ template <class T> bool _validate_array_count(
         int64 max_offset=-1)
 {
   if ( current_offset == -1 )
-    current_offset = qltell64(li);
+    current_offset = qltell(li);
   if ( max_offset == -1 )
-    max_offset = qlsize64(li);
+    max_offset = qlsize(li);
   int64 rest = max_offset - current_offset;
   T cnt = *p_cnt;
   if ( current_offset >= 0 && rest >= 0 )
   {
-    if ( is_mul_ok<size_t>(elsize, cnt) )
+#ifdef __X64__
+    typedef size_t biggest_t;
+#else
+    typedef ea_t biggest_t;
+#endif
+    if ( is_mul_ok<biggest_t>(elsize, cnt) )
     {
-      size_t needed = elsize * cnt;
-      if ( rest >= needed )
-        return true; // all ok
+      biggest_t needed = elsize * cnt;
+#ifndef __X64__
+      if ( needed == size_t(needed) )
+#endif
+        if ( rest >= needed )
+          return true; // all ok
     }
     cnt = rest / elsize;
   }
@@ -80,10 +88,15 @@ template <class T> void validate_array_count(
   T old = *p_cnt;
   if ( !_validate_array_count(li, p_cnt, elsize, curoff, maxoff) )
   {
-    static const char *const format = "%s %"FMT_64"u is incorrect, maximum possible value is %"FMT_64"u%s";
+    static const char *const format =
+      "%s %" FMT_64 "u is incorrect, maximum possible value is %" FMT_64 "u%s";
 #ifdef __LOADER__
-    if ( askyn_c(ASKBTN_YES, format, counter_name, uint64(old), uint64(*p_cnt),
-                 ". Do you want to continue with the new value?") != ASKBTN_YES )
+    if ( ask_yn(ASKBTN_YES,
+                format,
+                counter_name,
+                uint64(old),
+                uint64(*p_cnt),
+                ". Do you want to continue with the new value?") != ASKBTN_YES )
     {
       loader_failure(NULL);
     }

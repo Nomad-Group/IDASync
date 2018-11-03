@@ -1,6 +1,27 @@
 
 #include "dsp56k.hpp"
 
+// simple wrapper class for syntactic sugar of member functions
+// this class may have only simple member functions.
+// virtual functions and data fields are forbidden, otherwise the class
+// layout may change
+class out_dsp56k_t : public outctx_t
+{
+  out_dsp56k_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+  void outreg(int r) { out_register(ph.reg_names[r]); }
+  bool out_port_address(ea_t addr);
+  void out_bad_address(ea_t addr);
+  void out_ip_rel(int displ);
+  void out_operand_group(int idx, const op_t *x);
+};
+CASSERT(sizeof(out_dsp56k_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_dsp56k_t)
+
 //--------------------------------------------------------------------------
 static const char *const cc_text[] =
 {
@@ -64,57 +85,77 @@ static const char *const formats2[] =
 
 
 //----------------------------------------------------------------------
-static bool out_port_address(ea_t addr)
+bool out_dsp56k_t::out_port_address(ea_t addr)
 {
-  const char *name = find_port(addr);
-  if ( name != NULL )
+  const ioport_t *port = find_port(addr);
+  if ( port != NULL && !port->name.empty() )
   {
-    out_line(name, COLOR_IMPNAME);
+    out_line(port->name.c_str(), COLOR_IMPNAME);
     return true;
   }
   return false;
 }
 
 //----------------------------------------------------------------------
-static void out_bad_address(ea_t addr)
+void out_dsp56k_t::out_bad_address(ea_t addr)
 {
   if ( !out_port_address(addr) )
   {
     out_tagon(COLOR_ERROR);
-    OutLong(addr, 16);
+    out_btoa(addr, 16);
     out_tagoff(COLOR_ERROR);
-    QueueSet(Q_noName, cmd.ea);
+    remember_problem(PR_NONAME, insn.ea);
   }
 }
 
 //----------------------------------------------------------------------
-inline void outreg(int r)
+void out_dsp56k_t::out_ip_rel(int displ)
 {
-  out_register(ph.regNames[r]);
-}
-
-//----------------------------------------------------------------------
-inline void out_ip_rel(int displ)
-{
-  out_snprintf(COLSTR("%s+", SCOLOR_SYMBOL) COLSTR("%d", SCOLOR_NUMBER),
+  out_printf(COLSTR("%s+", SCOLOR_SYMBOL) COLSTR("%d", SCOLOR_NUMBER),
                ash.a_curip, displ);
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_dsp56k_t::out_operand(const op_t &x)
 {
-  if ( x.type == o_imm         ) out_symbol('#');
+  if ( x.type == o_imm )
+  {
+    out_symbol('#');
+  }
   else
   {
-    if ( x.amode & amode_x       ) { out_register("x"); out_symbol(':'); }
-    if ( x.amode & amode_y       ) { out_register("y"); out_symbol(':'); }
-    if ( x.amode & amode_p       ) { out_register("p"); out_symbol(':'); }
-    if ( x.amode & amode_l       ) { out_register("l"); out_symbol(':'); }
+    if ( x.amode & amode_x )
+    {
+      out_register("x");
+      out_symbol(':');
+    }
+    if ( x.amode & amode_y )
+    {
+      out_register("y");
+      out_symbol(':');
+    }
+    if ( x.amode & amode_p )
+    {
+      out_register("p");
+      out_symbol(':');
+    }
+    if ( x.amode & amode_l )
+    {
+      out_register("l");
+      out_symbol(':');
+    }
   }
-  if ( x.amode & amode_ioshort ) { out_symbol('<'); out_symbol('<'); }
-  if ( x.amode & amode_short   ) out_symbol('<');
-  if ( x.amode & amode_long    ) out_symbol('>');
-  if ( x.amode & amode_neg     ) out_symbol('-');
+  if ( x.amode & amode_ioshort )
+  {
+    out_symbol('<');
+    out_symbol('<');
+  }
+  if ( x.amode & amode_short )
+    out_symbol('<');
+  if ( x.amode & amode_long )
+    out_symbol('>');
+  if ( x.amode & amode_neg )
+    out_symbol('-');
 
   switch ( x.type )
   {
@@ -122,7 +163,7 @@ bool idaapi outop(op_t &x)
       return 0;
 
     case o_imm:
-      OutValue(x, OOFS_IFSIGN|OOFW_IMM);
+      out_value(x, OOFS_IFSIGN|OOFW_IMM);
       break;
 
     case o_reg:
@@ -133,18 +174,18 @@ bool idaapi outop(op_t &x)
       // no break;
     case o_near:
       {
-        ea_t ea = calc_mem(x);
+        ea_t ea = calc_mem(insn, x);
         // xmem ioports
         if ( x.amode & (amode_x|amode_l) && out_port_address(x.addr) )
         {
           qstring name;
-          const char *pnam = find_port(x.addr);
-          if ( get_true_name(&name, ea) <= 0 || name != pnam )
-            set_name(ea, pnam);
+          const ioport_t *port = find_port(x.addr);
+          if ( port != NULL && (get_name(&name, ea) <= 0 || name != port->name) )
+            set_name(ea, port->name.c_str());
           break;
         }
-        if ( ea == cmd.ea+cmd.size )
-          out_ip_rel(cmd.size);
+        if ( ea == insn.ea+insn.size )
+          out_ip_rel(insn.size);
         else if ( !out_name_expr(x, ea, x.addr) )
           out_bad_address(x.addr);
       }
@@ -169,58 +210,56 @@ bool idaapi outop(op_t &x)
     case o_iftype:
       {
         char postfix[4];
-        qstrncpy(postfix, cc_text[cmd.auxpref & aux_cc], sizeof(postfix));
+        qstrncpy(postfix, cc_text[insn.auxpref & aux_cc], sizeof(postfix));
         if ( x.imode == imode_if )
-          out_snprintf( COLSTR("IF%s", SCOLOR_SYMBOL),  postfix );
+          out_printf(COLSTR("IF%s", SCOLOR_SYMBOL), postfix);
         else
-          out_snprintf( COLSTR("IF%s.U", SCOLOR_SYMBOL),  postfix );
+          out_printf(COLSTR("IF%s.U", SCOLOR_SYMBOL), postfix);
       }
       break;
 
     case o_vsltype:
-      out_symbol((cmd.auxpref & 1) + '0');
+      out_symbol((insn.auxpref & 1) + '0');
       break;
 
     default:
-      interr("out");
+      interr(&insn, "out");
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-static void out_operand_group(int idx, op_t *x, const char *bufptr)
+void out_dsp56k_t::out_operand_group(int idx, const op_t *x)
 {
   for ( int i=0; i < 2; i++,x++ )
   {
     if ( x->type == o_void )
       break;
-    if ( i )
+    if ( i != 0 )
     {
       out_symbol(',');
     }
-    else if ( cmd.itype != DSP56_move || idx != 0 )
+    else if ( insn.itype != DSP56_move || idx != 0 )
     {
-      *get_output_ptr() = '\0';   // for tag_strlen
-      size_t n = (idx == (cmd.itype==DSP56_move)) ? tag_strlen(bufptr) : 16;
+      size_t n = 16;
+      if ( idx == (insn.itype == DSP56_move) )
+        n = tag_strlen(outbuf.c_str());
       do
-        OutChar(' ');
+        out_char(' ');
       while ( ++n < 20 );
     }
-    ph.u_outop(*x);
+    out_operand(*x);
   }
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_dsp56k_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
   // output instruction mnemonics
   char postfix[4];
   postfix[0] = '\0';
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case DSP56_tcc:
     case DSP56_debugcc:
@@ -229,54 +268,55 @@ void idaapi out(void)
     case DSP56_bcc:
     case DSP56_bscc:
     case DSP56_trapcc:
-      qstrncpy(postfix, cc_text[cmd.auxpref & aux_cc], sizeof(postfix));
+      qstrncpy(postfix, cc_text[insn.auxpref & aux_cc], sizeof(postfix));
       break;
 
     case DSP56_dmac:
     case DSP56_mac_s_u:
     case DSP56_mpy_s_u:
-      qstrncpy(postfix, su_text[cmd.auxpref & aux_su], sizeof(postfix));
+      qstrncpy(postfix, su_text[insn.auxpref & aux_su], sizeof(postfix));
       break;
   }
 
-  OutMnem(8, postfix);
+  out_mnem(8, postfix);
+}
 
+//----------------------------------------------------------------------
+void out_dsp56k_t::out_insn(void)
+{
+  out_mnemonic();
   bool comma = out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
-    if ( comma ) out_symbol(',');
+    if ( comma )
+      out_symbol(',');
     out_one_operand(1);
   }
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
     out_one_operand(2);
   }
 
-  fill_additional_args();
+  fill_additional_args(insn);
   for ( int i=0; i < aa.nargs; i++ )
-    out_operand_group(i, aa.args[i], buf);
+    out_operand_group(i, aa.args[i]);
 
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea, uFlag, 3) ) OutImmChar(cmd.Op3);
-
-  term_output_buffer();
-
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -e{818} seg could be made const
+void idaapi segstart(outctx_t &ctx, segment_t *seg)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(seg->type) )
+    return;
 
-  char sname[MAXNAMELEN];
-  char sclas[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sname;
+  qstring sclas;
+  get_segm_name(&sname, seg);
+  get_segm_class(&sclas, seg);
 
   if ( ash.uflag & UAS_GNU )
   {
@@ -287,84 +327,69 @@ void idaapi segstart(ea_t ea)
       ".rdata",
       ".comm",
     };
-
-    int i;
-    for ( i=0; i < qnumber(predefined); i++ )
-      if ( strcmp(sname, predefined[i]) == 0 )
-        break;
-    if ( i != qnumber(predefined) )
-      printf_line(inf.indent, COLSTR("%s", SCOLOR_ASMDIR), sname);
-    else
-      printf_line(inf.indent, COLSTR(".section %s", SCOLOR_ASMDIR) " " COLSTR("%s %s", SCOLOR_AUTOCMT),
-                   sname,
-                   ash.cmnt,
-                   sclas);
+    if ( !print_predefined_segname(ctx, &sname, predefined, qnumber(predefined)) )
+      ctx.gen_printf(inf.indent,
+                     COLSTR(".section %s", SCOLOR_ASMDIR) " " COLSTR("%s %s", SCOLOR_AUTOCMT),
+                     sname.c_str(),
+                     ash.cmnt,
+                     sclas.c_str());
   }
   else
   {
-    if ( strcmp(sname, "XMEM") == 0 || strcmp(sname, "YMEM") == 0 )
+    validate_name(&sname, VNT_IDENT);
+    if ( sname == "XMEM" || sname == "YMEM" )
     {
       char buf[MAX_NUMBUF];
-      btoa(buf, sizeof(buf), ea-get_segm_base(Sarea));
-      printf_line(inf.indent, COLSTR("%s %c:%s", SCOLOR_ASMDIR),
-                      ash.origin,
-                      qtolower(sname[0]),
-                      buf);
+      btoa(buf, sizeof(buf), seg->start_ea-get_segm_base(seg));
+      ctx.gen_printf(inf.indent,
+                     COLSTR("%s %c:%s", SCOLOR_ASMDIR),
+                     ash.origin,
+                     qtolower(sname[0]),
+                     buf);
     }
     else
     {
-      printf_line(inf.indent, COLSTR("section %s", SCOLOR_ASMDIR) " " COLSTR("%s %s", SCOLOR_AUTOCMT),
-                   sname,
-                   ash.cmnt,
-                   sclas);
+      ctx.gen_printf(inf.indent,
+                     COLSTR("section %s", SCOLOR_ASMDIR) " " COLSTR("%s %s", SCOLOR_AUTOCMT),
+                     sname.c_str(),
+                     ash.cmnt,
+                     sclas.c_str());
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi assumes(ea_t)                // function to produce assume directives
+//lint -e{818} seg could be made const
+void idaapi segend(outctx_t &ctx, segment_t *seg)
 {
-  if ( !inf.s_assume )
+  if ( is_spec_segm(seg->type) )
     return;
-}
-
-//--------------------------------------------------------------------------
-void idaapi segend(ea_t ea)
-{
-  segment_t *Sarea = getseg(ea-1);
-  if ( is_spec_segm(Sarea->type) ) return;
 
   if ( (ash.uflag & UAS_GNU) == 0 )
   {
-    char sname[MAXNAMELEN];
-    get_true_segm_name(Sarea, sname, sizeof(sname));
-    if ( strcmp(sname, "XMEM") != 0 && strcmp(sname, "YMEM") != 0 )
-      printf_line(inf.indent, "endsec");
+    qstring sname;
+    get_segm_name(&sname, seg);
+    if ( sname != "XMEM" && sname != "YMEM" )
+      ctx.gen_printf(inf.indent, "endsec");
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL, NULL, device);
+  ctx.gen_header(GH_PRINT_ALL, NULL, device.c_str());
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi footer(outctx_t &ctx)
 {
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
   const char *end = ash.end;
   if ( end == NULL )
-    printf_line(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
+    ctx.gen_printf(inf.indent, COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
   else
-    printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR)
-                  " "
-                  COLSTR("%s %s",SCOLOR_AUTOCMT), ash.end, ash.cmnt, name);
-}
-
-//--------------------------------------------------------------------------
-void idaapi dsp56k_data(ea_t ea)
-{
-  intel_data(ea);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                   ash.end, ash.cmnt, name);
 }

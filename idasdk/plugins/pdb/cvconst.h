@@ -12,7 +12,8 @@
 //      Enumeration for function call type
 
 
-typedef enum CV_call_e {
+typedef enum CV_call_e
+{
     CV_CALL_NEAR_C      = 0x00, // near right to left push, caller pops stack
     CV_CALL_FAR_C       = 0x01, // far right to left push, caller pops stack
     CV_CALL_NEAR_PASCAL = 0x02, // near left to right push, callee pops stack
@@ -46,13 +47,15 @@ typedef enum CV_call_e {
 //      Values for the access protection of class attributes
 
 
-typedef enum CV_access_e {
+typedef enum CV_access_e
+{
     CV_private   = 1,
     CV_protected = 2,
     CV_public    = 3
 } CV_access_e;
 
-typedef enum THUNK_ORDINAL {
+typedef enum THUNK_ORDINAL
+{
     THUNK_ORDINAL_NOTYPE,       // standard thunk
     THUNK_ORDINAL_ADJUSTOR,     // "this" adjustor thunk
     THUNK_ORDINAL_VCALL,        // virtual call thunk
@@ -67,7 +70,8 @@ typedef enum THUNK_ORDINAL {
 } THUNK_ORDINAL;
 
 
-enum CV_SourceChksum_t {
+enum CV_SourceChksum_t
+{
     CHKSUM_TYPE_NONE = 0,        // indicates no checksum is available
     CHKSUM_TYPE_MD5,
     CHKSUM_TYPE_SHA1
@@ -176,7 +180,8 @@ enum BasicType
 //  enum describing the compile flag source language
 
 
-typedef enum CV_CFL_LANG {
+typedef enum CV_CFL_LANG
+{
     CV_CFL_C        = 0x00,
     CV_CFL_CXX      = 0x01,
     CV_CFL_FORTRAN  = 0x02,
@@ -199,7 +204,8 @@ typedef enum CV_CFL_LANG {
 //  enum describing target processor
 
 
-typedef enum CV_CPU_TYPE_e {
+typedef enum CV_CPU_TYPE_e
+{
     CV_CFL_8080         = 0x00,
     CV_CFL_8086         = 0x01,
     CV_CFL_80286        = 0x02,
@@ -266,7 +272,8 @@ typedef enum CV_CPU_TYPE_e {
     CV_CFL_D3D11_SHADER = 0x100,
 } CV_CPU_TYPE_e;
 
-typedef enum CV_HREG_e {
+typedef enum CV_HREG_e
+{
     // Register subset shared by all processor types,
     // must not overlap with any of the ranges below, hence the high values
 
@@ -2021,7 +2028,7 @@ typedef enum CV_HREG_e {
     // Register set for the Mitsubishi M32R
     //
 
-    CV_M32R_NOREG    =   CV_REG_NONE,
+    CV_M32R_NOREG =   CV_REG_NONE,
 
     CV_M32R_R0    =   10,
     CV_M32R_R1    =   11,

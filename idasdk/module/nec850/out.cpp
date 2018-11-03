@@ -7,53 +7,78 @@
  *
  */
 #include "necv850.hpp"
-#include <queue.hpp>
 #include "ins.hpp"
 
 //--------------------------------------------------------------------------
-static void out_reg_list(uint32 L)
+// LIST12 table mapping to corresponding registers
+static const int list12_table[] =
 {
-  // LIST12 table mapping to corresponding registers
-  static const int list12_table[] =
-  {
-    rR31, // 0
-    rR29, // 1
-    rR28, // 2
-    rR23, // 3
-    rR22, // 4
-    rR21, // 5
-    rR20, // 6
-    rR27, // 7
-    rR26, // 8
-    rR25, // 9
-    rR24, // 10
-    rEP   // 11
-  };
+  rR31, // 0
+  rR29, // 1
+  rR28, // 2
+  rR23, // 3
+  rR22, // 4
+  rR21, // 5
+  rR20, // 6
+  rR27, // 7
+  rR26, // 8
+  rR25, // 9
+  rR24, // 10
+  rEP   // 11
+};
 
-  // Using the indexes in this table as indexes in list12_table[]
-  // we can test for bits in List12 in order
-  static const int list12order_table[] =
-  {
-    6,    // 0  r20
-    5,    // 1  r21
-    4,    // 2  r22
-    3,    // 3  r23
-    10,   // 4  r24
-    9,    // 5  r25
-    8,    // 6  r26
-    7,    // 7  r27
-    2,    // 8  r28
-    1,    // 9  r29
-    11,   // 10 r30
-    0,    // 11 r31
-  };
+// Using the indexes in this table as indexes in list12_table[]
+// we can test for bits in List12 in order
+static const int list12order_table[] =
+{
+  6,    // 0  r20
+  5,    // 1  r21
+  4,    // 2  r22
+  3,    // 3  r23
+  10,   // 4  r24
+  9,    // 5  r25
+  8,    // 6  r26
+  7,    // 7  r27
+  2,    // 8  r28
+  1,    // 9  r29
+  11,   // 10 r30
+  0,    // 11 r31
+};
 
+//----------------------------------------------------------------------
+class out_nec850_t : public outctx_t
+{
+  out_nec850_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void OutReg(const op_t &r);
+  void out_reg_list(uint32 L);
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_nec850_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_nec850_t)
+
+//--------------------------------------------------------------------------
+bool reg_in_list12(uint16 reg, uint32 L)
+{
+  if ( rR20 <= reg && reg <= rR31 )
+  {
+    uint32 idx = list12order_table[reg - rR20];
+    return (L & (1 << idx)) != 0;
+  }
+  return false;
+}
+
+//--------------------------------------------------------------------------
+void out_nec850_t::out_reg_list(uint32 L)
+{
   int last = qnumber(list12_table);
   int in_order = 0, c = 0;
   const char *last_rn = NULL;
 
   out_symbol('{');
-  for ( int i=0; i<qnumber(list12order_table); i++ )
+  for ( int i=0; i < qnumber(list12order_table); i++ )
   {
     uint32 idx = list12order_table[i];
     if ( (L & (1 << idx)) == 0 )
@@ -89,29 +114,30 @@ static void out_reg_list(uint32 L)
 }
 
 //--------------------------------------------------------------------------
-void idaapi nec850_header(void)
+void idaapi nec850_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_PROC_AND_ASM);
+  ctx.gen_header(GH_PRINT_PROC_AND_ASM);
 }
 
 //--------------------------------------------------------------------------
-void idaapi nec850_footer(void)
+void idaapi nec850_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  MakeNull();
-  tag_addstr( buf, buf+sizeof(buf), COLOR_ASMDIR, ash.end );
-  MakeLine(buf, inf.indent);
-  gen_cmt_line( "-------------- end of module --------------");
+  ctx.gen_empty_line();
+  ctx.out_line(ash.end, COLOR_ASMDIR);
+  ctx.flush_outbuf(inf.indent);
+  ctx.gen_cmt_line( "-------------- end of module --------------");
 }
 
 //--------------------------------------------------------------------------
-void idaapi nec850_segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, s) could be made const
+void idaapi nec850_segstart(outctx_t &ctx, segment_t *s)
 {
-  segment_t *s = getseg(ea);
-  char sname[MAXNAMELEN], sclass[MAXNAMELEN];
+  qstring sname;
+  qstring sclass;
 
-  get_segm_name(s, sname, sizeof(sname));
-  get_segm_class(s, sclass, sizeof(sclass));
+  get_visible_segm_name(&sname, s);
+  get_segm_class(&sclass, s);
 
   const char *p_class;
   if ( (s->perm == (SEGPERM_READ|SEGPERM_WRITE)) && s->type == SEG_BSS )
@@ -125,51 +151,44 @@ void idaapi nec850_segstart(ea_t ea)
   else if ( s->type == SEG_XTRN )
     p_class = "symtab";
   else
-    p_class = sclass;
+    p_class = sclass.c_str();
 
-  printf_line(0, COLSTR(".section \"%s\", %s", SCOLOR_ASMDIR), sname, p_class);
+  ctx.gen_printf(0, COLSTR(".section \"%s\", %s", SCOLOR_ASMDIR), sname.c_str(), p_class);
 }
 
 //--------------------------------------------------------------------------
-void idaapi nec850_segend(ea_t /*ea*/)
+void idaapi nec850_segend(outctx_t &, segment_t *)
 {
 }
 
 //----------------------------------------------------------------------
-inline void OutReg(const op_t &r)
+void out_nec850_t::OutReg(const op_t &r)
 {
   bool brackets = r.specflag1 & N850F_USEBRACKETS;
   if ( brackets )
     out_symbol('[');
-  out_register(ph.regNames[r.reg]);
+  out_register(ph.reg_names[r.reg]);
   if ( brackets )
     out_symbol(']');
 }
 
 //----------------------------------------------------------------------
-void idaapi nec850_out(void)
+void out_nec850_t::out_insn(void)
 {
-  char buf[MAXSTR];
+  out_mnemonic();
 
-  init_output_buffer(buf, sizeof(buf));
-  OutMnem();
+  out_one_operand(0);
 
-  out_one_operand( 0 );
-
-  for ( int i=1; i<3; i++ )
+  for ( int i=1; i < 3; i++ )
   {
-    if ( cmd.Operands[i].type != o_void )
+    if ( insn.ops[i].type != o_void )
     {
       out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
       out_one_operand(i);
     }
   }
-
-  term_output_buffer();
-
-  gl_comm = 1;
-  MakeLine(buf);
+  flush_outbuf();
 }
 
 //----------------------------------------------------------------------
@@ -179,9 +198,9 @@ void idaapi nec850_out(void)
 // The output text is placed in the output buffer initialized with init_output_buffer()
 // This function uses out_...() functions from ua.hpp to generate the operand text
 // Returns: 1-ok, 0-operand is hidden.
-bool idaapi nec850_outop(op_t &x)
+bool out_nec850_t::out_operand(const op_t &x)
 {
-  switch( x.type )
+  switch ( x.type )
   {
   case o_void:
     return false;
@@ -192,25 +211,40 @@ bool idaapi nec850_outop(op_t &x)
     OutReg(x);
     break;
   case o_imm:
-    OutValue(x, OOFW_IMM | ((x.specflag1 & N850F_OUTSIGNED) ? OOF_SIGNED : 0));
+    out_value(x, OOFW_IMM | ((x.specflag1 & N850F_OUTSIGNED) ? OOF_SIGNED : 0));
     break;
   case o_near:
   case o_mem:
     if ( !out_name_expr(x, x.addr, BADADDR) )
     {
       out_tagon(COLOR_ERROR);
-      OutValue(x, OOF_ADDR | OOFW_IMM | OOFW_32);
+      out_value(x, OOF_ADDR | OOFW_IMM | OOFW_32);
       out_tagoff(COLOR_ERROR);
-      QueueSet(Q_noName,cmd.ea);
+      remember_problem(PR_NONAME, insn.ea);
     }
     break;
   case o_displ:
     if ( x.addr != 0 || x.reg == rSP )
-      OutValue(x,
-          OOF_ADDR
-        | OOFW_16
-        | ((x.specflag1 & N850F_OUTSIGNED) ? OOF_SIGNED : 0));  // x.addr
+      out_value(x,
+               OOF_ADDR
+             | OOFW_16
+             | ((x.specflag1 & N850F_OUTSIGNED) ? OOF_SIGNED : 0));  // x.addr
     OutReg(x);
+    if ( x.reg != rGP && x.reg != rSP && x.addr == 0 )
+    { // add name comment
+      xrefblk_t xb;
+      for ( bool ok=xb.first_from(insn.ea, XREF_DATA); ok; ok=xb.next_from() )
+      {
+        if ( has_cmt(F) )
+          continue;
+        if ( xb.type != dr_R && xb.type != dr_W )
+          continue;
+
+        qstring qbuf;
+        if ( get_name_expr(&qbuf, insn.ea, x.n, xb.to, BADADDR) > 0 )
+          set_cmt(insn.ea, qbuf.begin(), false);
+      }
+    }
     break;
   default:
     return false;

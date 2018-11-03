@@ -3,17 +3,16 @@
 
 #include <algorithm>
 #include <typeinf.hpp>
-typedef bool (*input_exe_reader_t)(uint64 fileOffset, uint32 count, void *buffer, uint32 *read, void *user_data);
-typedef bool (*input_mem_reader_t)(ea_t ea, uint32 count, void *buffer, uint32 *read, void *user_data);
 
-static const char spath_prefix[] = "srv*";
-static const char spath_suffix[] = "*http://msdl.microsoft.com/download/symbols";
+static const char g_spath_prefix[] = "srv*";
+static const char g_spath_suffix[] = "*http://msdl.microsoft.com/download/symbols";
 
 const char *pdberr(int code);
 
 #define PDB_NODE_NAME             "$ pdb"
 #define PDB_DLLBASE_NODE_IDX       0
 #define PDB_DLLNAME_NODE_IDX       0
+#define PDB_LOADING_WIN32_DBG      1
 
 enum pdb_callcode_t
 {

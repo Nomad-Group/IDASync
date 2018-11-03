@@ -12,7 +12,7 @@
 #include "ins.hpp"
 
 //-----------------------------------------------------------------------
-instruc_t Instructions[] = 
+instruc_t Instructions[] =
 {
 { "",  0      },           // Unknown Operation
 { "cmp",   CF_USE1 | CF_USE2  },           // Compare Byte Data Comparison

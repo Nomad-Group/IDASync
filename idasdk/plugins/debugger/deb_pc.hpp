@@ -2,7 +2,7 @@
 #define __DEB_PC__
 
 #include <ua.hpp>
-#include <area.hpp>
+#include <range.hpp>
 #include <idd.hpp>
 
 #if (DEBUGGER_ID != DEBUGGER_ID_GDB_USER) && (DEBUGGER_ID != DEBUGGER_ID_TRACE_REPLAYER)
@@ -154,7 +154,11 @@ inline int check_x86_hwbpt(bpttype_t type, ea_t ea, int len)
 
   if ( len != 1                 // is length good?
     && (type == BPT_EXEC        // instruction hardware breakpoint only accepts the len of one byte
-     || (len != 2 && len != 4)) )
+     || (len != 2 && len != 4
+#ifdef __X64__
+      && len != 8
+#endif
+     )) )
   {
     return BPT_BAD_LEN;
   }

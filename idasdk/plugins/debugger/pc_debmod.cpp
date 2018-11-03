@@ -102,10 +102,11 @@ bool pc_debmod_t::add_hwbpt(bpttype_t type, ea_t ea, int len)
     if ( type == BPT_EXEC )
       type = 0; // exec bpts are encoded with 0 on x86
 
-    int lenc = 0;                   // length code used by the processor
-    //    if ( len == 1 ) lenc = 0;
-    if ( len == 2 ) lenc = 1;
-    if ( len == 4 ) lenc = 3;
+    // length code used by the processor
+    int lenc = (len == 2) ? 1
+             : (len == 4) ? 3
+             : (len == 8) ? 2
+             :              0;
 
     dr7 |= (1 << (i*2));            // enable local breakpoint
     dr7 |= (type << (16+(i*4)));    // set breakpoint type
@@ -213,7 +214,7 @@ void pc_debmod_t::cleanup_hwbpts()
   for ( int i=0; i < MAX_BPT; i++ )
   {
     hwbpt_ea[i] = BADADDR;
-    hwbpt_type[i] = BPT_OLD_EXEC;
+    hwbpt_type[i] = bpttype_t(0);
   }
   dr6 = 0;
   dr7 = 0x100; // exact local breakpoints
@@ -232,9 +233,9 @@ ea_t pc_debmod_t::calc_appcall_stack(const regvals_t &regvals)
 
 //--------------------------------------------------------------------------
 int pc_debmod_t::finalize_appcall_stack(
-    call_context_t &,
-    regval_map_t &,
-    bytevec_t &stk)
+        call_context_t &,
+        regval_map_t &,
+        bytevec_t &stk)
 {
   // pc-specific: add endless loop, so user does not execute unwanted code
   // after manual appcall. we do not really need to write bpt,
@@ -248,9 +249,9 @@ int pc_debmod_t::finalize_appcall_stack(
 
 //--------------------------------------------------------------------------
 bool pc_debmod_t::should_stop_appcall(
-    thid_t tid,
-    const debug_event_t *event,
-    ea_t ea)
+        thid_t tid,
+        const debug_event_t *event,
+        ea_t ea)
 {
   if ( inherited::should_stop_appcall(tid, event, ea) )
     return true;
@@ -302,21 +303,26 @@ int get_x86_reg_class(int idx)
 {
   if ( idx >= 0 )
   {
-    if ( idx <= R_TAGS )    return X86_RC_FPU;
-    if ( idx <= R_SS )      return X86_RC_SEGMENTS;
-    if ( idx <= R_EFLAGS )  return X86_RC_GENERAL;
-    if ( idx <= R_MXCSR )   return X86_RC_XMM;
-    if ( idx <= R_MMX7 )    return X86_RC_MMX;
+    if ( idx <= R_TAGS )
+      return X86_RC_FPU;
+    if ( idx <= R_SS )
+      return X86_RC_SEGMENTS;
+    if ( idx <= R_EFLAGS )
+      return X86_RC_GENERAL;
+    if ( idx <= R_MXCSR )
+      return X86_RC_XMM;
+    if ( idx <= R_MMX7 )
+      return X86_RC_MMX;
   }
   return 0; // failed
 }
 
 //--------------------------------------------------------------------------
 void pc_debmod_t::read_fpu_registers(
-    regval_t *values,
-    int clsmask,
-    const void *fptr,
-    size_t step)
+        regval_t *values,
+        int clsmask,
+        const void *fptr,
+        size_t step)
 {
   const uchar *vptr = (const uchar *)fptr;
   for ( int i=0; i < 8; i++,vptr+=step )
@@ -324,7 +330,7 @@ void pc_debmod_t::read_fpu_registers(
     if ( (clsmask & X86_RC_FPU) != 0 )
     {
       regval_t *v = &values[R_ST0+i];
-      memcpy(v->fval, vptr, 10);
+      memcpy(v->fval, vptr, 10);    //-V512 v->fval underflow
       v->rvtype = RVT_FLOAT;
     }
     if ( (clsmask & X86_RC_MMX) != 0 )

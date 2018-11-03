@@ -3,8 +3,6 @@
 // In fact, this approach can be used to hook IDC scripts to various debugger
 // events.
 
-#include <windows.h>
-
 #include <ida.hpp>
 #include <idp.hpp>
 #include <dbg.hpp>
@@ -40,7 +38,7 @@ static void set_idc_name(const char *idc)
 }
 
 //--------------------------------------------------------------------------
-static int idaapi callback(void * /*user_data*/, int notification_code, va_list /*va*/)
+static ssize_t idaapi callback(void * /*user_data*/, int notification_code, va_list /*va*/)
 {
   switch ( notification_code )
   {
@@ -49,27 +47,28 @@ static int idaapi callback(void * /*user_data*/, int notification_code, va_list 
       // it is time to run the script
       char idc[QMAXPATH];
       if ( get_idc_name(idc, sizeof(idc)) )
-        dosysfile(true, idc);
+        exec_system_script(idc);
       break;
   }
   return 0;
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   // retrieve the old IDC name from the database
   char idc[QMAXPATH];
   if ( !get_idc_name(idc, sizeof(idc)) )
     qstrncpy(idc, "*.idc", sizeof(idc));
 
-  char *newidc = askfile_c(false, idc, "Specify the script to run upon debugger launch");
+  char *newidc = ask_file(false, idc, "Specify the script to run upon debugger launch");
   if ( newidc != NULL )
   {
     // store it back in the database
     set_idc_name(newidc);
     msg("Script %s will be run when the debugger is launched\n", newidc);
   }
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -78,7 +77,7 @@ int idaapi init(void)
   // Our plugin works only for x86 PE executables
   if ( ph.id != PLFM_386 || inf.filetype != f_PE )
     return PLUGIN_SKIP;
-  if ( !hook_to_notification_point(HT_DBG, callback, NULL) )
+  if ( !hook_to_notification_point(HT_DBG, callback) )
     return PLUGIN_SKIP;
   return PLUGIN_OK;
 }
@@ -87,7 +86,7 @@ int idaapi init(void)
 void idaapi term(void)
 {
   // just to be safe
-  unhook_from_notification_point(HT_DBG, callback, NULL);
+  unhook_from_notification_point(HT_DBG, callback);
 }
 
 //--------------------------------------------------------------------------

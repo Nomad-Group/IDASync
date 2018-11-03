@@ -10,7 +10,7 @@
 #include <ctype.h>
 #include "tms320c55.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <ieee.h>
 
 //--------------------------------------------------------------------------
@@ -191,7 +191,6 @@ static const asm_t masm55 =
   "MASM55",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   NULL,         // org
   ".end",       // end
 
@@ -214,10 +213,6 @@ static const asm_t masm55 =
   ".space 8*%s",// uninited arrays
   ".asg",       // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "$",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -242,153 +237,35 @@ static const asm_t masm55 =
 static const asm_t *const asms[] = { &masm55, NULL };
 
 //--------------------------------------------------------------------------
-static ioport_t *ports = NULL;
-static size_t numports = 0;
-char device[MAXSTR] = "";
+static ioports_t ports;
+static qstring device;
 static const char *const cfgname = "tms320c55.cfg";
 
 static void load_symbols(void)
 {
-  free_ioports(ports, numports);
-  ports = read_ioports(&numports, cfgname, device, sizeof(device), NULL);
+  ports.clear();
+  read_ioports(&ports, &device, cfgname);
 }
 
 const char *find_sym(ea_t address)
 {
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? port->name : NULL;
-}
-
-const ioport_bit_t *find_bits(ea_t address)
-{
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? (*port->bits) : NULL;
-}
-
-const char *find_bit(ea_t address, int bit)
-{
-  const ioport_bit_t *b = find_ioport_bit(ports, numports, address, bit);
-  return b ? b->name : NULL;
+  const ioport_t *port = find_ioport(ports, address);
+  return port ? port->name.c_str() : NULL;
 }
 
 //--------------------------------------------------------------------------
 inline void set_device_name(const char *dev)
 {
   if ( dev != NULL )
-    qstrncpy(device, dev, sizeof(device));
+    device = dev;
 }
 
 //--------------------------------------------------------------------------
-
-netnode helper;
-proctype_t ptype = TMS320C55;
-ushort idpflags = TMS320C55_IO|TMS320C55_MMR;
-
-
-static const proctype_t ptypes[] =
+static int idaapi choose_device(int, form_actions_t &)
 {
-  TMS320C55
-};
-
-
-static int idaapi notify(processor_t::idp_notify msgid, ...)
-{
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
-  switch ( msgid )
-  {
-    case processor_t::init:
-      helper.create("$ tms320c54");
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(0, buf, sizeof(buf)) > 0 )
-          set_device_name(buf);
-      }
-      inf.mf = 1; // MSB first
-      break;
-
-    case processor_t::term:
-      free_ioports(ports, numports);
-    default:
-      break;
-
-    case processor_t::newfile:   // new file loaded
-      {
-        {
-          set_default_segreg_value(NULL, ARMS, 0);
-          set_default_segreg_value(NULL, CPL, 1);
-          for (int i = DP; i <= rVds; i++)
-            set_default_segreg_value(NULL, i, 0);
-        }
-        static const char *const informations =
-          "AUTOHIDE REGISTRY\n"
-          "Default values of flags and registers:\n"
-          "\n"
-          "ARMS bit = 0 (DSP mode operands).\n"
-          "CPL  bit = 1 (SP direct addressing mode).\n"
-          "DP register = 0 (Data Page register)\n"
-          "DPH register = 0 (High part of EXTENDED Data Page Register)\n"
-          "PDP register = 0 (Peripheral Data Page register)\n"
-          "\n"
-          "You can change the register values by pressing Alt-G\n"
-          "(Edit, Segments, Change segment register value)\n";
-        info(informations);
-        break;
-      }
-
-    case processor_t::oldfile:   // old file loaded
-      idpflags = (ushort)helper.altval(-1);
-      break;
-
-    case processor_t::closebase:
-    case processor_t::savebase:
-      helper.altset(-1, idpflags);
-      helper.supset(0,  device);
-      break;
-
-    case processor_t::newprc:    // new processor type
-      {
-        ptype = ptypes[va_arg(va, int)];
-        switch ( ptype )
-        {
-          case TMS320C55:
-            break;
-          default:
-            error("interr: setprc");
-            break;
-        }
-        device[0] = '\0';
-        load_symbols();
-      }
-      break;
-
-    case processor_t::newasm:    // new assembler type
-      break;
-
-    case processor_t::newseg:    // new segment
-      break;
-
-    case processor_t::get_stkvar_scale_factor:
-      return 2;
-  }
-  va_end(va);
-  return 1;
-}
-
-//--------------------------------------------------------------------------
-static void idaapi choose_device(TView *[],int)
-{
-  if ( choose_ioport_device(cfgname, device, sizeof(device), NULL) )
+  if ( choose_ioport_device(&device, cfgname) )
     load_symbols();
+  return 0;
 }
 
 static const char *idaapi set_idp_options(const char *keyword,int value_type,const void *value)
@@ -418,12 +295,13 @@ static const char *idaapi set_idp_options(const char *keyword,int value_type,con
 " <~C~hoose device name:B:0::>\n"
 "\n"
 "\n";
-    AskUsingForm_c(form, &idpflags, choose_device);
+    ask_form(form, &idpflags, choose_device);
     return IDPOPT_OK;
   }
   else
   {
-    if ( value_type != IDPOPT_BIT ) return IDPOPT_BADTYPE;
+    if ( value_type != IDPOPT_BIT )
+      return IDPOPT_BADTYPE;
     if ( strcmp(keyword, "TMS320C55_IO") == 0 )
     {
       setflag(idpflags, TMS320C55_IO, *(int*)value != 0);
@@ -436,6 +314,231 @@ static const char *idaapi set_idp_options(const char *keyword,int value_type,con
     }
     return IDPOPT_BADKEY;
   }
+}
+
+//--------------------------------------------------------------------------
+
+netnode helper;
+proctype_t ptype = TMS320C55;
+ushort idpflags = TMS320C55_IO|TMS320C55_MMR;
+
+static const proctype_t ptypes[] =
+{
+  TMS320C55
+};
+
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
+{
+  switch ( code )
+  {
+    case idb_event::closebase:
+    case idb_event::savebase:
+      helper.altset(-1, idpflags);
+      helper.supset(0,  device.c_str());
+      break;
+  }
+  return 0;
+}
+
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
+      helper.create("$ tms320c54");
+      if ( helper.supstr(&device, 0) > 0 )
+        set_device_name(device.c_str());
+      inf.set_be(true); // MSB first
+      break;
+
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
+      break;
+
+    case processor_t::ev_newfile:   // new file loaded
+      {
+        {
+          set_default_sreg_value(NULL, ARMS, 0);
+          set_default_sreg_value(NULL, CPL, 1);
+          for ( int i = DP; i <= rVds; i++ )
+            set_default_sreg_value(NULL, i, 0);
+        }
+        static const char *const informations =
+          "AUTOHIDE REGISTRY\n"
+          "Default values of flags and registers:\n"
+          "\n"
+          "ARMS bit = 0 (DSP mode operands).\n"
+          "CPL  bit = 1 (SP direct addressing mode).\n"
+          "DP register = 0 (Data Page register)\n"
+          "DPH register = 0 (High part of EXTENDED Data Page Register)\n"
+          "PDP register = 0 (Peripheral Data Page register)\n"
+          "\n"
+          "You can change the register values by pressing Alt-G\n"
+          "(Edit, Segments, Change segment register value)\n";
+        info(informations);
+        break;
+      }
+
+    case processor_t::ev_oldfile:   // old file loaded
+      idpflags = (ushort)helper.altval(-1);
+      break;
+
+    case processor_t::ev_newprc:    // new processor type
+      {
+        ptype = ptypes[va_arg(va, int)];
+        // bool keep_cfg = va_argi(va, bool);
+        switch ( ptype )
+        {
+          case TMS320C55:
+            break;
+          default:
+            error("interr: setprc");
+            break;
+        }
+        device.qclear();
+        load_symbols();
+      }
+      break;
+
+    case processor_t::ev_newasm:    // new assembler type
+      break;
+
+    case processor_t::ev_creating_segm:    // new segment
+      break;
+
+    case processor_t::ev_get_stkvar_scale_factor:
+      return 2;
+
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
+    case processor_t::ev_realcvt:
+      {
+        void *m = va_arg(va, void *);
+        uint16 *e = va_arg(va, uint16 *);
+        uint16 swt = va_argi(va, uint16);
+        int code1 = ieee_realcvt(m, e, swt);
+        return code1 == 0 ? 1 : code1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_gen_stkvar_def:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const member_t *mptr = va_arg(va, const member_t *);
+        sval_t v = va_arg(va, sval_t);
+        gen_stkvar_def(*ctx, mptr, v);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
+  }
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -455,11 +558,18 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_TMS320C55,
-  PRN_HEX | PR_SEGS | PR_SGROTHER | PR_SCALE_STKVARS,
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_TMS320C55,         // id
+                          // flag
+    PRN_HEX
+  | PR_SEGS
+  | PR_SGROTHER
+  | PR_SCALE_STKVARS,
+                          // flag2
+    PR2_REALCVT           // the module has 'realcvt' event implementation
+  | PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -468,31 +578,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  assumes,              // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  intel_data,           // generate ...                    data
-  NULL,                 // compare operands
-  can_have_type,        // can have type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   ARMS,                 // first
   rVds,                 // last
@@ -504,28 +591,13 @@ processor_t LPH =
 
   TMS320C55_null,
   TMS320C55_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  ieee_realcvt,          // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0,7,15,19 },        // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // long (*gen_map_file)(FILE *fp);
-  NULL,                 // ulong (*extract_address)(ulong ea,const char *string,int x);
-  NULL,                 // Check whether the operand is relative to stack pointer
-  create_func_frame,    // create frame of newly created function
-  NULL,                 // Get size of function return address in bytes
-  gen_stkvar_def,       // void (*gen_stkvar_def)(char *buf,const member_t *mptr,long v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   TMS320C55_ret,        // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ulong ea);
-  NULL,                 // mvm_t *mvm;
 };

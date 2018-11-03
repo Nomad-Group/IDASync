@@ -7,10 +7,9 @@
 #include <ida.hpp>
 #include <err.h>
 #include <idp.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <diskio.hpp>
 #include <segment.hpp>
-#include "consts.h"
 #include "epoc_debmod.h"
 #include "metrotrk.cpp"
 
@@ -23,7 +22,7 @@ static const int Treg = 20;        // number of T bit of ARM processor in IDA
 #pragma warning(push)
 #pragma warning(disable : 4355)
 #endif
-epoc_debmod_t::epoc_debmod_t(void) : trk(this)
+epoc_debmod_t::epoc_debmod_t(void) : trk(this), exited(false)
 {
   set_platform("epoc");
 }
@@ -80,7 +79,7 @@ int idaapi epoc_debmod_t::dbg_add_bpt(bpttype_t type, ea_t ea, int len)
     p->second.cnt++;
     return 1;
   }
-  bool thumb = get_segreg(ea, Treg) != 0;
+  bool thumb = get_sreg(ea, Treg) != 0;
   int bid = trk.add_bpt(trk.current_pid(), -1, (int)ea, len, 1, thumb);
   if ( bid == -1 )
     return 0; // failed
@@ -105,10 +104,15 @@ int idaapi epoc_debmod_t::dbg_del_bpt(bpttype_t /*type*/, ea_t ea, const uchar *
 }
 
 //--------------------------------------------------------------------------
-int idaapi epoc_debmod_t::dbg_init(bool _debug_debugger)
+void idaapi epoc_debmod_t::dbg_set_debugging(bool _debug_debugger)
+{
+  debug_debugger = ::debug_debugger = _debug_debugger;
+}
+
+//--------------------------------------------------------------------------
+int idaapi epoc_debmod_t::dbg_init(void)
 {
   cleanup();
-  debug_debugger = ::debug_debugger = _debug_debugger;
   return trk.ping() && trk.connect();
 }
 
@@ -120,14 +124,22 @@ void idaapi epoc_debmod_t::dbg_term(void)
 }
 
 //--------------------------------------------------------------------------
-// input is valid only if n==0
-int idaapi epoc_debmod_t::dbg_process_get_info(int n, const char * /*input*/, process_info_t *procinf)
+int idaapi epoc_debmod_t::dbg_get_processes(procinfo_vec_t *procs)
 {
-  if ( n == 0 ) // initialize the list
+  proclist.clear();
+  if ( !trk.get_process_list(proclist) )
+    return 0;
+
+  size_t size = proclist.size();
+  procs->qclear();
+  procs->reserve(size);
+  for ( size_t i = 0; i < size; i++ )
   {
-    proclist.clear();
-    if ( !trk.get_process_list(proclist) )
-      return 0;
+    proclist_entry_t &pe = proclist[i];
+    process_info_t &procinf = procs->push_back();
+    procinf.pid = pe.pid;
+    procinf.name = pe.name;
+  }
 #if 0 // commented out because we can not match file names with process names
     if ( input != NULL )
     { // remove all unmatching processes from the list
@@ -144,15 +156,6 @@ int idaapi epoc_debmod_t::dbg_process_get_info(int n, const char * /*input*/, pr
           proclist.erase(proclist.begin()+i);
     }
 #endif
-  }
-  if ( n >= proclist.size() )
-    return 0;
-  if ( procinf != NULL )
-  {
-    proclist_entry_t &pe = proclist[n];
-    procinf->pid = pe.pid;
-    qstrncpy(procinf->name, pe.name.c_str(), sizeof(procinf->name));
-  }
   return 1;
 }
 
@@ -164,12 +167,12 @@ int idaapi epoc_debmod_t::dbg_detach_process(void)
 
 //--------------------------------------------------------------------------
 int idaapi epoc_debmod_t::dbg_start_process(
-  const char *path,
-  const char *args,
-  const char * /*startdir*/,
-  int /* flags */,
-  const char * /*input_path*/,
-  uint32 /* input_file_crc32 */)
+        const char *path,
+        const char *args,
+        const char * /*startdir*/,
+        int /* flags */,
+        const char * /*input_path*/,
+        uint32 /* input_file_crc32 */)
 {
   // ideally here we should check if the input_path exists on the device
   // unfortunately, TRK refuses to open files in c:\sys\bin
@@ -440,7 +443,7 @@ bool epoc_debmod_t::refresh_threads(void)
     ev.eid     = THREAD_START;
     gen_thread_events(tlist, threads, ev);
     // generate THREAD_EXIT events
-    ev.eid     = THREAD_EXIT;
+    ev.eid = THREAD_EXIT;
     gen_thread_events(threads, tlist, ev);
     threads.swap(tlist);
   }
@@ -494,7 +497,7 @@ gdecode_t idaapi epoc_debmod_t::dbg_get_debug_event(debug_event_t *event, int ti
 }
 
 //--------------------------------------------------------------------------
-int idaapi epoc_debmod_t::dbg_attach_process(pid_t _pid, int /*event_id*/)
+int idaapi epoc_debmod_t::dbg_attach_process(pid_t _pid, int /*event_id*/, int /*flags*/)
 {
   if ( !trk.attach_process(_pid) )
     return 0;
@@ -660,7 +663,7 @@ int idaapi epoc_debmod_t::dbg_read_registers(thid_t tid, int, regval_t *values)
 
   for ( int i=0; i < n; i++ )
   {
-    debdeb("%cR%d: %08X", i==8 ? '\n' : ' ', i, rvals[i]);
+    debdeb("%cR%d: %08X", i == 8 ? '\n' : ' ', i, rvals[i]);
     values[i].ival = rvals[i];
   }
   debdeb("\n");
@@ -672,9 +675,9 @@ int idaapi epoc_debmod_t::dbg_read_registers(thid_t tid, int, regval_t *values)
   {
     ea_t pc = rvals[15];
     int real_t = (rvals[16] & 0x20) != 0;
-    int virt_t = get_segreg(pc, Treg) != 0;
+    int virt_t = get_sreg(pc, Treg) != 0;
     if ( real_t != virt_t )
-      split_srarea(pc, Treg, real_t, SR_autostart);
+      split_sreg_range(pc, Treg, real_t, SR_autostart);
   }
   return 1;
 }
@@ -688,7 +691,7 @@ int idaapi epoc_debmod_t::dbg_write_register(thid_t tid, int reg_idx, const regv
 }
 
 //--------------------------------------------------------------------------
-int idaapi epoc_debmod_t::dbg_get_memory_info(meminfo_vec_t & /*areas*/)
+int idaapi epoc_debmod_t::dbg_get_memory_info(meminfo_vec_t & /*ranges*/)
 {
   return 0; // failed - we will rely on manual regions
 }
@@ -719,7 +722,7 @@ ssize_t idaapi epoc_debmod_t::dbg_write_memory(ea_t ea, const void *buffer, size
 }
 
 //--------------------------------------------------------------------------
-int  idaapi epoc_debmod_t::dbg_open_file(const char *file, uint32 *fsize, bool readonly)
+int idaapi epoc_debmod_t::dbg_open_file(const char *file, uint64 *fsize, bool readonly)
 {
   if ( fsize != NULL )
     *fsize = 0;
@@ -731,17 +734,7 @@ int  idaapi epoc_debmod_t::dbg_open_file(const char *file, uint32 *fsize, bool r
       // problem: trk does not have the ftell call
       // we will have to find the file size using the binary search
       // it seems the read_file() doesn't work at all!
-      size_t size = 0x100000; // assume big file
-      size_t delta = size;
-      while ( (delta>>=1) > 0 )
-      {
-        uchar dummy;
-        if ( dbg_read_file(h, uint32(size-1), &dummy, 1) == 1 )
-          size += delta;
-        else
-          size -= delta;
-      }
-      *fsize = uint32(size - 1);
+      *fsize = probe_file_size(h, 0x1000);
     }
   }
   else
@@ -759,7 +752,7 @@ void idaapi epoc_debmod_t::dbg_close_file(int fn)
 }
 
 //--------------------------------------------------------------------------
-ssize_t idaapi epoc_debmod_t::dbg_read_file(int fn, uint32 off, void *buf, size_t size)
+ssize_t idaapi epoc_debmod_t::dbg_read_file(int fn, qoff64_t off, void *buf, size_t size)
 {
   if ( !trk.seek_file(fn, off, SEEK_SET) )
     return -1;
@@ -767,7 +760,7 @@ ssize_t idaapi epoc_debmod_t::dbg_read_file(int fn, uint32 off, void *buf, size_
 }
 
 //--------------------------------------------------------------------------
-ssize_t idaapi epoc_debmod_t::dbg_write_file(int fn, uint32 off, const void *buf, size_t size)
+ssize_t idaapi epoc_debmod_t::dbg_write_file(int fn, qoff64_t off, const void *buf, size_t size)
 {
   if ( !trk.seek_file(fn, off, SEEK_SET) )
     return -1;
@@ -775,10 +768,7 @@ ssize_t idaapi epoc_debmod_t::dbg_write_file(int fn, uint32 off, const void *buf
 }
 
 //--------------------------------------------------------------------------
-int idaapi epoc_debmod_t::dbg_thread_get_sreg_base(
-        thid_t,
-        int,
-        ea_t *)
+int idaapi epoc_debmod_t::dbg_thread_get_sreg_base(ea_t *, thid_t, int)
 {
   return 0; // not implemented
 }

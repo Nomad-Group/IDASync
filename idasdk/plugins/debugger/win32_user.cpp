@@ -1,11 +1,9 @@
 /*
 This is main source code for the local win32 debugger module
 */
-#ifdef __X64__
-static const char wanted_name[] = "Local Win64 debugger";
-#else
-static const char wanted_name[] = "Local Win32 debugger";
-#endif
+
+static const char wanted_name[] = "Local Windows debugger";
+
 #define DEBUGGER_NAME  "win32"
 #define PROCESSOR_NAME "metapc"
 #define TARGET_PROCESSOR PLFM_386
@@ -26,6 +24,10 @@ static const char wanted_name[] = "Local Win32 debugger";
 // (since no renaming takes place)
 #define win32_init_plugin       init_plugin
 #define win32_term_plugin       term_plugin
+
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <objidl.h>
 
 #include <fpro.h>
 #include <ua.hpp>

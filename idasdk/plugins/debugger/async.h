@@ -9,7 +9,7 @@
 #include "consts.h"
 
 #ifndef SOCKET
-#  define SOCKET int*
+#  define SOCKET int *
 #endif
 #ifndef INVALID_SOCKET
 #  define INVALID_SOCKET (SOCKET)(~0)
@@ -22,6 +22,7 @@
 #  ifdef _MSC_VER
 #    pragma comment(lib, "wsock32")
 #  endif
+#include <process.h>
 #endif
 
 #ifdef ASYNC_TEST
@@ -30,6 +31,7 @@
 #define qrealloc realloc
 #endif
 
+//-V:async_stream_t:730 not all members of a class are initialized inside the constructor
 struct async_stream_t
 {
   IRAPIStream *s;

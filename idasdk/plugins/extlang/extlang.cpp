@@ -12,61 +12,56 @@
 #include <kernwin.hpp>
 
 //--------------------------------------------------------------------------
-static bool idaapi compile(     // Compile an expression
+static bool idaapi compile_expr(// Compile an expression
         const char *name,       // in: name of the function which will
                                 //     hold the compiled expression
         ea_t current_ea,        // in: current address. if unknown then BADADDR
         const char *expr,       // in: expression to compile
-        char *errbuf,           // out: error message if compilation fails
-        size_t errbufsize)      // in: size of the error buffer
+        qstring *errbuf)        // out: error message if compilation fails
 {                               // Returns: success
   qnotused(name);
   qnotused(current_ea);
   qnotused(expr);
-  qnotused(errbuf);
-  qnotused(errbufsize);
   // our toy interpreter doesn't support separate compilation/evaluation
   // some entry fields in ida won't be useable (bpt conditions, for example)
-  qstrncpy(errbuf, "compilation error", errbufsize);
+  if ( errbuf != NULL )
+    *errbuf = "compilation error";
   return false;
 }
 
 //--------------------------------------------------------------------------
-static bool idaapi run(         // Evaluate a previously compiled expression
-        const char *name,       // in: function to run
-        int nargs,              // in: number of input arguments
-        const idc_value_t args[], // in: input arguments
+static bool idaapi call_func(   // Evaluate a previously compiled expression
         idc_value_t *result,    // out: function result
-        char *errbuf,           // out: error message if evaluation fails
-        size_t errbufsize)      // in: size of the error buffer
+        const char *name,       // in: function to call
+        const idc_value_t args[], // in: input arguments
+        size_t nargs,           // in: number of input arguments
+        qstring *errbuf)        // out: error message if compilation fails
 {                               // Returns: success
   qnotused(name);
   qnotused(nargs);
   qnotused(args);
   qnotused(result);
-  qnotused(errbuf);
-  qnotused(errbufsize);
-  qstrncpy(errbuf, "evaluation error", errbufsize);
+  if ( errbuf != NULL )
+    *errbuf = "evaluation error";
   return false;
 }
 
 //--------------------------------------------------------------------------
-bool idaapi calcexpr(           // Compile and evaluate expression
+bool idaapi eval_expr(           // Compile and evaluate expression
+        idc_value_t *rv,        // out: expression value
         ea_t current_ea,        // in: current address. if unknown then BADADDR
         const char *expr,       // in: expression to evaluation
-        idc_value_t *rv,        // out: expression value
-        char *errbuf,           // out: error message if evaluation fails
-        size_t errbufsize)      // in: size of the error buffer
+        qstring *errbuf)        // out: error message if compilation fails
 {                               // Returns: success
   qnotused(current_ea);
   // we know to parse and decimal and hexadecimal numbers
   int radix = 10;
-  const char *ptr = skipSpaces(expr);
+  const char *ptr = skip_spaces(expr);
   bool neg = false;
   if ( *ptr == '-' )
   {
     neg = true;
-    ptr = skipSpaces(ptr+1);
+    ptr = skip_spaces(ptr+1);
   }
   if ( *ptr == '0' && *(ptr+1) == 'x' )
   {
@@ -74,7 +69,7 @@ bool idaapi calcexpr(           // Compile and evaluate expression
     ptr += 2;
   }
   sval_t value = 0;
-  while ( radix==10 ? qisdigit(*ptr) : qisxdigit(*ptr) )
+  while ( radix == 10 ? qisdigit(*ptr) : qisxdigit(*ptr) )
   {
     int d = *ptr <= '9' ? *ptr-'0' : qtolower(*ptr)-'a'+10;
     value *= radix;
@@ -83,38 +78,40 @@ bool idaapi calcexpr(           // Compile and evaluate expression
   }
   if ( neg )
     value = -value;
-  ptr = skipSpaces(ptr);
+  ptr = skip_spaces(ptr);
   if ( *ptr != '\0' )
   {
     msg("EVAL FAILED: %s\n", expr);
-    qstrncpy(errbuf, "syntax error", errbufsize);
+    if ( errbuf != NULL )
+      *errbuf = "syntax error";
     return false;
   }
 
   // we have the result, store it in the return value
   rv->clear();
   rv->num = value;
-  msg("EVAL %d: %s\n", value, expr);
+  msg("EVAL %" FMT_EA "d: %s\n", value, expr);
   return true;
 }
 
 //--------------------------------------------------------------------------
-static const extlang_t el =
+static extlang_t el =
 {
   sizeof(extlang_t),            // Size of this structure
   0,                            // Language features, currently 0
+  0,                            // refcnt
   "extlang sample",             // Language name
-
-  compile,
-  run,
-  calcexpr,
-  NULL,                         // compile_file
   NULL,                         // fileext
+  NULL,                         // syntax highlighter
+  compile_expr,
+  NULL,                         // compile_file
+  call_func,
+  eval_expr,
   NULL,                         // create_object
   NULL,                         // get_attr
   NULL,                         // set_attr
   NULL,                         // call_method
-  NULL,                         // run_statements
+  NULL,                         // eval_snippet
   NULL,                         // load_procmod
   NULL,                         // unload_procmod
 };
@@ -140,8 +137,9 @@ void idaapi term(void)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int) // won't be called
+bool idaapi run(size_t) // won't be called
 {
+  return false;
 }
 
 //--------------------------------------------------------------------------

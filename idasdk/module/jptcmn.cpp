@@ -1,4 +1,3 @@
-
 // common file to handle jump tables
 
 #include <limits.h>
@@ -11,6 +10,7 @@ enum jump_table_type_t
   JT_FLAT32,      // Flat 32-bit jump table
   JT_ARM_LDRB,    // pc + byte(table[i])  (possibly << 1)
   JT_ARM_LDRH,    // pc + word(table[i])  (possibly << 1)
+  JT_LAST,
 };
 
 // Class to check for a jump table sequence.
@@ -25,7 +25,7 @@ enum jump_table_type_t
 //   The last instruction has the number 0.
 //   The instruction before the last instruciton has the number 1, etc.
 //   There is a virtual function jpiN() for each instruction of the sequence
-//   These functions return true if 'cmd' is filled with the required instruction
+//   These functions return true if 'insn' is filled with the required instruction
 //
 // The comparison is made in the match() function:
 //
@@ -85,13 +85,13 @@ enum jump_table_type_t
 //   label:
 //
 //   Then jpi5() must behave like this:
-//      if the instruction in 'cmd' is 'BSC' or 'BGE'
+//      if the instruction in 'insn' is 'BSC' or 'BGE'
 //        then skip instruction #6. For this:
 //              skip[6] = true;
-//      if the instruction in 'cmd' is 'B'
+//      if the instruction in 'insn' is 'B'
 //              remember defea; return true;
 //   And jpi6() must behave like this:
-//      check if the instruction in 'cmd' is 'BCC' and jump to the end of instruction #5
+//      check if the instruction in 'insn' is 'BCC' and jump to the end of instruction #5
 //
 // In order to use the 'jump_pattern_t' class you should derive another class from it
 // and define the jpiN() virtual functions.
@@ -100,15 +100,17 @@ enum jump_table_type_t
 // If you processor contains instructions who modify registers in peculiar ways
 // you might want to override the check_spoiled() function.
 
+//-V:jump_pattern_t:730 not all members of a class are initialized inside the constructor
 class jump_pattern_t
 {
 public:
   typedef bool (jump_pattern_t::*check_insn_t)(void);
-  jump_pattern_t(const char *roots, const char (*depends)[2], switch_info_ex_t &si);
+  jump_pattern_t(switch_info_t *si, const char *roots, const char (*depends)[2]);
 
-  switch_info_ex_t &si; // answers will be here
+  switch_info_t *si; // answers will be here
+  insn_t insn;   // current instruction
 
-#define NINS 16         // the maximum length of the sequence
+  enum { NINS = 16 };   // the maximum length of the sequence
   ea_t eas[NINS];
   bool skip[NINS];
   check_insn_t check[NINS];
@@ -133,11 +135,17 @@ public:
   // maintained by derived classes.
   eavec_t remote_code;
 
+  // this should return true if the current instruction (in "insn")
+  // has a delay slot after it.
+  virtual bool has_delay_slot(void) { return false; }
+
   virtual bool handle_mov(void) { return false; }
   virtual void check_spoiled(void);
 
-  // check that cmd.ea jumps to addr_to and only it
+  // check that insn.ea jumps to addr_to and only it
   // can be used to skip instructions which glue blocks together
+  // this function can change current instruction (member 'insn')
+  // (e.g. in case of delayed jump, see sh3/emu.cpp)
   virtual bool is_branch_to(ea_t /*addr_to*/) { return false; }
   void spoil(int reg);
   bool follow_tree(ea_t ea, int n);
@@ -166,7 +174,7 @@ public:
   virtual bool jpif(void) { return false; }
   virtual bool start_tree(ea_t /*ea*/, int /*n*/) { return true; }
 
-  bool match(ea_t ea);
+  bool match(const insn_t &insn);
 
   // remove compiler warnings -- class with virtual functions MUST have virtual destructot
   virtual ~jump_pattern_t() {}
@@ -193,9 +201,9 @@ inline void jmsg(const char *, ...) {}
 
 //----------------------------------------------------------------------
 inline jump_pattern_t::jump_pattern_t(
+        switch_info_t *_si,
         const char *_roots,
-        const char (*_depends)[2],
-        switch_info_ex_t &_si)
+        const char (*_depends)[2])
   : si(_si),
     roots(_roots),
     depends(_depends),
@@ -229,14 +237,14 @@ void jump_pattern_t::spoil(int reg)
 //----------------------------------------------------------------------
 void jump_pattern_t::check_spoiled(void)
 {
-  uint32 F = cmd.get_canon_feature();
+  uint32 F = insn.get_canon_feature();
   if ( F != 0 )
   {
     for ( int i=0; i < UA_MAXOP; i++ )
     {
       if ( (F & (CF_CHG1<<i)) == 0 )
         continue;
-      op_t &x = cmd.Operands[i];
+      const op_t &x = insn.ops[i];
       switch ( x.type )
       {
         case o_reg:
@@ -289,15 +297,15 @@ bool jump_pattern_t::follow_tree(ea_t ea, int n)
         farref = false;
         bool tried_farref = false;
         ea_t prev = BADADDR;
-        if ( (allow_noflows && !allow_farrefs) || isFlow(get_flags_novalue(cur_addr)) )
+        if ( (allow_noflows && !allow_farrefs) || is_flow(get_flags(cur_addr)) )
         {
           while ( true )
           {
-            prev = decode_prev_insn(cur_addr);
+            prev = decode_prev_insn(&insn, cur_addr);
             // skip all matched addresses
             if ( prev == BADADDR || !is_matched_ea(prev) )
               break;
-            if ( !allow_noflows && !isFlow(get_flags_novalue(prev)) )
+            if ( !allow_noflows && !is_flow(get_flags(prev)) )
               break;
             cur_addr = prev;
           }
@@ -308,37 +316,48 @@ bool jump_pattern_t::follow_tree(ea_t ea, int n)
             break;
 FARREF:
           tried_farref = true;
-          if ( decode_preceding_insn(cur_addr, &farref) == BADADDR )
+          if ( decode_preceding_insn(&insn, cur_addr, &farref) == BADADDR )
             break;
+
+          // handle delay slot if this instruction has one
+          if ( farref && has_delay_slot() )
+          {
+            if ( decode_insn(&insn, insn.ea+insn.size) > 0 )
+            {
+              jmsg("%a: handling delay slot instruction\n", insn.ea);
+              cur_addr = insn.ea;
+              farref = false;
+            }
+          }
 
           // skip branches which are used to glue blocks together
           if ( farref && is_branch_to(cur_addr) )
           {
-            if ( is_call_insn(cmd.ea) )
+            if ( is_call_insn(insn) )
             {
-              jmsg("%a: detected call, failed\n", cmd.ea);
+              jmsg("%a: detected call, failed\n", insn.ea);
               break; // do not continue to other functions
             }
-            cur_addr = cmd.ea;
+            cur_addr = insn.ea;
             continue;
           }
         }
         ea_t farref_to_try = cur_addr;
-        cur_addr = cmd.ea;
+        cur_addr = insn.ea;
         if ( cur_addr < minea )
         {
           // if we crossed 'minea' because we switched
           // to another chunk of the same function,
           // update it accordingly
           func_t *pfn = get_fchunk(minea);
-          if ( pfn != NULL && pfn->startEA == minea )
+          if ( pfn != NULL && pfn->start_ea == minea )
           {
             pfn = get_func(cur_addr);
             if ( pfn != NULL && func_contains(pfn, minea) )
             {
               // ok, we're in the same function
               pfn = get_fchunk(cur_addr);
-              minea = pfn->startEA;
+              minea = pfn->start_ea;
             }
           }
         }
@@ -360,7 +379,7 @@ FARREF:
         }
         if ( failed )
           return false;
-        jmsg("%a: can't be %d.", cmd.ea, n);
+        jmsg("%a: can't be %d.", insn.ea, n);
         jmsg(" rA=%d%s rB=%d%s rC=%d%s rD=%d%s rE=%d%s\n",
                         r[1], spoiled[1] ? "*" : "",
                         r[2], spoiled[2] ? "*" : "",
@@ -382,7 +401,7 @@ FARREF:
         }
         return false;
       }
-      eas[n] = cmd.ea;
+      eas[n] = insn.ea;
     }
     if ( eas[n] >= ea )
     {
@@ -390,7 +409,7 @@ FARREF:
       return optional;
     }
     ea = eas[n];
-    jmsg("%a: found %d\n", cmd.ea, n);
+    jmsg("%a: found %d\n", insn.ea, n);
   }
 SUCC:
   bool ok = true;
@@ -421,8 +440,9 @@ SUCC:
 }
 
 //----------------------------------------------------------------------
-bool jump_pattern_t::match(ea_t ea)
+bool jump_pattern_t::match(const insn_t &_insn)
 {
+  insn = _insn;
   // unfortunately we can not do this in the constructor
   check[0x00] = &jump_pattern_t::jpi0;
   check[0x01] = &jump_pattern_t::jpi1;
@@ -446,6 +466,7 @@ bool jump_pattern_t::match(ea_t ea)
   memset(r, -1, sizeof(r));
   memset(&r_moved[0], 0, sizeof(r_moved));
 
+  ea_t ea = insn.ea;
   eas[0] = ea;
   failed = false;
 
@@ -454,13 +475,13 @@ bool jump_pattern_t::match(ea_t ea)
     pfn = get_prev_fchunk(ea);
   if ( pfn != NULL )
   {
-    minea = pfn->startEA;
+    minea = pfn->start_ea;
   }
   else
   {
     segment_t *seg = getseg(ea);
     QASSERT(10183, seg != NULL);
-    minea = seg->startEA;
+    minea = seg->start_ea;
   }
 
   if ( !(this->*check[0])() )
@@ -479,7 +500,7 @@ bool jump_pattern_t::match(ea_t ea)
   ea_t start = eas[0];
   for ( int i=1; i < qnumber(eas); i++ )
     start = qmin(start, eas[i]);
-  si.startea = start;
+  si->startea = start;
   return !failed;
 }
 
@@ -530,7 +551,7 @@ bool jump_pattern_t::is_same(const op_t &op, int r_i)
 }
 
 //----------------------------------------------------------------------
-static inline ea_t calc_entry_target(segment_t* seg, ea_t ea, switch_info_ex_t &si)
+static inline ea_t calc_entry_target(segment_t *seg, ea_t ea, const switch_info_t &si)
 {
   sval_t off = 0;
   int jsize = si.get_jtable_element_size();
@@ -548,7 +569,7 @@ static inline ea_t calc_entry_target(segment_t* seg, ea_t ea, switch_info_ex_t &
         off = int16(off);
       break;
     case 4:
-      off = get_long(ea);
+      off = get_dword(ea);
 #ifdef __EA64__
       if ( is_signed )
         off = int32(off);
@@ -579,8 +600,9 @@ static bool is_coagulated_addr(ea_t ea)
 // check if any of the would-be targets point into the table
 // and if so, truncate it
 // if 'ignore_refs' is false, also stop at first data reference
-static inline void trim_jtable(switch_info_ex_t &si, bool ignore_refs = false)
+static inline void trim_jtable(switch_info_t *_si, bool ignore_refs = false)
 {
+  switch_info_t &si = *_si;
   unsigned int elsize = si.get_jtable_element_size();
   ea_t start  = si.jumps;
   ea_t end    = start + elsize * si.ncases;
@@ -592,15 +614,15 @@ static inline void trim_jtable(switch_info_ex_t &si, bool ignore_refs = false)
   {
     if ( !is_coagulated_addr(ea) )
     {
-      flags_t F = getFlags(ea);
-      if ( !hasValue(F)
-        || isCode(F)
-        || (isTail(F) && get_item_head(ea) != start)
-        || (!ignore_refs && hasRef(F)) )
+      flags_t F = get_full_flags(ea);
+      if ( !has_value(F)
+        || is_code(F)
+        || (is_tail(F) && get_item_head(ea) != start)
+        || (!ignore_refs && has_xref(F)) )
       {
         // for the start address, only truncate if there is no value
         // other situations are possibly caused by wrong analysis
-        if ( ea != start || !hasValue(F) )
+        if ( ea != start || !has_value(F) )
         {
           //msg("%a: table would run into code; truncating it\n", ea);
           end = ea;
@@ -611,8 +633,8 @@ static inline void trim_jtable(switch_info_ex_t &si, bool ignore_refs = false)
     ea_t target = calc_entry_target(curseg, ea, si);
     if ( !is_coagulated_addr(target) )
     {
-      flags_t F = getFlags(target);
-      if ( !hasValue(F) || isData(F) || isTail(F) )
+      flags_t F = get_full_flags(target);
+      if ( !has_value(F) || is_data(F) || is_tail(F) )
       {
         //msg("%a: item would point to non-code; truncating it\n", ea);
         end = ea;
@@ -653,15 +675,17 @@ static inline void trim_jtable(switch_info_ex_t &si, bool ignore_refs = false)
 #ifndef SKIP_NOPC_FUNCTIONS
 // check and create a flat 32/16/8 bit jump table -- the most common case
 static void check_and_create_flat_jump_table(
-        jump_table_type_t /*jtt*/,
-        switch_info_ex_t &si)
+        switch_info_t *_si,
+        const insn_t &insn,
+        jump_table_type_t /*jtt*/)
 {
+  switch_info_t &si = *_si;
   // check the table contents
   ea_t table = si.jumps;
   segment_t *table_seg = getseg(table);
   if ( table_seg == NULL )
     return;
-  size_t maxsize = size_t(table_seg->endEA - table);
+  size_t maxsize = size_t(table_seg->end_ea - table);
   int size = si.ncases;
   if ( size > maxsize )
   {
@@ -672,25 +696,23 @@ static void check_and_create_flat_jump_table(
   int elsz = si.get_jtable_element_size();
 
   int i;
-  insn_t saved = cmd;
   for ( i = 0; i < size; i++ )
   {
     ea_t ea = table + i*elsz;
-    flags_t F = getFlags(ea);
-    if ( !hasValue(F) )
+    flags_t F = get_full_flags(ea);
+    if ( !has_value(F) )
       break;
-    if ( i && (has_any_name(F) || hasRef(F)) )
+    if ( i && (has_any_name(F) || has_xref(F)) )
       break;
     ea_t target = calc_entry_target(table_seg, ea, si);
-    if ( !isLoaded(target) )
+    if ( !is_loaded(target) )
       break;
-    flags_t F2 = get_flags_novalue(target);
-    if ( isTail(F2) || isData(F2) )
+    flags_t F2 = get_flags(target);
+    if ( is_tail(F2) || is_data(F2) )
       break;
-    if ( !isCode(F2) && !decode_insn(target) )
+    if ( !is_code(F2) && !can_decode(target) )
       break;
   }
-  cmd = saved;
   jmsg("Adjust ncases from %d to %d\n", size, i);
   size = i;
 
@@ -698,46 +720,50 @@ static void check_and_create_flat_jump_table(
   for ( i=0; i < size; i++ )
   {
     ea_t ea = table + i*elsz;
-    elsz == 1 ? doByte(ea, 1) :
-    elsz == 2 ? doWord(ea, 2) :
-                doDwrd(ea, 4);
+    if ( elsz == 1 )
+      create_byte(ea, 1);
+    else if ( elsz == 2 )
+      create_word(ea, 2);
+    else
+      create_dword(ea, 4);
     op_offset(ea, 0, REF_OFF32, BADADDR, si.elbase);
     ea_t target = calc_entry_target(table_seg, ea, si);
-    ua_add_cref(0, target, fl_JN);
+    add_cref(insn.ea, target, fl_JN);
   }
   si.ncases = (uint16)size;
   if ( si.defjump != BADADDR )
     si.flags |= SWI_DEFAULT;
   if ( si.startea == BADADDR )
-    si.startea = cmd.ea;
-  set_switch_info_ex(cmd.ea, &si);
+    si.startea = insn.ea;
+  set_switch_info(insn.ea, si);
 }
 
 //----------------------------------------------------------------------
-typedef jump_table_type_t is_pattern_t(switch_info_ex_t &si);
+typedef void create_table_t(switch_info_t *si, const insn_t &insn, jump_table_type_t jtt);
+typedef jump_table_type_t is_pattern_t(switch_info_t *si, const insn_t &insn);
 
 // This function finds and creates a 32-bit jump table
-static bool check_for_table_jump2(
+static bool check_for_table_jump(
+        switch_info_t *_si,
+        const insn_t &insn,
         is_pattern_t *const patterns[],
         size_t qty,
-        void (*create_table)(jump_table_type_t jtt, switch_info_ex_t &si),
-        switch_info_ex_t &si,
+        create_table_t *create_table=NULL,
         const char *name=NULL)
 {
+  switch_info_t &si = *_si;
   jump_table_type_t jtt = JT_NONE;
-  insn_t saved = cmd;
-  int i;
+  size_t i;
   for ( i=0; jtt == JT_NONE && i < qty; i++ )
   {
-    jmsg("%a: check pattern %d ----\n", cmd.ea, i);
+    jmsg("%a: check pattern %" FMT_Z " ----\n", insn.ea, i);
     si.clear();
-    jtt = patterns[i](si);
-    cmd = saved;
+    jtt = patterns[i](&si, insn);
   }
   if ( jtt == JT_NONE )
     return false;
 
-  jmsg("%s(%d): jumps=%a lowcase=%d. ncases=%d. elbase=%a defjump=%a\n",
+  jmsg("%s(%" FMT_Z "): jumps=%a lowcase=%" FMT_EA "d. ncases=%hd. elbase=%a defjump=%a\n",
        name == NULL ? "unknown" : name, i,
        si.jumps, si.lowcase, si.ncases, si.elbase, si.defjump);
 
@@ -745,54 +771,20 @@ static bool check_for_table_jump2(
     si.flags |= SWI_ELBASE;
 
   if ( create_table == NULL )
-    create_table = check_and_create_flat_jump_table;
-
-  create_table(jtt, si);
+    check_and_create_flat_jump_table(&si, insn, jtt);
+  else
+    create_table(&si, insn, jtt);
 
   char buf[MAXSTR];
-  qsnprintf(buf, sizeof(buf), "def_%a", saved.ip);
   if ( si.defjump != BADADDR )
   {
-    if ( !set_name(si.defjump, buf, SN_NOWARN|SN_LOCAL) )
-      set_name(si.defjump, buf, SN_NOWARN);
+    qsnprintf(buf, sizeof(buf), "def_%a", insn.ip);
+    if ( !set_name(si.defjump, buf, SN_NOCHECK|SN_NOWARN|SN_LOCAL) )
+      set_name(si.defjump, buf, SN_NOCHECK|SN_NOWARN);
   }
-  qsnprintf(buf, sizeof(buf), "jpt_%a", saved.ip);
-  set_name(si.jumps, buf, SN_NOWARN);
+  qsnprintf(buf, sizeof(buf), "jpt_%a", insn.ip);
+  set_name(si.jumps, buf, SN_NOCHECK|SN_NOWARN);
   return true;
 }
-#endif // SKIP_NOPC_FUNCTIONS
 
-//----------------------------------------------------------------------
-#ifndef SKIP_NOPPC_FUNCTIONS
-// this function find the size of the jump table for indirect switches
-// (indirect switches have the values table which contains indexes into
-// the jump table)
-// in: si->ncases has the size of the values table
-// out: si->jcases is initialized
-static bool find_jtable_size(switch_info_ex_t &si)
-{
-  int size = 0, maxsize = INT_MAX;
-  ea_t ea = si.values;
-  int vsize = si.get_vtable_element_size();
-  if ( si.values > si.jumps )
-    maxsize = (si.values - si.jumps) / si.get_jtable_element_size();
-  for ( int i=0; i < si.ncases; i++,ea+=vsize )
-  {
-    uint64 v = 0;
-    if ( !get_many_bytes(ea, &v, vsize) )
-      break;
-    if ( v >= maxsize )
-    {
-      si.ncases = i - 1;
-      break;
-    }
-    if ( size < v )
-      size = (int)v;
-  }
-  if ( size == 0 || si.ncases == 0 )
-    return false;
-  size++;
-  si.jcases = size;
-  return true;
-}
-#endif // SKIP_NOPPC_FUNCTIONS
+#endif // SKIP_NOPC_FUNCTIONS

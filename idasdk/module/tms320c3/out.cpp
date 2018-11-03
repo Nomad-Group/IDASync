@@ -9,9 +9,27 @@
 
 #include "tms320c3x.hpp"
 #include <frame.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <struct.hpp>
 
+// simple wrapper class for syntactic sugar of member functions
+// this class may have only simple member functions.
+// virtual functions and data fields are forbidden, otherwise the class
+// layout may change
+class out_tms320c3_t : public outctx_t
+{
+  out_tms320c3_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+  void out_address(ea_t ea, const op_t &x, bool at);
+};
+CASSERT(sizeof(out_tms320c3_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_tms320c3_t)
+
+//----------------------------------------------------------------------
 #define SYM(x) COLSTR(x, SCOLOR_SYMBOL)
 #define REG(x) COLSTR(x, SCOLOR_REG)
 #define REGP(x) SYM("(") REG(x) SYM(")")
@@ -19,94 +37,94 @@
 // o_phrase output format strings, indexed by phtype
 static const char *const formats[0x1a] =
 {
-        SYM("*+")  REG("%s"),                                     //0     "*+arn(NN)"
-        SYM("*-")  REG("%s"),                                     //1     "*-arn(NN)"
-        SYM("*++") REG("%s"),                                     //2     "*++arn(NN)"
-        SYM("*--") REG("%s"),                                     //3     "*--arn(NN)"
-        SYM("*")   REG("%s") SYM("++"),                           //4     "*arn++(NN)"
-        SYM("*")   REG("%s") SYM("--"),                           //5     "*arn--(NN)"
-        SYM("*")   REG("%s") SYM("++"),                           //6     "*arn++(NN)%"
-        SYM("*")   REG("%s") SYM("--"),                           //7     "*arn--(NN)%"
-        SYM("*+")  REG("%s") REGP("ir0"),                         //8     "*+arn(ir0)"
-        SYM("*-")  REG("%s") REGP("ir0"),                         //9     "*-arn(ir0)"
-        SYM("*++") REG("%s") REGP("ir0"),                         //a     "*++arn(ir0)"
-        SYM("*--") REG("%s") REGP("ir0"),                         //b     "*--arn(ir0)"
-        SYM("*")   REG("%s") SYM("++") REGP("ir0"),               //c     "*arn++(ir0)"
-        SYM("*")   REG("%s") SYM("--") REGP("ir0"),               //d     "*arn--(ir0)"
-        SYM("*")   REG("%s") SYM("++") REGP("ir0") SYM("%%"),     //e     "*arn++(ir0)%"
-        SYM("*")   REG("%s") SYM("--") REGP("ir0") SYM("%%"),     //f     "*arn--(ir0)%"
-        SYM("*+")  REG("%s") REGP("ir1"),                         //10    "*+arn(ir1)"
-        SYM("*-")  REG("%s") REGP("ir1"),                         //11    "*-arn(ir1)"
-        SYM("*++") REG("%s") REGP("ir1"),                         //12    "*++arn(ir1)"
-        SYM("*--") REG("%s") REGP("ir1"),                         //13    "*--arn(ir1)"
-        SYM("*")   REG("%s") SYM("++") REGP("ir1"),               //14    "*arn++(ir1)"
-        SYM("*")   REG("%s") SYM("--") REGP("ir1"),               //15    "*arn--(ir1)"
-        SYM("*")   REG("%s") SYM("++") REGP("ir1") SYM("%%"),     //16    "*arn++(ir1)%"
-        SYM("*")   REG("%s") SYM("--") REGP("ir1") SYM("%%"),     //17    "*arn--(ir1)%"
-        SYM("*")   REG("%s"),                                     //18    "*arn"
-        SYM("*")   REG("%s") SYM("++") REGP("ir0") SYM("B"),      //19    "*arn++(ir0)B"
+  SYM("*+")  REG("%s"),                                     //0     "*+arn(NN)"
+  SYM("*-")  REG("%s"),                                     //1     "*-arn(NN)"
+  SYM("*++") REG("%s"),                                     //2     "*++arn(NN)"
+  SYM("*--") REG("%s"),                                     //3     "*--arn(NN)"
+  SYM("*")   REG("%s") SYM("++"),                           //4     "*arn++(NN)"
+  SYM("*")   REG("%s") SYM("--"),                           //5     "*arn--(NN)"
+  SYM("*")   REG("%s") SYM("++"),                           //6     "*arn++(NN)%"
+  SYM("*")   REG("%s") SYM("--"),                           //7     "*arn--(NN)%"
+  SYM("*+")  REG("%s") REGP("ir0"),                         //8     "*+arn(ir0)"
+  SYM("*-")  REG("%s") REGP("ir0"),                         //9     "*-arn(ir0)"
+  SYM("*++") REG("%s") REGP("ir0"),                         //a     "*++arn(ir0)"
+  SYM("*--") REG("%s") REGP("ir0"),                         //b     "*--arn(ir0)"
+  SYM("*")   REG("%s") SYM("++") REGP("ir0"),               //c     "*arn++(ir0)"
+  SYM("*")   REG("%s") SYM("--") REGP("ir0"),               //d     "*arn--(ir0)"
+  SYM("*")   REG("%s") SYM("++") REGP("ir0") SYM("%%"),     //e     "*arn++(ir0)%"
+  SYM("*")   REG("%s") SYM("--") REGP("ir0") SYM("%%"),     //f     "*arn--(ir0)%"
+  SYM("*+")  REG("%s") REGP("ir1"),                         //10    "*+arn(ir1)"
+  SYM("*-")  REG("%s") REGP("ir1"),                         //11    "*-arn(ir1)"
+  SYM("*++") REG("%s") REGP("ir1"),                         //12    "*++arn(ir1)"
+  SYM("*--") REG("%s") REGP("ir1"),                         //13    "*--arn(ir1)"
+  SYM("*")   REG("%s") SYM("++") REGP("ir1"),               //14    "*arn++(ir1)"
+  SYM("*")   REG("%s") SYM("--") REGP("ir1"),               //15    "*arn--(ir1)"
+  SYM("*")   REG("%s") SYM("++") REGP("ir1") SYM("%%"),     //16    "*arn++(ir1)%"
+  SYM("*")   REG("%s") SYM("--") REGP("ir1") SYM("%%"),     //17    "*arn--(ir1)%"
+  SYM("*")   REG("%s"),                                     //18    "*arn"
+  SYM("*")   REG("%s") SYM("++") REGP("ir0") SYM("B"),      //19    "*arn++(ir0)B"
 };
 
 //--------------------------------------------------------------------------
-static const char * const cc_text[] =
+static const char *const cc_text[] =
 {
-        //Unconditional compares
-        "u",    //Unconditional
+  //Unconditional compares
+  "u",    //Unconditional
 
-        //Unsigned compares
-        "lo",   //Lower than
-        "ls",   //Lower than or same as
-        "hi",   //Higher than
-        "hs",   //Higher than or same as
-        "e",    //Equal to
-        "ne",   //Not equal to
+  //Unsigned compares
+  "lo",   //Lower than
+  "ls",   //Lower than or same as
+  "hi",   //Higher than
+  "hs",   //Higher than or same as
+  "e",    //Equal to
+  "ne",   //Not equal to
 
-        //Signed compares
-        "lt",   //Less than
-        "le",   //Less than or equal to
-        "gt",   //Greater than
-        "ge",   //Greater than or equal to
+  //Signed compares
+  "lt",   //Less than
+  "le",   //Less than or equal to
+  "gt",   //Greater than
+  "ge",   //Greater than or equal to
 
-        //Unknown
-        "?",    //Unknown
+  //Unknown
+  "?",    //Unknown
 
-        //Compare to condition flags
-        "nv",   //No overflow
-        "v",    //Overflow
-        "nuf",  //No underflow
-        "uf",   //Underflow
-        "nlv",  //No latched overflow
-        "lv",   //Latched overflow
-        "nluf", //No latched floating-point underflow
-        "luf",  //Latched floating-point underflow
-        "zuf"   //Zero or floating-point underflow
+  //Compare to condition flags
+  "nv",   //No overflow
+  "v",    //Overflow
+  "nuf",  //No underflow
+  "uf",   //Underflow
+  "nlv",  //No latched overflow
+  "lv",   //Latched overflow
+  "nluf", //No latched floating-point underflow
+  "luf",  //Latched floating-point underflow
+  "zuf"   //Zero or floating-point underflow
 };
 
 //----------------------------------------------------------------------
-static void out_address(ea_t ea, op_t &x, bool at)
+void out_tms320c3_t::out_address(ea_t ea, const op_t &x, bool at)
 {
-    char buf[MAXSTR];
-    if ( get_name_expr(cmd.ea+x.offb, x.n, ea, ea, buf, sizeof(buf)) > 0 )
-    {
-      if ( at )
-        out_symbol('@');
-      OutLine(buf);
-    }
-    else
-    {
-      if ( at )
-        out_symbol('@');
-      out_tagon(COLOR_ERROR);
-      OutValue(x, OOFW_IMM|OOF_ADDR|OOFW_16);
-      out_snprintf(" (ea = %a)", ea);
-      out_tagoff(COLOR_ERROR);
-      QueueSet(Q_noName, cmd.ea);
-    }
+  qstring qbuf;
+  if ( get_name_expr(&qbuf, insn.ea+x.offb, x.n, ea, ea) > 0 )
+  {
+    if ( at )
+      out_symbol('@');
+    out_line(qbuf.begin());
+  }
+  else
+  {
+    if ( at )
+      out_symbol('@');
+    out_tagon(COLOR_ERROR);
+    out_value(x, OOFW_IMM|OOF_ADDR|OOFW_16);
+    out_printf(" (ea = %a)", ea);
+    out_tagoff(COLOR_ERROR);
+    remember_problem(PR_NONAME, insn.ea);
+  }
 
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_tms320c3_t::out_operand(const op_t &x)
 {
   ea_t ea;
   char buf[MAXSTR];
@@ -117,31 +135,31 @@ bool idaapi outop(op_t &x)
       return 0;
 
     case o_reg:
-      out_register(ph.regNames[x.reg]);
+      out_register(ph.reg_names[x.reg]);
       break;
 
     case o_near:
-      out_address( calc_code_mem(x), x, false);
+      out_address(calc_code_mem(insn, x), x, false);
       break;
 
     case o_imm:
-      if ( cmd.itype != TMS320C3X_TRAPcond)
+      if ( insn.itype != TMS320C3X_TRAPcond )
         out_symbol('#');
 
-      if ( cmd.auxpref & ImmFltFlag )
+      if ( insn.auxpref & ImmFltFlag )
       {
          int16 v = int16(x.value);
-         out_real(&v, 2, buf, sizeof(buf));
+         print_fpval(buf, sizeof(buf), &v, 2);
          out_line(buf[0] == ' ' ? &buf[1] : buf, COLOR_NUMBER);
       }
       else
       {
-         OutValue(x, OOFW_IMM);
+         out_value(x, OOFW_IMM);
       }
       break;
 
     case o_mem:
-      ea = calc_data_mem(x);
+      ea = calc_data_mem(insn, x);
       if ( ea != BADADDR )
       {
         out_address(ea, x, true);
@@ -149,7 +167,7 @@ bool idaapi outop(op_t &x)
       else
       {
         out_tagon(COLOR_ERROR);
-        OutValue(x, OOFW_IMM|OOF_ADDR|OOFW_16);
+        out_value(x, OOFW_IMM|OOF_ADDR|OOFW_16);
         out_tagoff(COLOR_ERROR);
       }
       break;
@@ -165,9 +183,8 @@ bool idaapi outop(op_t &x)
           {
             // this is *arn phrase
             // check if we need to print the displacement
-            flags_t F = uFlag;
             int n = x.n;
-            if ( isOff(F, n) || isStkvar(F, n) || isEnum(F, n) || isStroff(F, n) )
+            if ( is_off(F, n) || is_stkvar(F, n) || is_enum(F, n) || is_stroff(F, n) )
             {
               outdisp = true;
               y.addr = 0;
@@ -177,7 +194,7 @@ bool idaapi outop(op_t &x)
           }
 
           // print the base part
-          const char *reg = ph.regNames[uchar(y.phtype)];
+          const char *reg = ph.reg_names[uchar(y.phtype)];
           nowarn_qsnprintf(buf, sizeof(buf), formats[uchar(y.phrase)], reg);
           out_colored_register_line(buf);
 
@@ -185,7 +202,7 @@ bool idaapi outop(op_t &x)
           if ( outdisp )
           {
             out_symbol('(');
-            OutValue(y, OOFS_IFSIGN|OOF_ADDR|OOFW_32);
+            out_value(y, OOFS_IFSIGN|OOF_ADDR|OOFW_32);
             out_symbol(')');
             if ( printmod )
               out_symbol('%'); // %: circular modify
@@ -199,22 +216,17 @@ bool idaapi outop(op_t &x)
       }
 
     default:
-      error("interr: out");
-      break;
+      INTERR(10261);
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_tms320c3_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  // output instruction mnemonics
   char postfix[8];
   postfix[0] = '\0';
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS320C3X_LDFcond:
     case TMS320C3X_LDIcond:
@@ -224,167 +236,165 @@ void idaapi out(void)
     case TMS320C3X_TRAPcond:
     case TMS320C3X_RETIcond:
     case TMS320C3X_RETScond:
-                qstrncpy(postfix, cc_text[cmd.auxpref & 0x1f ], sizeof(postfix));
-                if ( cmd.auxpref & DBrFlag ) // если переход отложенный
-                        qstrncat(postfix, "d", sizeof(postfix));
-                break;
+      qstrncpy(postfix, cc_text[insn.auxpref & 0x1f ], sizeof(postfix));
+      if ( insn.auxpref & DBrFlag ) // если переход отложенный
+        qstrncat(postfix, "d", sizeof(postfix));
+      break;
   }
 
-  OutMnem(8, postfix);
+  out_mnem(8, postfix);
+}
 
+//----------------------------------------------------------------------
+void out_tms320c3_t::out_insn(void)
+{
+  out_mnemonic();
 
   // по кол-ву операндов бывают такие сочетания в командах:
   // 0, 1, 2, 3 для непараллельных
   // 2+2, 3+2, 3+3, для параллельных
 
   out_one_operand(0);   //два операнда можно выводить смело
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
     out_one_operand(1);
   }
-
-  gl_comm = 1;                  // generate comments at the next MakeLine();
-  if ( cmd.itype2 )             // Is Parallel
+  if ( insn.itype2 )             // Is Parallel
   {
-        if ( cmd.i2op > 2 ) // 3-й операнд принадлежит первой половине команды
-        {
-                out_symbol(',');
-                out_one_operand(2);
-        }
-        term_output_buffer();
-        MakeLine(buf);
-        init_output_buffer(buf, sizeof(buf));
+    if ( insn.i2op > 2 ) // 3-й операнд принадлежит первой половине команды
+    {
+      out_symbol(',');
+      out_one_operand(2);
+    }
+    flush_outbuf();
 
-        char insn2[MAXSTR];
-        qsnprintf(insn2, sizeof(insn2), "||%s", ph.instruc[uchar(cmd.itype2)].name);
-        add_spaces(insn2, sizeof(insn2), 8);
-        out_line(insn2, COLOR_INSN);
+    char insn2[MAXSTR];
+    qsnprintf(insn2, sizeof(insn2), "||%s", ph.instruc[uchar(insn.itype2)].name);
+    ::add_spaces(insn2, sizeof(insn2), 8);
+    out_line(insn2, COLOR_INSN);
 
+    if ( insn.i2op == 2 ) // 3-й операнд принадлежит второй половине команды
+    {
+      out_one_operand(2);
+      out_symbol(',');
+    }
 
-        if ( cmd.i2op == 2 ) // 3-й операнд принадлежит второй половине команды
-        {
-                out_one_operand(2);
-                out_symbol(',');
-        }
+    if ( insn.Op4.type != o_void )
+      out_one_operand(3);
 
-        if ( cmd.Op4.type != o_void )
-        {
-                out_one_operand(3);
-        }
+    if ( insn.Op5.type != o_void )
+    {
+      out_symbol(',');
+      out_one_operand(4);
+    }
 
-        if ( cmd.Op5.type != o_void )
-        {
-                out_symbol(',');
-                out_one_operand(4);
-        }
-
-        if ( cmd.Op6.type != o_void )
-        {
-                out_symbol(',');
-                out_one_operand(5);
-        }
+    if ( insn.Op6.type != o_void )
+    {
+      out_symbol(',');
+      out_one_operand(5);
+    }
   }
-  else
-        if ( cmd.Op3.type != o_void )
-        {
-                out_symbol(',');
-                out_one_operand(2);
-        }
+  else if ( insn.Op3.type != o_void )
+  {
+    out_symbol(',');
+    out_one_operand(2);
+  }
 
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea, uFlag, 2) ) OutImmChar(cmd.Op3);
+  out_immchar_cmts();
 
-  term_output_buffer();
-  MakeLine(buf);
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-static void print_segment_register(int reg, sel_t value)
+static void print_segment_register(outctx_t &ctx, int reg, sel_t value)
 {
-  if ( reg == ph.regDataSreg ) return;
+  if ( reg == ph.reg_data_sreg )
+    return;
   if ( value != BADADDR )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), value);
-    gen_cmt_line("assume %s = %s", ph.regNames[reg], buf);
+    ctx.gen_cmt_line("assume %s = %s", ph.reg_names[reg], buf);
   }
   else
   {
-    gen_cmt_line("drop %s", ph.regNames[reg]);
+    ctx.gen_cmt_line("drop %s", ph.reg_names[reg]);
   }
 }
 
 //--------------------------------------------------------------------------
 // function to produce assume directives
-void idaapi assumes(ea_t ea)
+//lint -e{1764} ctx could be const
+void idaapi assumes(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( !inf.s_assume || seg == NULL )
+  if ( (inf.outflags & OFLG_GEN_ASSUME) == 0 || seg == NULL )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
-  for ( int i = ph.regFirstSreg; i <= ph.regLastSreg; ++i )
+  for ( int i = ph.reg_first_sreg; i <= ph.reg_last_sreg; ++i )
   {
-    if ( i == ph.regCodeSreg )
+    if ( i == ph.reg_code_sreg )
       continue;
-    segreg_area_t sra;
-    if ( !get_srarea2(&sra, ea, i) )
+    sreg_range_t sra;
+    if ( !get_sreg_range(&sra, ea, i) )
       continue;
-    if ( seg_started || sra.startEA == ea )
+    if ( seg_started || sra.start_ea == ea )
     {
-      sel_t now = get_segreg(ea, i);
-      segreg_area_t prev;
-      bool prev_exists = get_srarea2(&prev, ea-1, i);
-      if ( seg_started || (prev_exists && get_segreg(prev.startEA, i) != now) )
-        print_segment_register(i, now);
+      sel_t now = get_sreg(ea, i);
+      sreg_range_t prev;
+      bool prev_exists = get_sreg_range(&prev, ea-1, i);
+      if ( seg_started || (prev_exists && get_sreg(prev.start_ea, i) != now) )
+        print_segment_register(ctx, i, now);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -e{818} seg could be const
+void idaapi segstart(outctx_t &ctx, segment_t *seg)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(seg->type) )
+    return;
 
-  char sclas[MAXNAMELEN];
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sclas;
+  get_segm_class(&sclas, seg);
 
-  if ( strcmp(sclas,"CODE") == 0 )
-    printf_line(inf.indent, COLSTR(".text", SCOLOR_ASMDIR));
-  else if ( strcmp(sclas,"DATA") == 0 )
-    printf_line(inf.indent, COLSTR(".data", SCOLOR_ASMDIR));
+  if ( sclas == "CODE" )
+    ctx.gen_printf(inf.indent, COLSTR(".text", SCOLOR_ASMDIR));
+  else if ( sclas == "DATA" )
+    ctx.gen_printf(inf.indent, COLSTR(".data", SCOLOR_ASMDIR));
 
-  if ( Sarea->orgbase != 0 )
+  if ( seg->orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
-    btoa(buf, sizeof(buf), Sarea->orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    btoa(buf, sizeof(buf), seg->orgbase);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t)
+void idaapi segend(outctx_t &, segment_t *)
 {
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL | GH_BYTESEX_HAS_HIGHBYTE, NULL, device);
-  MakeNull();
+  ctx.gen_header(GH_PRINT_ALL | GH_BYTESEX_HAS_HIGHBYTE, NULL, device.c_str());
+  ctx.gen_empty_line();
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi footer(outctx_t &ctx)
 {
-  printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR),ash.end);
+  ctx.gen_printf(inf.indent,COLSTR("%s",SCOLOR_ASMDIR),ash.end);
 }
 
 //--------------------------------------------------------------------------
-void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v)
+void idaapi gen_stkvar_def(outctx_t &ctx, const member_t *mptr, sval_t v)
 {
   char sign = ' ';
   if ( v < 0 )
@@ -393,17 +403,16 @@ void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval
     v = -v;
   }
 
-  qstring name = get_member_name2(mptr->id);
+  qstring name = get_member_name(mptr->id);
 
   char vstr[MAX_NUMBUF];
   btoa(vstr, sizeof(vstr), v);
-  qsnprintf(buf, bufsize,
-            COLSTR("%s",SCOLOR_KEYWORD)
-            COLSTR("%c%s",SCOLOR_DNUM)
-            COLSTR(",",SCOLOR_SYMBOL) " "
-            COLSTR("%s",SCOLOR_LOCNAME),
-            ash.a_equ,
-            sign,
-            vstr,
-            name.c_str());
+  ctx.out_printf(COLSTR("%s",SCOLOR_KEYWORD)
+                 COLSTR("%c%s",SCOLOR_DNUM)
+                 COLSTR(",",SCOLOR_SYMBOL) " "
+                 COLSTR("%s",SCOLOR_LOCNAME),
+                 ash.a_equ,
+                 sign,
+                 vstr,
+                 name.c_str());
 }

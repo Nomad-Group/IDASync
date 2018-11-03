@@ -11,8 +11,8 @@
 #include "i860.hpp"
 
 //----------------------------------------------------------------------
-static void FPunit(void);
-static void COREunit(void);
+static void FPunit(insn_t &insn);
+static void COREunit(insn_t &insn);
 
 //      Inline functions
 
@@ -87,8 +87,10 @@ static void op_s1s2(op_t &x)
   {
     x.type = o_displ;
     x.addr = short(code);
-    if ( code & bit28 ) x.addr &= ~1L;
-    if ( x.reg == 0 ) x.type = o_mem;
+    if ( code & bit28 )
+      x.addr &= ~1L;
+    if ( x.reg == 0 )
+      x.type = o_mem;
   }
   else
   {
@@ -138,62 +140,73 @@ static char dsize_10_9(void)
 //----------------------------------------------------------------------
 static void op_stoff(op_t &x)
 {
-  x.type  = o_displ;
-  x.reg   = op_s2();
-  x.addr  = short((code & 0x7FF) + (op_ds() << 11));    // extend sign
+  x.type = o_displ;
+  x.reg  = op_s2();
+  x.addr = short((code & 0x7FF) + (op_ds() << 11));    // extend sign
 }
 
 //----------------------------------------------------------------------
-static void op_bteoff(op_t &x)
+//lint -e{1764} Reference parameter '' could be declared const ref
+static void op_bteoff(insn_t &insn, op_t &x)
 {
-  x.type  = o_near;
-  x.addr  = cmd.ea + cmd.size +
-             (sval_t( (code & 0x7FF)+(op_ds()<<11) ) << 2); // extend sign
-  x.dtyp  = dt_code;
+  x.type = o_near;
+  x.addr = insn.ea + insn.size
+         + (sval_t( (code & 0x7FF)+(op_ds()<<11) ) << 2); // extend sign
+  x.dtype = dt_code;
 }
 
 //----------------------------------------------------------------------
-static void op_lbroff(op_t &x)
+//lint -e{1764} Reference parameter '' could be declared const ref
+static void op_lbroff(insn_t &insn, op_t &x)
 {
-  x.type  = o_near;
+  x.type = o_near;
   sval_t lbr = code & 0x3FFFFFFL;
-  if ( code & bit25 ) lbr |= ~uval_t(0x3FFFFFF);  // extend sign
-  x.addr  = cmd.ea + cmd.size + (lbr << 2);
-  x.dtyp  = dt_code;
+  if ( code & bit25 )
+    lbr |= ~uval_t(0x3FFFFFF);  // extend sign
+  x.addr = insn.ea + insn.size + (lbr << 2);
+  x.dtype = dt_code;
 }
 
 //----------------------------------------------------------------------
 static void op_ainc(op_t &x)
 {
   op_s1s2(x);
-  if ( code & bit0 ) x.reg = - x.reg;
+  if ( code & bit0 )
+    x.reg = - x.reg;
   if ( x.type == o_displ || x.type == o_mem )
   {
     x.addr &= ~3L;
-    if ( (code & bit1) == 0 ) x.addr &= ~7L;
+    if ( (code & bit1) == 0 )
+      x.addr &= ~7L;
   }
-  x.dtyp = dsize_1_2();
+  x.dtype = dsize_1_2();
 }
 
 //----------------------------------------------------------------------
 static int op_ctl(op_t &x)
 {
   op_s2(x);
-  if ( x.reg > (is860XP() ? 11 : 5) ) return 0;
+  if ( x.reg > (is860XP() ? 11 : 5) )
+    return 0;
   x.reg += R_fir;
   return 1;
 }
 
 //----------------------------------------------------------------------
-int idaapi i860_ana(void)
+int idaapi i860_ana(insn_t *_insn)
 {
-  if ( (cmd.ea & 3) != 0 ) return 0;            // only four byte boundaries
-  code = ua_next_long();
+  if ( _insn == NULL )
+    return 0;
+  insn_t &insn = *_insn;
 
-  cmd.Op1.dtyp = dt_dword;
-  cmd.Op2.dtyp = dt_dword;
-  cmd.Op3.dtyp = dt_dword;
-  cmd.itype = I860_null;
+  if ( (insn.ea & 3) != 0 )
+    return 0;            // only four byte boundaries
+  code = insn.get_next_dword();
+
+  insn.Op1.dtype = dt_dword;
+  insn.Op2.dtype = dt_dword;
+  insn.Op3.dtype = dt_dword;
+  insn.itype = I860_null;
 
   switch ( code>>26 )
   {
@@ -201,218 +214,230 @@ int idaapi i860_ana(void)
     case 0x01:
     case 0x04:
     case 0x05:
-      cmd.itype = I860_ld;
-      op_s1s2(cmd.Op1);
-      op_dest(cmd.Op2);
-      cmd.Op1.dtyp = dsize_28_0();
-      cmd.Op2.dtyp = cmd.Op1.dtyp;
+      insn.itype = I860_ld;
+      op_s1s2(insn.Op1);
+      op_dest(insn.Op2);
+      insn.Op1.dtype = dsize_28_0();
+      insn.Op2.dtype = insn.Op1.dtype;
       break;
     case 0x03:
     case 0x07:
-      cmd.itype = I860_st;
-      op_s1ni(cmd.Op2);
-      op_stoff(cmd.Op1);
-      cmd.Op1.dtyp = dsize_28_0();
-      cmd.Op2.dtyp = cmd.Op1.dtyp;
+      insn.itype = I860_st;
+      op_s1ni(insn.Op2);
+      op_stoff(insn.Op1);
+      insn.Op1.dtype = dsize_28_0();
+      insn.Op2.dtype = insn.Op1.dtype;
       break;
     case 0x02:
-      cmd.itype = I860_ixfr;
-      op_s1ni(cmd.Op1);
-      op_fdest(cmd.Op2);
+      insn.itype = I860_ixfr;
+      op_s1ni(insn.Op1);
+      op_fdest(insn.Op2);
       break;
     case 0x08:
     case 0x09:
-      cmd.itype = I860_fld;
-      op_ainc(cmd.Op1);
-      op_fdest(cmd.Op2);
-      cmd.Op2.dtyp = cmd.Op1.dtyp;
+      insn.itype = I860_fld;
+      op_ainc(insn.Op1);
+      op_fdest(insn.Op2);
+      insn.Op2.dtype = insn.Op1.dtype;
       break;
     case 0x0A:
     case 0x0B:
-      cmd.itype = I860_fst;
-      op_fdest(cmd.Op1);
-      op_ainc(cmd.Op2);
-      cmd.Op1.dtyp = cmd.Op2.dtyp;
+      insn.itype = I860_fst;
+      op_fdest(insn.Op1);
+      op_ainc(insn.Op2);
+      insn.Op1.dtype = insn.Op2.dtype;
       break;
     case 0x0D:
-      cmd.itype = I860_flush;
-      op_ainc(cmd.Op1);
+      insn.itype = I860_flush;
+      op_ainc(insn.Op1);
       break;
     case 0x0F:
-      cmd.itype = I860_pst_d;
-      op_fdest(cmd.Op1);
-      op_ainc(cmd.Op2);
-      cmd.Op1.dtyp = cmd.Op2.dtyp;
+      insn.itype = I860_pst_d;
+      op_fdest(insn.Op1);
+      op_ainc(insn.Op2);
+      insn.Op1.dtype = insn.Op2.dtype;
       break;
     case 0x0C:
-      if ( ! op_ctl(cmd.Op1) ) break;
-      op_dest(cmd.Op2);
-      cmd.itype = I860_ld_c;
+      if ( !op_ctl(insn.Op1) )
+        break;
+      op_dest(insn.Op2);
+      insn.itype = I860_ld_c;
       break;
     case 0x0E:
-      op_s1ni(cmd.Op1);
-      if ( ! op_ctl(cmd.Op2) ) break;
-      cmd.itype = I860_st_c;
+      op_s1ni(insn.Op1);
+      if ( !op_ctl(insn.Op2) )
+        break;
+      insn.itype = I860_st_c;
       break;
     case 0x10:
-      cmd.itype = I860_bri;
-      op_s1ni(cmd.Op1);
+      insn.itype = I860_bri;
+      op_s1ni(insn.Op1);
       break;
     case 0x11:
-      cmd.itype = I860_trap;
-      op_s1ni(cmd.Op1);
-      op_s2(cmd.Op2);
-      op_dest(cmd.Op3);
+      insn.itype = I860_trap;
+      op_s1ni(insn.Op1);
+      op_s2(insn.Op2);
+      op_dest(insn.Op3);
       break;
     case 0x12:
-      FPunit();
+      FPunit(insn);
       break;
     case 0x13:
-      COREunit();
+      COREunit(insn);
       break;
     case 0x14:
     case 0x16:
     case 0x15:
     case 0x17:
-      cmd.itype = (code & bit27) ? I860_bte : I860_btne;
-      if ( code & bit26 ) {     // small immediate
-        cmd.Op1.type = o_imm;
-        cmd.Op1.value = op_s1();
-      } else {
-        op_s1ni(cmd.Op1);
+      insn.itype = (code & bit27) ? I860_bte : I860_btne;
+      if ( code & bit26 ) // small immediate
+      {
+        insn.Op1.type = o_imm;
+        insn.Op1.value = op_s1();
       }
-      op_s2(cmd.Op2);
-      op_bteoff(cmd.Op3);
+      else
+      {
+        op_s1ni(insn.Op1);
+      }
+      op_s2(insn.Op2);
+      op_bteoff(insn, insn.Op3);
       break;
     case 0x18:
     case 0x19:
-      op_ainc(cmd.Op1);
-      op_fdest(cmd.Op2);
-      cmd.Op2.dtyp = cmd.Op1.dtyp;
-      if ( !is860XP() && cmd.Op2.dtyp == dt_byte16 ) break;
-      cmd.itype = I860_pfld;
+      op_ainc(insn.Op1);
+      op_fdest(insn.Op2);
+      insn.Op2.dtype = insn.Op1.dtype;
+      if ( !is860XP() && insn.Op2.dtype == dt_byte16 )
+        break;
+      insn.itype = I860_pfld;
       break;
     case 0x1A:
-      cmd.itype = I860_br;
-      op_lbroff(cmd.Op1);
+      insn.itype = I860_br;
+      op_lbroff(insn, insn.Op1);
       break;
     case 0x1B:
-      cmd.itype = I860_call;
-      op_lbroff(cmd.Op1);
+      insn.itype = I860_call;
+      op_lbroff(insn, insn.Op1);
       break;
     case 0x1C:
     case 0x1D:
-      cmd.itype = (code & bit26) ? I860_bc_t : I860_bc;
-      op_lbroff(cmd.Op1);
+      insn.itype = (code & bit26) ? I860_bc_t : I860_bc;
+      op_lbroff(insn, insn.Op1);
       break;
     case 0x1E:
     case 0x1F:
-      cmd.itype = (code & bit26) ? I860_bnc_t : I860_bnc;
-      op_lbroff(cmd.Op1);
+      insn.itype = (code & bit26) ? I860_bnc_t : I860_bnc;
+      op_lbroff(insn, insn.Op1);
       break;
     case 0x20: case 0x21: case 0x22: case 0x23:
     case 0x24: case 0x25: case 0x26: case 0x27:
-      cmd.itype = (code & bit27)
+      insn.itype = (code & bit27)
                         ? (code & bit28) ? I860_subs : I860_subu
                         : (code & bit28) ? I860_adds : I860_addu;
-      op_s1s(cmd.Op1);
-      op_s2(cmd.Op2);
-      op_dest(cmd.Op3);
+      op_s1s(insn.Op1);
+      op_s2(insn.Op2);
+      op_dest(insn.Op3);
       break;
     case 0x28:
     case 0x29:
     case 0x2A:
     case 0x2B:
-      cmd.itype = (code & bit27) ? I860_shr : I860_shl;
-      op_s1u(cmd.Op1);
-      op_s2(cmd.Op2);
-      op_dest(cmd.Op3);
+      insn.itype = (code & bit27) ? I860_shr : I860_shl;
+      op_s1u(insn.Op1);
+      op_s2(insn.Op2);
+      op_dest(insn.Op3);
       break;
     case 0x2C:
-      cmd.itype = I860_shrd;
-      op_s1ni(cmd.Op1);
-      op_s2(cmd.Op2);
-      op_dest(cmd.Op3);
+      insn.itype = I860_shrd;
+      op_s1ni(insn.Op1);
+      op_s2(insn.Op2);
+      op_dest(insn.Op3);
       break;
     case 0x2D:
-      cmd.itype = I860_bla;
-      op_s1ni(cmd.Op1);
-      op_s2(cmd.Op2);
-      op_bteoff(cmd.Op3);
+      insn.itype = I860_bla;
+      op_s1ni(insn.Op1);
+      op_s2(insn.Op2);
+      op_bteoff(insn, insn.Op3);
       break;
     case 0x2E:
     case 0x2F:
-      cmd.itype = I860_shra;
-      op_s1u(cmd.Op1);
-      op_s2(cmd.Op2);
-      op_dest(cmd.Op3);
+      insn.itype = I860_shra;
+      op_s1u(insn.Op1);
+      op_s2(insn.Op2);
+      op_dest(insn.Op3);
       break;
     case 0x30: case 0x31: case 0x33:
-      cmd.itype = (code & bit27) ? I860_andh : I860_and;
+      insn.itype = (code & bit27) ? I860_andh : I860_and;
       goto common;
     case 0x34: case 0x35: case 0x37:
-      cmd.itype = (code & bit27) ? I860_andnoth : I860_andnot;
+      insn.itype = (code & bit27) ? I860_andnoth : I860_andnot;
       goto common;
     case 0x38: case 0x39: case 0x3B:
-      cmd.itype = (code & bit27) ? I860_orh : I860_or;
+      insn.itype = (code & bit27) ? I860_orh : I860_or;
       goto common;
     case 0x3C: case 0x3D: case 0x3F:
-      cmd.itype = (code & bit27) ? I860_xorh : I860_xor;
+      insn.itype = (code & bit27) ? I860_xorh : I860_xor;
 common:
-      op_s1u(cmd.Op1);
-      op_s2(cmd.Op2);
-      op_dest(cmd.Op3);
+      op_s1u(insn.Op1);
+      op_s2(insn.Op2);
+      op_dest(insn.Op3);
       break;
   }
-  if ( cmd.itype == I860_null ) return 0;
+  if ( insn.itype == I860_null )
+    return 0;
   return 4;
 }
 
 //----------------------------------------------------------------------
-static void COREunit(void)
+static void COREunit(insn_t &insn)
 {
-  if ( (code & 0x1E0) != 0 ) return;
+  if ( (code & 0x1E0) != 0 )
+    return;
   switch ( code & 0x1F )
   {
     case 1:
-      cmd.itype = I860_lock;
+      insn.itype = I860_lock;
       break;
     case 2:
-      cmd.itype = I860_calli;
-      op_s1ni(cmd.Op1);
-      cmd.Op1.dtyp = dt_code;
+      insn.itype = I860_calli;
+      op_s1ni(insn.Op1);
+      insn.Op1.dtype = dt_code;
       break;
     case 4:
-      cmd.itype = I860_introvr;
+      insn.itype = I860_introvr;
       break;
     case 7:
-      cmd.itype = I860_unlock;
+      insn.itype = I860_unlock;
       break;
     case 8:
-      if ( ! is860XP() ) break;
-      cmd.itype = I860_ldio;
+      if ( !is860XP() )
+        break;
+      insn.itype = I860_ldio;
 common:
-      op_s2(cmd.Op1);
-      op_dest(cmd.Op2);
-      cmd.Op1.dtyp = dsize_10_9();
-      cmd.Op2.dtyp = cmd.Op1.dtyp;
+      op_s2(insn.Op1);
+      op_dest(insn.Op2);
+      insn.Op1.dtype = dsize_10_9();
+      insn.Op2.dtype = insn.Op1.dtype;
       break;
     case 9:
-      if ( ! is860XP() ) break;
-      cmd.itype = I860_stio;
-      op_s1ni(cmd.Op1);
-      op_s2(cmd.Op2);
-      cmd.Op1.dtyp = dsize_10_9();
-      cmd.Op2.dtyp = cmd.Op1.dtyp;
+      if ( !is860XP() )
+        break;
+      insn.itype = I860_stio;
+      op_s1ni(insn.Op1);
+      op_s2(insn.Op2);
+      insn.Op1.dtype = dsize_10_9();
+      insn.Op2.dtype = insn.Op1.dtype;
       break;
     case 0x0A:
-      if ( ! is860XP() ) break;
-      cmd.itype = I860_ldint;
+      if ( !is860XP() )
+        break;
+      insn.itype = I860_ldint;
       goto common;
     case 0x0B:
-      if ( ! is860XP() ) break;
-      cmd.itype = I860_scyc;
-      op_s2(cmd.Op1);
+      if ( !is860XP() )
+        break;
+      insn.itype = I860_scyc;
+      op_s2(insn.Op1);
       break;
   }
 }
@@ -422,7 +447,7 @@ inline int isDS(void)   { return (code & (Sbit|Rbit)) == Sbit; }   // prec .ds
 inline int isSSDD(void) { return (code & Sbit) == (code & Rbit); } // prec .ss .dd
 inline int isSDDD(void) { return (code & Rbit) != 0; }             // prec .sd .dd
 
-static void FPunit(void)
+static void FPunit(insn_t &insn)
 {
   switch ( code & 0x7F )
   {
@@ -459,86 +484,101 @@ static void FPunit(void)
         };
         if ( isDS() )
           break;
-        cmd.itype = uint16(((code & Pbit) ? Pintrs : Mintrs)[ int(code) & 0xF ]);
+        insn.itype = uint16(((code & Pbit) ? Pintrs : Mintrs)[ int(code) & 0xF ]);
       }
 common3:
-      op_fs1(cmd.Op1);
-      op_fs2(cmd.Op2);
-      op_dest(cmd.Op3);
+      op_fs1(insn.Op1);
+      op_fs2(insn.Op2);
+      op_dest(insn.Op3);
 common:
-      if ( code & Dbit ) cmd.auxpref |= aux_dual;
-      if ( code & Sbit ) cmd.auxpref |= aux_sdbl;
-      if ( code & Rbit ) cmd.auxpref |= aux_rdbl;
+      if ( code & Dbit )
+        insn.auxpref |= aux_dual;
+      if ( code & Sbit )
+        insn.auxpref |= aux_sdbl;
+      if ( code & Rbit )
+        insn.auxpref |= aux_rdbl;
       break;
     case 0x20:
-      if ( isDS() ) break;
-      cmd.itype = (code & Pbit) ? I860_pfmul : I860_fmul;
+      if ( isDS() )
+        break;
+      insn.itype = (code & Pbit) ? I860_pfmul : I860_fmul;
       goto common3;
     case 0x21:
-      cmd.itype = I860_fmlow_dd;
+      insn.itype = I860_fmlow_dd;
       goto common3;
     case 0x22:
-      if ( isDS() ) break;
-      cmd.itype = I860_frcp;
+      if ( isDS() )
+        break;
+      insn.itype = I860_frcp;
 common22:
-      op_fs2(cmd.Op1);
-      op_dest(cmd.Op2);
+      op_fs2(insn.Op1);
+      op_dest(insn.Op2);
       goto common;
     case 0x23:
-      if ( isDS() ) break;
-      cmd.itype = I860_frsqr;
+      if ( isDS() )
+        break;
+      insn.itype = I860_frsqr;
       goto common22;
     case 0x24:
-      if ( (code & (Rbit|Sbit)) != (Rbit|Sbit) ) break;
-      cmd.itype = I860_pfmul3_dd;
+      if ( (code & (Rbit|Sbit)) != (Rbit|Sbit) )
+        break;
+      insn.itype = I860_pfmul3_dd;
       goto common3;
     case 0x30:
-      if ( isDS() ) break;
-      cmd.itype = (code & Pbit) ? I860_pfadd : I860_fadd;
+      if ( isDS() )
+        break;
+      insn.itype = (code & Pbit) ? I860_pfadd : I860_fadd;
       goto common3;
     case 0x31:
-      if ( isDS() ) break;
-      cmd.itype = (code & Pbit) ? I860_pfsub : I860_fsub;
+      if ( isDS() )
+        break;
+      insn.itype = (code & Pbit) ? I860_pfsub : I860_fsub;
       goto common3;
     case 0x32:
-      if ( !isSDDD() ) break;
-      cmd.itype = (code & Pbit) ? I860_pfix : I860_fix;
+      if ( !isSDDD() )
+        break;
+      insn.itype = (code & Pbit) ? I860_pfix : I860_fix;
       goto common21;
     case 0x33:
-      cmd.itype = (code & Pbit) ? I860_pfamov : I860_famov;
+      insn.itype = (code & Pbit) ? I860_pfamov : I860_famov;
       goto common21;
     case 0x34:
-      if ( isDS() ) break;
-      cmd.itype = (code & Rbit) ? I860_pfle  : I860_pfgt;
+      if ( isDS() )
+        break;
+      insn.itype = (code & Rbit) ? I860_pfle : I860_pfgt;
       goto common3;
     case 0x35:
-      if ( isDS() ) break;
-      cmd.itype = I860_pfeq;
+      if ( isDS() )
+        break;
+      insn.itype = I860_pfeq;
       goto common3;
     case 0x3A:
-      if ( !isSDDD() ) break;
-      cmd.itype = (code & Pbit) ? I860_pftrunc : I860_ftrunc;
+      if ( !isSDDD() )
+        break;
+      insn.itype = (code & Pbit) ? I860_pftrunc : I860_ftrunc;
       goto common21;
     case 0x40:
-      cmd.itype = I860_fxfr;
+      insn.itype = I860_fxfr;
 common21:
-      op_fs1(cmd.Op1);
-      op_dest(cmd.Op2);
+      op_fs1(insn.Op1);
+      op_dest(insn.Op2);
       goto common;
     case 0x49:
-      if ( !isSSDD() ) break;
-      cmd.itype = (code & Pbit) ? I860_pfiadd : I860_fiadd;
+      if ( !isSSDD() )
+        break;
+      insn.itype = (code & Pbit) ? I860_pfiadd : I860_fiadd;
       goto common3;
     case 0x4D:
-      if ( !isSSDD() ) break;
-      cmd.itype = (code & Pbit) ? I860_pfisub : I860_fisub;
+      if ( !isSSDD() )
+        break;
+      insn.itype = (code & Pbit) ? I860_pfisub : I860_fisub;
       goto common3;
-    case 0x57: cmd.itype = (code & Pbit) ? I860_pfzchkl: I860_fzchkl;goto common3;
-    case 0x5F: cmd.itype = (code & Pbit) ? I860_pfzchks: I860_fzchks;goto common3;
-    case 0x50: cmd.itype = (code & Pbit) ? I860_pfaddp : I860_faddp;    goto common3;
-    case 0x51: cmd.itype = (code & Pbit) ? I860_pfaddz : I860_faddz;    goto common3;
+    case 0x57: insn.itype = (code & Pbit) ? I860_pfzchkl: I860_fzchkl;goto common3;
+    case 0x5F: insn.itype = (code & Pbit) ? I860_pfzchks: I860_fzchks;goto common3;
+    case 0x50: insn.itype = (code & Pbit) ? I860_pfaddp : I860_faddp;    goto common3;
+    case 0x51: insn.itype = (code & Pbit) ? I860_pfaddz : I860_faddz;    goto common3;
     case 0x5A:
-      cmd.itype = (code & Pbit) ? I860_pform : I860_form;
+      insn.itype = (code & Pbit) ? I860_pform : I860_form;
       goto common21;
   }
 }

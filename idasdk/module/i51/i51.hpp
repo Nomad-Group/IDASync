@@ -73,13 +73,13 @@ enum processor_subtype_t
 };
 
 extern processor_subtype_t ptype;
-extern char device[];
-extern char deviceparams[];
+extern qstring deviceparams;
+extern qstring device;
 
 extern ea_t intmem;               // address of the internal memory
 extern ea_t sfrmem;               // address of SFR memory
 
-ea_t map_addr(asize_t off, int opnum, bool isdata);
+ea_t i51_map_data_ea(const insn_t &insn, ea_t addr, int opnum);
 
 //------------------------------------------------------------------------
 // Registers
@@ -112,23 +112,20 @@ enum i51_phrases
   fPr1,                 // @PR1
 };
 
-const ioport_t *find_sym(int address);
 const ioport_bit_t *find_bit(ea_t address, int bit);
 bool IsPredefined(const char *name);
 
 //------------------------------------------------------------------------
-void    idaapi header(void);
-void    idaapi footer(void);
+void    idaapi i51_header(outctx_t &ctx);
+void    idaapi i51_footer(outctx_t &ctx);
 
-void    idaapi segstart(ea_t ea);
+void    idaapi i51_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi ana(void);
-int     idaapi emu(void);
-void    idaapi out(void);
-bool    idaapi outop(op_t &op);
+int     idaapi ana(insn_t *out);
+int     idaapi emu(const insn_t &insn);
 
-void    idaapi i51_data(ea_t ea);
+void    idaapi i51_data(outctx_t &ctx, bool analyze_only);
 
-bool idaapi is_sane_insn(bool no_crefs);
+bool is_sane_insn(const insn_t &insn, int reason);
 
 #endif

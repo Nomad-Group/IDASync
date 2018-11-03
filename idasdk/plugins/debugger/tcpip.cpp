@@ -45,11 +45,12 @@ bool init_irs_layer(void)
   /* 2.0 in wVersion since that is the version we      */
   /* requested.                                        */
 
-  if ( LOBYTE( wsaData.wVersion ) != 2 ||
-       HIBYTE( wsaData.wVersion ) != 0 )
+  if ( LOBYTE( wsaData.wVersion ) != 2 || HIBYTE( wsaData.wVersion ) != 0 )
+  {
     /* Tell the user that we couldn't find a usable */
     /* WinSock DLL.                                  */
     return false;
+  }
 
   /* The WinSock DLL is acceptable. Proceed. */
   return true;
@@ -110,11 +111,6 @@ int irs_error(idarpc_stream_t *)
 //-------------------------------------------------------------------------
 int irs_ready(idarpc_stream_t *irs, int timeout)
 {
-  static hit_counter_t *hc = NULL;
-  if ( hc == NULL )
-    hc = create_hit_counter("irs_ready");
-  incrementer_t inc(*hc);
-
   SOCKET s = sock_from_irs(irs);
   int milliseconds = timeout;
   int seconds = milliseconds / 1000;
@@ -123,13 +119,7 @@ int irs_ready(idarpc_stream_t *irs, int timeout)
   fd_set rd;
   FD_ZERO(&rd);
   FD_SET(s, &rd);
-  int code = qselect(int(s+1),
-         &rd, NULL,
-         NULL,
-         seconds != -1 ? &tv : NULL);
-  if ( code == 0 )
-    inc.failed();
-  return code;
+  return qselect(int(s+1), &rd, NULL, NULL, seconds != -1 ? &tv : NULL);
 }
 
 //--------------------------------------------------------------------------
@@ -168,32 +158,10 @@ void term_client_irs(idarpc_stream_t *irs)
 }
 
 //-------------------------------------------------------------------------
-static in_addr name_to_addr(const char *name)
-{
-  in_addr addr;
-  addr.s_addr = inet_addr(name);
-  if ( addr.s_addr == INADDR_NONE )
-  {
-    struct hostent *he = gethostbyname(name);
-    if ( he != NULL )
-    {
-#define INADDRSZ   4
-//      warning("addrtype = %d addr=%08lX", he->h_addrtype, *(uint32*)he->h_addr);
-      memcpy(&addr, he->h_addr, INADDRSZ);
-      return addr;
-    }
-  }
-  return addr;
-}
-
-//-------------------------------------------------------------------------
 bool name_to_sockaddr(const char *name, ushort port, sockaddr_in *sa)
 {
   memset(sa, 0, sizeof(sockaddr_in));
-  sa->sin_family = AF_INET;
-  sa->sin_port = htons(port);
-  sa->sin_addr = name_to_addr(name);
-  return sa->sin_addr.s_addr != INADDR_NONE;
+  return qhost2addr(sa, name, port);
 }
 
 //-------------------------------------------------------------------------
@@ -230,7 +198,14 @@ idarpc_stream_t *init_client_irs(const char *hostname, int port_number)
   int code = getaddrinfo(hostname, port, &ai, &res);
   if ( code != 0 )
   { // failed to resolve the name
-    wcstr(errstr, gai_strerror(code), sizeof(errstr));
+#ifdef UNDER_CE
+    wchar16_t *werrstr = gai_strerror(code);
+    qstring utf8;
+    utf16_utf8(&utf8, werrstr);
+    qstrncpy(errstr, utf8.c_str(), sizeof(errstr));
+#else
+    qstrncpy(errstr, gai_strerror(code), sizeof(errstr));
+#endif
   }
   else
   {
@@ -266,7 +241,7 @@ NETERR:
   }
   if ( !ok )
   {
-    msg("Could not connect to %s: %s\n", hostname, errstr);
+    msg("Could not connect to %s:%d: %s\n", hostname, port_number, errstr);
     return NULL;
   }
 

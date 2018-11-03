@@ -12,17 +12,17 @@ extern "C" BOOL WINAPI AttachDebugger(LPCWSTR dbgname);
 // we implement them ourselves:
 
 WINBASEAPI SIZE_T WINAPI VirtualQueryEx(
-    IN HANDLE /*hProcess*/,
-    IN LPCVOID lpAddress,
-    OUT PMEMORY_BASIC_INFORMATION lpBuffer,
-    IN SIZE_T dwLength);
+        IN HANDLE /*hProcess*/,
+        IN LPCVOID lpAddress,
+        OUT PMEMORY_BASIC_INFORMATION lpBuffer,
+        IN SIZE_T dwLength);
 
 WINBASEAPI BOOL WINAPI VirtualProtectEx(
-    IN  HANDLE hProcess,
-    IN  LPVOID lpAddress,
-    IN  SIZE_T dwSize,
-    IN  DWORD flNewProtect,
-    OUT PDWORD lpflOldProtect);
+        IN  HANDLE hProcess,
+        IN  LPVOID lpAddress,
+        IN  SIZE_T dwSize,
+        IN  DWORD flNewProtect,
+        OUT PDWORD lpflOldProtect);
 
 //--------------------------------------------------------------------------
 struct wince_romptr_t
@@ -108,7 +108,7 @@ struct copy_entry_t
 // pointed to by wince_romhdr_t.pExtensions
 struct romext_t
 {
-  char  name[24];
+  char name[24];
   uint32 type;
   uint32 dataptr;
   uint32 length;
@@ -120,20 +120,20 @@ struct romext_t
 // pointed by toc_entry_t.e32
 struct e32_rom_t
 {
-  uint16  nobjs;             // Number of memory objects
-  uint16  flags;             // Image flags
-  uint32  entry;             // Relative virt. addr. of entry point
-  uint32  vbase;             // Virtual base address of module
-  uint16  subsysmajor;       // The subsystem major version number
-  uint16  subsysminor;       // The subsystem minor version number
+  uint16 nobjs;             // Number of memory objects
+  uint16 flags;             // Image flags
+  uint32 entry;             // Relative virt. addr. of entry point
+  uint32 vbase;             // Virtual base address of module
+  uint16 subsysmajor;       // The subsystem major version number
+  uint16 subsysminor;       // The subsystem minor version number
 
-  uint32  stackmax;          // Maximum stack size
-  uint32  vsize;             // Virtual size of the entire image
-  uint32  sect14rva;         // section 14 rva
-  uint32  sect14size;        // section 14 size
+  uint32 stackmax;          // Maximum stack size
+  uint32 vsize;             // Virtual size of the entire image
+  uint32 sect14rva;         // section 14 rva
+  uint32 sect14size;        // section 14 size
 
   petab_t unit[9];           // Array of extra info units
-  uint16  subsys;            // The subsystem type
+  uint16 subsys;            // The subsystem type
 };
 
 // pointed by toc_entry_t.o32, e32.nobjs objects of this type
@@ -196,8 +196,11 @@ typedef uint32 ACCESSKEY;
 typedef void *LPName;
 typedef void *PMODULELIST;
 #ifndef UNDER_CE
-typedef enum _EXCEPTION_DISPOSITION (WINAPI *PEXCEPTION_ROUTINE)(
-                struct _EXCEPTION_RECORD*,void*,struct _CONTEXT*,void*);
+typedef _EXCEPTION_DISPOSITION (WINAPI *PEXCEPTION_ROUTINE)(
+                struct _EXCEPTION_RECORD*,
+                void*,
+                struct _CONTEXT*,
+                void*);
 typedef struct DBGPARAM *LPDBGPARAM;
 typedef DWORD CEOID;
 #endif
@@ -394,53 +397,53 @@ struct o32_lite
 
 struct win420_module_t
 {
-  LPVOID      lpSelf;                 // 0x00 Self pointer for validation
+  LPVOID lpSelf;                      // 0x00 Self pointer for validation
   win420_module_t *pMod;              // 0x04 Next module in chain
-  LPWSTR      lpszModName;            // 0x08 Module name
-  DWORD       inuse;                  // 0x0c Bit vector of use
-  DWORD       calledfunc;             // 0x10 Called entry but not exit
+  LPWSTR lpszModName;                 // 0x08 Module name
+  DWORD inuse;                        // 0x0c Bit vector of use
+  DWORD calledfunc;                   // 0x10 Called entry but not exit
 #define MAX_PROCESSES 32
-  WORD        refcnt[MAX_PROCESSES];  // 0x14 Reference count per process
-  LPVOID      BasePtr;                // 0x54 Base pointer of dll load (not 0 based)
-  DWORD       DbgFlags;               // 0x58 Debug flags
-  LPDBGPARAM  ZonePtr;                // 0x5c Debug zone pointer
-  uint32      startip;                // 0x60 0 based entrypoint
-  openexe_t   oe;                     // 0x64 Pointer to executable file handle
+  WORD refcnt[MAX_PROCESSES];         // 0x14 Reference count per process
+  LPVOID BasePtr;                     // 0x54 Base pointer of dll load (not 0 based)
+  DWORD DbgFlags;                     // 0x58 Debug flags
+  LPDBGPARAM ZonePtr;                 // 0x5c Debug zone pointer
+  uint32 startip;                     // 0x60 0 based entrypoint
+  openexe_t oe;                       // 0x64 Pointer to executable file handle
   win420_e32_lite e32;                // 0x74 E32 header
-  o32_lite   *o32_ptr;                // 0xbc O32 chain ptr
-  DWORD       dwNoNotify;             // 0xc0 1 bit per process, set if notifications disabled
-  WORD        wFlags;                 // 0xc4
-  BYTE        bTrustLevel;            // 0xc6
-  BYTE        bPadding;               // 0xc7
+  o32_lite *o32_ptr;                  // 0xbc O32 chain ptr
+  DWORD dwNoNotify;                   // 0xc0 1 bit per process, set if notifications disabled
+  WORD wFlags;                        // 0xc4
+  BYTE bTrustLevel;                   // 0xc6
+  BYTE bPadding;                      // 0xc7
   win420_module_t *pmodResource;      // 0xc8 module that contains the resources
-  DWORD       rwLow;                  // 0xcc base address of RW section for ROM DLL
-  DWORD       rwHigh;                 // 0xd0 high address RW section for ROM DLL
-  PGPOOL_Q    pgqueue;                // 0xd4 list of the page owned by the module
+  DWORD rwLow;                        // 0xcc base address of RW section for ROM DLL
+  DWORD rwHigh;                       // 0xd0 high address RW section for ROM DLL
+  PGPOOL_Q pgqueue;                   // 0xd4 list of the page owned by the module
 };
 
 struct win500_module_t
 {
-  LPVOID      lpSelf;                 // 0x00 Self pointer for validation
+  LPVOID lpSelf;                      // 0x00 Self pointer for validation
   win500_module_t *pMod;              // 0x04 Next module in chain
-  LPWSTR      lpszModName;            // 0x08 Module name
-  DWORD       inuse;                  // 0x0c Bit vector of use
-  WORD        refcnt[MAX_PROCESSES];  // 0x10 Reference count per process
-  LPVOID      BasePtr;                // 0x50 Base pointer of dll load (not 0 based)
-  DWORD       DbgFlags;               // 0x54 Debug flags
-  LPDBGPARAM  ZonePtr;                // 0x58 Debug zone pointer
-  uint32      startip;                // 0x5c 0 based entrypoint
-  openexe_t   oe;                     // 0x60 Pointer to executable file handle
+  LPWSTR lpszModName;                 // 0x08 Module name
+  DWORD inuse;                        // 0x0c Bit vector of use
+  WORD refcnt[MAX_PROCESSES];         // 0x10 Reference count per process
+  LPVOID BasePtr;                     // 0x50 Base pointer of dll load (not 0 based)
+  DWORD DbgFlags;                     // 0x54 Debug flags
+  LPDBGPARAM ZonePtr;                 // 0x58 Debug zone pointer
+  uint32 startip;                     // 0x5c 0 based entrypoint
+  openexe_t oe;                       // 0x60 Pointer to executable file handle
   win500_e32_lite e32;                // 0x70 E32 header
-  o32_lite   *o32_ptr;                // 0x   O32 chain ptr
-  DWORD       dwNoNotify;             // 0x   1 bit per process, set if notifications disabled
-  WORD        wFlags;                 // 0x
-  BYTE        bTrustLevel;            // 0x
-  BYTE        bPadding;               // 0x
+  o32_lite *o32_ptr;                  // 0x   O32 chain ptr
+  DWORD dwNoNotify;                   // 0x   1 bit per process, set if notifications disabled
+  WORD wFlags;                        // 0x
+  BYTE bTrustLevel;                   // 0x
+  BYTE bPadding;                      // 0x
   win500_module_t *pmodResource;      // 0x   module that contains the resources
-  DWORD       rwLow;                  // 0x   base address of RW section for ROM DLL
-  DWORD       rwHigh;                 // 0x   high address RW section for ROM DLL
-  PGPOOL_Q    pgqueue;                // 0x   list of the page owned by the module
-  LPVOID      pShimInfo;              // 0x   pointer to shim information
+  DWORD rwLow;                        // 0x   base address of RW section for ROM DLL
+  DWORD rwHigh;                       // 0x   high address RW section for ROM DLL
+  PGPOOL_Q pgqueue;                   // 0x   list of the page owned by the module
+  LPVOID pShimInfo;                   // 0x   pointer to shim information
 };
 
 typedef uint32 wince_module_t[sizeof(win500_module_t)/4];
@@ -449,78 +452,78 @@ typedef uint32 wince_module_t[sizeof(win500_module_t)/4];
 
 struct win420_process_t
 {
-  BYTE        procnum;        /* 00: ID of this process [ie: it's slot number] */
-  BYTE        DbgActive;      /* 01: ID of process currently DebugActiveProcess'ing this process */
-  BYTE        bChainDebug;    /* 02: Did the creator want to debug child processes? */
-  BYTE        bTrustLevel;    /* 03: level of trust of this exe */
-#define OFFSET_TRUSTLVL     3   // offset of the bTrustLevel member in Process structure
-  LPPROXY     pProxList;      /* 04: list of proxies to threads blocked on this process */
-  HANDLE      hProc;          /* 08: handle for this process, needed only for SC_GetProcFromPtr */
-  DWORD       dwVMBase;       /* 0C: base of process's memory section, or 0 if not in use */
-  PTHREAD     pTh;            /* 10: first thread in this process */
-  ACCESSKEY   aky;            /* 14: default address space key for process's threads */
-  LPVOID      BasePtr;        /* 18: Base pointer of exe load */
-  HANDLE      hDbgrThrd;      /* 1C: handle of thread debugging this process, if any */
-  LPWSTR      lpszProcName;   /* 20: name of process */
-  DWORD       tlsLowUsed;     /* 24: TLS in use bitmask (first 32 slots) */
-  DWORD       tlsHighUsed;    /* 28: TLS in use bitmask (second 32 slots) */
+  BYTE procnum;               /* 00: ID of this process [ie: it's slot number] */
+  BYTE DbgActive;             /* 01: ID of process currently DebugActiveProcess'ing this process */
+  BYTE bChainDebug;           /* 02: Did the creator want to debug child processes? */
+  BYTE bTrustLevel;           /* 03: level of trust of this exe */
+#define OFFSET_TRUSTLVL 3  // offset of the bTrustLevel member in Process structure
+  LPPROXY pProxList;          /* 04: list of proxies to threads blocked on this process */
+  HANDLE hProc;               /* 08: handle for this process, needed only for SC_GetProcFromPtr */
+  DWORD dwVMBase;             /* 0C: base of process's memory section, or 0 if not in use */
+  PTHREAD pTh;                /* 10: first thread in this process */
+  ACCESSKEY aky;              /* 14: default address space key for process's threads */
+  LPVOID BasePtr;             /* 18: Base pointer of exe load */
+  HANDLE hDbgrThrd;           /* 1C: handle of thread debugging this process, if any */
+  LPWSTR lpszProcName;        /* 20: name of process */
+  DWORD tlsLowUsed;           /* 24: TLS in use bitmask (first 32 slots) */
+  DWORD tlsHighUsed;          /* 28: TLS in use bitmask (second 32 slots) */
   PEXCEPTION_ROUTINE pfnEH;   /* 2C: process exception handler */
-  LPDBGPARAM  ZonePtr;        /* 30: Debug zone pointer */
-  PTHREAD     pMainTh;        /* 34  primary thread in this process*/
-  wince_module_t *pmodResource;   /* 38: module that contains the resources */
-  LPName      pStdNames[3];   /* 3C: Pointer to names for stdio */
-  LPCWSTR     pcmdline;       /* 48: Pointer to command line */
-  DWORD       dwDyingThreads; /* 4C: number of pending dying threads */
-  openexe_t   oe;             /* 50: Pointer to executable file handle */
+  LPDBGPARAM ZonePtr;         /* 30: Debug zone pointer */
+  PTHREAD pMainTh;            /* 34  primary thread in this process*/
+  wince_module_t *pmodResource;  /* 38: module that contains the resources */
+  LPName pStdNames[3];        /* 3C: Pointer to names for stdio */
+  LPCWSTR pcmdline;           /* 48: Pointer to command line */
+  DWORD dwDyingThreads;       /* 4C: number of pending dying threads */
+  openexe_t oe;               /* 50: Pointer to executable file handle */
   win420_e32_lite e32;        /* ??: structure containing exe header */
-  o32_lite    *o32_ptr;       /* ??: o32 array pointer for exe */
-  LPVOID      pExtPdata;      /* ??: extend pdata */
-  BYTE        bPrio;          /* ??: highest priority of all threads of the process */
-  BYTE        fNoDebug;       /* ??: this process cannot be debugged */
-  WORD        wPad;           /* padding */
-  PGPOOL_Q    pgqueue;        /* ??: list of the page owned by the process */
+  o32_lite *o32_ptr;          /* ??: o32 array pointer for exe */
+  LPVOID pExtPdata;           /* ??: extend pdata */
+  BYTE bPrio;                 /* ??: highest priority of all threads of the process */
+  BYTE fNoDebug;              /* ??: this process cannot be debugged */
+  WORD wPad;                  /* padding */
+  PGPOOL_Q pgqueue;           /* ??: list of the page owned by the process */
 #if HARDWARE_PT_PER_PROC
-  uint32      pPTBL[HARDWARE_PT_PER_PROC];   /* hardware page tables */
+  uint32 pPTBL[HARDWARE_PT_PER_PROC];   /* hardware page tables */
 #endif
 };
 
 struct win500_process_t
 {
-  BYTE        procnum;        /* 00: ID of this process [ie: it's slot number] */
-  BYTE        DbgActive;      /* 01: ID of process currently DebugActiveProcess'ing this process */
-  BYTE        bChainDebug;    /* 02: Did the creator want to debug child processes? */
-  BYTE        bTrustLevel;    /* 03: level of trust of this exe */
-  LPPROXY     pProxList;      /* 04: list of proxies to threads blocked on this process */
-  HANDLE      hProc;          /* 08: handle for this process, needed only for SC_GetProcFromPtr */
-  DWORD       dwVMBase;       /* 0C: base of process's memory section, or 0 if not in use */
-  PTHREAD     pTh;            /* 10: first thread in this process */
-  ACCESSKEY   aky;            /* 14: default address space key for process's threads */
-  LPVOID      BasePtr;        /* 18: Base pointer of exe load */
-  HANDLE      hDbgrThrd;      /* 1C: handle of thread debugging this process, if any */
-  LPWSTR      lpszProcName;   /* 20: name of process */
-  DWORD       tlsLowUsed;     /* 24: TLS in use bitmask (first 32 slots) */
-  DWORD       tlsHighUsed;    /* 28: TLS in use bitmask (second 32 slots) */
+  BYTE procnum;               /* 00: ID of this process [ie: it's slot number] */
+  BYTE DbgActive;             /* 01: ID of process currently DebugActiveProcess'ing this process */
+  BYTE bChainDebug;           /* 02: Did the creator want to debug child processes? */
+  BYTE bTrustLevel;           /* 03: level of trust of this exe */
+  LPPROXY pProxList;          /* 04: list of proxies to threads blocked on this process */
+  HANDLE hProc;               /* 08: handle for this process, needed only for SC_GetProcFromPtr */
+  DWORD dwVMBase;             /* 0C: base of process's memory section, or 0 if not in use */
+  PTHREAD pTh;                /* 10: first thread in this process */
+  ACCESSKEY aky;              /* 14: default address space key for process's threads */
+  LPVOID BasePtr;             /* 18: Base pointer of exe load */
+  HANDLE hDbgrThrd;           /* 1C: handle of thread debugging this process, if any */
+  LPWSTR lpszProcName;        /* 20: name of process */
+  DWORD tlsLowUsed;           /* 24: TLS in use bitmask (first 32 slots) */
+  DWORD tlsHighUsed;          /* 28: TLS in use bitmask (second 32 slots) */
   PEXCEPTION_ROUTINE pfnEH;   /* 2C: process exception handler */
-  LPDBGPARAM  ZonePtr;        /* 30: Debug zone pointer */
-  PTHREAD     pMainTh;        /* 34  primary thread in this process*/
+  LPDBGPARAM ZonePtr;         /* 30: Debug zone pointer */
+  PTHREAD pMainTh;            /* 34  primary thread in this process*/
   wince_module_t *pmodResource;   /* 38: module that contains the resources */
-  LPName      pStdNames[3];   /* 3C: Pointer to names for stdio */
-  LPCWSTR     pcmdline;       /* 48: Pointer to command line */
-  DWORD       dwDyingThreads; /* 4C: number of pending dying threads */
-  openexe_t   oe;             /* 50: Pointer to executable file handle */
+  LPName pStdNames[3];        /* 3C: Pointer to names for stdio */
+  LPCWSTR pcmdline;           /* 48: Pointer to command line */
+  DWORD dwDyingThreads;       /* 4C: number of pending dying threads */
+  openexe_t oe;               /* 50: Pointer to executable file handle */
   win500_e32_lite e32;        /* ??: structure containing exe header */
-  o32_lite    *o32_ptr;       /* ??: o32 array pointer for exe */
-  LPVOID      pExtPdata;      /* ??: extend pdata */
-  BYTE        bPrio;          /* ??: highest priority of all threads of the process */
-  BYTE        fNoDebug;       /* ??: this process cannot be debugged */
-  WORD        wModCount;      /* ??: # of modules in pLastModList */
-  PGPOOL_Q    pgqueue;        /* ??: list of the page owned by the process */
+  o32_lite *o32_ptr;          /* ??: o32 array pointer for exe */
+  LPVOID pExtPdata;           /* ??: extend pdata */
+  BYTE bPrio;                 /* ??: highest priority of all threads of the process */
+  BYTE fNoDebug;              /* ??: this process cannot be debugged */
+  WORD wModCount;             /* ??: # of modules in pLastModList */
+  PGPOOL_Q pgqueue;           /* ??: list of the page owned by the process */
   PMODULELIST pLastModList;   /* ??: the list of modules that just loaded/unloaded into the process */
-  HANDLE      hTok;           /* ??: process default token */
+  HANDLE hTok;                /* ??: process default token */
 #if HARDWARE_PT_PER_PROC
-  uint32      pPTBL[HARDWARE_PT_PER_PROC];   /* hardware page tables */
+  uint32 pPTBL[HARDWARE_PT_PER_PROC];   /* hardware page tables */
 #endif
-  LPVOID      pShimInfo;      /* pointer to shim information */
+  LPVOID pShimInfo;           /* pointer to shim information */
 };
 
 ea_t get_process_slot(HANDLE phandle);
@@ -567,7 +570,7 @@ extern ea_t slot;
 inline ea_t pstos0(ea_t ea)        // map process slot to slot 0
 {
   if ( (ea & 0xFE000000) == slot ) // redirect our process addresses
-    ea  &= ~0xFE000000;            // to slot 0
+    ea &= ~0xFE000000;            // to slot 0
   return ea;
 }
 

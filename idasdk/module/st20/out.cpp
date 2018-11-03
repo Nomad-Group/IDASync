@@ -10,25 +10,32 @@
 #include "st20.hpp"
 
 //----------------------------------------------------------------------
-inline void outreg(int r)
+class out_st20_t : public outctx_t
 {
-  out_register(ph.regNames[r]);
-}
+  out_st20_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outmem(const op_t &x, ea_t ea);
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_st20_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_st20_t)
 
 //----------------------------------------------------------------------
-static void outmem(op_t &x, ea_t ea)
+void out_st20_t::outmem(const op_t &x, ea_t ea)
 {
   if ( !out_name_expr(x, ea, BADADDR) )
   {
     out_tagon(COLOR_ERROR);
-    OutLong(x.addr, 16);
+    out_btoa(x.addr, 16);
     out_tagoff(COLOR_ERROR);
-    QueueSet(Q_noName,cmd.ea);
+    remember_problem(PR_NONAME,insn.ea);
   }
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_st20_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
@@ -37,71 +44,66 @@ bool idaapi outop(op_t &x)
       return 0;
 
     case o_imm:
-      OutValue(x, OOFS_IFSIGN|OOFW_IMM);
+      out_value(x, OOFS_IFSIGN|OOFW_IMM);
       break;
 
     case o_near:
-      outmem(x, calc_mem(x.addr));
+      outmem(x, calc_mem(insn, x.addr));
       break;
 
     default:
-      interr("out");
+      interr(insn, "out");
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_st20_t::out_insn(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  OutMnem();
-
+  out_mnemonic();
   out_one_operand(0);
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi st20_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(Sarea->type) )
+    return;
 
-  char sname[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
+  qstring sname;
+  get_visible_segm_name(&sname, Sarea);
 
-  gen_cmt_line("section %s", sname);
+  ctx.gen_cmt_line("section %s", sname.c_str());
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t)
+void idaapi st20_segend(outctx_t &, segment_t *)
 {
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi st20_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_PROC);
-  MakeNull();
+  ctx.gen_header(GH_PRINT_PROC);
+  ctx.gen_empty_line();
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi st20_footer(outctx_t &ctx)
 {
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
   const char *end = ash.end;
   if ( end == NULL )
-    printf_line(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
+    ctx.gen_printf(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
   else
-    printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR)
-                  " "
-                  COLSTR("%s %s",SCOLOR_AUTOCMT), ash.end, ash.cmnt, name);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                   ash.end, ash.cmnt, name);
 }
 

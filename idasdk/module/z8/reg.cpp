@@ -39,9 +39,8 @@ static const entry_t entries[] =
 };
 
 netnode helper;
-char device[MAXSTR] = "";
-static size_t numports = 0;
-static ioport_t *ports = NULL;
+static qstring device;
+static ioports_t ports;
 
 #define AREA_PROCESSING handle_area
 static bool handle_area(ea_t start, ea_t end, const char *name, const char *aclass);
@@ -50,8 +49,8 @@ static bool handle_area(ea_t start, ea_t end, const char *name, const char *acla
 //------------------------------------------------------------------
 const char *z8_find_ioport(uval_t port)
 {
-  const ioport_t *p = find_ioport(ports, numports, port);
-  return p ? p->name : NULL;
+  const ioport_t *p = find_ioport(ports, port);
+  return p ? p->name.c_str() : NULL;
 }
 
 //----------------------------------------------------------------------
@@ -66,7 +65,7 @@ static ea_t specialSeg(sel_t sel, bool make_imem = true)
       s->type = SEG_IMEM;
       s->update();
     }
-    return s->startEA;
+    return s->start_ea;
   }
   return BADADDR;
 }
@@ -75,7 +74,7 @@ static ea_t specialSeg(sel_t sel, bool make_imem = true)
 static void setup_data_segment_pointers(void)
 {
   sel_t sel;
-  if ( atos("INTMEM", &sel) || atos("RAM", &sel) )
+  if ( atos(&sel, "INTMEM") || atos(&sel, "RAM") )
     intmem = specialSeg(sel);
   else
     intmem = BADADDR;
@@ -85,12 +84,12 @@ static void setup_data_segment_pointers(void)
 static ea_t AdditionalSegment(size_t size, size_t offset, const char *name, const char *sclass, uchar stype)
 {
   segment_t s;
-  s.startEA = freechunk(0, size, -0xF);
-  s.endEA   = s.startEA + size;
-  s.sel     = allocate_selector((s.startEA-offset) >> 4);
+  s.start_ea = free_chunk(0, size, -0xF);
+  s.end_ea   = s.start_ea + size;
+  s.sel     = allocate_selector((s.start_ea-offset) >> 4);
   s.type    = stype;
   add_segm_ex(&s, name, sclass, ADDSEG_NOSREG|ADDSEG_OR_DIE);
-  return s.startEA - offset;
+  return s.start_ea - offset;
 }
 
 //----------------------------------------------------------------------
@@ -100,7 +99,7 @@ static bool handle_area(ea_t start, ea_t end, const char *name, const char *acla
 {
   if ( start >= end )
   {
-    warning("Error in definition of segment %s %s\n", aclass, name);
+    warning("Error in definition of segment %s %s", aclass, name);
     return false;
   }
   if ( strcmp(aclass, "CODE") == 0 )
@@ -124,16 +123,16 @@ static bool select_device(int resp_info)
 {
   char cfgfile[QMAXFILE];
   get_cfg_filename(cfgfile, sizeof(cfgfile));
-  if ( !choose_ioport_device(cfgfile, device, sizeof(device), NULL) )
+  if ( !choose_ioport_device(&device, cfgfile) )
   {
-    qstrncpy(device, NONEPROC, sizeof(device));
+    device = NONEPROC;
     return false;
   }
 
   if ( !display_infotype_dialog(IORESP_ALL, &resp_info, cfgfile) )
     return false;
 
-  set_device_name(device, resp_info & ~IORESP_PORT);
+  set_device_name(device.c_str(), resp_info & ~IORESP_PORT);
   setup_data_segment_pointers();
 
   if ( (resp_info & IORESP_PORT) != 0 )
@@ -143,20 +142,20 @@ static bool select_device(int resp_info)
       AdditionalSegment(0x1000, 0, "INTMEM", NULL, SEG_IMEM);
       setup_data_segment_pointers();
     }
-    for ( int i=0; i < numports; i++ )
+    for ( int i=0; i < ports.size(); i++ )
     {
-      ioport_t *p = ports + i;
-      ea_t ea = p->address + intmem;
-      ea_t oldea = get_name_ea(BADADDR, p->name);
+      const ioport_t &p = ports[i];
+      ea_t ea = p.address + intmem;
+      ea_t oldea = get_name_ea(BADADDR, p.name.c_str());
       if ( oldea != ea )
       {
         if ( oldea != BADADDR )
           set_name(oldea, NULL);
-        do_unknown(ea, DOUNK_EXPAND);
-        set_name(ea, p->name);
+        del_items(ea, DELIT_EXPAND);
+        set_name(ea, p.name.c_str());
       }
-      if ( p->cmt != NULL )
-        set_cmt(ea, p->cmt, true);
+      if ( !p.cmt.empty() )
+        set_cmt(ea, p.cmt.c_str(), true);
     }
   }
   return true;
@@ -172,58 +171,43 @@ static const char *idaapi set_idp_options(const char *keyword, int, const void *
 }
 
 //--------------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...) // Various messages:
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code )
-    return code;
-
-
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
       helper.create("$ Zilog Z8");
-      inf.mf = 1;                                 // MSB first
+      inf.set_be(true);                                 // MSB first
       break;
 
-    default:
+    case processor_t::ev_term:
+      ports.clear();
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
-      break;
-
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       {
         segment_t *sptr = get_first_seg();
         if ( sptr != NULL )
         {
-          if ( sptr->startEA - get_segm_base(sptr) == 0 )
+          if ( sptr->start_ea - get_segm_base(sptr) == 0 )
           {
-            inf.beginEA = sptr->startEA + 0xC;
-            inf.startIP = 0xC;
+            inf.start_ea = sptr->start_ea + 0xC;
+            inf.start_ip = 0xC;
             if ( !inf.like_binary() )
             {
               // set default entries
-              for( int i = 0; i < qnumber(entries); i++ )
+              for ( int i = 0; i < qnumber(entries); i++ )
               {
-                ea_t ea = sptr->startEA + entries[i].off;
-                if( isEnabled(ea) )
+                ea_t ea = sptr->start_ea + entries[i].off;
+                if ( is_mapped(ea) )
                 {
-                  doWord(ea, 2);
-                  set_offset(ea, 0, sptr->startEA);
-                  ea_t ea1 = sptr->startEA + get_word(ea);
+                  create_word(ea, 2);
+                  op_plain_offset(ea, 0, sptr->start_ea);
+                  ea_t ea1 = sptr->start_ea + get_word(ea);
                   auto_make_proc(ea1);
                   set_name(ea, entries[i].name);
-                  set_cmt(sptr->startEA+get_word(ea), entries[i].cmt, 1);
+                  set_cmt(sptr->start_ea+get_word(ea), entries[i].cmt, 1);
                 }
               }
             }
@@ -241,24 +225,108 @@ static int idaapi notify(processor_t::idp_notify msgid, ...) // Various messages
       }
       break;
 
-    case processor_t::oldfile:
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_NONE);
-      }
+    case processor_t::ev_oldfile:
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_NONE);
       setup_data_segment_pointers();
       break;
 
-    case processor_t::newseg:
+    case processor_t::ev_creating_segm:
       {                 // default DS is equal to CS
         segment_t *sptr = va_arg(va, segment_t *);
-        sptr->defsr[rVds-ph.regFirstSreg] = sptr->sel;
+        sptr->defsr[rVds-ph.reg_first_sreg] = sptr->sel;
       }
-  }
-  va_end(va);
+      break;
 
-  return(1);
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        z8_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        z8_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        z8_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        z8_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        z8_assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_data:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        bool analyze_only = va_argi(va, bool);
+        z8_data(*ctx, analyze_only);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
+      break;
+  }
+  return code;
 }
 
 //--------------------------------------------------------------------------
@@ -268,7 +336,6 @@ static const asm_t Z8asm =
   0,
   "Zilog Z8 assembler",
   0,
-  NULL,
   NULL,
   ".org",
   ".end",
@@ -292,9 +359,6 @@ static const asm_t Z8asm =
   ".block %s",  // uninited arrays
   ".equ",       // Equ
   NULL,         // seg prefix
-//  preline, NULL, operdim,
-  NULL, NULL, NULL,
-  NULL,
   "$",
   NULL,         // func_header
   NULL,         // func_footer
@@ -336,29 +400,25 @@ static const bytes_t retcodes[] =
 };
 
 //-----------------------------------------------------------------------
-// use simple translation
-static ea_t idaapi z8_translate(ea_t base, adiff_t offset)
-{
-  return base+offset;
-}
-
-//-----------------------------------------------------------------------
 //      Processor Definition
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_Z8,                      // id
-  PRN_HEX
-  |PR_RNAMESOK          // can use register names for byte names
-  |PR_SEGTRANS          // segment translation is supported (codeSeg)
-  |PR_BINMEM            // The module creates RAM/ROM segments for binary files
-                        // (the kernel shouldn't ask the user about their sizes and addresses)
-  |PR_SEGS              // has segment registers?
-  |PR_SGROTHER,         // the segment registers don't contain
-                        // the segment selectors, something else
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_Z8,                // id
+                          // flag
+    PRN_HEX
+  | PR_RNAMESOK           // can use register names for byte names
+  | PR_SEGTRANS           // segment translation is supported (map_code_ea)
+  | PR_BINMEM             // The module creates RAM/ROM segments for binary files
+                          // (the kernel shouldn't ask the user about their sizes and addresses)
+  | PR_SEGS               // has segment registers?
+  | PR_SGROTHER,          // the segment registers don't contain
+                          // the segment selectors, something else
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,    // short processor names (null term)
   lnames,     // long processor names (null term)
@@ -367,31 +427,8 @@ processor_t LPH =
 
   notify,     // Various messages:
 
-  header,     // produce start of text file
-  footer,     // produce end of text file
-
-  segstart,   // produce start of segment
-  segend,     // produce end of segment
-
-  z8_assumes,
-
-  ana,
-  emu,
-
-  out,
-  outop,
-  z8_data,    //intel_data,
-  NULL,       // compare operands
-  NULL,       // can have type
-
-  qnumber(RegNames),    // Number of registers
   RegNames,             // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(RegNames),    // Number of registers
 
   rVcs,rRp,
   1,                    // size of a segment register
@@ -401,27 +438,13 @@ processor_t LPH =
   retcodes,
 
   0, Z8_last,
-  Instructions,
-  NULL,                 // int  (*is_far_jump)(int icode);
-  z8_translate,         // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 0, 0, 0 },       // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x); -- always, so leave it NULL
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   Z8_ret,               // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

@@ -4,7 +4,7 @@
 #define MAGICLEN ((SARMAG > SAIAMAG) ? SARMAG : SAIAMAG)
 
 //------------------------------------------------------------------------
-bool is_ar_file(linput_t *li, int32 offset, bool include_aix)
+bool is_ar_file(linput_t *li, qoff64_t offset, bool include_aix)
 {
   char magic[MAGICLEN];
   qlseek(li, offset);
@@ -13,8 +13,9 @@ bool is_ar_file(linput_t *li, int32 offset, bool include_aix)
   return memcmp(magic, ARMAG,  SARMAG) == 0
       || memcmp(magic, ARMAGB, SARMAG) == 0
       || memcmp(magic, ARMAGE, SARMAG) == 0
-      || include_aix && (memcmp(magic,AIAMAG,SAIAMAG) == 0 
-                      || memcmp(magic,AIAMAGBIG,SAIAMAG) == 0);
+      || include_aix
+      && (memcmp(magic,AIAMAG,SAIAMAG) == 0
+       || memcmp(magic,AIAMAGBIG,SAIAMAG) == 0);
 }
 
 //------------------------------------------------------------------------
@@ -75,26 +76,26 @@ static const char *get_ar_modname(
 // 3: bad archive
 // 4: not enough memory
 // 5: maxpos reached
-int enum_ar_contents64(linput_t *li,
-                     int (idaapi *_callback)(void *ud,
-                                             qoff64_t offset,
-                                             ar_hdr *ah,
-                                             uint64 size,
-                                             char *filename),
-                     void *ud,
-                     // Max position in file. Typically used when
-                     // archive is embedded within other file.
-                     int32 maxpos = -1)
-{
+int enum_ar_contents(
+        linput_t *li,
+        int (idaapi *_callback)(
+          void *ud,
+          qoff64_t offset,
+          ar_hdr *ah,
+          uint64 size,
+          char *filename),
+        void *ud,
+        int32 maxpos = -1)              // Max position in file. Typically used when
+{                                       // archive is embedded within other file.
   int code = 0;
   char *names = NULL;
   size_t names_size = 0;
   while ( true )
   {
     ar_hdr ah;
-    qoff64_t filepos = qltell64(li);
+    qoff64_t filepos = qltell(li);
     if ( filepos & 1 )
-      qlseek64(li, filepos+1);
+      qlseek(li, filepos+1);
     if ( maxpos > -1 && filepos >= maxpos )
     {
       code = 5;
@@ -116,7 +117,7 @@ int enum_ar_contents64(linput_t *li,
     char name[sizeof(ah.ar_name)+1];
     get_msft_module_name(ah.ar_name, ah.ar_name+sizeof(ah.ar_name), name, sizeof(name));
     uint64 size = qatoll(ah.ar_size);
-    filepos = qltell64(li);
+    filepos = qltell(li);
     if ( names == NULL && name[0] == '/' && name[1] == '\0' )
     {
       if ( size != 0 )
@@ -136,12 +137,12 @@ int enum_ar_contents64(linput_t *li,
       }
       continue;
     }
-    if ( memcmp(name, AR_EFMT1, 3) == 0)
+    if ( memcmp(name, AR_EFMT1, 3) == 0 )
     {
       //BSD/Apple archive: the length of long name follows
       //#1/nnn
       size_t extralen = size_t(atol(name+3));
-      char* modname = (char *)qalloc(extralen+1);
+      char *modname = (char *)qalloc(extralen+1);
       if ( modname == NULL )
       {
         code = 4;  // not enough memory
@@ -155,10 +156,11 @@ int enum_ar_contents64(linput_t *li,
       modname[extralen]='\0';
 
       //skip special files
-      if ( strncmp(modname, "__.SYMDEF", sizeof("__.SYMDEF")-1) )
+      if ( !strneq(modname, "__.SYMDEF", sizeof("__.SYMDEF")-1) )
       {
         code = _callback(ud, qoff64_t(filepos+extralen), &ah, size-extralen, modname);
-        if ( code != 0 ) break;
+        if ( code != 0 )
+          break;
       }
       qfree(modname);
     }
@@ -167,62 +169,13 @@ int enum_ar_contents64(linput_t *li,
       char modname[MAXSTR];
       get_ar_modname(names, names+names_size, name, modname, sizeof(modname));
       code = _callback(ud, filepos, &ah, size, modname);
-      if ( code != 0 ) break;
+      if ( code != 0 )
+        break;
     }
-    qlseek64(li, qoff64_t(filepos+size));
+    qlseek(li, qoff64_t(filepos+size));
   }
   qfree(names);
   return code;
-}
-
-//----------------------------------------------------------------------------
-struct proxy32_ar_cbdata_t
-{
-  int (idaapi *callback)(
-                   void *ud,
-                   int32 offset,
-                   ar_hdr *ah,
-                   size_t size,
-                   char *filename);
-  void *ud;
-};
-
-//----------------------------------------------------------------------------
-static int idaapi proxy32_ar_callback(
-                   void *ud,
-                   qoff64_t offset,
-                   ar_hdr *ah,
-                   uint64 size,
-                   char *filename)
-{
-  if ( offset >> 31 != 0 || size >> 31 != 0 )
-    return 6;
-  proxy32_ar_cbdata_t *d32 = (proxy32_ar_cbdata_t *)ud;
-  return d32->callback(d32->ud, offset, ah, size, filename);
-}
-
-//------------------------------------------------------------------------
-// return codes:
-// 1: no input file
-// 0: ok
-// 2: read error
-// 3: bad archive
-// 4: not enough memory
-// 5: maxpos reached
-// 6: file is too large - use 64bit offset!
-int enum_ar_contents(linput_t *li,
-                     int (idaapi *_callback)(void *ud,
-                                             int32 offset,
-                                             ar_hdr *ah,
-                                             size_t size,
-                                             char *filename),
-                     void *ud,
-                     // Max position in file. Typically used when
-                     // archive is embedded within other file.
-                     int32 maxpos = -1)
-{
-  proxy32_ar_cbdata_t d32 = { _callback, ud };
-  return enum_ar_contents64(li, proxy32_ar_callback, &d32, maxpos);
 }
 
 //--------------------------------------------------------------------------

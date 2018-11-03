@@ -1,14 +1,26 @@
 
 #include "m7700.hpp"
 
-//--------------------------------------------------------------------------
-inline static void outreg(const int n)
+//----------------------------------------------------------------------
+class out_m7700_t : public outctx_t
 {
-  out_register(ph.regNames[n]);
-}
+  out_m7700_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(const int n) { out_register(ph.reg_names[n]); }
+  void outaddr(const op_t &op, const bool replace_with_label = true);
+  void outdispl(const op_t &op);
+  bool bitmask2list(const op_t &op);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+};
+CASSERT(sizeof(out_m7700_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_m7700_t)
 
 //--------------------------------------------------------------------------
-static void outaddr(const op_t &op, const bool replace_with_label = true)
+void out_m7700_t::outaddr(const op_t &op, const bool replace_with_label)
 {
   bool ind = is_addr_ind(op);      // is operand indirect ?
 
@@ -17,19 +29,21 @@ static void outaddr(const op_t &op, const bool replace_with_label = true)
 
   // if addressing mode is direct and the value of DR is unknown,
   // we have to print DR:x (where x is the "indexed" value)
-  if ( is_addr_dr_rel(op) && get_segreg(cmd.ea, rDR) == BADSEL )
+  if ( is_addr_dr_rel(op) && get_sreg(insn.ea, rDR) == BADSEL )
   {
     outreg(rDR);
     out_symbol(':');
-    OutValue(op, OOF_ADDR | OOFS_NOSIGN);
+    out_value(op, OOF_ADDR | OOFS_NOSIGN);
   }
   // otherwise ...
   else if ( !replace_with_label
-         || !out_name_expr(op, toEA(cmd.cs, op.addr), op.addr) )
+         || !out_name_expr(op, to_ea(insn.cs, op.addr), op.addr) )
   {
-    if ( replace_with_label) out_tagon(COLOR_ERROR );
-    OutValue(op, OOF_ADDR | OOFS_NOSIGN /*| OOFW_16*/);
-    if ( replace_with_label) out_tagoff(COLOR_ERROR );
+    if ( replace_with_label )
+      out_tagon(COLOR_ERROR);
+    out_value(op, OOF_ADDR | OOFS_NOSIGN /*| OOFW_16*/);
+    if ( replace_with_label )
+      out_tagoff(COLOR_ERROR);
   }
 
   if ( ind )
@@ -37,7 +51,7 @@ static void outaddr(const op_t &op, const bool replace_with_label = true)
 }
 
 //--------------------------------------------------------------------------
-static void outdispl(const op_t &op)
+void out_m7700_t::outdispl(const op_t &op)
 {
   if ( is_displ_ind(op) )
   {
@@ -45,7 +59,7 @@ static void outdispl(const op_t &op)
     outaddr(op, false);
     out_symbol(',');
     if ( !(ash.uflag & UAS_INDX_NOSPACE) )
-      OutChar(' ');
+      out_char(' ');
     outreg(op.reg);
     out_symbol(')');
   }
@@ -55,63 +69,63 @@ static void outdispl(const op_t &op)
     outaddr(op, false);
     out_symbol(')');
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     outreg(op.reg);
   }
   else
   {
     outaddr(op, false);
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     outreg(op.reg);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi m7700_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device.c_str());
   if ( ash.uflag & UAS_DEVICE_DIR )
   {
     switch ( ptype )
     {
-      case prc_m7700: printf_line(inf.indent, ".MCU M37700"); break;
-      case prc_m7750: printf_line(inf.indent, ".MCU M37750"); break;
-      default:        INTERR(10029);
+      case prc_m7700:
+        ctx.gen_printf(inf.indent, ".MCU M37700");
+        break;
+      case prc_m7750:
+        ctx.gen_printf(inf.indent, ".MCU M37750");
+        break;
+      default:
+        INTERR(10029);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi m7700_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   if ( ash.end != NULL )
   {
-    MakeNull();
-    char *p = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
-      APPCHAR(p, end, ' ');
+      ctx.out_char(' ');
       if ( ash.uflag & UAS_END_WITHOUT_LABEL )
-      {
-        APPCHAR(p, end, ';');
-        APPCHAR(p, end, ' ');
-      }
-      APPEND(p, end, name.begin());
+        ctx.out_line("; ");
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }
 
 //--------------------------------------------------------------------------
-static bool bitmask2list(const op_t &op)
+bool out_m7700_t::bitmask2list(const op_t &op)
 {
   static const char *const flags[] =
   {
@@ -123,7 +137,7 @@ static bool bitmask2list(const op_t &op)
   };
 
   enum { bitFLAGS, bitREGS } t;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case m7700_psh:
     case m7700_pul:
@@ -151,13 +165,17 @@ static bool bitmask2list(const op_t &op)
     if ( ok )
     {
       out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
     }
 
     switch ( t )
     {
-      case bitFLAGS: out_register(flags[7 - j]); break;
-      case bitREGS:  outreg(regs[7 - j]);        break;
+      case bitFLAGS:
+        out_register(flags[7 - j]);
+        break;
+      case bitREGS:
+        outreg(regs[7 - j]);
+        break;
     }
     ok = true;
   }
@@ -165,7 +183,7 @@ static bool bitmask2list(const op_t &op)
 }
 
 //--------------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_m7700_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
@@ -186,7 +204,7 @@ bool idaapi outop(op_t &x)
         {
           if ( !(is_imm_without_sharp(x)) )
             out_symbol('#');
-          OutValue(x, OOFW_IMM);
+          out_value(x, OOFW_IMM);
         }
       }
       break;
@@ -196,20 +214,20 @@ bool idaapi outop(op_t &x)
       {
         const ioport_bit_t * port = NULL;
 
-        if ( x.n == 0 && (cmd.Op2.type == o_near || cmd.Op2.type == o_mem) )
-          port = find_bit(cmd.Op2.addr, (size_t)x.value);
+        if ( x.n == 0 && (insn.Op2.type == o_near || insn.Op2.type == o_mem) )
+          port = find_bit(insn.Op2.addr, (size_t)x.value);
 
         // this immediate is represented in the .cfg file
-        if ( port != NULL && port->name != NULL )
+        if ( port != NULL && !port->name.empty() )
         {
           // output the port name instead of the numeric value
-          out_line(port->name, COLOR_IMPNAME);
+          out_line(port->name.c_str(), COLOR_IMPNAME);
         }
         // otherwise, simply print the value
         else
         {
           out_symbol('#');
-          OutValue(x, OOFW_IMM);
+          out_value(x, OOFW_IMM);
         }
       }
       break;
@@ -236,23 +254,16 @@ bool idaapi outop(op_t &x)
 }
 
 //--------------------------------------------------------------------------
-void idaapi out(void)
+void out_m7700_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
+  const char *pfx = is_insn_long_format(insn) ? "l" : NULL;
+  out_mnem(8, pfx);
+}
 
-  //
-  // print insn mnemonic
-  //
-
-  char postfix[2];
-  postfix[0] = '\0';
-  if ( is_insn_long_format() )
-  {
-    postfix[0] = 'l';
-    postfix[1] = '\0';
-  }
-  OutMnem(8, postfix);
+//--------------------------------------------------------------------------
+void out_m7700_t::out_insn(void)
+{
+  out_mnemonic();
 
   //
   // print insn operands
@@ -260,94 +271,87 @@ void idaapi out(void)
 
   out_one_operand(0);        // output the first operand
 
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
   }
 
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(2);
   }
 
   // output a character representation of the immediate values
   // embedded in the instruction as comments
-  if ( isVoid(cmd.ea,uFlag,0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea,uFlag,1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea,uFlag,2) ) OutImmChar(cmd.Op3);
-
-  term_output_buffer();                   // terminate the output string
-  gl_comm = 1;                            // ask to attach a possible user-
-                                          // defined comment to it
-  MakeLine(buf);                          // pass the generated line to the
-                                          // kernel
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
 // generate segment header
-void idaapi gen_segm_header(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Srange) could be made const
+void idaapi m7700_segstart(outctx_t &ctx, segment_t *Srange)
 {
-  segment_t *Sarea = getseg(ea);
-
-  char sname[MAXNAMELEN];
-  get_segm_name(Sarea, sname, sizeof(sname));
-  char *segname = sname;
+  qstring sname;
+  get_visible_segm_name(&sname, Srange);
 
   if ( ash.uflag & UAS_SEGM )
-    printf_line(inf.indent, COLSTR("SEGMENT %s", SCOLOR_ASMDIR), segname);
+    ctx.gen_printf(inf.indent, COLSTR("SEGMENT %s", SCOLOR_ASMDIR), sname.c_str());
   else
-    printf_line(inf.indent, COLSTR(".SECTION %s", SCOLOR_ASMDIR), segname);
+    ctx.gen_printf(inf.indent, COLSTR(".SECTION %s", SCOLOR_ASMDIR), sname.c_str());
 
-  ea_t orgbase = ea - get_segm_para(Sarea);
+  ea_t orgbase = ctx.insn_ea - get_segm_para(Srange);
   if ( orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-inline bool show_assume_line(const segreg_area_t *sra, ea_t ea, int segreg)
+inline bool show_assume_line(const sreg_range_t *sra, ea_t ea, int segreg)
 {
   bool show = false;
-  if ( sra->startEA == ea )
+  if ( sra->start_ea == ea )
   {
-    segreg_area_t prev_sra;
-    if ( get_prev_srarea(&prev_sra, ea, segreg) )
+    sreg_range_t prev_sra;
+    if ( get_prev_sreg_range(&prev_sra, ea, segreg) )
       show = sra->val != prev_sra.val;
   }
   return show;
 }
 
 //--------------------------------------------------------------------------
-void idaapi gen_assumes(ea_t ea)         // function to produce assume directives
+void idaapi m7700_assumes(outctx_t &ctx)         // function to produce assume directives
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( !inf.s_assume || seg == NULL )
+  if ( (inf.outflags & OFLG_GEN_ASSUME) == 0 || seg == NULL )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
-  segreg_area_t sra;
-  if ( get_srarea2(&sra, ea, rDR) )
+  sreg_range_t sra;
+  if ( get_sreg_range(&sra, ea, rDR) )
   {
     if ( (seg_started && sra.val != BADSEL) || show_assume_line(&sra, ea, rDR) )
-      printf_line(-1, COLSTR("%s DPR = %a", SCOLOR_REGCMT), ash.cmnt, sra.val);
+      ctx.gen_printf(-1, COLSTR("%s DPR = %a", SCOLOR_REGCMT), ash.cmnt, sra.val);
   }
 
-  if ( get_srarea2(&sra, ea, rfM) )
+  if ( get_sreg_range(&sra, ea, rfM) )
   {
     if ( seg_started || show_assume_line(&sra, ea, rfM) )
-      printf_line(-1, COLSTR("%s m = %a", SCOLOR_REGCMT), ash.cmnt, sra.val);
+      ctx.gen_printf(-1, COLSTR("%s m = %a", SCOLOR_REGCMT), ash.cmnt, sra.val);
   }
 
-  if ( get_srarea2(&sra, ea, rfX) )
+  if ( get_sreg_range(&sra, ea, rfX) )
   {
     if ( seg_started || show_assume_line(&sra, ea, rfX) )
-      printf_line(-1, COLSTR("%s x = %a", SCOLOR_REGCMT), ash.cmnt, sra.val);
+      ctx.gen_printf(-1, COLSTR("%s x = %a", SCOLOR_REGCMT), ash.cmnt, sra.val);
   }
 }

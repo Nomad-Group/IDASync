@@ -11,9 +11,9 @@
 #include "../idaldr.h"
 #include "amiga.hpp"
 
-#define SkipLong(Longs)   qlseek(li, 4 * (Longs), SEEK_CUR)
-#define SkipWord(Words)   qlseek(li, 2 * (Words), SEEK_CUR)
-#define SkipByte(Bytes)   qlseek(li, 1 * (Bytes), SEEK_CUR)
+#define SkipLong(Longs) do { if ( qlseek(li, 4 * qoff64_t(Longs), SEEK_CUR) == -1 ) goto TRUNCATED_INPUT; } while ( 0 )
+#define SkipWord(Words) do { if ( qlseek(li, 2 * qoff64_t(Words), SEEK_CUR) == -1 ) goto TRUNCATED_INPUT; } while ( 0 )
+#define SkipByte(Bytes) do { if ( qlseek(li, 1 * qoff64_t(Bytes), SEEK_CUR) == -1 ) goto TRUNCATED_INPUT; } while ( 0 )
 
 //------------------------------------------------------------------------------
 static void ask_for_help(void)
@@ -42,8 +42,7 @@ static char *read_name(linput_t *li, char *buf, size_t bufsize, int Longs)
 //------------------------------------------------------------------------------
 void idaapi load_file(linput_t *li,ushort /*_neflags*/,const char * /*fileformatname*/)
 {
-  if ( ph.id != PLFM_68K )
-    set_processor_type("68040", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("68040", SETPROC_LOADER);
 
   uint32 Type, Data, i;
   int nums;
@@ -51,14 +50,14 @@ void idaapi load_file(linput_t *li,ushort /*_neflags*/,const char * /*fileformat
   bool has_header = false;
   bool shortreloc = false;
   inf.baseaddr = 0;
-  ea_t start = toEA(inf.baseaddr, 0);
+  ea_t start = to_ea(inf.baseaddr, 0);
   ea_t end = start;
   ea_t codestart = BADADDR;
 
 //
 //      The first pass
 //
-  uint32 fsize = qlsize(li);
+  qoff64_t fsize = qlsize(li);
   qlseek(li, 0);
   while ( true )
   {
@@ -89,10 +88,7 @@ void idaapi load_file(linput_t *li,ushort /*_neflags*/,const char * /*fileformat
       SkipLong(1);
       break;
     case HUNK_INDEX:
-      {
-        Data = mf_readlong(li);
-        SkipByte((Data*4));
-      }
+      SkipLong(mf_readlong(li));
       break;
     case HUNK_CODE:
     case HUNK_PPC_CODE:
@@ -102,18 +98,17 @@ void idaapi load_file(linput_t *li,ushort /*_neflags*/,const char * /*fileformat
         Data = mf_readlong(li);
         Data <<= 2;
         Data &= 0x7FFFFFFF;
-        start = freechunk(end, Data, -0xF);
+        start = free_chunk(end, Data, -0xF);
         end = start + Data;
         if ( end < start )
           loader_failure("Segment address overlow: %a..%a", start, end);
         const char *sname = NULL;
-        sel_t sel = segs.get_area_qty() + 1;
+        sel_t sel = get_segm_qty() + 1;
         set_selector(sel, 0);
         switch ( Type & 0xFFFF )
         {
           case HUNK_PPC_CODE:
-            if ( ph.id != PLFM_PPC )
-              set_processor_type("ppc", SETPROC_ALL|SETPROC_FATAL);
+            set_processor_type("ppc", SETPROC_LOADER);
             sname = "PPC_CODE";
             break;
           case HUNK_CODE:
@@ -121,7 +116,7 @@ void idaapi load_file(linput_t *li,ushort /*_neflags*/,const char * /*fileformat
             if ( inf.start_cs == BADSEL )
             {
               inf.start_cs = sel;
-              inf.startIP = start;
+              inf.start_ip = start;
             }
             break;
           case HUNK_DATA:
@@ -134,19 +129,19 @@ void idaapi load_file(linput_t *li,ushort /*_neflags*/,const char * /*fileformat
         bool sparse = true;
         if ( (Type & 0xFFFF) != HUNK_BSS )
         {
-          uint32 rest = fsize - qltell(li);
+          uint64 rest = fsize - qltell(li);
           if ( end-start > rest )
             loader_failure("Too big segment %a..%a", start, end);
           sparse = false;
           file2base(li, qltell(li), start, end, FILEREG_PATCHABLE);
         }
         segment_t s;
-        s.sel    = setup_selector(sel);
-        s.startEA= start;
-        s.endEA  = end;
-        s.align  = saRelByte;
-        s.comb   = scPub;
-        s.bitness = (uchar)ph.get_segm_bitness();
+        s.sel     = setup_selector(sel);
+        s.start_ea = start;
+        s.end_ea   = end;
+        s.align   = saRelByte;
+        s.comb    = scPub;
+        s.bitness = ph.get_segm_bitness();
         add_segm_ex(&s, sname, sname, ADDSEG_NOSREG|(sparse ? ADDSEG_SPARSE : 0));
       }
       break;
@@ -173,7 +168,10 @@ TRUNCATED_INPUT:
         if ( Data == 0 )
           break;
         shortreloc ? mf_readshort(li) : mf_readlong(li);
-        shortreloc ? SkipWord(Data) : SkipLong(Data);
+        if ( shortreloc )
+          SkipWord(Data);
+        else
+          SkipLong(Data);
         nums += Data;
       }
       if ( (nums & 1) == 0 && shortreloc )
@@ -213,9 +211,7 @@ TRUNCATED_INPUT:
         }
 
         /* Display size of common block. */
-        if ( exttype == EXT_COMMON
-//          || exttype == EXT_RELCOMMON
-           )
+        if ( exttype == EXT_COMMON )
         {
           mf_readlong(li);
           SkipLong(mf_readlong(li));
@@ -283,7 +279,7 @@ TRUNCATED_INPUT:
 //
   qlseek(li, 0);
   int nseg = 0;
-  while( true )
+  while ( true )
   {
     i = (uint32)qlread(li, &Type, sizeof(Type));
     if ( i != sizeof(Type) )
@@ -307,10 +303,7 @@ TRUNCATED_INPUT:
         mf_readlong(li);
         break;
       case HUNK_INDEX:
-        {
-          Data = mf_readlong(li);
-          SkipByte((Data*4));
-        }
+        SkipLong(mf_readlong(li));
         break;
       case HUNK_CODE:
       case HUNK_PPC_CODE:
@@ -344,7 +337,7 @@ TRUNCATED_INPUT:
           segment_t *ssrc = get_segm_by_sel(nseg);
           ea_t base = BADADDR;
           if ( ssrc != NULL )
-            base = ssrc->startEA;
+            base = ssrc->start_ea;
           else
             s = NULL;
           int elsize = shortreloc ? 2 : 4;
@@ -355,9 +348,9 @@ TRUNCATED_INPUT:
             if ( s != NULL )
             {
               ea_t src = base + off;
-              ea_t dst = s->startEA;
-              fixup_data_t fd;
+              ea_t dst = s->start_ea;
               ea_t target = BADADDR;
+              fixup_type_t fd_type = 0;
               switch ( Type & 0xFFFF )
               {
                 case HUNK_RELRELOC32:
@@ -365,9 +358,9 @@ TRUNCATED_INPUT:
                 case HUNK_DREL32:
                 case HUNK_RELOC32SHORT:
                 case HUNK_DREL32EXE:
-                  target = get_long(src)+dst;
-                  put_long(src, target);
-                  fd.type = FIXUP_OFF32;
+                  target = get_dword(src)+dst;
+                  put_dword(src, target);
+                  fd_type = FIXUP_OFF32;
                   break;
                 case HUNK_ABSRELOC16:
                 case HUNK_RELRELOC26:
@@ -375,19 +368,22 @@ TRUNCATED_INPUT:
                 case HUNK_DREL16:
                   target = get_word(src)+dst;
                   put_word(src, target);
-                  fd.type = FIXUP_OFF16;
+                  fd_type = FIXUP_OFF16;
                   break;
                 case HUNK_RELOC8:
                 case HUNK_DREL8:
                   target = get_byte(src)+dst;
                   put_byte(src, (uint32)target);
-                  fd.type = FIXUP_OFF8;
+                  fd_type = FIXUP_OFF8;
                   break;
               }
-              fd.sel = ushort(dat2+1);
-              fd.off = target;
-              fd.displacement = 0;
-              set_fixup(src, &fd);
+              if ( fd_type != 0 )
+              {
+                fixup_data_t fd(fd_type);
+                fd.sel = dat2 + 1;
+                fd.off = target;
+                fd.set(src);
+              }
             }
             else
             {
@@ -459,9 +455,7 @@ TRUNCATED_INPUT:
           }
 
           /* Display size of common block. */
-          if ( exttype == EXT_COMMON
-//            || exttype == EXT_RELCOMMON
-             )
+          if ( exttype == EXT_COMMON )
           {
             Data = mf_readlong(li);
 
@@ -485,7 +479,7 @@ TRUNCATED_INPUT:
           if ( ssrc == NULL )
             ask_for_help();
           else
-            set_name(ssrc->startEA+Data, NameString, SN_NOWARN);
+            set_name(ssrc->start_ea+Data, NameString, SN_NOCHECK | SN_NOWARN | SN_IDBENC);
         }
         break;
       case HUNK_DEBUG:
@@ -529,22 +523,25 @@ TRUNCATED_INPUT:
   if ( codestart != BADADDR )
   {
     inf.start_cs = 0;
-    inf.startIP = codestart;
+    inf.start_ip = codestart;
   }
 }
 
 //--------------------------------------------------------------------------
-int idaapi accept_file(linput_t *li,char fileformatname[MAX_FILE_FORMAT_NAME],int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
-  if ( n != 0 )
-    return 0;
   qlseek(li, 0);
   uint32 type;
   if ( qlread(li, &type, sizeof(uint32)) == sizeof(uint32)
     && swap32(type) == HUNK_HEADER )
   {
-    qstrncpy(fileformatname, "Amiga hunk file", MAX_FILE_FORMAT_NAME);
-    return true;
+    *fileformatname = "Amiga hunk file";
+    *processor      = "68040";
+    return 1;
   }
   return 0;
 }
@@ -570,5 +567,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

@@ -7,6 +7,36 @@
 
 int wince_debmod_t::kdstub_loaded = -1;
 
+//-------------------------------------------------------------------------
+static bool do_load_kdstub(const char *stubname)
+{
+  qwstring wname;
+  utf8_utf16(&wname, stubname);
+  bool ok = AttachDebugger(wname.c_str());
+  if ( !ok )
+  {
+    //Likely error codes:
+    //ERROR_FILE_NOT_FOUND (2) - if LoadKernelLibrary failed
+    //  This may happen if the DLL is not found or cannot be
+    //  loaded. The DLL will fail to load if it is for a
+    //  wrong platform or if it is linked to any other DLL.
+    //ERROR_INVALID_PARAMETER (87) -if ConnectDebugger failed
+    //  This may happen if IOCTL_DBG_INIT was not called
+    //  by the DLL initialization routing or if some module
+    //  in the system is marked as non-debuggable
+    int code = GetLastError();
+    g_global_server->dwarning("Failed to attach kernel debugger stub: %s", winerr(code));
+  }
+  else
+  {
+    g_global_server->dmsg("Successfully attached kernel debugger stub\n");
+    //          win420_module_t wm;
+    //          if ( find_module_by_name("ida_kdstub", (wince_module_t*)&wm) )
+    //            msg("%x: kernel stub\n", int(wm.BasePtr)+0x1000);
+  }
+  return ok;
+}
+
 //--------------------------------------------------------------------------
 // The only reason why we load and use kernel stub is to ignore
 // hardware breakpoints in foreign applications. If the user puts
@@ -25,36 +55,9 @@ static bool load_kdstub(void)
     // 01234567 8
     ok = g_global_server->rpc_sync_stub(stubname, &stubname[9]);
     if ( !ok )
-    {
       g_global_server->dwarning("Failed to synchronize kernel debugger stub");
-    }
     else
-    {
-      wchar_t wname[80];
-      cwstr(wname, stubname, qnumber(wname));
-      ok = AttachDebugger(wname);
-      if ( !ok )
-      {
-        //Likely error codes:
-        //ERROR_FILE_NOT_FOUND (2) - if LoadKernelLibrary failed
-        //  This may happen if the DLL is not found or cannot be
-        //  loaded. The DLL will fail to load if it is for a
-        //  wrong platform or if it is linked to any other DLL.
-        //ERROR_INVALID_PARAMETER (87) -if ConnectDebugger failed
-        //  This may happen if IOCTL_DBG_INIT was not called
-        //  by the DLL initialization routing or if some module
-        //  in the system is marked as non-debuggable
-        int code = GetLastError();
-        g_global_server->dwarning("Failed to attach kernel debugger stub: %s", winerr(code));
-      }
-      else
-      {
-        g_global_server->dmsg("Successfully attached kernel debugger stub\n");
-        //          win420_module_t wm;
-        //          if ( find_module_by_name("ida_kdstub", (wince_module_t*)&wm) )
-        //            msg("%x: kernel stub\n", int(wm.BasePtr)+0x1000);
-      }
-    }
+      ok = do_load_kdstub(stubname);
   }
   __except( EXCEPTION_EXECUTE_HANDLER )
   {
@@ -165,20 +168,3 @@ bool wince_debmod_t::enable_hwbpts()
   return set_hwbpts(NULL);
 }
 
-/*
-//--------------------------------------------------------------------------
-ea_t wince_debmod_t::pstos0(ea_t ea)        // map process slot to slot 0
-{
-  if ( (ea & 0xFE000000) == slot ) // redirect our process addresses
-    ea  &= ~0xFE000000;            // to slot 0
-  return ea;
-}
-
-//--------------------------------------------------------------------------
-ea_t wince_debmod_t::s0tops(ea_t ea)        // map slot 0 to the process slot
-{
-  if ( (ea & 0xFE000000) == 0 )
-    ea |= slot;
-  return ea;
-}
-*/

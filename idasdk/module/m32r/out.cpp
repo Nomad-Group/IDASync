@@ -2,12 +2,22 @@
 #include "m32r.hpp"
 #include <diskio.hpp>
 
-// print register name
-inline static void outreg(const int n)
+//----------------------------------------------------------------------
+class out_m32r_t : public outctx_t
 {
-  out_register(ph.regNames[n]);
-}
+  out_m32r_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(int n) { out_register(ph.reg_names[n]); }
 
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+};
+CASSERT(sizeof(out_m32r_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_m32r_t)
+
+//----------------------------------------------------------------------------
 inline static const char *ptype_str(void)
 {
   switch ( ptype )
@@ -18,10 +28,11 @@ inline static const char *ptype_str(void)
   return NULL;
 }
 
+//----------------------------------------------------------------------------
 // generate header
-void idaapi header(void)
+void idaapi m32r_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device.c_str());
 
   char buf[MAXSTR];
   const char *n = ptype_str();
@@ -30,18 +41,20 @@ void idaapi header(void)
   if ( n != NULL )
   {
     qsnprintf(buf, sizeof(buf), COLSTR(".%s", SCOLOR_ASMDIR), n);
-    MakeLine(buf,0);
+    ctx.flush_buf(buf,0);
   }
 }
 
+//----------------------------------------------------------------------------
 // generate footer
-void idaapi footer(void)
+void idaapi m32r_footer(outctx_t &ctx)
 {
-  gen_cmt_line("end of file");
+  ctx.gen_cmt_line("end of file");
 }
 
+//----------------------------------------------------------------------------
 // output an operand
-bool idaapi outop(op_t &x)
+bool out_m32r_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
@@ -59,13 +72,13 @@ bool idaapi outop(op_t &x)
         if ( port != NULL )
         {
           // output the port name instead of the numeric value
-          out_line(port->name, COLOR_IMPNAME);
+          out_line(port->name.c_str(), COLOR_IMPNAME);
         }
         // otherwise, simply print the value
         else
         {
           out_symbol('#');
-          OutValue(x, OOFW_IMM|OOF_SIGNED);
+          out_value(x, OOFW_IMM|OOF_SIGNED);
         }
       }
       break;
@@ -74,17 +87,17 @@ bool idaapi outop(op_t &x)
     case o_displ:
       out_symbol('@');
       out_symbol('(');
-      OutValue(x, OOF_SIGNED | OOF_ADDR | OOFW_32);
+      out_value(x, OOF_SIGNED | OOF_ADDR | OOFW_32);
       out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
       outreg(x.reg);
       out_symbol(')');
       break;
 
     // address
     case o_near:
-      if ( !out_name_expr(x, toEA(cmd.cs, x.addr), x.addr) )
-        OutValue(x, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN | OOFW_32);
+      if ( !out_name_expr(x, to_ea(insn.cs, x.addr), x.addr) )
+        out_value(x, OOF_ADDR | OOF_NUMBER | OOFS_NOSIGN | OOFW_32);
       break;
 
     // phrase
@@ -94,12 +107,12 @@ bool idaapi outop(op_t &x)
         // @R
         case fRI:
           out_symbol('@');
-          if ( isDefArg(uFlag, x.n) )
+          if ( is_defarg(F, x.n) )
           {
             out_symbol('(');
-            OutValue(x, 0);   // will print 0
+            out_value(x, 0);   // will print 0
             out_symbol(',');
-            OutChar(' ');
+            out_char(' ');
             outreg(x.reg);
             out_symbol(')');
           }
@@ -135,105 +148,103 @@ bool idaapi outop(op_t &x)
   return 1;
 }
 
-// output an instruction and its operands
-void idaapi out(void)
+//----------------------------------------------------------------------------
+void out_m32r_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));     // setup the output pointer
-
-  // if this DSP instruction in executed in parallel with a NOP instruction
-  // (example: nop || machi r1, r2), first print the NOP.
-  if ( cmd.segpref & NEXT_INSN_PARALLEL_DSP )
-  {
-    out_line("nop", COLOR_INSN);
-    OutChar(' ');
-    out_symbol('|');
-    out_symbol('|');
-    OutChar(' ');
-  }
-
   char postfix[3];                        // postfix to eventually insert after the insn name
   postfix[0] = '\0';                      // postfix is null by default
 
   // use synthetic option is selected
   if ( use_synthetic_insn() )
   {
-    if ( cmd.segpref & SYNTHETIC_SHORT )
-      qstrncpy(postfix, (cmd.itype == m32r_ldi ? "8" : ".s"), sizeof(postfix));
-    if ( cmd.segpref & SYNTHETIC_LONG )
-      qstrncpy(postfix, (cmd.itype == m32r_ldi ? "16" : ".l"), sizeof(postfix));
+    if ( insn.segpref & SYNTHETIC_SHORT )
+      qstrncpy(postfix, (insn.itype == m32r_ldi ? "8" : ".s"), sizeof(postfix));
+    if ( insn.segpref & SYNTHETIC_LONG )
+      qstrncpy(postfix, (insn.itype == m32r_ldi ? "16" : ".l"), sizeof(postfix));
   }
 
-  OutMnem(8, postfix);
+  out_mnem(8, postfix);
+}
+
+//----------------------------------------------------------------------------
+// output an instruction and its operands
+void out_m32r_t::out_insn(void)
+{
+  // if this DSP instruction in executed in parallel with a NOP instruction
+  // (example: nop || machi r1, r2), first print the NOP.
+  if ( insn.segpref & NEXT_INSN_PARALLEL_DSP )
+  {
+    out_line("nop", COLOR_INSN);
+    out_char(' ');
+    out_symbol('|');
+    out_symbol('|');
+    out_char(' ');
+  }
+
+  out_mnemonic();
 
   out_one_operand(0);                   // output the first operand
 
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);               // output the second operand
   }
 
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(2);               // output the third operand
   }
 
   // output a character representation of the immediate values
   // embedded in the instruction as comments
-  if ( isVoid(cmd.ea,uFlag,0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea,uFlag,1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea,uFlag,2) ) OutImmChar(cmd.Op3);
+  out_immchar_cmts();
 
   // print a parallel NOP instruction unless the current instruction
   // is either push or pop (in this special case, nop cannot be executed in //)
-  if ( (cmd.itype != m32r_push && cmd.itype != m32r_pop)
-    && cmd.segpref & NEXT_INSN_PARALLEL_NOP )
+  if ( (insn.itype != m32r_push && insn.itype != m32r_pop)
+    && insn.segpref & NEXT_INSN_PARALLEL_NOP )
   {
     // don't print NOP if the instruction was ld/st reg, fp, and has been converted to ld/st reg, @(arg, fp)
     // (in other words, in the second operand is a stack variable).
     // because the o_displ form of ld/st insn is 32 bits, and cannot handle a parallel nop.
-    if ( (cmd.itype != m32r_ld && cmd.itype != m32r_st) || !isStkvar1(uFlag) )
+    if ( (insn.itype != m32r_ld && insn.itype != m32r_st) || !is_stkvar1(F) )
     {
-      if ( cmd.Op1.type != o_void )
-        OutChar(' ');
+      if ( insn.Op1.type != o_void )
+        out_char(' ');
       out_symbol('|');
       out_symbol('|');
-      OutChar(' ');
+      out_char(' ');
       out_line("nop", COLOR_INSN);
     }
   }
 
-  if ( cmd.segpref & NEXT_INSN_PARALLEL_OTHER )
+  if ( insn.segpref & NEXT_INSN_PARALLEL_OTHER )
   {
-    if ( cmd.Op1.type != o_void )
-      OutChar(' ');
+    if ( insn.Op1.type != o_void )
+      out_char(' ');
     out_symbol('|');
     out_symbol('|');
     out_symbol('\\');
   }
-
-  term_output_buffer();                 // terminate the output string
-  gl_comm = 1;                          // ask to attach a possible user-
-                                        // defined comment to it
-  MakeLine(buf);                        // pass the generated line to the
-                                        // kernel
+  flush_outbuf();
 }
 
+//----------------------------------------------------------------------------
 // generate segment header
-void idaapi gen_segm_header(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi m32r_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  segment_t *Sarea = getseg(ea);
+  qstring sname;
+  get_visible_segm_name(&sname, Sarea);
+  char *segname = sname.begin();
 
-  char sname[MAXNAMELEN];
-  get_segm_name(Sarea, sname, sizeof(sname));
-  char *segname = sname;
-
-  if ( *segname == '_' )
+  if ( !sname.empty() && *segname == '_' )
     *segname = '.';
 
-  printf_line(0, COLSTR(".section %s", SCOLOR_ASMDIR), segname);
+  ctx.gen_printf(0, COLSTR(".section %s", SCOLOR_ASMDIR), sname.c_str());
 }

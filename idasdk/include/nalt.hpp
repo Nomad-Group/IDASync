@@ -11,8 +11,6 @@
 #include <ida.hpp>
 #include <netnode.hpp>
 
-#pragma pack(push, 1)           // IDA uses 1 byte alignments
-
 /*! \file nalt.hpp
 
   \brief Definitions of various information kept in netnodes
@@ -105,6 +103,13 @@
 #define  NSUP_XREFPOS   27      ///< saved xref address and type in the xrefs window
 #define  NSUP_CUSTDT    28      ///< custom data type id
 #define  NSUP_GROUPS    29      ///< SEG_GRP: pack_dd encoded list of selectors
+#define  NSUP_ARGEAS    30      ///< instructions that initialize call arguments
+#define  NSUP_FOP7      31      ///< forced operand 7
+#define  NSUP_FOP8      32      ///< forced operand 8
+#define  NSUP_REF6      33      ///< complex reference information for operand 7
+#define  NSUP_REF7      34      ///< complex reference information for operand 8
+#define  NSUP_OREF6     35      ///< outer complex reference information for operand 7
+#define  NSUP_OREF7     36      ///< outer complex reference information for operand 8
 
 // values E_PREV..E_NEXT+1000 are reserved (1000..2000..3000 decimal)
 
@@ -162,90 +167,27 @@
 #define NSUP_GR_LAYT         'l'     ///< group layouts, idx: layout pointer
 //@}
 
-/// See ::net_patch
+/// Patch netnode tag
 #define PATCH_TAG 'P'
-/// Node with information about patched bytes.
-/// altval(ea)<-(oldval).
-/// charval(ea, PATCH_TAG)==1 => byte has been patched.
-idaman netnode ida_export_data net_patch;
 
-/// Node with information about imported modules.
-/// \note Please use enum_import_names() to work with imports!
-/// supval(i) -> module name; altval(i) -> module node.
-/// altval(-1) -> number of modules.
-/// the module node is:
-///   - supval(ea) -> function name
-///   - altval(ord) -> import ea
-///   - for modules that import the same ordinal multiple times:
-///     altval(ea, 'O') -> ordinal
-idaman netnode ida_export_data import_node;
+/// Get netnode for the specified address.
 
-/// \name Helper macros
-//@{
-#define _N_PASTE(x,y)   x ## y
-#define N_PASTE(x,y)    _N_PASTE(x,y)
-#define NSUP_TYPE(name,type,code,size)                                  \
-inline ssize_t N_PASTE(get_,name)(ea_t ea, type *buf, size_t bufsize)   \
-        { return netnode(ea).supval(code, buf, bufsize); }              \
-inline void N_PASTE(set_,name)(ea_t ea,const type *oi)                  \
-        { netnode(ea).supset(code,oi,size); }                           \
-inline void N_PASTE(del_,name)(ea_t ea) { netnode(ea).supdel(code); }
-
-#define NSUP_CHAR(name,code)                                            \
-inline ssize_t N_PASTE(get_,name)(ea_t ea, char *buf, size_t bufsize)   \
-        { return netnode(ea).supstr(code, buf, bufsize); }              \
-inline void N_PASTE(set_,name)(ea_t ea,const char *oi)                  \
-        { netnode(ea).supset(code,oi); }                                \
-inline void N_PASTE(del_,name)(ea_t ea) { netnode(ea).supdel(code); }
-
-#define NSUP_VTYPE(name,type,code)                                      \
-inline ssize_t N_PASTE(get_,name)(ea_t ea, type *buf, size_t bufsize)   \
-        { return netnode(ea).supval(code, buf, bufsize); }              \
-inline void N_PASTE(set_,name)(ea_t ea,const type *oi,int size)         \
-        { netnode(ea).supset(code,oi,size); }                           \
-inline void N_PASTE(del_,name)(ea_t ea) { netnode(ea).supdel(code); }
-
-#define NSUP_BLOB(name,type,code)                                       \
-inline type *N_PASTE(get_,name)(ea_t ea,type *buf,size_t *bufsize)      \
-        { return (type *)netnode(ea).getblob(buf,bufsize,code,stag); }  \
-inline void N_PASTE(set_,name)(ea_t ea,const type *oi,size_t size)      \
-        { netnode(ea).setblob(oi,size,code,stag); }                     \
-inline void N_PASTE(del_,name)(ea_t ea) { netnode(ea).delblob(code,stag); }
-
-#define NALT_TYPE(get,set,del,type,code)                                                                              \
-inline type get(ea_t ea) { type x; return netnode(ea).supval(code, &x, sizeof(x), atag) > 0 ? type(x-1) : type(-1); } \
-inline void set(ea_t ea,type x) { x++; netnode(ea).supset(code, &x, sizeof(x), atag); }                               \
-inline void del(ea_t ea) { netnode(ea).supdel(code, atag); }
-
-#define NSUP_STRUCT(name,code)  NSUP_TYPE(name,N_PASTE(name,_t),code,sizeof(N_PASTE(name,_t)))
-#define NSUP_STRING(name,code)  NSUP_CHAR(name,code)
-
-#define NSUP_VAR(name,code,t)   NSUP_VTYPE(name,t,code)
-#define NALT_EA(    get,set,del,code) NALT_TYPE(get,set,del,ea_t,  code)
-#define NALT_UINT32(get,set,del,code) NALT_TYPE(get,set,del,uint32,code)
-#define NALT_UINT16(get,set,del,code) NALT_TYPE(get,set,del,uint16,code)
-#define NALT_UINT8( get,set,del,code) NALT_TYPE(get,set,del,uint8, code)
-//@}
+idaman nodeidx_t ida_export ea2node(ea_t ea);
+idaman ea_t ida_export node2ea(nodeidx_t ndx);
+inline netnode getnode(ea_t ea) { return netnode(ea2node(ea)); }
 
 //--------------------------------------------------------------------------
 //      C O N V E N I E N C E   F U N C T I O N S
 //--------------------------------------------------------------------------
 
-/// \name Wide values
-/// Up to 32bit value for wide (more than 8-bit) byte processors.
-/// Use higher level functions:
-///   - get_full_byte()
-///   - get_full_word()
-///   - get_full_long()
-//@{
-NALT_UINT32(get_wide_value,set_wide_value,del_wide_value,NALT_WIDE)
-//@}
 
-/// \name Structure ID
-/// Structure ID for structures in structure definitions.
-/// Use higher level function get_opinfo()
+/// \name Get structure ID
+/// Returns the struct id of the struct type at the specified address.
+/// Use this function when is_struct()==true
 //@{
-NALT_EA(get_strid,_set_strid,_del_strid, NALT_STRUCT)
+
+idaman tid_t ida_export get_strid(ea_t ea);
+
 //@}
 
 /// \name xrefpos
@@ -255,9 +197,15 @@ NALT_EA(get_strid,_set_strid,_del_strid, NALT_STRUCT)
 struct xrefpos_t
 {
   ea_t ea;
-  char type;
+  uchar type;  // the type of xref (::cref_t & ::dref_t)
+  xrefpos_t(ea_t ea_ = BADADDR, uchar type_ = 0) : ea(ea_), type(type_) {}
+  bool is_valid() const { return ea != BADADDR; }
 };
-NSUP_STRUCT(xrefpos, NSUP_XREFPOS)
+
+idaman ssize_t ida_export get_xrefpos(xrefpos_t *out, ea_t ea);
+idaman void ida_export set_xrefpos(ea_t ea, const xrefpos_t *in);
+inline void idaapi del_xrefpos(ea_t ea) { getnode(ea).supdel(NSUP_XREFPOS); }
+
 //@}
 
 /// \defgroup AFL_ Additional flags for the location
@@ -306,63 +254,130 @@ NSUP_STRUCT(xrefpos, NSUP_XREFPOS)
 #define AFL_USEMODSP    0x08000000L     ///< insn modifes SP and uses the modified value
                                         ///< example: pop [rsp+N]
 #define AFL_NOTCODE     0x10000000L     ///< autoanalysis should not create code here
+#define AFL_NOTPROC     0x20000000L     ///< autoanalysis should not create proc here
 //@}
 
 /// \name Work with additional location flags
 /// See \ref AFL_
 //@{
-inline void   set_aflags0(ea_t ea, uint32 flags){ netnode(ea).altset(NALT_AFLAGS,flags); }
-inline uint32 get_aflags0(ea_t ea)              { return flags_t(netnode(ea).altval(NALT_AFLAGS)); }
-inline void   del_aflags0(ea_t ea)              { netnode(ea).altdel(NALT_AFLAGS); }
+inline void   set_aflags0(ea_t ea, uint32 flags) { getnode(ea).altset(NALT_AFLAGS,flags); }
+inline uint32 get_aflags0(ea_t ea)               { return flags_t(getnode(ea).altval(NALT_AFLAGS)); }
+inline void   del_aflags0(ea_t ea)               { getnode(ea).altdel(NALT_AFLAGS); }
 idaman void   ida_export set_aflags(ea_t ea, uint32 flags);
 idaman void   ida_export set_abits(ea_t ea,uint32 bits);
 idaman void   ida_export clr_abits(ea_t ea,uint32 bits);
 idaman uint32 ida_export get_aflags(ea_t ea);
 idaman void   ida_export del_aflags(ea_t ea);
 
-/// Used to define 3 functions to work with a bit:
-///   - int  test(ea_t ea);   // test if the bit is set
-///   - void set(ea_t ea);    // set bit
-///   - void clear(ea_t ea);  // clear bit
-#define IMPLEMENT_AFLAG_FUNCTIONS(bit, test, set, clear)            \
-inline bool test(ea_t ea)   { return (get_aflags(ea) & bit) != 0; } \
-inline void set(ea_t ea)    { set_abits(ea, bit); }                 \
-inline void clear(ea_t ea)  { clr_abits(ea, bit); }
+inline bool is_hidden_item(ea_t ea)   { return (get_aflags(ea) & AFL_HIDDEN) != 0; }
+inline void hide_item(ea_t ea)        { set_abits(ea, AFL_HIDDEN); }
+inline void unhide_item(ea_t ea)      { clr_abits(ea, AFL_HIDDEN); }
 
-/// See #IMPLEMENT_AFLAG_FUNCTIONS
-#define IMPL__IS_AFLAG_FUNCS(bit, name) \
- IMPLEMENT_AFLAG_FUNCTIONS(bit, is_ ## name, set_ ## name, clr_ ## name)
-/// See #IMPLEMENT_AFLAG_FUNCTIONS
-#define IMPL_HAS_AFLAG_FUNCS(bit, name) \
- IMPLEMENT_AFLAG_FUNCTIONS(bit, has_ ## name, set_has_ ## name, clr_has_ ## name)
+inline bool is_hidden_border(ea_t ea) { return (get_aflags(ea) & AFL_NOBRD) != 0; }
+inline void hide_border(ea_t ea)      { set_abits(ea, AFL_NOBRD); }
+inline void unhide_border(ea_t ea)    { clr_abits(ea, AFL_NOBRD); }
 
-IMPLEMENT_AFLAG_FUNCTIONS(AFL_HIDDEN,   is_hidden_item, hide_item, unhide_item)
-IMPLEMENT_AFLAG_FUNCTIONS(AFL_NOBRD,    is_hidden_border, hide_border, unhide_border)
-IMPLEMENT_AFLAG_FUNCTIONS(AFL_USEMODSP, uses_modsp, set_usemodsp, clr_usemodsp)
+inline bool uses_modsp(ea_t ea)       { return (get_aflags(ea) & AFL_USEMODSP) != 0; }
+inline void set_usemodsp(ea_t ea)     { set_abits(ea, AFL_USEMODSP); }
+inline void clr_usemodsp(ea_t ea)     { clr_abits(ea, AFL_USEMODSP); }
 
-IMPL__IS_AFLAG_FUNCS(AFL_ZSTROFF,  zstroff)
-IMPL__IS_AFLAG_FUNCS(AFL_BNOT0,    _bnot0)
-IMPL__IS_AFLAG_FUNCS(AFL_BNOT1,    _bnot1)
-IMPL__IS_AFLAG_FUNCS(AFL_LIB,      libitem)
-IMPL_HAS_AFLAG_FUNCS(AFL_TI,       ti)
-IMPL_HAS_AFLAG_FUNCS(AFL_TI0,      ti0)
-IMPL_HAS_AFLAG_FUNCS(AFL_TI1,      ti1)
-IMPL_HAS_AFLAG_FUNCS(AFL_LNAME,    lname)
-IMPL__IS_AFLAG_FUNCS(AFL_TILCMT,   tilcmt)
-IMPL__IS_AFLAG_FUNCS(AFL_USERSP,   usersp)
-IMPL__IS_AFLAG_FUNCS(AFL_LZERO0,   lzero0)
-IMPL__IS_AFLAG_FUNCS(AFL_LZERO1,   lzero1)
-IMPL__IS_AFLAG_FUNCS(AFL_COLORED,  colored_item)
-IMPL__IS_AFLAG_FUNCS(AFL_TERSESTR, terse_struc)
-IMPL__IS_AFLAG_FUNCS(AFL_SIGN0,    _invsign0)
-IMPL__IS_AFLAG_FUNCS(AFL_SIGN1,    _invsign1)
-IMPL__IS_AFLAG_FUNCS(AFL_NORET,    noret)
-IMPL__IS_AFLAG_FUNCS(AFL_FIXEDSPD, fixed_spd)
-IMPL__IS_AFLAG_FUNCS(AFL_ALIGNFLOW,align_flow)
-IMPL__IS_AFLAG_FUNCS(AFL_USERTI,   userti)
-IMPL__IS_AFLAG_FUNCS(AFL_RETFP,    retfp)
-IMPL__IS_AFLAG_FUNCS(AFL_NOTCODE,  notcode)
+inline bool is_zstroff(ea_t ea)       { return (get_aflags(ea) & AFL_ZSTROFF) != 0; }
+inline void set_zstroff(ea_t ea)      { set_abits(ea, AFL_ZSTROFF); }
+inline void clr_zstroff(ea_t ea)      { clr_abits(ea, AFL_ZSTROFF); }
+
+inline bool is__bnot0(ea_t ea)        { return (get_aflags(ea) & AFL_BNOT0) != 0; }
+inline void set__bnot0(ea_t ea)       { set_abits(ea, AFL_BNOT0); }
+inline void clr__bnot0(ea_t ea)       { clr_abits(ea, AFL_BNOT0); }
+
+inline bool is__bnot1(ea_t ea)        { return (get_aflags(ea) & AFL_BNOT1) != 0; }
+inline void set__bnot1(ea_t ea)       { set_abits(ea, AFL_BNOT1); }
+inline void clr__bnot1(ea_t ea)       { clr_abits(ea, AFL_BNOT1); }
+
+inline bool is_libitem(ea_t ea)       { return (get_aflags(ea) & AFL_LIB) != 0; }
+inline void set_libitem(ea_t ea)      { set_abits(ea, AFL_LIB); }
+inline void clr_libitem(ea_t ea)      { clr_abits(ea, AFL_LIB); }
+
+inline bool has_ti(ea_t ea)           { return (get_aflags(ea) & AFL_TI) != 0; }
+inline void set_has_ti(ea_t ea)       { set_abits(ea, AFL_TI); }
+inline void clr_has_ti(ea_t ea)       { clr_abits(ea, AFL_TI); }
+
+inline bool has_ti0(ea_t ea)          { return (get_aflags(ea) & AFL_TI0) != 0; }
+inline void set_has_ti0(ea_t ea)      { set_abits(ea, AFL_TI0); }
+inline void clr_has_ti0(ea_t ea)      { clr_abits(ea, AFL_TI0); }
+
+inline bool has_ti1(ea_t ea)          { return (get_aflags(ea) & AFL_TI1) != 0; }
+inline void set_has_ti1(ea_t ea)      { set_abits(ea, AFL_TI1); }
+inline void clr_has_ti1(ea_t ea)      { clr_abits(ea, AFL_TI1); }
+
+inline bool has_lname(ea_t ea)        { return (get_aflags(ea) & AFL_LNAME) != 0; }
+inline void set_has_lname(ea_t ea)    { set_abits(ea, AFL_LNAME); }
+inline void clr_has_lname(ea_t ea)    { clr_abits(ea, AFL_LNAME); }
+
+inline bool is_tilcmt(ea_t ea)        { return (get_aflags(ea) & AFL_TILCMT) != 0; }
+inline void set_tilcmt(ea_t ea)       { set_abits(ea, AFL_TILCMT); }
+inline void clr_tilcmt(ea_t ea)       { clr_abits(ea, AFL_TILCMT); }
+
+inline bool is_usersp(ea_t ea)        { return (get_aflags(ea) & AFL_USERSP) != 0; }
+inline void set_usersp(ea_t ea)       { set_abits(ea, AFL_USERSP); }
+inline void clr_usersp(ea_t ea)       { clr_abits(ea, AFL_USERSP); }
+
+inline bool is_lzero0(ea_t ea)        { return (get_aflags(ea) & AFL_LZERO0) != 0; }
+inline void set_lzero0(ea_t ea)       { set_abits(ea, AFL_LZERO0); }
+inline void clr_lzero0(ea_t ea)       { clr_abits(ea, AFL_LZERO0); }
+
+inline bool is_lzero1(ea_t ea)        { return (get_aflags(ea) & AFL_LZERO1) != 0; }
+inline void set_lzero1(ea_t ea)       { set_abits(ea, AFL_LZERO1); }
+inline void clr_lzero1(ea_t ea)       { clr_abits(ea, AFL_LZERO1); }
+
+inline bool is_colored_item(ea_t ea)  { return (get_aflags(ea) & AFL_COLORED) != 0; }
+inline void set_colored_item(ea_t ea) { set_abits(ea, AFL_COLORED); }
+inline void clr_colored_item(ea_t ea) { clr_abits(ea, AFL_COLORED); }
+
+inline bool is_terse_struc(ea_t ea)   { return (get_aflags(ea) & AFL_TERSESTR) != 0; }
+inline void set_terse_struc(ea_t ea)  { set_abits(ea, AFL_TERSESTR); }
+inline void clr_terse_struc(ea_t ea)  { clr_abits(ea, AFL_TERSESTR); }
+
+inline bool is__invsign0(ea_t ea)     { return (get_aflags(ea) & AFL_SIGN0) != 0; }
+inline void set__invsign0(ea_t ea)    { set_abits(ea, AFL_SIGN0); }
+inline void clr__invsign0(ea_t ea)    { clr_abits(ea, AFL_SIGN0); }
+
+inline bool is__invsign1(ea_t ea)     { return (get_aflags(ea) & AFL_SIGN1) != 0; }
+inline void set__invsign1(ea_t ea)    { set_abits(ea, AFL_SIGN1); }
+inline void clr__invsign1(ea_t ea)    { clr_abits(ea, AFL_SIGN1); }
+
+inline bool is_noret(ea_t ea)         { return (get_aflags(ea) & AFL_NORET) != 0; }
+inline void set_noret(ea_t ea)        { set_abits(ea, AFL_NORET); }
+inline void clr_noret(ea_t ea)        { clr_abits(ea, AFL_NORET); }
+
+inline bool is_fixed_spd(ea_t ea)     { return (get_aflags(ea) & AFL_FIXEDSPD) != 0; }
+inline void set_fixed_spd(ea_t ea)    { set_abits(ea, AFL_FIXEDSPD); }
+inline void clr_fixed_spd(ea_t ea)    { clr_abits(ea, AFL_FIXEDSPD); }
+
+inline bool is_align_flow(ea_t ea)    { return (get_aflags(ea) & AFL_ALIGNFLOW) != 0; }
+inline void set_align_flow(ea_t ea)   { set_abits(ea, AFL_ALIGNFLOW); }
+inline void clr_align_flow(ea_t ea)   { clr_abits(ea, AFL_ALIGNFLOW); }
+
+inline bool is_userti(ea_t ea)        { return (get_aflags(ea) & AFL_USERTI) != 0; }
+inline void set_userti(ea_t ea)       { set_abits(ea, AFL_USERTI); }
+inline void clr_userti(ea_t ea)       { clr_abits(ea, AFL_USERTI); }
+
+inline bool is_retfp(ea_t ea)         { return (get_aflags(ea) & AFL_RETFP) != 0; }
+inline void set_retfp(ea_t ea)        { set_abits(ea, AFL_RETFP); }
+inline void clr_retfp(ea_t ea)        { clr_abits(ea, AFL_RETFP); }
+
+inline bool is_notproc(ea_t ea)       { return (get_aflags(ea) & AFL_NOTPROC) != 0; }
+inline void set_notproc(ea_t ea)      { set_abits(ea, AFL_NOTPROC); }
+inline void clr_notproc(ea_t ea)      { clr_abits(ea, AFL_NOTPROC); }
 //@}
+
+/// Mark address so that it can not be converted to instruction
+idaman void ida_export set_notcode(ea_t ea);
+
+/// Clear not-code mark
+inline void clr_notcode(ea_t ea) { clr_abits(ea, AFL_NOTCODE); }
+
+/// Is the address marked as not-code?
+inline bool is_notcode(ea_t ea) { return (get_aflags(ea) & AFL_NOTCODE) != 0; }
 
 
 /// Change visibility of item at given ea
@@ -389,7 +404,7 @@ inline bool is_finally_visible_item(ea_t ea)
 /// \name Source line numbers
 /// They are sometimes present in object files.
 //@{
-NALT_EA(get_linnum0,set_linnum0, del_linnum0, NALT_LINNUM)
+
 idaman void   ida_export set_source_linnum(ea_t ea, uval_t lnnum);
 idaman uval_t ida_export get_source_linnum(ea_t ea);
 idaman void   ida_export del_source_linnum(ea_t ea);
@@ -398,19 +413,17 @@ idaman void   ida_export del_source_linnum(ea_t ea);
 /// \name Absolute segment base address
 /// These functions may be used if necessary.
 //@{
-NALT_EA(get_absbase,set_absbase, del_absbase, NALT_ABSBASE)
-//@}
-
-/// \name Enum id (first operand)
-/// Use higher level function get_enum_id()
-//@{
-NALT_EA(get_enum_id0,set_enum_id0,del_enum_id0,NALT_ENUM0)
-//@}
-
-/// \name Enum id (second operand)
-/// Use higher level function get_enum_id()
-//@{
-NALT_EA(get_enum_id1,set_enum_id1,del_enum_id1,NALT_ENUM1)
+inline ea_t get_absbase(ea_t ea)
+{
+  ea_t x;
+  return getnode(ea).supval(NALT_ABSBASE, &x, sizeof(x), atag) > 0 ? ea_t(x-1) : ea_t(-1);
+}
+inline void set_absbase(ea_t ea, ea_t x)
+{
+  x++;
+  getnode(ea).supset(NALT_ABSBASE, &x, sizeof(x), atag);
+}
+inline void del_absbase(ea_t ea) { getnode(ea).supdel(NALT_ABSBASE, atag); }
 //@}
 
 /// \name Purged bytes
@@ -418,58 +431,97 @@ NALT_EA(get_enum_id1,set_enum_id1,del_enum_id1,NALT_ENUM1)
 /// get_ind_purged() may be used if necessary.
 /// Use set_purged() to modify this value (do not use set_ind_purged())
 //@{
-NALT_EA(get_ind_purged,set_ind_purged,del_ind_purged,NALT_PURGE)
+inline ea_t get_ind_purged(ea_t ea)
+{
+  ea_t x;
+  return getnode(ea).supval(NALT_PURGE, &x, sizeof(x), atag) > 0 ? ea_t(x-1) : ea_t(-1);
+}
+inline void set_ind_purged(ea_t ea, ea_t x)
+{
+  x++;
+  getnode(ea).supset(NALT_PURGE, &x, sizeof(x), atag);
+}
+inline void del_ind_purged(ea_t ea) { getnode(ea).supdel(NALT_PURGE, atag); }
 //@}
 
 /// \name Get type of string
 /// Use higher level function get_opinfo().
 //@{
-NALT_UINT32(get_str_type,set_str_type,del_str_type,NALT_STRTYPE)
+inline uint32 get_str_type(ea_t ea)
+{
+  uint32 x;
+  return getnode(ea).supval(NALT_STRTYPE, &x, sizeof(x), atag) > 0 ? uint32(x-1) : uint32(-1);
+}
+inline void set_str_type(ea_t ea, uint32 x)
+{
+  x++;
+  getnode(ea).supset(NALT_STRTYPE, &x, sizeof(x), atag);
+}
+inline void del_str_type(ea_t ea) { getnode(ea).supdel(NALT_STRTYPE, atag); }
 //@}
 
-/// \defgroup ASCSTR_ String type codes
+// Number of bytes per "units" in a string. E.g., ASCII, Windows-1252,
+// UTF-8 all take up one byte per unit, while UTF-16 variations take 2 and
+// UTF-32 variations take 4.
+// (Note that an "unit" in this context is not necessarily a character,
+// since UTF-8-encoded characters can be encoded in up to 4 bytes,
+// and UTF-16-encoded characters can be encoded in up to 2 bytes.)
+#define STRWIDTH_1B 0
+#define STRWIDTH_2B 1
+#define STRWIDTH_4B 2
+#define STRWIDTH_MASK 0x03
+
+// The string layout; how the string is laid out in data.
+#define STRLYT_TERMCHR 0
+#define STRLYT_PASCAL1 1
+#define STRLYT_PASCAL2 2
+#define STRLYT_PASCAL4 3
+#define STRLYT_MASK 0xFC
+#define STRLYT_SHIFT 2
+
+
+/// \defgroup STRTYPE_ String type codes
 //@{
-#define ASCSTR_C        ASCSTR_TERMCHR ///< C-style ASCII string
-#define ASCSTR_TERMCHR  0              ///< Character-terminated ASCII string.
-                                       ///< The termination characters are kept in
-                                       ///< the next bytes of string type.
-#define ASCSTR_PASCAL   1              ///< Pascal-style ASCII string (one byte length prefix)
-#define ASCSTR_LEN2     2              ///< Pascal-style, two-byte length prefix
-#define ASCSTR_UNICODE  3              ///< Unicode string (UTF-16)
-#define ASCSTR_UTF16    3              ///< same
-#define ASCSTR_LEN4     4              ///< Pascal-style, four-byte length prefix
-#define ASCSTR_ULEN2    5              ///< Pascal-style Unicode, two-byte length prefix
-#define ASCSTR_ULEN4    6              ///< Pascal-style Unicode, four-byte length prefix
-#define ASCSTR_UTF32    7              ///< four-byte Unicode codepoints
-#define ASCSTR_LAST     7              ///< Last string type
+///< Character-terminated string. The termination characters are kept in
+///< the next bytes of string type.
+#define STRTYPE_TERMCHR   (STRWIDTH_1B|STRLYT_TERMCHR<<STRLYT_SHIFT)
+///< C-style string.
+#define STRTYPE_C         STRTYPE_TERMCHR
+///< Zero-terminated 16bit chars
+#define STRTYPE_C_16      (STRWIDTH_2B|STRLYT_TERMCHR<<STRLYT_SHIFT)
+///< Zero-terminated 32bit chars
+#define STRTYPE_C_32      (STRWIDTH_4B|STRLYT_TERMCHR<<STRLYT_SHIFT)
+///< Pascal-style, one-byte length prefix
+#define STRTYPE_PASCAL    (STRWIDTH_1B|STRLYT_PASCAL1<<STRLYT_SHIFT)
+///< Pascal-style, 16bit chars, one-byte length prefix
+#define STRTYPE_PASCAL_16 (STRWIDTH_2B|STRLYT_PASCAL1<<STRLYT_SHIFT)
+///< Pascal-style, two-byte length prefix
+#define STRTYPE_LEN2      (STRWIDTH_1B|STRLYT_PASCAL2<<STRLYT_SHIFT)
+///< Pascal-style, 16bit chars, two-byte length prefix
+#define STRTYPE_LEN2_16   (STRWIDTH_2B|STRLYT_PASCAL2<<STRLYT_SHIFT)
+///< Pascal-style, two-byte length prefix
+#define STRTYPE_LEN4      (STRWIDTH_1B|STRLYT_PASCAL4<<STRLYT_SHIFT)
+///< Pascal-style, 16bit chars, two-byte length prefix
+#define STRTYPE_LEN4_16   (STRWIDTH_2B|STRLYT_PASCAL4<<STRLYT_SHIFT)
 //@}
 
 /// \name Work with string type codes
-/// See \ref ASCSTR_
+/// See \ref STRTYPE_
 //@{
-inline char idaapi get_str_type_code(uval_t strtype) { return char(strtype); }
+inline uchar idaapi get_str_type_code(int32 strtype) { return uchar(strtype); }
 inline char get_str_term1(int32 strtype) { return char(strtype>>8); }
 inline char get_str_term2(int32 strtype) { return char(strtype>>16); }
                                 // if the second termination character is
                                 // '\0', then it doesn't exist.
-inline bool is_unicode(int32 strtype)
-{
-  char code = get_str_type_code(strtype);
-  return code == ASCSTR_UNICODE
-      || code == ASCSTR_ULEN2
-      || code == ASCSTR_ULEN4;
-}
-inline bool is_pascal(int32 strtype)
-{
-  char code = get_str_type_code(strtype);
-  return code == ASCSTR_PASCAL
-      || code == ASCSTR_LEN2
-      || code >= ASCSTR_LEN4;
-}
-//@}
-
 /// Get index of the string encoding for this string
 inline uchar idaapi get_str_encoding_idx(int32 strtype) { return uchar(strtype>>24); }
+
+inline bool is_pascal(int32 strtype)
+{
+  int lyt = get_str_type_code(strtype) >> STRLYT_SHIFT;
+  return lyt >= STRLYT_PASCAL1 && lyt <= STRLYT_PASCAL4;
+}
+//@}
 
 #define STRENC_DEFAULT 0x00  ///< use default encoding for this type (see get_default_encoding_idx())
 #define STRENC_NONE    0xFF  ///< force no-conversion encoding
@@ -478,64 +530,30 @@ inline uchar idaapi get_str_encoding_idx(int32 strtype) { return uchar(strtype>>
 /// (should be power of 2)
 /// These functions may be used if necessary.
 //@{
-NALT_UINT32(get_alignment,set_alignment,del_alignment,NALT_ALIGN)
+inline uint32 get_alignment(ea_t ea)
+{
+  uint32 x;
+  return getnode(ea).supval(NALT_ALIGN, &x, sizeof(x), atag) > 0 ? uint32(x-1) : uint32(-1);
+}
+inline void set_alignment(ea_t ea,uint32 x)
+{
+  x++;
+  getnode(ea).supset(NALT_ALIGN, &x, sizeof(x), atag);
+}
+inline void del_alignment(ea_t ea) { getnode(ea).supdel(NALT_ALIGN, atag); }
 //@}
 
 /// \name Instruction/Data background color
 //@{
-NALT_UINT32(_get_item_color,_set_item_color,_del_item_color,NALT_COLOR)
+
 idaman void      ida_export set_item_color(ea_t ea, bgcolor_t color);
 idaman bgcolor_t ida_export get_item_color(ea_t ea);      // returns DEFCOLOR if no color
 idaman void      ida_export del_item_color(ea_t ea);
 //@}
 
-//----------------------------------------------------------------------
-/// \name Regular comment
-/// low level, don't use - use get_cmt()
-//@{
-NSUP_STRING(nalt_cmt,NSUP_CMT)
-//@}
 
-/// \name Repeatable comment
-/// low level, don't use - use get_cmt()
-//@{
-NSUP_STRING(nalt_rptcmt,NSUP_REPCMT)
-//@}
 
-/// \name Forced operands
-/// low level, don't use - use get_forced_operand()
-//@{
-NSUP_STRING(fop1,NSUP_FOP1)
-NSUP_STRING(fop2,NSUP_FOP2)
-NSUP_STRING(fop3,NSUP_FOP3)
-NSUP_STRING(fop4,NSUP_FOP4)
-NSUP_STRING(fop5,NSUP_FOP5)
-NSUP_STRING(fop6,NSUP_FOP6)
-//@}
 
-/// \name Manual insn
-/// low level, don't use - use get_manual_insn()
-//@{
-NSUP_BLOB(manual_insn0,char,NSUP_MANUAL)
-//@}
-
-/// \name Graph group
-/// low level, don't use - use mutable_graph_t::get_graph_groups()
-//@{
-NSUP_BLOB(graph_groups0,uchar,NSUP_GROUP)
-//@}
-
-//--------------------------------------------------------------------------
-/// \name Jump tables
-//@{
-/// Information about jump tables
-struct jumptable_info_t
-{
-  ea_t table;
-  asize_t size;
-};
-NSUP_STRUCT(jumptable_info,NSUP_JINFO)
-//@}
 
 //--------------------------------------------------------------------------
 /// \name Array representation
@@ -559,38 +577,51 @@ struct array_parameters_t
                                         ///< 0  - align automatically.
                                         ///< else item width
 };
-NSUP_STRUCT(array_parameters,NSUP_ARRAY)
+idaman ssize_t ida_export get_array_parameters(array_parameters_t *out, ea_t ea);
+idaman void ida_export set_array_parameters(ea_t ea, const array_parameters_t *in);
+inline void idaapi del_array_parameters(ea_t ea) { getnode(ea).supdel(NSUP_ARRAY); }
 //@}
 
 //--------------------------------------------------------------------------
 /// Information about a switch statement
 struct switch_info_t
 {
-  ushort flags;                 ///< \ref SWI_
+  uint32 flags;                    ///< \ref SWI_
 /// \defgroup SWI_ Switch info flags
 /// Used by switch_info_t::flags
 //@{
-#define SWI_SPARSE      0x01    ///< sparse switch (value table present)
-                                ///< otherwise lowcase present
-#define SWI_V32         0x02    ///< 32-bit values in table
-#define SWI_J32         0x04    ///< 32-bit jump offsets
-#define SWI_VSPLIT      0x08    ///< value table is split (only for 32-bit values)
-#define SWI_DEFAULT     0x10    ///< default case is present
-#define SWI_END_IN_TBL  0x20    ///< switchend in table (default entry)
-#define SWI_JMP_INV     0x40    ///< jumptable is inversed. (last entry is
-                                ///< for first entry in values table)
-#define SWI_SHIFT_MASK  0x180   ///< use formula (element<<shift) + elbase to find jump targets
-#define SWI_ELBASE      0x200   ///< elbase is present (if not and shift!=0, endof(jumpea) is used)
-#define SWI_JSIZE       0x400   ///< jump offset expansion bit
-#define SWI_VSIZE       0x800   ///< value table element size expansion bit
-#define SWI_SEPARATE    0x1000  ///< create an array of individual elements (otherwise separate items)
-#define SWI_SIGNED      0x2000  ///< jump table entries are signed
-#define SWI_CUSTOM      0x4000  ///< custom jump table. \ph{create_switch_xrefs} will be
-                                ///< called to create code xrefs for the table.
-                                ///< it must return 2.
-                                ///< custom jump table must be created by the module
-                                ///< (or see #SWI2_STDTBL)
-#define SWI_EXTENDED    0x8000  ///< this is a ::switch_info_ex_t
+#define SWI_SPARSE      0x00000001 ///< sparse switch (value table present)
+                                   ///< otherwise lowcase present
+#define SWI_V32         0x00000002 ///< 32-bit values in table
+#define SWI_J32         0x00000004 ///< 32-bit jump offsets
+#define SWI_VSPLIT      0x00000008 ///< value table is split (only for 32-bit values)
+#define SWI_DEFAULT     0x00000010 ///< default case is present
+#define SWI_DEF_IN_TBL  0x00000020 ///< default case is an entry in the jump table.
+                                   ///< This flag is only applicable in the case of a sparse
+                                   ///< nonindirect switch (i.e. a switch with a values table).
+                                   ///< <jump table size> == <value table size> + 1.
+                                   ///< The default case entry is the last one in the table
+                                   ///< (or the first one in the case of an inversed jump table).
+                                   ///< See also the find_defjump_from_table() helper function.
+#define SWI_JMP_INV     0x00000040 ///< jumptable is inversed. (last entry is
+                                   ///< for first entry in values table)
+#define SWI_SHIFT_MASK  0x00000180 ///< use formula (element<<shift) + elbase to find jump targets
+#define SWI_ELBASE      0x00000200 ///< elbase is present (if not and shift!=0, endof(jumpea) is used)
+#define SWI_JSIZE       0x00000400 ///< jump offset expansion bit
+#define SWI_VSIZE       0x00000800 ///< value table element size expansion bit
+#define SWI_SEPARATE    0x00001000 ///< create an array of individual elements (otherwise separate items)
+#define SWI_SIGNED      0x00002000 ///< jump table entries are signed
+#define SWI_CUSTOM      0x00004000 ///< custom jump table.
+                                   ///< \ph{create_switch_xrefs} will be called to create code xrefs
+                                   ///< for the table. Custom jump table must be created by the
+                                   ///< module (see also #SWI_STDTBL)
+#define SWI_INDIRECT    0x00010000 ///< value table elements are used as indexes into the jump table
+#define SWI_SUBTRACT    0x00020000 ///< table values are subtracted from the elbase instead of being added
+#define SWI_HXNOLOWCASE 0x00040000 ///< lowcase value should not be used by the decompiler (internal flag)
+#define SWI_STDTBL      0x00080000 ///< custom jump table with standard table formatting.
+                                   ///< ATM IDA doesn't use SWI_CUSTOM for switches with standard
+                                   ///< table formatting. So this flag can be considered as obsolete.
+#define SWI_DEFRET      0x00100000 ///< return in the default case (defjump==BADADDR)
 //@}
 
   /// See #SWI_SHIFT_MASK.
@@ -601,7 +632,7 @@ struct switch_info_t
   void set_shift(int shift)
   {
     flags &= ~SWI_SHIFT_MASK;
-    flags = ushort(flags | ((shift & 3) << 7));
+    flags |= ((shift & 3) << 7);
   }
 
   int get_jtable_element_size(void) const
@@ -618,10 +649,22 @@ struct switch_info_t
   void set_jtable_element_size(int size)
   {
     flags &= ~SWI_J32|SWI_JSIZE;
-    if ( size == 4 ) { flags |= SWI_J32; return; }
-    if ( size == 1 ) { flags |= SWI_JSIZE; return; }
-    if ( size == 8 ) { flags |= SWI_J32|SWI_JSIZE; return; }
-    if ( size != 2 ) abort();
+    switch ( size )
+    {
+      case 4:
+        flags |= SWI_J32;
+        break;
+      case 1:
+        flags |= SWI_JSIZE;
+        break;
+      case 8:
+        flags |= SWI_J32|SWI_JSIZE;
+        break;
+      case 2:
+        break;
+      default:
+        INTERR(1297);
+    }
   }
   int get_vtable_element_size(void) const
   {
@@ -637,11 +680,31 @@ struct switch_info_t
   void set_vtable_element_size(int size)
   {
     flags &= ~SWI_V32|SWI_VSIZE;
-    if ( size == 4 ) { flags |= SWI_V32; return; }
-    if ( size == 1 ) { flags |= SWI_VSIZE; return; }
-    if ( size == 8 ) { flags |= SWI_V32|SWI_VSIZE; return; }
-    if ( size != 2 ) abort();
+    switch ( size )
+    {
+      case 4:
+        flags |= SWI_V32;
+        break;
+      case 1:
+        flags |= SWI_VSIZE;
+        break;
+      case 8:
+        flags |= SWI_V32|SWI_VSIZE;
+        break;
+      case 2:
+        break;
+      default:
+        INTERR(1298);
+    }
   }
+
+  bool is_sparse(void)    const { return (flags & SWI_SPARSE)      != 0; }
+  bool is_custom(void)    const { return (flags & SWI_CUSTOM)      != 0; }
+  bool is_indirect(void)  const { return (flags & SWI_INDIRECT)    != 0; }
+  bool is_subtract(void)  const { return (flags & SWI_SUBTRACT)    != 0; }
+  bool is_nolowcase(void) const { return (flags & SWI_HXNOLOWCASE) != 0; }
+  bool use_std_table(void) const { return !is_custom() || (flags & SWI_STDTBL) != 0; }
+
   ushort ncases;                ///< number of cases (excluding default)
   ea_t jumps;                   ///< jump table start address
   union
@@ -651,41 +714,53 @@ struct switch_info_t
   };
   ea_t defjump;                 ///< default jump address (#BADADDR if not used)
   ea_t startea;                 ///< start of the switch idiom
-};
+  int jcases;                   ///< number of entries in the jump table (SWI_INDIRECT)
 
-/// Extended information about a switch statement
-struct switch_info_ex_t : public switch_info_t
-{
-  size_t cb;                    ///< sizeof(this)
-  int flags2;                   ///< \ref SWI2_
-/// \defgroup SWI2_ Extended switch info flags
-/// Used by switch_info_ex_t::flags2
-//@{
-#define SWI2_INDIRECT    0x0001 ///< value table elements are used as indexes into the jump table
-#define SWI2_SUBTRACT    0x0002 ///< table values are subtracted from the elbase instead of being added
-#define SWI2_HXNOLOWCASE 0x0004 ///< lowcase value should not be used by the decompiler (internal flag)
-#define SWI2_STDTBL      0x0008 ///< use standard table formatting (only xrefs are customized)
-//@}
-
-  int jcases;                   ///< number of entries in the jump table (SWI2_INDIRECT)
-  bool is_indirect(void)  const { return (flags & SWI_EXTENDED) != 0 && (flags2 & SWI2_INDIRECT) != 0; }
-  bool is_subtract(void)  const { return (flags & SWI_EXTENDED) != 0 && (flags2 & SWI2_SUBTRACT) != 0; }
-  bool is_nolowcase(void) const { return (flags & SWI_EXTENDED) != 0 && (flags2 & SWI2_HXNOLOWCASE) != 0; }
-  int get_jtable_size(void) const { return is_indirect() ? jcases : ncases; }
   sval_t ind_lowcase;
   sval_t get_lowcase(void) const { return is_indirect() ? ind_lowcase : lowcase; }
   ea_t elbase;                  ///< element base
   int regnum;                   ///< the switch expression as a register number
                                 ///< of the instruction at 'startea'. -1 means 'unknown'
-  char regdtyp;                 ///< size of the switch expression register as dtyp
-  void set_expr(int r, char dt) { regnum = r; regdtyp = dt; }
+  op_dtype_t regdtype;          ///< size of the switch expression register as dtype
+
+  int get_jtable_size(void) const { return is_indirect() ? jcases : ncases; }
+  void set_jtable_size(int size)
+  {
+    if ( is_indirect() )
+      jcases = size;
+    else
+      ncases = uint16(size);
+  }
+
+  void set_expr(int r, op_dtype_t dt) { regnum = r; regdtype = dt; }
+
+  /// get separate parts of the switch
+  bool get_jrange_vrange(range_t *jrange = NULL, range_t *vrange = NULL) const
+  {
+    if ( !use_std_table() )
+      return false;
+    if ( jrange != NULL )
+    {
+      int n = get_jtable_size();
+      if ( (flags & SWI_DEF_IN_TBL) != 0 )
+        ++n;
+      int jsize = get_jtable_element_size();
+      *jrange = range_t(jumps, jumps + jsize * n);
+    }
+    if ( vrange != NULL && (is_indirect() || is_sparse()) )
+    {
+      int vsize = get_vtable_element_size();
+      *vrange = range_t(values, values + vsize * ncases);
+    }
+    return true;
+  }
+
   uval_t custom;                ///< information for custom tables (filled and used by modules)
-  switch_info_ex_t(void) { clear(); }
+  switch_info_t(void) { clear(); }
   void clear(void)
   {
-    memset(this, 0, sizeof(switch_info_ex_t));
-    cb = sizeof(switch_info_ex_t);
-    flags = SWI_EXTENDED;
+    memset(this, 0, sizeof(switch_info_t));
+    flags = 0;
     jumps = BADADDR;
     defjump = BADADDR;
     startea = BADADDR;
@@ -693,16 +768,28 @@ struct switch_info_ex_t : public switch_info_t
   }
 };
 
-/// \name Switch info Ex
-/// See ::switch_info_ex_t, xref.hpp for related functions
+/// \name Switch info
+/// See ::switch_info_t, xref.hpp for related functions
 //@{
-NSUP_STRUCT(switch_info_ex,NSUP_SWITCH)
+idaman ssize_t ida_export get_switch_info(switch_info_t *out, ea_t ea);
+idaman void ida_export set_switch_info(ea_t ea, const switch_info_t &in);
+inline void idaapi del_switch_info(ea_t ea) { getnode(ea).supdel(NSUP_SWITCH); }
 //@}
 
 /// \name Switch parent
 /// Address which holds the switch info (::switch_info_t). Used at the jump targets.
 //@{
-NALT_EA(get_switch_parent,set_switch_parent,del_switch_parent, NALT_SWITCH)
+inline ea_t get_switch_parent(ea_t ea)
+{
+  ea_t x;
+  return getnode(ea).supval(NALT_SWITCH, &x, sizeof(x), atag) > 0 ? ea_t(x-1) : ea_t(-1);
+}
+inline void set_switch_parent(ea_t ea,ea_t x)
+{
+  x++;
+  getnode(ea).supset(NALT_SWITCH, &x, sizeof(x), atag);
+}
+inline void del_switch_parent(ea_t ea) { getnode(ea).supdel(NALT_SWITCH, atag); }
 //@}
 
 /// \name Custom data types
@@ -710,12 +797,12 @@ NALT_EA(get_switch_parent,set_switch_parent,del_switch_parent, NALT_SWITCH)
 /// Information about custom data types
 struct custom_data_type_ids_t
 {
-  int16 dtid;           ///< data type id
-  int16 fids[6];        ///< data format ids
+  int16 dtid;               ///< data type id
+  int16 fids[UA_MAXOP];     ///< data format ids
 };
-idaman int  ida_export get_custom_data_type_ids(ea_t ea, custom_data_type_ids_t *cdis, size_t bufsize);
+idaman int  ida_export get_custom_data_type_ids(custom_data_type_ids_t *cdis, ea_t ea);
 idaman void ida_export set_custom_data_type_ids(ea_t ea, const custom_data_type_ids_t *cdis);
-inline void idaapi del_custom_data_type_ids(ea_t ea) { netnode(ea).supdel(NSUP_CUSTDT); }
+inline void idaapi del_custom_data_type_ids(ea_t ea) { getnode(ea).supdel(NSUP_CUSTDT); }
 //@}
 
 typedef uchar reftype_t;  ///< see \ref reftype_
@@ -731,22 +818,38 @@ typedef uchar reftype_t;  ///< see \ref reftype_
 /// The target must be present for LOW and HIGH reference types
 //@{
 const reftype_t
-  REF_OFF8   = 0,         ///< 8bit full offset
+  V695_REF_OFF8 = 0,      ///< reserved
   REF_OFF16  = 1,         ///< 16bit full offset
   REF_OFF32  = 2,         ///< 32bit full offset
   REF_LOW8   = 3,         ///< low 8bits of 16bit offset
   REF_LOW16  = 4,         ///< low 16bits of 32bit offset
   REF_HIGH8  = 5,         ///< high 8bits of 16bit offset
   REF_HIGH16 = 6,         ///< high 16bits of 32bit offset
-  REF_VHIGH  = 7,         ///< high \ph{high_fixup_bits} of 32bit offset
-  REF_VLOW   = 8,         ///< low  \ph{high_fixup_bits} of 32bit offset
+  V695_REF_VHIGH  = 7,    ///< obsolete
+  V695_REF_VLOW   = 8,    ///< obsolete
   REF_OFF64  = 9,         ///< 64bit full offset
-  REF_LAST = REF_OFF64;
+  REF_OFF8   = 10,        ///< 8bit full offset
+  REF_LAST = REF_OFF8;
 //@}
+
+/// Can the target be calculated using operand value?
+
+inline bool is_reftype_target_optional(reftype_t type)
+{
+  switch ( type )
+  {
+    case REF_OFF8:
+    case REF_OFF16:
+    case REF_OFF32:
+    case REF_OFF64:
+      return true;
+  }
+  return false;
+}
 
 /// Get REF_... constant from size
 /// Supported sizes: 1,2,4,8,16
-/// For other sizes returns reftype(-1)
+/// For other sizes returns reftype_t(-1)
 
 idaman reftype_t ida_export get_reftype_by_size(size_t size);
 
@@ -754,7 +857,7 @@ idaman reftype_t ida_export get_reftype_by_size(size_t size);
 struct refinfo_t
 {
   ea_t    target;                 ///< reference target (#BADADDR-none)
-  ea_t    base;                   ///< base of reference
+  ea_t    base;                   ///< base of reference (may be BADADDR)
   adiff_t tdelta;                 ///< offset from the target
   uint32  flags;                  ///< \ref REFINFO_
 /// \defgroup REFINFO_ Reference info flags
@@ -780,6 +883,12 @@ struct refinfo_t
 //@}
 
   reftype_t type(void)    const { return reftype_t(flags & REFINFO_TYPE); }
+
+  bool is_target_optional() const ///< \ref is_reftype_target_optional()
+  {
+    return is_reftype_target_optional(type());
+  }
+
   bool no_base_xref(void) const { return (flags & REFINFO_NOBASE) != 0; }
   bool is_pastend(void)   const { return (flags & REFINFO_PASTEND) != 0; }
   bool is_rvaoff(void)    const { return (flags & REFINFO_RVAOFF) != 0; }
@@ -813,32 +922,40 @@ struct custom_refinfo_handler_t
   const char *desc;             ///< Refinfo description to use in Ctrl-R dialog
   int props;                    ///< properties (currently 0)
 
-  ea_t (idaapi *calc_basevalue)(
+  // this callback prepares the full offset expression in buf and
+  // returns 1 if it is a simple expression or 2 if it is a complex one.
+  // Or this callback checks the compliance of opval and fullvalue,
+  // and possibly updates values of target and fullvalue,
+  // and prepares the format,
+  // and returns 3 to continue standard processing with updated values.
+  // It returns 0 in the case of error.
+  int (idaapi *gen_expr)(
+        qstring *buf,
+        qstring *format,           // buffer for the format (if retcode==3)
+        ea_t ea,
+        int opnum,
+        const refinfo_t &ri,
         ea_t from,
-        refinfo_t &ri,
-        adiff_t opval,
-        ea_t target);
-
-  ea_t (idaapi *calc_target)(
-        ea_t from,
-        refinfo_t &ri,
-        adiff_t opval);
-
-  int (idaapi *gen_expr)(       // returns: 1 - buf filled as simple expression
-        ea_t ea,                //          2 - buf filled as complex expression
-        int opnum,              //          3 - apply standard processing (with - possible - changed values)
-        refinfo_t *ri,          //      other - can't convert to offset expression
-        ea_t from,
-        adiff_t *opval,
-        char *buf,
-        size_t bufsize,
-        char *format,           // buffer for the format (if retcode==3)
-        size_t formatsize,
+        adiff_t *opval,         // the output value is not used
         ea_t *target,
         ea_t *fullvalue,
         int getn_flags);
+
+  // this callback replaces calc_target.
+  // It calculates target and base,
+  // and calculates an internal variable fullvalue,
+  // and checks the compliance of opval and fullvalue,
+  // and returns the success flag.
+  bool (idaapi *calc_reference_data)(
+        ea_t *target,
+        ea_t *base,
+        ea_t from,
+        const refinfo_t &ri,
+        adiff_t opval);
+
+  // just custom format
+  void (idaapi *get_format)(qstring *format);
 };
-typedef qvector<const custom_refinfo_handler_t *> custom_refinfo_handlers_t; ///< vector of refinfo handlers
 
 
 /// Register a new custom refinfo type.
@@ -851,9 +968,38 @@ idaman int ida_export register_custom_refinfo(const custom_refinfo_handler_t *cr
 idaman bool ida_export unregister_custom_refinfo(int crid);
 
 
-/// Get refinfo handlers
+/// Get id of a custom refinfo type.
 
-idaman int ida_export get_custom_refinfos(const custom_refinfo_handler_t ***infos);
+idaman int ida_export find_custom_refinfo(const char *name);
+
+
+/// Get definition of a registered custom refinfo type.
+
+idaman const custom_refinfo_handler_t *ida_export get_custom_refinfo(int crid);
+
+
+/// Get refinfo handler
+
+inline const custom_refinfo_handler_t *idaapi get_custom_refinfo_handler(
+        const refinfo_t &ri)
+{
+  return ri.is_custom() ? get_custom_refinfo(ri.type()) : NULL;
+}
+
+
+/// Get descriptions of all standard and custom refinfo types.
+
+struct refinfo_desc_t
+{
+  uint32 type;      ///< Refinfo type, see \ref REFINFO_
+                    ///< Custom refinfo has REFINFO_CUSTOM bit.
+  const char *name; ///< Refinfo name
+  const char *desc; ///< Refinfo description to use in Ctrl-R dialog
+};
+DECLARE_TYPE_AS_MOVABLE(refinfo_desc_t);
+typedef qvector<refinfo_desc_t> refinfo_desc_vec_t;
+idaman void ida_export get_refinfo_descs(refinfo_desc_vec_t *descs);
+
 
 #define MAXSTRUCPATH  32        ///< maximal inclusion depth of unions
 
@@ -882,9 +1028,19 @@ union opinfo_t
   refinfo_t ri;              ///< for offset members
   tid_t tid;                 ///< for struct, etc. members
   strpath_t path;            ///< for stroff
-  int32 strtype;             ///< for strings (\ref ASCSTR_)
+  int32 strtype;             ///< for strings (\ref STRTYPE_)
   enum_const_t ec;           ///< for enums
   custom_data_type_ids_t cd; ///< for custom data
+};
+
+struct printop_t
+{
+  flags_t flags;        // new operand representation flags
+  opinfo_t ti;          // new operand type
+  bool is_ti_valid;     // is operand type initialized?
+  int suspop;           // out: will be set by print_operand()
+
+  const opinfo_t *get_ti() const { return is_ti_valid ? &ti : NULL; }
 };
 
 /// \name Get/Set refinfo
@@ -893,9 +1049,14 @@ union opinfo_t
 /// Don't use these functions, see get_opinfo(), set_opinfo()
 //@{
 idaman int ida_export set_refinfo_ex(ea_t ea, int n, const refinfo_t *ri);  // 1-ok, 0-bad refinfo
-idaman int ida_export set_refinfo(ea_t ea, int n,
-          reftype_t type, ea_t target=BADADDR, ea_t base=0, adiff_t tdelta=0);
-idaman int ida_export get_refinfo(ea_t ea, int n, refinfo_t *ri);        // 1-ok, 0-no refinfo
+idaman int ida_export set_refinfo(
+        ea_t ea,
+        int n,
+        reftype_t type,
+        ea_t target=BADADDR,
+        ea_t base=0,
+        adiff_t tdelta=0);
+idaman int ida_export get_refinfo(refinfo_t *ri, ea_t ea, int n);        // 1-ok, 0-no refinfo
 idaman int ida_export del_refinfo(ea_t ea, int n);
 //@}
 
@@ -908,29 +1069,15 @@ idaman int ida_export del_refinfo(ea_t ea, int n);
 /// the maximal size of array is #MAXSTRUCPATH.
 /// strpaths are used to determine how to display structure offsets.
 //@{
-idaman void ida_export write_struc_path(netnode node, int idx, const tid_t *path, int plen, adiff_t delta);
-idaman int  ida_export read_struc_path(netnode node, int idx, tid_t *path, adiff_t *delta);  // returns plen
-void del_struc_path(netnode node, int idx, const tid_t *path, int plen);
+idaman void ida_export write_struc_path(ea_t ea, int idx, const tid_t *path, int plen, adiff_t delta);
+idaman int  ida_export read_struc_path(tid_t *path, adiff_t *delta, ea_t ea, int idx);  // returns plen
+void del_struc_path(ea_t ea, int idx, const tid_t *path, int plen);
 
-#define DEFINE_PATH_FUNCS(name, code)                                \
-inline int  N_PASTE(get_,name)(ea_t ea, tid_t *path, adiff_t *delta) \
- { return read_struc_path(netnode(ea), code, path, delta); }         \
-inline void N_PASTE(set_,name)(ea_t ea, const tid_t *path, int plen, adiff_t delta) \
- { write_struc_path(netnode(ea), code, path, plen, delta); }         \
-inline void N_PASTE(del_,name)(ea_t ea, const tid_t *path, int plen) \
- { del_struc_path(netnode(ea), code, path, plen); }
-
-DEFINE_PATH_FUNCS(stroff0, NSUP_STROFF0)
-DEFINE_PATH_FUNCS(stroff1, NSUP_STROFF1)
 //@}
 
-//--------------------------------------------------------------------------
-/// \name Segment translation
-/// low level segment translation functions.
-/// please use functions from segment.hpp.
-//@{
-NSUP_VAR(_segtrans, NSUP_SEGTRANS, ea_t)
 //@}
+
+
 
 //--------------------------------------------------------------------------
 // type information (ti) storage
@@ -944,17 +1091,17 @@ class tinfo_t;
 /// Work with function/data types
 /// These functions may be used if necessary.
 //@{
-idaman bool ida_export get_tinfo2(ea_t ea, tinfo_t *tif);
-idaman bool ida_export set_tinfo2(ea_t ea, const tinfo_t *tif);
-inline void idaapi del_tinfo2(ea_t ea) { set_tinfo2(ea, NULL); }
+idaman bool ida_export get_tinfo(tinfo_t *tif, ea_t ea);
+idaman bool ida_export set_tinfo(ea_t ea, const tinfo_t *tif);
+inline void idaapi del_tinfo(ea_t ea) { set_tinfo(ea, NULL); }
 //@}
 
 /// \name Operand types
 /// These functions may be used if necessary.
 //@{
-idaman bool ida_export get_op_tinfo2(ea_t ea, int n, tinfo_t *tif);
-idaman bool ida_export set_op_tinfo2(ea_t ea, int n, const tinfo_t *tif);
-inline void idaapi del_tinfo2(ea_t ea, int n) { set_op_tinfo2(ea, n, NULL); }
+idaman bool ida_export get_op_tinfo(tinfo_t *tif, ea_t ea, int n);
+idaman bool ida_export set_op_tinfo(ea_t ea, int n, const tinfo_t *tif);
+inline void idaapi del_op_tinfo(ea_t ea, int n) { set_op_tinfo(ea, n, NULL); }
 //@}
 
 //------------------------------------------------------------------------//
@@ -975,16 +1122,15 @@ inline void idaapi del_tinfo2(ea_t ea, int n) { set_op_tinfo2(ea, n, NULL); }
 #define RIDX_DUALOP_TEXT          1301     ///< Text text representation options
 #define RIDX_MD5                  1302     ///< MD5 of the input file
 #define RIDX_IDA_VERSION          1303     ///< version of ida which created the database
-#define RIDX_AUTO_PLUGINS         1304     ///< comma separated list of plugins to run
-                                           ///< (immediately after opening the database).
-                                           ///< if a plugin specified here can not be
-                                           ///< loaded, the database can not be opened.
-                                           ///< debugger plugins automatically launch debugging.
 
 #define RIDX_STR_ENCODINGS        1305     ///< a list of encodings for the program strings
 #define RIDX_SRCDBG_PATHS         1306     ///< source debug paths, occupies 20 indexes
 #define RIDX_SELECTED_EXTLANG     1327     ///< last selected extlang name (from the execute script box)
 #define RIDX_DBG_BINPATHS         1328     ///< debug binary paths, occupies 20 indexes
+#define RIDX_SHA256               1349     ///< SHA256 of the input file
+#define RIDX_ABINAME              1350     ///< ABI name (processor specific)
+#define RIDX_ARCHIVE_PATH         1351     ///< archive file path
+#define RIDX_PROBLEMS             1352     ///< problem lists
 
 // altvals
 #define RIDX_ALT_VERSION        uval_t(-1) ///< initial version of database
@@ -994,6 +1140,7 @@ inline void idaapi del_tinfo2(ea_t ea, int n) { set_op_tinfo2(ea, n, NULL); }
 #define RIDX_ALT_CRC32          uval_t(-5) ///< input file crc32
 #define RIDX_ALT_IMAGEBASE      uval_t(-6) ///< image base
 #define RIDX_ALT_IDSNODE        uval_t(-7) ///< ids modnode id (for import_module)
+#define RIDX_ALT_FSIZE          uval_t(-8) ///< input file size
 //@}
 
 //--------------------------------------------------------------------------
@@ -1001,7 +1148,7 @@ inline void idaapi del_tinfo2(ea_t ea, int n) { set_op_tinfo2(ea, n, NULL); }
 
 inline ssize_t idaapi get_input_file_path(char *buf, size_t bufsize)
 {
-  return RootNode.valstr(buf, bufsize);
+  return root_node.valstr(buf, bufsize);
 }
 
 
@@ -1011,54 +1158,53 @@ idaman ssize_t ida_export get_root_filename(char *buf, size_t bufsize);
 
 /// Set full path of the input file
 
-inline void set_root_filename(const char *file) { RootNode.set(file); }
+inline void set_root_filename(const char *file) { root_node.set(file); }
+
+
+/// Get size of input file in bytes
+
+inline uint32 idaapi retrieve_input_file_size(void) { return uint32(root_node.altval(RIDX_ALT_FSIZE)); }
 
 
 /// Get input file crc32 stored in the database.
 /// it can be used to check that the input file has not been changed.
 
-inline uint32 idaapi retrieve_input_file_crc32(void) { return uint32(RootNode.altval(RIDX_ALT_CRC32)); }
-
+inline uint32 idaapi retrieve_input_file_crc32(void) { return uint32(root_node.altval(RIDX_ALT_CRC32)); }
 
 /// Get input file md5
 
-inline bool idaapi retrieve_input_file_md5(uchar hash[16]) { return RootNode.supval(RIDX_MD5, hash, 16) == 16; }
+inline bool idaapi retrieve_input_file_md5(uchar hash[16]) { return root_node.supval(RIDX_MD5, hash, 16) == 16; }
+
+/// Get input file sha256
+
+inline bool idaapi retrieve_input_file_sha256(uchar hash[32]) { return root_node.supval(RIDX_SHA256, hash, 32) == 32; }
 
 
 /// Get name of the include file
 
-inline ssize_t idaapi get_asm_inc_file(char *buf, size_t bufsize) { return RootNode.supstr(RIDX_INCLUDE, buf, bufsize); }
+inline ssize_t idaapi get_asm_inc_file(qstring *buf) { return root_node.supstr(buf, RIDX_INCLUDE); }
 
 /// Set name of the include file
 
-inline bool idaapi set_asm_inc_file(const char *file) { return RootNode.supset(RIDX_INCLUDE, file); }
+inline bool idaapi set_asm_inc_file(const char *file) { return root_node.supset(RIDX_INCLUDE, file); }
 
 
 /// Get image base address
 
-inline ea_t idaapi get_imagebase(void) { return RootNode.altval(RIDX_ALT_IMAGEBASE); }
+inline ea_t idaapi get_imagebase(void) { return root_node.altval(RIDX_ALT_IMAGEBASE); }
 
 /// Set image base address
 
-inline void idaapi set_imagebase(ea_t base) { RootNode.altset(RIDX_ALT_IMAGEBASE, base); }
+inline void idaapi set_imagebase(ea_t base) { root_node.altset(RIDX_ALT_IMAGEBASE, base); }
 
 
 /// Get ids modnode
 
-inline netnode idaapi get_ids_modnode(void) { return RootNode.altval(RIDX_ALT_IDSNODE); }
+inline netnode idaapi get_ids_modnode(void) { return root_node.altval(RIDX_ALT_IDSNODE); }
 
 /// Set ids modnode
 
-inline void idaapi set_ids_modnode(netnode id) { RootNode.altset(RIDX_ALT_IDSNODE, id); }
-
-
-/// Get auto plugins, works with comma separated list of plugins
-
-inline ssize_t idaapi get_auto_plugins(char *buf, size_t bufsize) { return RootNode.supstr(RIDX_AUTO_PLUGINS, buf, bufsize); }
-
-/// Set auto plugins, works with comma separated list of plugins
-
-inline bool idaapi set_auto_plugins(const char *list, size_t listsize=0) { return RootNode.supset(RIDX_AUTO_PLUGINS, list, listsize); }
+inline void idaapi set_ids_modnode(netnode id) { root_node.altset(RIDX_ALT_IDSNODE, id); }
 
 
 /// Get debugger input file name/path (see #LFLG_DBG_NOPATH)
@@ -1071,52 +1217,86 @@ inline ssize_t dbg_get_input_path(char *buf, size_t bufsize)
     return get_input_file_path(buf, bufsize);
 }
 
+inline ssize_t idaapi get_abi_name(qstring *buf) { return root_node.supstr(buf, RIDX_ABINAME); }
+
+
+/// Get archive file path from which input file was extracted
+
+inline ssize_t idaapi get_archive_path(qstring *buf) { return root_node.supstr(buf, RIDX_ARCHIVE_PATH); }
+
+/// Set archive file path from which input file was extracted
+
+inline bool idaapi set_archive_path(const char *file) { return root_node.supset(RIDX_ARCHIVE_PATH, file); }
+
+
 //------------------------------------------------------------------------//
 /// \name String encodings
 /// Encoding names can be a codepage names (CP1251, windows-1251),
 /// charset name (Shift-JIS, UTF-8), or just codepage number (866, 932).
-/// NB: not all platforms support all encodings
 /// user-accessible encodings are counted from 1
 /// (index 0 is reserved)
 //@{
 
 /// Get total number of encodings (counted from 0)
 
-idaman int          ida_export get_encodings_count();
+idaman int ida_export get_encoding_qty();
 
 
 /// Get encoding name for specific index (1-based).
 /// \return NULL if idx is out of bounds
 
-idaman const char * ida_export get_encoding_name(int idx);
+idaman const char *ida_export get_encoding_name(int idx);
 
 
-/// Add a new encoding (e.g. "utf-8").
+/// Add a new encoding (e.g. "UTF-8").
 /// \return its index (1-based)
 /// if it's already in the list, return its index
 
-idaman int          ida_export add_encoding(const char *encoding);
+idaman int ida_export add_encoding(const char *encoding);
 
 
 /// Delete an encoding (1-based)
 
-idaman bool         ida_export del_encoding(int idx);
+idaman bool ida_export del_encoding(int idx);
 
 
 /// Change name for an encoding (1-based)
 
-idaman bool         ida_export change_encoding_name(int idx, const char *encoding);
+idaman bool ida_export rename_encoding(int idx, const char *encoding);
 
+
+#define BPU_1B 1
+#define BPU_2B 2
+#define BPU_4B 4
+
+/// Get the amount of bytes per unit (e.g., 2 for UTF-16, 4 for UTF-32)
+/// for the encoding with the given index.
+///
+/// \param idx  the encoding index
+/// \return the number of bytes per units (1/2/4); -1 means error
+
+idaman int ida_export get_encoding_bpu(int idx);
+
+
+//-------------------------------------------------------------------------
+inline int get_strtype_bpu(int32 strtype)
+{
+  int w = get_str_type_code(strtype) & STRWIDTH_MASK;
+  return w == STRWIDTH_2B ? BPU_2B : (w == STRWIDTH_4B ? BPU_4B : BPU_1B);
+}
 
 /// Get default encoding index for a specific string type.
+/// \param bpu the amount of bytes per unit (e.g., 1 for ASCII, CP1252, UTF-8..., 2 for UTF-16, 4 for UTF-32)
 /// 0 means no specific encoding is set - byte values are displayed without conversion.
 
-idaman int          ida_export get_default_encoding_idx(int32 strtype);
+idaman int          ida_export get_default_encoding_idx(int bpu);
 
 /// set default encoding for a string type
+/// \param bpu the amount of bytes per unit
+/// \param idx  the encoding index
 /// idx can be 0 to disable encoding conversion
 
-idaman bool         ida_export set_default_encoding_idx(int32 strtype, int idx);
+idaman bool         ida_export set_default_encoding_idx(int bpu, int idx);
 
 
 /// Get encoding name for this strtype
@@ -1125,7 +1305,7 @@ inline const char *idaapi encoding_from_strtype(int32 strtype)
 {
   uchar enc = get_str_encoding_idx(strtype);
   if ( enc == 0 )
-    enc = get_default_encoding_idx(strtype);
+    enc = get_default_encoding_idx(get_strtype_bpu(strtype));
   return get_encoding_name(enc); // will return NULL if enc is 0
 }
 //@}
@@ -1143,7 +1323,7 @@ idaman uint ida_export get_import_module_qty();
 /// \retval true   ok
 /// \retval false  bad index
 
-idaman bool ida_export get_import_module_name(int mod_index, char *buf, size_t bufsize);
+idaman bool ida_export get_import_module_name(qstring *buf, int mod_index);
 
 
 /// Callback for enumerating imports.
@@ -1163,28 +1343,17 @@ typedef int idaapi import_enum_cb_t(ea_t ea, const char *name, uval_t ord, void 
 /// \retval other  callback return value (<=0)
 
 idaman int ida_export enum_import_names(int mod_index, import_enum_cb_t *callback, void *param=NULL);
+
+
+/// Delete all imported modules information
+
+idaman void ida_export delete_imports(void);
 //@}
 
 
 /// Check consistency of name records, return number of bad ones
 
 idaman int ida_export validate_idb_names();
-
-#ifndef NO_OBSOLETE_FUNCS
-#define SWI_SHIFT1      0x80    // use formula (element*2 + elbase)
-                                // to find jump targets (obsolete)
-NSUP_STRUCT(switch_info,NSUP_SWITCH)
-idaman DEPRECATED bool ida_export get_ti(ea_t ea, type_t *buf, size_t bufsize, p_list *fnames, size_t fnsize);
-idaman DEPRECATED bool ida_export set_ti(ea_t ea, const type_t *ti, const p_list *fnames); // see apply_type()
-inline DEPRECATED void idaapi del_ti(ea_t ea) { del_tinfo2(ea); }
-#define typeinfo_t opinfo_t
-idaman DEPRECATED bool ida_export get_op_tinfo(ea_t ea, int n, qtype *type, qtype *fnames);
-idaman DEPRECATED bool ida_export set_op_tinfo(ea_t ea, int n, const type_t *ti, const p_list *fnames);
-inline DEPRECATED void idaapi del_tinfo(ea_t ea, int n) { set_op_tinfo2(ea, n, NULL); }
-idaman DEPRECATED bool ida_export get_op_ti(ea_t ea, int n, type_t *buf, size_t bufsize, p_list *fnames, size_t fnsize);
-idaman DEPRECATED bool ida_export set_op_ti(ea_t ea, int n, const type_t *ti, const p_list *fnames);
-inline DEPRECATED void idaapi del_ti(ea_t ea, int n) { set_op_tinfo2(ea, n, NULL); }
-#endif
 
 #ifndef SWIG
 
@@ -1198,31 +1367,42 @@ extern netnode ignore_micro;
 #define IM_NONE   0     // regular instruction
 #define IM_PROLOG 1     // prolog instruction
 #define IM_EPILOG 2     // epilog instruction
-#define IM_SWITCH 3     // switch instruction
+#define IM_SWITCH 3     // switch instruction (the indirect jump should not be marked)
 
-inline void init_ignore_micro(void) { ignore_micro.create("$ ignore micro"); }
-inline void term_ignore_micro(void) { ignore_micro = BADNODE; }
-inline char get_ignore_micro(ea_t ea) { return ignore_micro.charval(ea, 0); }
-inline bool should_ignore_micro(ea_t ea) { return get_ignore_micro(ea) != IM_NONE; }
-inline void set_ignore_micro(ea_t ea, uchar im_type) { ignore_micro.charset(ea, im_type, 0); }
-inline void clr_ignore_micro(ea_t ea) { ignore_micro.chardel(ea, 0); }
-inline void mark_prolog_insn(ea_t ea) { set_ignore_micro(ea, IM_PROLOG); }
-inline void mark_epilog_insn(ea_t ea) { set_ignore_micro(ea, IM_EPILOG); }
-inline void mark_switch_insn(ea_t ea) { set_ignore_micro(ea, IM_SWITCH); }
-inline bool is_prolog_insn(ea_t ea) { return get_ignore_micro(ea) == IM_PROLOG; }
-inline bool is_epilog_insn(ea_t ea) { return get_ignore_micro(ea) == IM_EPILOG; }
-inline bool is_switch_insn(ea_t ea) { return get_ignore_micro(ea) == IM_SWITCH; }
-inline ea_t next_marked_insn(ea_t ea) { return ignore_micro.charnxt(ea, 0); }
+inline void init_ignore_micro(void)                  { ignore_micro.create("$ ignore micro"); }
+inline void term_ignore_micro(void)                  { ignore_micro = BADNODE; }
+inline char get_ignore_micro(ea_t ea)                { return ignore_micro.charval_ea(ea, 0); }
+inline void set_ignore_micro(ea_t ea, uchar im_type) { ignore_micro.charset_ea(ea, im_type, 0); }
+inline void clr_ignore_micro(ea_t ea)                { ignore_micro.chardel_ea(ea, 0); }
+inline ea_t next_marked_insn(ea_t ea)                { return node2ea(ignore_micro.charnext(ea2node(ea), 0)); }
+inline void mark_prolog_insn(ea_t ea)                { set_ignore_micro(ea, IM_PROLOG); }
+inline void mark_epilog_insn(ea_t ea)                { set_ignore_micro(ea, IM_EPILOG); }
+inline void mark_switch_insn(ea_t ea)                { set_ignore_micro(ea, IM_SWITCH); }
+inline bool is_prolog_insn(ea_t ea)                  { return get_ignore_micro(ea) == IM_PROLOG; }
+inline bool is_epilog_insn(ea_t ea)                  { return get_ignore_micro(ea) == IM_EPILOG; }
+inline bool is_switch_insn(ea_t ea)                  { return get_ignore_micro(ea) == IM_SWITCH; }
+inline bool should_ignore_micro(ea_t ea)             { return get_ignore_micro(ea) != IM_NONE; }
 //@}
 #endif // SWIG
 
+//--------------------------------------------------------------------------
+// Set address of .got section
+inline void set_gotea(ea_t gotea)
+{
+  netnode n;
+  n.create("$ got");
+  n.altset(0, ea2node(gotea)+1);
+}
+
+//--------------------------------------------------------------------------
+// Get address of .got section
+inline ea_t get_gotea(void)
+{
+  netnode n("$ got");
+  return exist(n) ? node2ea(n.altval(0) - 1) : BADADDR;
+}
 
 
-#if !defined(NO_OBSOLETE_FUNCS) || defined(VARLOCS_SOURCE)
-idaman DEPRECATED bool ida_export get_tinfo(ea_t ea, qtype *type, qtype *fields); // use get_tinfo2
-idaman DEPRECATED bool ida_export set_tinfo(ea_t ea, const type_t *ti, const p_list *fnames); // use set_tinfo2
-inline DEPRECATED void idaapi del_tinfo(ea_t ea) { set_tinfo2(ea, NULL); }
-#endif
 
 #ifndef BYTES_SOURCE    // undefined bit masks so no one can use them directly
 #undef AFL_LINNUM
@@ -1252,13 +1432,13 @@ inline DEPRECATED void idaapi del_tinfo(ea_t ea) { set_tinfo2(ea, NULL); }
 #undef NALT_ENUM
 #undef NALT_WIDE
 #undef NALT_SWITCH
-#undef NALT_STRUCT
+//#undef NALT_STRUCT
 #undef NALT_XREFPOS
 #undef NALT_AFLAGS
 #undef NALT_LINNUM
 #undef NALT_ABSBASE
-#undef NALT_ENUM0
-#undef NALT_ENUM1
+//#undef NALT_ENUM0
+//#undef NALT_ENUM1
 #undef NALT_PURGE
 #undef NALT_STRTYPE
 #undef NALT_ALIGN
@@ -1284,16 +1464,21 @@ inline DEPRECATED void idaapi del_tinfo(ea_t ea) { set_tinfo2(ea, NULL); }
 #undef NSUP_FOP4
 #undef NSUP_FOP5
 #undef NSUP_FOP6
+#undef NSUP_FOP7
+#undef NSUP_FOP8
 #undef NSUP_REF3
 #undef NSUP_REF4
 #undef NSUP_REF5
+#undef NSUP_REF6
+#undef NSUP_REF7
 #undef NSUP_OREF3
 #undef NSUP_OREF4
 #undef NSUP_OREF5
+#undef NSUP_OREF6
+#undef NSUP_OREF7
 #undef NSUP_MANUAL
 #undef NSUP_FTAILS
 #undef NSUP_GROUP
 #endif
 
-#pragma pack(pop)
 #endif // NALT_HPP

@@ -8,7 +8,8 @@
 #include <idp.hpp>
 #include "ins.hpp"
 
-instruc_t Instructions[] = {
+instruc_t Instructions[] =
+{
   { "",       0                       },  // Unknown Operation
 
   { "adc",    CF_USE2|CF_USE1|CF_CHG1 },  // Add with carry

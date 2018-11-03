@@ -30,16 +30,16 @@
 
 #include "../idaidp.hpp"
 #include "ins.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //------------------------------------------------------------------------
-// customization of cmd structure:
+// customization of insn_t structure:
 
 #define o_ind_mem   o_idpspec0      // @intmem
 #define o_ind_reg   o_idpspec1      // @Rx
 
 extern ea_t intmem;
-ea_t map_addr(asize_t off, int opnum, bool isdata);
+ea_t map_addr(const insn_t &insn, asize_t off, int opnum, bool isdata);
 
 //------------------------------------------------------------------------
 
@@ -68,7 +68,7 @@ struct predefined_t
 //------------------------------------------------------------------------
 inline uint16 get_rp(ea_t ea)
 {
-  sel_t t = get_segreg(ea, rRp);
+  sel_t t = get_sreg(ea, rRp);
   return t != BADSEL ? t : 0;
 }
 
@@ -76,18 +76,16 @@ inline uint16 get_rp(ea_t ea)
 
 const char *z8_find_ioport(uval_t port);
 
-void idaapi header( void );
-void idaapi footer( void );
+void idaapi z8_header(outctx_t &ctx);
+void idaapi z8_footer(outctx_t &ctx);
 
-void idaapi segstart( ea_t ea );
-void idaapi segend( ea_t ea );
+void idaapi z8_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi z8_segend(outctx_t &ctx, segment_t *seg);
 
-int  idaapi ana( void );
-int  idaapi emu( void );
-void idaapi out( void );
-bool idaapi outop( op_t &op );
+int  idaapi ana(insn_t *insn);
+int  idaapi emu(const insn_t &insn);
 
-void idaapi z8_data( ea_t ea );
-void idaapi z8_assumes( ea_t ea );
+void idaapi z8_data(outctx_t &ctx, bool analyze_only);
+void idaapi z8_assumes(outctx_t &ctx);
 
 #endif

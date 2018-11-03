@@ -13,6 +13,7 @@
 
 #include "../idaidp.hpp"
 #include "ins.hpp"
+#include <diskio.hpp>
 
 //---------------------------------
 // Operand types:
@@ -46,7 +47,7 @@ enum RegNo
 //------------------------------------------------------------------
 // I/O port definitions
 
-const char *find_port(ea_t address);
+const ioport_t *find_port(ea_t address);
 const char *find_bit(ea_t address, size_t bit);
 
 // memory configuration
@@ -56,23 +57,18 @@ extern uint32 romsize;
 extern uint32 eepromsize;
 extern ea_t ram;
 extern netnode helper;
-extern char device[];
+extern qstring device;
 
 //------------------------------------------------------------------
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi avr_header(outctx_t &ctx);
+void idaapi avr_footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);         // function to produce assume directives
+void idaapi avr_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi avr_segend(outctx_t &ctx, segment_t *seg);
+void idaapi avr_assumes(outctx_t &ctx);         // function to produce assume directives
 
-void idaapi out(void);
-int  idaapi outspec(ea_t ea,uchar segtype);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi ana(insn_t *_insn);
+int  idaapi emu(const insn_t &insn);
 
 int  idaapi is_align_insn(ea_t ea);
 

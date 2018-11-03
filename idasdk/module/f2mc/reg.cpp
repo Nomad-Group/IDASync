@@ -10,7 +10,7 @@
 #include <ctype.h>
 #include "f2mc.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 netnode helper;
 proctype_t ptype = F2MC16LX;
@@ -89,7 +89,6 @@ static const asm_t fasm =
   "Fujitsu FASM",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   ".org",       // org
   ".end",       // end
 
@@ -112,10 +111,6 @@ static const asm_t fasm =
   ".res.b %s",  // uninited arrays
   ".equ",       // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "$",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -139,9 +134,8 @@ static const asm_t fasm =
 static const asm_t *const asms[] = { &fasm, NULL };
 
 //--------------------------------------------------------------------------
-static ioport_t *ports = NULL;
-static size_t numports = 0;
-char device[MAXSTR] = "";
+static ioports_t ports;
+qstring device;
 static const char *cfgname = NULL;
 
 #define CUSTOM1 "FSR"
@@ -150,7 +144,7 @@ static const char *cfgname = NULL;
 //lint -esym(528,handle_area)
 #define AREA_PROCESSING handle_area
 #define callback handle_interrupt
-static const char *idaapi handle_interrupt(const ioport_t *, size_t, const char *line);
+static const char *idaapi handle_interrupt(const ioports_t &iop, const char *line);
 
 static bool handle_area(ea_t start, ea_t end, const char *name, const char *aclass)
 {
@@ -173,7 +167,7 @@ static bool handle_area(ea_t start, ea_t end, const char *name, const char *acla
 #include "../iocommon.cpp"
 
 //-------------------------------------------------------------------------
-static const char *idaapi handle_interrupt(const ioport_t *iop, size_t sz, const char *line)
+static const char *idaapi handle_interrupt(const ioports_t &iop, const char *line)
 {
   const char *ret = NULL;
   bool handled = false;
@@ -188,15 +182,15 @@ static const char *idaapi handle_interrupt(const ioport_t *iop, size_t sz, const
       ea_t proc;
       if ( s != NULL )
       {
-        doDwrd(ea1, 4);
-        proc = get_long(ea1);
+        create_dword(ea1, 4);
+        proc = get_dword(ea1);
         if ( proc != 0xFFFFFFFF )
         {
-          set_offset(ea1, 0, 0);
+          op_plain_offset(ea1, 0, 0);
           add_entry(proc, proc, word, true);
 
           const char *ptr = &line[len];
-          ptr = skipSpaces(ptr);
+          ptr = skip_spaces(ptr);
           if ( ptr[0] != '\0' )
             set_cmt(ea1, ptr, true);
 
@@ -206,7 +200,7 @@ static const char *idaapi handle_interrupt(const ioport_t *iop, size_t sz, const
     }
   }
   if ( !handled )
-    ret = standard_callback(iop, sz, line);
+    ret = standard_callback(iop, line);
   return ret;
 }
 
@@ -214,22 +208,23 @@ static void load_symbols(int _respect_info)
 {
   if ( cfgname != NULL )
   {
-    deviceparams[0] = '\0';
+    deviceparams.qclear();
     respect_info = _respect_info;
-    if ( !inf.like_binary() ) respect_info &= ~2;
-    free_ioports(ports, numports);
-    ports = read_ioports(&numports, cfgname, device, sizeof(device), callback);
+    if ( !inf.like_binary() )
+      respect_info &= ~2;
+    ports.clear();
+    read_ioports(&ports, &device, cfgname, callback);
     if ( respect_info )
     {
-      for ( int i=0; i < numports; i++ )
+      for ( int i=0; i < ports.size(); i++ )
       {
         ea_t ea = ports[i].address;
-        doByte(ea, 1);
-        const char *name = ports[i].name;
-        if ( !set_name(ea, name, SN_NOWARN) )
+        create_byte(ea, 1);
+        const char *name = ports[i].name.c_str();
+        if ( !set_name(ea, name, SN_NOCHECK|SN_NOWARN) )
           set_cmt(ea, name, 0);
         else
-          set_cmt(ea, ports[i].cmt, true);
+          set_cmt(ea, ports[i].cmt.c_str(), true);
       }
     }
   }
@@ -237,20 +232,14 @@ static void load_symbols(int _respect_info)
 
 const char *find_sym(ea_t address)
 {
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? port->name : NULL;
-}
-
-const ioport_bit_t *find_bits(ea_t address)
-{
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? (*port->bits) : NULL;
+  const ioport_t *port = find_ioport(ports, address);
+  return port ? port->name.c_str() : NULL;
 }
 
 const char *find_bit(ea_t address, int bit)
 {
-  const ioport_bit_t *b = find_ioport_bit(ports, numports, address, bit);
-  return b ? b->name : NULL;
+  const ioport_bit_t *b = find_ioport_bit(ports, address, bit);
+  return b ? b->name.c_str() : NULL;
 }
 
 //--------------------------------------------------------------------------
@@ -258,8 +247,7 @@ static void f2mc_set_device_name(const char *dev, int _respect_info)
 {
   if ( dev != NULL )
   {
-    if ( dev != device )
-      qstrncpy(device, dev, sizeof(device));
+    device = dev;
     helper.supset(0, dev);
   }
   load_symbols(_respect_info);
@@ -268,55 +256,64 @@ static void f2mc_set_device_name(const char *dev, int _respect_info)
 //-------------------------------------------------------------------------
 static void choose_and_set_device(int flags)
 {
-  if ( choose_ioport_device(cfgname, device, sizeof(device), parse_area_line0) )
-    f2mc_set_device_name(device, flags);
+  if ( choose_ioport_device(&device, cfgname, parse_area_line0) )
+    f2mc_set_device_name(device.c_str(), flags);
 }
 
 //--------------------------------------------------------------------------
-static void idaapi choose_device(TView *[],int)
+inline void choose_device()
 {
   choose_and_set_device(IORESP_PORT|IORESP_INT);
 }
 
+//--------------------------------------------------------------------------
+static int idaapi choose_device_cb(int, form_actions_t &)
+{
+  choose_device();
+  return 0;
+}
+
+//--------------------------------------------------------------------------
 static const char *idaapi set_idp_options(const char *keyword,int value_type,const void *value)
 {
   if ( keyword == NULL )
   {
     static const char form[] =
-"HELP\n"
-"F2MC specific options\n"
-"\n"
-" Use macro instructions\n"
-"\n"
-"       If this option is on, IDA will try to combine several instructions\n"
-"       into a macro instruction\n"
-"       For example,\n"
-"\n"
-"            sbbs    data:7, $1\n"
-"            bra     $2\n"
-"          $1:\n"
-"            jmp     LABEL\n"
-"          $2:\n"
-"\n"
-"       will be replaced by\n"
-"\n"
-"            sbbs16  data:7, LABEL\n"
-"\n"
-"ENDHELP\n"
-"F2MC specific options\n"
-"\n"
-" <Use ~m~acro instructions:C>>\n"
-"\n"
-" <~C~hoose device name:B:0::>\n"
-"\n"
-"\n";
-    AskUsingForm_c(form, &idpflags, choose_device);
+      "HELP\n"
+      "F2MC specific options\n"
+      "\n"
+      " Use macro instructions\n"
+      "\n"
+      "       If this option is on, IDA will try to combine several instructions\n"
+      "       into a macro instruction\n"
+      "       For example,\n"
+      "\n"
+      "            sbbs    data:7, $1\n"
+      "            bra     $2\n"
+      "          $1:\n"
+      "            jmp     LABEL\n"
+      "          $2:\n"
+      "\n"
+      "       will be replaced by\n"
+      "\n"
+      "            sbbs16  data:7, LABEL\n"
+      "\n"
+      "ENDHELP\n"
+      "F2MC specific options\n"
+      "\n"
+      " <Use ~m~acro instructions:C>>\n"
+      "\n"
+      " <~C~hoose device name:B:0::>\n"
+      "\n"
+      "\n";
+    ask_form(form, &idpflags, choose_device_cb);
     return IDPOPT_OK;
   }
   else
   {
-    if ( value_type != IDPOPT_BIT ) return IDPOPT_BADTYPE;
-    if ( strcmp(keyword, "F2MC_MACRO") == 0 )
+    if ( value_type != IDPOPT_BIT )
+      return IDPOPT_BADTYPE;
+    if ( streq(keyword, "F2MC_MACRO") )
     {
       setflag(idpflags, F2MC_MACRO, *(int*)value != 0);
       return IDPOPT_OK;
@@ -326,59 +323,55 @@ static const char *idaapi set_idp_options(const char *keyword,int value_type,con
 }
 
 //--------------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
 {
-  va_list va;
-  va_start(va, msgid);
+  switch ( code )
+  {
+    case idb_event::closebase:
+    case idb_event::savebase:
+      helper.altset(-1, idpflags);
+      break;
+  }
+  return 0;
+}
 
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
 //      __emit__(0xCC);   // debugger trap
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ f2mc");
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(0, buf, sizeof(buf)) > 0 )
-          f2mc_set_device_name(buf, IORESP_NONE);
-      }
-      inf.wide_high_byte_first = 1;
+      if ( helper.supstr(&device, 0) > 0 )
+        f2mc_set_device_name(device.c_str(), IORESP_NONE);
+      inf.set_wide_high_byte_first(true);
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
-    default:
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::newfile:   // new file loaded
+    case processor_t::ev_newfile:   // new file loaded
       set_segm_name(get_first_seg(), "CODE");
       choose_and_set_device(IORESP_ALL);
       for ( int i = DTB; i <= rVds; i++ )
       {
-        for ( segment_t *s=get_first_seg(); s != NULL; s=get_next_seg(s->startEA) )
-          set_default_segreg_value(s, i, 0);
+        for ( segment_t *s=get_first_seg(); s != NULL; s=get_next_seg(s->start_ea) )
+          set_default_sreg_value(s, i, 0);
       }
       break;
 
-    case processor_t::oldfile:   // old file loaded
+    case processor_t::ev_oldfile:   // old file loaded
       idpflags = (ushort)helper.altval(-1);
       break;
 
-    case processor_t::closebase:
-    case processor_t::savebase:
-      helper.altset(-1, idpflags);
-      break;
-
-    case processor_t::newprc:    // new processor type
+    case processor_t::ev_newprc:    // new processor type
       {
         ptype = ptypes[va_arg(va, int)];
+        // bool keep_cfg = va_argi(va, bool);
         switch ( ptype )
         {
           case F2MC16L:
@@ -391,21 +384,109 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
             error("interr: setprc");
             break;
         }
-        device[0] = '\0';
+        device.qclear();
         if ( get_first_seg() != NULL )
-          choose_device(NULL, 0);
+          choose_device();
       }
       break;
 
-    case processor_t::newasm:    // new assembler type
-      break;
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        f2mc_header(*ctx);
+        return 1;
+      }
 
-    case processor_t::newseg:    // new segment
-      break;
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        f2mc_footer(*ctx);
+        return 1;
+      }
 
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        f2mc_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        f2mc_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        f2mc_assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
+      break;
   }
-  va_end(va);
-  return 1;
+  return 0;
 }
 
 //-----------------------------------------------------------------------
@@ -427,11 +508,16 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_F2MC,                    // id
-  PRN_HEX | PR_SEGS | PR_SGROTHER,
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_F2MC,              // id
+                          // flag
+    PRN_HEX
+  | PR_SEGS
+  | PR_SGROTHER,
+                          // flag2
+  PR2_IDP_OPTS,           // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -440,31 +526,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  assumes,              // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  intel_data,           // generate ...                    data
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   DTB,                  // first. We don't start at PCB, because
                         // PCB == cs, and the way to get addresses
@@ -479,28 +542,13 @@ processor_t LPH =
 
   F2MC_null,
   F2MC_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 0, 0, 0 },       // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  is_sp_based,          // Check whether the operand is relative to stack pointer
-  create_func_frame,    // create frame of newly created function
-  NULL,                 // Get size of function return address in bytes
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   F2MC_ret,             // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

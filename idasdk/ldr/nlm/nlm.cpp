@@ -12,7 +12,7 @@
 #include "nlm.h"
 #include <typeinf.hpp>
 
-#pragma pack(push, 1)   // IDA uses 1 byte alignments!
+#pragma pack(push, 1)
 
 //--------------------------------------------------------------------------
 //
@@ -20,12 +20,13 @@
 //      and fill 'fileformatname'.
 //      otherwise return 0
 //
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
   char magic[NLM_MAGIC_SIZE];
-
-  if ( n != 0 )
-    return 0;
 
   if ( qlread(li, magic, sizeof(magic)) != sizeof(magic )
     || memcmp(magic, NLM_MAGIC, sizeof(magic)) != 0 )
@@ -33,9 +34,8 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
     return 0;
   }
 
-  qstrncpy(fileformatname,
-           "Netware Loadable Module (NLM)",
-           MAX_FILE_FORMAT_NAME);
+  *fileformatname = "Netware Loadable Module (NLM)";
+  *processor      = "metapc";
   return f_NLM;
 }
 
@@ -73,8 +73,12 @@ static int mread(void *buf, size_t size)
 {
   if ( qlread(lc.li, buf, size) == size )
     return 0;
-  if ( askyn_c(0, "HIDECANCEL\nRead error or bad file structure. Continue loading?") <= 0 )
+  if ( ask_yn(ASKBTN_NO,
+              "HIDECANCEL\n"
+              "Read error or bad file structure. Continue loading?") <= ASKBTN_NO )
+  {
     loader_failure();
+  }
   return 1;
 }
 
@@ -95,25 +99,20 @@ static int getstr(void)
 //----------------------------------------------------------------------
 static void set_reloc(ushort sel, ea_t fixaddr, ea_t toea, bool self_flag)
 {
-  fixup_data_t fdt;
-  sval_t displ = int32(get_long(fixaddr));
+  sval_t displ = int32(get_dword(fixaddr));
 
-  fdt.off          = toea;
-  fdt.sel          = sel;
-  fdt.type         = FIXUP_OFF32;
-  fdt.displacement = 0;
+  fixup_data_t fd(FIXUP_OFF32);
+  fd.off = toea;
+  fd.sel = sel;
   if ( sel == 3 )
   {
-    fdt.type |= FIXUP_EXTDEF;
-    fdt.displacement = displ;
+    fd.set_extdef();
+    fd.displacement = displ;
   }
   if ( self_flag )
-  {
-    fdt.type |=  FIXUP_SELFREL;
     toea -= fixaddr;
-  }
-  put_long(fixaddr, uint32(toea + displ));
-  set_fixup(fixaddr, &fdt);
+  put_dword(fixaddr, uint32(toea + displ));
+  fd.set(fixaddr);
 }
 
 //----------------------------------------------------------------------
@@ -127,40 +126,46 @@ static void add_imports(void)
   qlseek(lc.li, lc.nlm.impoff, SEEK_SET);
   ea_t ebase = lc.start;
   ea_t eend  = ebase + (i * sizeof(int32));
-  uint32 fsize = qlsize(lc.li);
+  uint64 fsize = qlsize(lc.li);
   if ( lc.nlm.impoff >= fsize )
     loader_failure("Bad import offset");
-  uint32 rest = fsize - lc.nlm.impoff;
+  uint64 rest = fsize - lc.nlm.impoff;
   if ( !is_mul_ok<uint32>(i, sizeof(int32))
     || eend <= ebase
-    || i*2 > rest ) // each name requires at least 2 bytes
+    || qoff64_t(i)*2 > rest ) // each name requires at least 2 bytes
   {
     loader_failure("Bad import count");
   }
 
   set_selector(3, 0);
-  if ( !add_segm(3, ebase, eend, NAME_EXTERN, NULL) )
-    loader_failure();
+  if ( add_segm(3, ebase, eend, NAME_EXTERN, NULL) )
   {
     segment_t *ps = getseg(ebase);
     ps->type = SEG_XTRN;
     ps->update();
   }
+  else
+  {
+    loader_failure();
+  }
 
-  for( ; i; i--, ebase += sizeof(int32) )
+  for ( ; i; i--, ebase += inf.specsegs )
   {
     if ( getstr() )
       break;
-    showAddr(ebase);
-    set_name(ebase, lc.buf, SN_NOCHECK | SN_PUBLIC);
-    put_long(ebase, 0);
+    show_addr(ebase);
+    set_name(ebase, lc.buf, SN_NOCHECK | SN_PUBLIC | SN_IDBENC);
+    if ( inf.specsegs == 8 )
+      put_qword(ebase, 0);
+    else
+      put_dword(ebase, 0);
     if ( lc.impnode )
-      netnode(lc.impnode).supset(ebase, lc.buf);
+      netnode(lc.impnode).supset_ea(ebase, lc.buf);
     uint32 fnum;
     if ( mread(&fnum, sizeof(fnum)) )
     {
 FORCE_END:
-      if ( (ebase += sizeof(int32)) < eend )
+      if ( (ebase += inf.specsegs) < eend )
         set_segm_end(ebase, ebase, SEGMOD_KILL);
       return;
     }
@@ -194,7 +199,7 @@ FORCE_END:
         if ( sff == 0 && self )
         {
           ++sff;
-          add_func(ebase, ebase+3);
+          add_func(ebase, ebase+inf.specsegs-1);
         }
       }
     }
@@ -300,7 +305,7 @@ static void add_exports_and_publics(void)
       else
       {
         ea += base;
-        add_entry(ea, ea, lc.buf, flag);
+        add_entry(ea, ea, lc.buf, flag, AEF_IDBENC);
       }
     }
   }
@@ -343,7 +348,8 @@ static int LoadMsgString(void)
 static uint32 addSpecialComment(void)
 {
   uchar vp = 0, cp = 0;
-  uint32 mp = 0, pos = qltell(lc.li);
+  uint32 mp = 0;
+  qoff64_t pos = qltell(lc.li);
   ea_t loadbase = lc.nlm.codeoff;
   if ( lc.nlm.datalen && loadbase > lc.nlm.dataoff )
     loadbase = lc.nlm.dataoff;
@@ -374,7 +380,8 @@ static uint32 addSpecialComment(void)
       add_pgm_cmt("Version                : %s", &lc.buf[32]);
       goto check;
     }
-    if ( !cp && !memcmp(lc.buf, "CoPyRiGhT=", 10) ) {
+    if ( !cp && !memcmp(lc.buf, "CoPyRiGhT=", 10) )
+    {
       pos += 10;
       pos += (uchar)lc.buf[10];
       qlseek(lc.li, -2L, SEEK_CUR);
@@ -404,15 +411,16 @@ repos:
 static void addComments(int flg)
 {
   uint32 clst = (uint32)-1, msgpos = 0;
-  char  *cl1 = NULL, *cl2 = NULL;
+  char *cl1 = NULL;
+  char *cl2 = NULL;
 
   create_filename_cmt();
   qlseek(lc.li, NLM_MODNAMOFF, SEEK_SET);
   if ( lc.nlm.fname[0] )
-    add_pgm_cmt(  "Module Name            : %.12s", lc.nlm.fname);
+    add_pgm_cmt("Module Name            : %.12s", lc.nlm.fname);
   if ( !getstr() )
   {
-    add_pgm_cmt(  "Description            : %s", lc.buf);
+    add_pgm_cmt("Description            : %s", lc.buf);
     qlseek(lc.li, 1, SEEK_CUR);
     if ( mread(&clst, sizeof(clst)) )
     {
@@ -433,7 +441,7 @@ static void addComments(int flg)
       }
     }
   }
-  add_pgm_cmt(  "File Format Version    : %08Xh%s", lc.nlm.version,
+  add_pgm_cmt("File Format Version    : %08Xh%s", lc.nlm.version,
               (lc.nlm.version & NLM_COMPRESSED) ? " (compressed)" : "");
   {
     static const char *const tt[15] =
@@ -457,12 +465,12 @@ static void addComments(int flg)
     int type = (int)lc.nlm.modType;
     if ( lc.nlm.modType > 14 )
       type = 14;
-    add_pgm_cmt(  "Module type            : %s (%d)", tt[type], type);
+    add_pgm_cmt("Module type            : %s (%d)", tt[type], type);
   }
   if ( lc.nlm.bssSize )
-    add_pgm_cmt(  "Unitialized data size  : %08Xh", lc.nlm.bssSize);
+    add_pgm_cmt("Unitialized data size  : %08Xh", lc.nlm.bssSize);
   if ( lc.nlm.custoff && lc.nlm.custlen )
-    add_pgm_cmt(  "Custom data            : off=%08Xh len=%08Xh",
+    add_pgm_cmt("Custom data            : off=%08Xh len=%08Xh",
                                             lc.nlm.custoff, lc.nlm.custlen);
   lc.buf[0]= '\0';
   if ( lc.nlm.flags )
@@ -494,12 +502,13 @@ static void addComments(int flg)
     }
     if ( cn )
       APPCHAR(ptr, end, ')');
-    else   ptr = lc.buf;
+    else
+      ptr = lc.buf;
     APPZERO(ptr, end);
   }
-  add_pgm_cmt(    "Flags                  : %08Xh%s", lc.nlm.flags, lc.buf);
+  add_pgm_cmt("Flags                  : %08Xh%s", lc.nlm.flags, lc.buf);
   if ( clst != (uint32)-1 )
-    add_pgm_cmt(  "CLIB Stack Size        : %08Xh", clst);
+    add_pgm_cmt("CLIB Stack Size        : %08Xh", clst);
   if ( cl1 )
   {
     if ( *cl1 )
@@ -546,37 +555,37 @@ static void addComments(int flg)
 
   uint32 id = *(uint32 *)&lc.buf[0x60-8];
   if ( id )
-    add_pgm_cmt(  "Product ID             : %08Xh", id);
+    add_pgm_cmt("Product ID             : %08Xh", id);
   id = *(uint32 *)&lc.buf[0];
   if ( id )
-    add_pgm_cmt(  "Language ID            : %u", id);
+    add_pgm_cmt("Language ID            : %u", id);
   id = *(uint32 *)&lc.buf[0x34-8];
   if ( id )
-    add_pgm_cmt(  "Shared Data            : off=%08Xh, size=%08Xh",
+    add_pgm_cmt("Shared Data            : off=%08Xh, size=%08Xh",
                                               *(uint32 *)&lc.buf[0x30-8], id);
   id = *(uint32 *)&lc.buf[0x2C-8];
   if ( id )
   {
-    add_pgm_cmt(  "Shared Code            : off=%08Xh, size=%08Xh",
+    add_pgm_cmt("Shared Code            : off=%08Xh, size=%08Xh",
                                             *(uint32 *)&lc.buf[0x28-8], id);
-    add_pgm_cmt(  "Shared Start Procedure : off=%08Xh",
+    add_pgm_cmt("Shared Start Procedure : off=%08Xh",
                                               *(uint32 *)&lc.buf[0x58-8]);
-    add_pgm_cmt(  "Shared Exit Procedure  : off=%08Xh",
+    add_pgm_cmt("Shared Exit Procedure  : off=%08Xh",
                                               *(uint32 *)&lc.buf[0x5C-8]);
   }
   id = *(uint32 *)&lc.buf[0x1C-8];
   if ( id )
-    add_pgm_cmt(  "Help                   : off=%08Xh, size=%08Xh",
+    add_pgm_cmt("Help                   : off=%08Xh, size=%08Xh",
                                               *(uint32 *)&lc.buf[0x18-8], id);
   id = *(uint32 *)&lc.buf[0x24-8];
   if ( id )
-    add_pgm_cmt(  "RPC & BAG              : off=%08Xh, size=%08Xh",
+    add_pgm_cmt("RPC & BAG              : off=%08Xh, size=%08Xh",
                                             *(uint32 *)&lc.buf[0x20-8], id);
   id = *(uint32 *)&lc.buf[0x10-8];
 
   if ( id )
   {
-    add_pgm_cmt(  "Message                : off=%08Xh, size=%08Xh",
+    add_pgm_cmt("Message                : off=%08Xh, size=%08Xh",
                                     msgpos = *(uint32 *)&lc.buf[0xC-8], id);
 
     if ( !flg )
@@ -587,11 +596,11 @@ static void addComments(int flg)
     if ( mread(&mlng, sizeof(mlng)) || mread(&mcnt, sizeof(mcnt)) )
       return;
 
-    add_pgm_cmt(  "Message Language       : %08Xh", mlng);
+    add_pgm_cmt("Message Language       : %08Xh", mlng);
     msgpos += 0x76;
     for ( clst = 0; clst < mcnt; clst++ )
     {
-      qlseek(lc.li, msgpos + clst*4, SEEK_SET);
+      qlseek(lc.li, msgpos + qoff64_t(clst)*4, SEEK_SET);
       if ( mread(&mlng, sizeof(mlng)) )
         break;
       qlseek(lc.li, msgpos + mlng, SEEK_SET);
@@ -612,7 +621,7 @@ static void load_image(void)
   uint32 lend = 0;
   uint32 addbss = 0;
 
-  uint32 off = lc.nlm.codeoff;
+  qoff64_t off = lc.nlm.codeoff;
   if ( off != 0 )
   {
     lend = lc.nlm.codelen;
@@ -626,11 +635,12 @@ static void load_image(void)
   {
     const char *pn, *pc;
     segment_t s;
-    s.endEA   = s.startEA = lc.start;
-    s.align   = saRel4K;
-    s.bitness = 1;
-    s.comb    = scPub;
-    s.sel     = i;
+    s.start_ea = lc.start;
+    s.end_ea   = lc.start;
+    s.align    = saRel4K;
+    s.bitness  = 1;
+    s.comb     = scPub;
+    s.sel      = i;
     if ( i == 1 )
     {
       s.type  = SEG_CODE;
@@ -658,21 +668,21 @@ static void load_image(void)
     }
     if ( lend == 0 && !addbss )
     {
-      s.type  = SEG_NULL;
+      s.type = SEG_NULL;
       lc.start += 0x1000;
     }
     else
     {
       if ( lend != 0 )
       {
-        s.endEA += lend;
-        uint32 fsize = qlsize(lc.li);
-        if ( s.endEA < s.startEA || off > fsize || s.size() > fsize-off )
+        s.end_ea += lend;
+        uint64 fsize = qlsize(lc.li);
+        if ( s.end_ea < s.start_ea || off > fsize || s.size() > fsize-off )
           loader_failure("Truncated input file");
-        file2base(lc.li, off, s.startEA, s.endEA, FILEREG_PATCHABLE);
+        file2base(lc.li, off, s.start_ea, s.end_ea, FILEREG_PATCHABLE);
       }
-      s.endEA += addbss;
-      lc.start = (s.endEA + 0xFFF) & ~0xFFF;
+      s.end_ea += addbss;
+      lc.start = (s.end_ea + 0xFFF) & ~0xFFF;
     }
     set_selector(s.sel, 0);
     if ( !add_segm_ex(&s, pn, pc, ADDSEG_NOSREG | ADDSEG_SPARSE) )
@@ -693,17 +703,16 @@ static void Unpack(void);
 //
 void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname*/)
 {
-  add_til2("nlm", ADDTIL_DEFAULT);
-  if ( ph.id != PLFM_386 )
-    set_processor_type("80386r", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("metapc", SETPROC_LOADER);
+  add_til("nlm", ADDTIL_DEFAULT);
   inf.lflags |= LFLG_PC_FLAT;
 
   if ( qlread(lc.li = li, &lc.nlm, sizeof(lc.nlm)) != sizeof(lc.nlm) )
     errstruct();
-  if ( lc.nlm.version & NLM_COMPRESSED)
+  if ( lc.nlm.version & NLM_COMPRESSED )
     Unpack();
 
-  lc.start = toEA(inf.baseaddr, 0);
+  lc.start = to_ea(inf.baseaddr, 0);
   memset(&lc.cbase, 0, sizeof(local_data) - qoffsetof(local_data, cbase));
 
   load_image();
@@ -713,7 +722,7 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
   {
     uval_t bip = lc.cbase + lc.nlm.startIP;
     inf.start_cs = 1;
-    inf.startIP = bip;
+    inf.start_ip = bip;
     add_entry(bip, bip, "nlm_start", 1);
   }
   if ( (lc.nlm.endIP || lc.nlm.startIP) && lc.nlm.endIP < lc.csize )
@@ -730,8 +739,8 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
 //  inf.nametype   =  NM_EA;
 //  inf.s_prefflag &= ~PREF_SEGADR;
 //  inf.start_ss = BADSEL;
-//  inf.startSP = BADADDR;
-  inf.specsegs = 1; //4-byte format of extrn/abs/common
+//  inf.start_sp = BADADDR;
+  inf.specsegs = inf.is_64bit() ? 8 : 4;
 
   add_imports();
   add_exports_and_publics();
@@ -739,12 +748,12 @@ void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname
   addComments(neflag & NEF_RSCS);
   if ( lc.impnode )
     import_module("nlm_root", NULL, lc.impnode, NULL, "netware");
-  inf.lowoff = inf.minEA;
+  inf.lowoff = inf.min_ea;
 
   if ( lc.li != li )
     close_linput(lc.li);  // close & delete tmp (unpack) file
 
-  split_srarea(inf.beginEA, ph.regDataSreg, 2, SR_autostart, true);
+  split_sreg_range(inf.start_ea, ph.reg_data_sreg, 2, SR_autostart, true);
 }
 
 //----------------------------------------------------------------------
@@ -772,7 +781,8 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };
 
 //===============unpack=====================================================
@@ -796,9 +806,11 @@ static void Unpack(void)
 
   if ( qlread(lc.li, lc.buf, 0x196-sizeof(lc.nlm)) != (0x196-sizeof(lc.nlm)) )
     errstruct();
-  if ( lc.buf[0x190 - sizeof(lc.nlm )] != 1  ||
-     lc.buf[0x191 - sizeof(lc.nlm)] != 10)
-                                    loader_failure("Unknown compressing method");
+  if ( lc.buf[0x190 - sizeof(lc.nlm )] != 1
+    || lc.buf[0x191 - sizeof(lc.nlm)] != 10 )
+  {
+    loader_failure("Unknown compressing method");
+  }
   if ( (fsize = *((uint32 *)&lc.buf[0x192 - sizeof(lc.nlm)])) <= 0x190 )
     errstruct();
 
@@ -829,11 +841,11 @@ static void Unpack(void)
 //=========================================================================
 struct record
 {
-  record   *left;
+  record *left;
   union
   {
     record *right;
-    uchar  data;
+    uchar data;
   };
 };
 
@@ -850,7 +862,7 @@ static void putUnpByte(uchar data)
 //=====================================================================
 static void putUnpRepeatBlk(ushort off, ushort sizeBlk)
 {
-  if ( !off || !sizeBlk || (uint32)off >= lc.unp.pos)
+  if ( !off || !sizeBlk || (uint32)off >= lc.unp.pos )
     errstruct();
   int pos = lc.unp.b_pos - off;
   if ( pos < 0 )
@@ -964,7 +976,7 @@ static void unp_process(void)
       continue;
     }
     ushort data = extractByte(rKey);
-    switch( data )
+    switch ( data )
     {
       case 255:
         {
@@ -987,6 +999,7 @@ static void unp_process(void)
 
       case 254:
         data = getNbit(13);
+        // fallthrough
       default:
         {
           ushort off = getNbit(5);

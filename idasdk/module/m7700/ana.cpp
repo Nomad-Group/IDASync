@@ -242,13 +242,13 @@ static const struct opcode opcodes_7700[] =
   // LDT
   { m7700_ldt,       0x89C2, A_IMM                           },
   // LDX
-  { m7700_ldx,       0xA2  , A_IMM                           },
+  { m7700_ldx,       0xA2,   A_IMM                           },
   { m7700_ldx,       0xA6,   A_DIR                           },
   { m7700_ldx,       0xB6,   A_DIR_IND_Y                     },
   { m7700_ldx,       0xAE,   A_ABS                           },
   { m7700_ldx,       0xBE,   A_ABS_IND_Y                     },
   // LDY
-  { m7700_ldy,       0xA0  , A_IMM                           },
+  { m7700_ldy,       0xA0,   A_IMM                           },
   { m7700_ldy,       0xA4,   A_DIR                           },
   { m7700_ldy,       0xB4,   A_DIR_IND_X                     },
   { m7700_ldy,       0xAC,   A_ABS                           },
@@ -554,9 +554,9 @@ static const struct opcode_flag opcodes_flags[] =
 
 static bool with_acc_b = false;
 
-static bool with_acc(void)
+static bool with_acc(const insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case m7700_adc:
     case m7700_and:
@@ -571,13 +571,13 @@ static bool with_acc(void)
   return false;
 }
 
-static bool imm_read_another_byte(void)
+static bool imm_read_another_byte(const insn_t &insn)
 {
-  bool m16 = get_segreg(cmd.ea, rfM) == 0;
-  bool x16 = get_segreg(cmd.ea, rfX) == 0;
+  bool m16 = get_sreg(insn.ea, rfM) == 0;
+  bool x16 = get_sreg(insn.ea, rfX) == 0;
 
   // if insn are using X flag and this flag is set to 0
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case m7700_cpx:
     case m7700_cpy:
@@ -588,7 +588,7 @@ static bool imm_read_another_byte(void)
   }
 
   // if insn is not using M flag
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case m7700_clp:
     case m7700_ldt:
@@ -611,16 +611,16 @@ inline static void set_flag(op_t &x, int flag)
   x.specflag1 |= flag;
 }
 
-inline static void set_flag(int flag)
+inline static void set_flag(insn_t &insn, int flag)
 {
-  cmd.auxpref |= flag;
+  insn.auxpref |= flag;
 }
 
 inline static void set_op_reg(op_t &op, uint16 reg)
 {
   op.type = o_reg;
   op.reg = reg;
-  op.dtyp = dt_word; // XXX not sure
+  op.dtype = dt_word; // XXX not sure
 }
 
 // shortcuts
@@ -629,86 +629,86 @@ inline static void set_op_reg(op_t &op, uint16 reg)
 //#define set_op_ind_x(op)     set_op_reg(op, rX)
 #define set_op_ind_y(op)     set_op_reg(op, rY)
 
-static uint16 my_next_word()
+static uint16 my_next_word(insn_t &insn)
 {
-  uchar b1 = ua_next_byte();
-  uchar b2 = ua_next_byte();
+  uchar b1 = insn.get_next_byte();
+  uchar b2 = insn.get_next_byte();
   return b1 | (b2 << 8);
 }
 
-static uint32 my_next_3bytes()
+static uint32 my_next_3bytes(insn_t &insn)
 {
-  uchar b1 = ua_next_byte();
-  uchar b2 = ua_next_byte();
-  uchar b3 = ua_next_byte();
+  uchar b1 = insn.get_next_byte();
+  uchar b2 = insn.get_next_byte();
+  uchar b3 = insn.get_next_byte();
   return b1 | (b2 << 8) | (b3 << 16);
 }
 
-inline static int d_typ2addr (char d_typ)
+inline static int d_typ2addr(insn_t &insn, char d_typ)
 {
   switch ( d_typ )
   {
     default:
       INTERR(10026);
-    case dt_byte:  return ua_next_byte();
-    case dt_word:  return my_next_word();
+    case dt_byte:  return insn.get_next_byte();
+    case dt_word:  return my_next_word(insn);
 
     // special case: dt_dword is 3 bytes long here
-    case dt_dword: return my_next_3bytes();
+    case dt_dword: return my_next_3bytes(insn);
   }
 }
 
-inline static void set_op_imm(op_t &op, char d_typ)
+inline static void set_op_imm(insn_t &insn, op_t &op, char d_typ)
 {
   op.type = o_imm;
-  op.value = d_typ2addr(d_typ);
-  op.dtyp = d_typ;
+  op.value = d_typ2addr(insn, d_typ);
+  op.dtype = d_typ;
   // when operating on 16-bit data in immediate addressing
   // mode with data lenght selection flag set to 0, the
   // bytes-count increases by 1
-  if ( imm_read_another_byte() )
+  if ( imm_read_another_byte(insn) )
   {
-    op.value |= ua_next_byte() << 8;
-    op.dtyp = dt_word;
+    op.value |= insn.get_next_byte() << 8;
+    op.dtype = dt_word;
   }
 }
 
-inline static void set_op_bit(op_t &op)
+inline static void set_op_bit(insn_t &insn, op_t &op)
 {
-  set_op_imm(op, dt_byte);
+  set_op_imm(insn, op, dt_byte);
   op.type = o_bit;
 }
 
-inline static void set_op_addr(op_t &op, char d_typ)
+inline static void set_op_addr(insn_t &insn, op_t &op, char d_typ)
 {
   op.type = o_near;
-  op.dtyp = with_acc() ? dt_word : d_typ;
-  op.addr = d_typ2addr(d_typ);
+  op.dtype = with_acc(insn) ? dt_word : d_typ;
+  op.addr = d_typ2addr(insn, d_typ);
 }
 
-inline static void set_op_mem(op_t &op, char d_typ, int flags)
+inline static void set_op_mem(insn_t &insn, op_t &op, char d_typ, int flags)
 {
   op.type = o_mem;
-  op.dtyp = with_acc() ? dt_word : d_typ;
-  op.addr = d_typ2addr(d_typ);
+  op.dtype = with_acc(insn) ? dt_word : d_typ;
+  op.addr = d_typ2addr(insn, d_typ);
   set_flag(op, flags);
 }
 
-inline static void set_op_displ(op_t &op, char d_typ, uint16 reg)
+inline static void set_op_displ(insn_t &insn, op_t &op, char d_typ, uint16 reg)
 {
   op.type = o_displ;
-  op.dtyp = with_acc() ? dt_word : d_typ;
-  op.addr = d_typ2addr(d_typ);
+  op.dtype = with_acc(insn) ? dt_word : d_typ;
+  op.addr = d_typ2addr(insn, d_typ);
   op.reg = reg;
 }
 
-#define x       cmd.Operands[n]
-#define next_x  cmd.Operands[n + 1]
+#define x       insn.ops[n]
+#define next_x  insn.ops[n + 1]
 
 // get an opcode flags struct from insn
 static int get_opcode_flags(const int insn)
 {
-  for (int i = 0; i < qnumber(opcodes_flags); i++)
+  for ( int i = 0; i < qnumber(opcodes_flags); i++ )
   {
     if ( opcodes_flags[i].insn != insn )
       continue;
@@ -718,35 +718,35 @@ static int get_opcode_flags(const int insn)
   return 0;
 }
 
-static inline bool is_jmp(void)
+static inline bool is_jmp(const insn_t &insn)
 {
-  return cmd.itype == m7700_jmp || cmd.itype == m7700_jsr;
+  return insn.itype == m7700_jmp || insn.itype == m7700_jsr;
 }
 
-static void set_op_mem_dr_rel(op_t &op)
+static void set_op_mem_dr_rel(const insn_t &insn, op_t &op)
 {
-  sel_t s = get_segreg(cmd.ea, rDR);
+  sel_t s = get_sreg(insn.ea, rDR);
   // if the value of the DR register is known,
   // we can compute the absolute address
   if ( s != BADSEL )
   {
     op.addr += s;
     // set operand type according to the M bit
-    bool m16 = get_segreg(cmd.ea, rfM) == 0;
-    op.dtyp = m16 ? dt_word : dt_byte;
+    bool m16 = get_sreg(insn.ea, rfM) == 0;
+    op.dtype = m16 ? dt_word : dt_byte;
   }
   set_flag(op, OP_ADDR_DR_REL);
 }
 
-// fill cmd struct according to the specified addressing mode
-static void fill_cmd(m7700_addr_mode_t mode)
+// fill insn struct according to the specified addressing mode
+static void fill_insn(insn_t &insn, m7700_addr_mode_t mode)
 {
   int n = 0;      // current operand
-  const int curflags = get_opcode_flags(cmd.itype); // current flags
+  const int curflags = get_opcode_flags(insn.itype); // current flags
 
   // if the first operand should be an accumulator (either A or B),
-  // just fill accordingly the cmd structure
-  if ( with_acc() )
+  // just fill accordingly the insn structure
+  if ( with_acc(insn) )
   {
     if ( with_acc_b )
       set_op_acc_b(x);
@@ -757,7 +757,8 @@ static void fill_cmd(m7700_addr_mode_t mode)
 
   // the LDM instruction operands are always preceded by an immediate value,
   // but this immediate value is always at the end of the operation code.
-  if ( cmd.itype == m7700_ldm ) { n++; }
+  if ( insn.itype == m7700_ldm )
+    n++;
 
   switch ( mode )
   {
@@ -766,7 +767,7 @@ static void fill_cmd(m7700_addr_mode_t mode)
       break;
 
     case A_IMM:                  // immediate
-      set_op_imm(x, dt_byte);
+      set_op_imm(insn, x, dt_byte);
       break;
 
     case A_ACC_A:                // accumulator A
@@ -778,106 +779,106 @@ static void fill_cmd(m7700_addr_mode_t mode)
       break;
 
     case A_DIR:                  // direct
-      set_op_mem(x, dt_byte, curflags);
-      set_op_mem_dr_rel(x);
+      set_op_mem(insn, x, dt_byte, curflags);
+      set_op_mem_dr_rel(insn, x);
       break;
 
     case A_DIR_BIT:              // direct bit
-      set_op_mem(next_x, dt_byte, curflags);
-      set_op_mem_dr_rel(next_x);
-      set_op_bit(x);
+      set_op_mem(insn, next_x, dt_byte, curflags);
+      set_op_mem_dr_rel(insn, next_x);
+      set_op_bit(insn, x);
       break;
 
     case A_DIR_IND_X:            // direct indexed X
-      set_op_displ(x, dt_byte, rX);
-      set_op_mem_dr_rel(x);
+      set_op_displ(insn, x, dt_byte, rX);
+      set_op_mem_dr_rel(insn, x);
       break;
 
     case A_DIR_IND_Y:            // direct indexed Y
-      set_op_displ(x, dt_byte, rY);
-      set_op_mem_dr_rel(x);
+      set_op_displ(insn, x, dt_byte, rY);
+      set_op_mem_dr_rel(insn, x);
       break;
 
     case A_DIR_INDI:             // direct indirect
-      set_op_mem(x, dt_byte, curflags);
+      set_op_mem(insn, x, dt_byte, curflags);
       set_flag(x, OP_ADDR_IND);
-      set_op_mem_dr_rel(x);
+      set_op_mem_dr_rel(insn, x);
       break;
 
     case A_DIR_IND_X_INDI:       // direct indexed X indirect
-      set_op_displ(x, dt_byte, rX);
+      set_op_displ(insn, x, dt_byte, rX);
       set_flag(x, OP_DISPL_IND);
-      set_op_mem_dr_rel(x);
+      set_op_mem_dr_rel(insn, x);
       break;
 
     case A_DIR_INDI_IND_Y:       // direct indirect indexed Y
-      set_op_displ(x, dt_byte, rY);
+      set_op_displ(insn, x, dt_byte, rY);
       set_flag(x, OP_DISPL_IND_P1);
-      set_op_mem_dr_rel(x);
+      set_op_mem_dr_rel(insn, x);
       break;
 
     case A_DIR_INDI_LONG:         // direct indirect long
-      set_op_mem(x, dt_byte, curflags);
+      set_op_mem(insn, x, dt_byte, curflags);
       set_flag(x, OP_ADDR_IND);
-      set_op_mem_dr_rel(x);
-      set_flag(INSN_LONG_FORMAT);
+      set_op_mem_dr_rel(insn, x);
+      set_flag(insn, INSN_LONG_FORMAT);
       break;
 
     case A_DIR_INDI_LONG_IND_Y:   // direct indirect long indexed Y
-      set_op_displ(x, dt_byte, rY);
+      set_op_displ(insn, x, dt_byte, rY);
       set_flag(x, OP_DISPL_IND_P1);
-      set_op_mem_dr_rel(x);
-      set_flag(INSN_LONG_FORMAT);
+      set_op_mem_dr_rel(insn, x);
+      set_flag(insn, INSN_LONG_FORMAT);
       break;
 
     case A_ABS:                  // absolute
-      if ( is_jmp() )
-          set_op_addr(x, dt_word);
+      if ( is_jmp(insn) )
+          set_op_addr(insn, x, dt_word);
       else
-          set_op_mem(x, dt_word, curflags);
+          set_op_mem(insn, x, dt_word, curflags);
       break;
 
     case A_ABS_BIT:              // absolute bit
-      set_op_mem(next_x, dt_word, curflags);
-      set_op_bit(x);
+      set_op_mem(insn, next_x, dt_word, curflags);
+      set_op_bit(insn, x);
       break;
 
     case A_ABS_IND_X:            // absolute indexed X
-      set_op_displ(x, dt_word, rX);
+      set_op_displ(insn, x, dt_word, rX);
       break;
 
     case A_ABS_IND_Y:            // absolute indexed Y
-      set_op_displ(x, dt_word, rY);
+      set_op_displ(insn, x, dt_word, rY);
       break;
 
     case A_ABS_LONG:             // absolute long
-      if ( is_jmp() )
+      if ( is_jmp(insn) )
       {
-        set_op_addr(x, dt_dword);
-        set_flag(INSN_LONG_FORMAT);
+        set_op_addr(insn, x, dt_dword);
+        set_flag(insn, INSN_LONG_FORMAT);
       }
       else
-        set_op_mem(x, dt_dword, curflags);
+        set_op_mem(insn, x, dt_dword, curflags);
       break;
 
     case A_ABS_LONG_IND_X:       // absolute long indexed X
-      set_op_displ(x, dt_dword, rX);
+      set_op_displ(insn, x, dt_dword, rX);
       break;
 
     case A_ABS_INDI:             // absolute indirect
-      set_op_mem(x, dt_word, curflags);
+      set_op_mem(insn, x, dt_word, curflags);
       set_flag(x, OP_ADDR_IND);
       break;
 
     case A_ABS_INDI_LONG:        // absolute indirect long
-      set_op_mem(x, dt_word, curflags);
+      set_op_mem(insn, x, dt_word, curflags);
       set_flag(x, OP_ADDR_IND);
-      if ( is_jmp() )
-        set_flag(INSN_LONG_FORMAT);
+      if ( is_jmp(insn) )
+        set_flag(insn, INSN_LONG_FORMAT);
       break;
 
     case A_ABS_IND_X_INDI:       // absolute indexed X indirect
-      set_op_displ(x, dt_word, rX);
+      set_op_displ(insn, x, dt_word, rX);
       set_flag(x, OP_DISPL_IND);
       break;
 
@@ -886,56 +887,56 @@ static void fill_cmd(m7700_addr_mode_t mode)
       break;
 
     case A_STACK_S:              // stack short
-      set_op_imm(x, dt_byte);
+      set_op_imm(insn, x, dt_byte);
       break;
 
     case A_STACK_L:              // stack long
-      set_op_imm(x, dt_word);
+      set_op_imm(insn, x, dt_word);
       break;
 
     case A_REL:                  // relative
-      set_op_addr(x, dt_byte);
-      x.addr = (signed char) x.addr + cmd.ip + cmd.size;
+      set_op_addr(insn, x, dt_byte);
+      x.addr = (signed char) x.addr + insn.ip + insn.size;
       break;
 
     case A_REL_LONG:             // relative long
-      set_op_addr(x, dt_word);
-      x.addr = (signed short) x.addr + cmd.ip + cmd.size;
-      set_flag(INSN_LONG_FORMAT);
+      set_op_addr(insn, x, dt_word);
+      x.addr = (signed short) x.addr + insn.ip + insn.size;
+      set_flag(insn, INSN_LONG_FORMAT);
       break;
 
     case A_DIR_BIT_REL:          // direct bit relative
-      set_op_mem(next_x, dt_byte, curflags);
-      set_op_mem_dr_rel(x);
-      set_op_bit(x);
+      set_op_mem(insn, next_x, dt_byte, curflags);
+      set_op_mem_dr_rel(insn, x);
+      set_op_bit(insn, x);
       n += 2;
-      set_op_addr(x, dt_byte);
-      x.addr = (signed char) x.addr + cmd.ip + cmd.size;
+      set_op_addr(insn, x, dt_byte);
+      x.addr = (signed char) x.addr + insn.ip + insn.size;
       break;
 
     case A_ABS_BIT_REL:          // absolute bit relative
-      set_op_mem(next_x, dt_word, curflags);
-      set_op_bit(x);
+      set_op_mem(insn, next_x, dt_word, curflags);
+      set_op_bit(insn, x);
       n += 2;
-      set_op_addr(x, dt_byte);
-      x.addr = (signed char) x.addr + cmd.ip + cmd.size;
+      set_op_addr(insn, x, dt_byte);
+      x.addr = (signed char) x.addr + insn.ip + insn.size;
       break;
 
     case A_STACK_PTR_REL:        // stack pointer relative
-      set_op_displ(x, dt_byte, rS);
+      set_op_displ(insn, x, dt_byte, rS);
       break;
 
     case A_STACK_PTR_REL_IIY:    // stack pointer relative indirect indexed Y
-      set_op_displ(x, dt_byte, rS);
+      set_op_displ(insn, x, dt_byte, rS);
       set_flag(x, OP_DISPL_IND);
       set_op_ind_y(next_x);
       break;
 
     case A_BT:                   // block transfer
-      set_op_imm(x, dt_byte);
+      set_op_imm(insn, x, dt_byte);
       set_flag(x, OP_IMM_WITHOUT_SHARP);
       n += 2;
-      set_op_imm(x, dt_byte);
+      set_op_imm(insn, x, dt_byte);
       set_flag(x, OP_IMM_WITHOUT_SHARP);
       break;
 
@@ -945,13 +946,13 @@ static void fill_cmd(m7700_addr_mode_t mode)
 
   // now we can read immediate from operation code, and fill the first operand
   // as it should be
-  if ( cmd.itype == m7700_ldm )
+  if ( insn.itype == m7700_ldm )
   {
     n = 0;
-    set_op_imm(x, dt_byte);
+    set_op_imm(insn, x, dt_byte);
     /*
-    if ( x.dtyp == dt_word )
-       set_flag(INSN_LONG_FORMAT);
+    if ( x.dtype == dt_word )
+       set_flag(insn, INSN_LONG_FORMAT);
     */
   }
 }
@@ -969,7 +970,7 @@ static const struct opcode *get_opcode(uint16 code)
   // check in the 7750 opcodes
   if ( ptype == prc_m7750 )
   {
-    for (int i = 0; i < qnumber(opcodes_7750); i++)
+    for ( int i = 0; i < qnumber(opcodes_7750); i++ )
     {
       if ( opcodes_7750[i].code != code )
         continue;
@@ -988,38 +989,40 @@ static const struct opcode *get_opcode(uint16 code)
 }
 
 // analyze an instruction
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
+  insn_t &insn = *_insn;
+
   const struct opcode *op;
   uint16 code;
 
   with_acc_b = false;
 
   // read a byte
-  code = ua_next_byte();
+  code = insn.get_next_byte();
 
   // detect BRK insn
-  if ( code == 0x00 && get_byte(cmd.ea + 1) == 0xEA )
+  if ( code == 0x00 && get_byte(insn.ea + 1) == 0xEA )
   {
-    cmd.itype = m7700_brk;
-    cmd.size += 1;
+    insn.itype = m7700_brk;
+    insn.size += 1;
     goto ana_finished;
   }
 
   // some instructions have their opcodes represented in 2 bytes,
   // so we need to pick an another byte
   if ( code == 0x42 || code == 0x89 )
-      code = (code << 8) + ua_next_byte();
+      code = (code << 8) + insn.get_next_byte();
 
   // analyze and return corresponding opcode struct
   op = get_opcode(code);
   if ( op == NULL )     // no instruction was found..
     return 0;
 
-  // fill the cmd struct
-  cmd.itype = op->insn;
-  fill_cmd(op->mode);
+  // fill the insn struct
+  insn.itype = op->insn;
+  fill_insn(insn, op->mode);
 
 ana_finished:
-  return cmd.size;
+  return insn.size;
 }

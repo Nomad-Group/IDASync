@@ -8,7 +8,6 @@
 #ifndef _AUTO_HPP
 #define _AUTO_HPP
 #include <ida.hpp>
-#pragma pack(push, 1)
 
 /*! \file auto.hpp
 
@@ -57,26 +56,29 @@ typedef int idastate_t; ///< IDA status indicator - see \ref st_
 /// \defgroup st_ Status indicator states
 //@{
 const idastate_t
-                        //                      meaning
-  st_Ready  = 0,        ///< READY:             IDA is doing nothing
-  st_Think  = 1,        ///< THINKING:          Autoanalysis on, the user may press keys
-  st_Waiting= 2,        ///< WAITING:           Waiting for the user input
-  st_Work   = 3;        ///< BUSY:              IDA is busy
+                         //                      meaning
+  st_Ready   = 0,        ///< READY:             IDA is doing nothing
+  st_Think   = 1,        ///< THINKING:          Autoanalysis on, the user may press keys
+  st_Waiting = 2,        ///< WAITING:           Waiting for the user input
+  st_Work    = 3;        ///< BUSY:              IDA is busy
 //@}
 
 
-/// Enable/disable autoanalyzer. If not set, autoanalyzer will not work.
-
-idaman int ida_export_data autoEnabled;
-
-
-/// Current state of autoanalyzer.
+/// Get current state of autoanalyzer.
 /// If auto_state == ::AU_NONE, IDA is currently not running the analysis
 /// (it could be temporarily interrupted to perform the user's requests, for example).
 
-idaman atype_t ida_export_data auto_state;
+idaman atype_t ida_export get_auto_state(void);
 
-/// See ::auto_display
+
+/// Set current state of autoanalyzer.
+/// \param new_state  new state of autoanalyzer
+/// \return previous state
+
+idaman atype_t ida_export set_auto_state(atype_t new_state);
+
+
+/// See ::get_auto_display
 struct auto_display_t
 {
   atype_t type;
@@ -84,38 +86,30 @@ struct auto_display_t
   idastate_t state;
 };
 
-/// Structure to hold the autoanalysis indicator contents
+/// Get structure which holds the autoanalysis indicator contents
 
-idaman auto_display_t ida_export_data auto_display;
+idaman void ida_export get_auto_display(auto_display_t *auto_display);
+
 
 /// Change autoanalysis indicator value.
 /// \param ea    linear address being analyzed
 /// \param type  autoanalysis type (see \ref AU_)
 
-inline void showAuto(ea_t ea, atype_t type=AU_NONE)
-{
-  auto_display.type = type;
-  auto_display.ea = ea;
-}
+idaman void ida_export show_auto(ea_t ea, atype_t type=AU_NONE);
 
 
 /// Show an address on the autoanalysis indicator.
 /// The address is displayed in the form " @:12345678".
 /// \param ea - linear address to display
 
-inline void showAddr(ea_t ea) { showAuto(ea); }
+inline void show_addr(ea_t ea) { show_auto(ea); }
 
 
 /// Change IDA status indicator value
 /// \param st - new indicator status
 /// \return old indicator status
 
-inline idastate_t setStat(idastate_t st)
-{
-  idastate_t old = auto_display.state;
-  auto_display.state = st;
-  return old;
-}
+idaman idastate_t ida_export set_ida_state(idastate_t st);
 
 
 /// Is it allowed to create stack variables automatically?.
@@ -123,7 +117,7 @@ inline idastate_t setStat(idastate_t st)
 
 inline bool may_create_stkvars(void)
 {
-  return should_create_stkvars() && auto_state == AU_USED;
+  return should_create_stkvars() && get_auto_state() == AU_USED;
 }
 
 
@@ -132,7 +126,12 @@ inline bool may_create_stkvars(void)
 
 inline bool may_trace_sp(void)
 {
-  return should_trace_sp() && (auto_state == AU_USED || auto_state == AU_TRSP);
+  if ( should_trace_sp() )
+  {
+    atype_t auto_state = get_auto_state();
+    return auto_state == AU_USED || auto_state == AU_TRSP;
+  }
+  return false;
 }
 
 
@@ -145,10 +144,9 @@ idaman void ida_export auto_mark_range(ea_t start,ea_t end,atype_t type);
 
 /// Put single address into a queue. Queues keep addresses sorted.
 
-inline void autoMark(ea_t ea, atype_t type)
+inline void auto_mark(ea_t ea, atype_t type)
 {
-  if ( ea != BADADDR )
-    auto_mark_range(ea, ea+1, type);
+  auto_mark_range(ea, ea+1, type);
 }
 
 
@@ -156,22 +154,31 @@ inline void autoMark(ea_t ea, atype_t type)
 /// 'start' may be higher than 'end', the kernel will swap them in this case.
 /// 'end' doesn't belong to the range.
 
-idaman void ida_export autoUnmark(ea_t start,ea_t end,atype_t type);
+idaman void ida_export auto_unmark(ea_t start, ea_t end, atype_t type);
 
 // Convenience functions
 
 /// Plan to perform reanalysis
-inline void noUsed(ea_t ea)
-  { autoMark(ea,AU_USED); }
+inline void plan_ea(ea_t ea)
+{
+  auto_mark(ea, AU_USED);
+}
 /// Plan to perform reanalysis
-inline void noUsed(ea_t sEA,ea_t eEA)
-  { auto_mark_range(sEA,eEA,AU_USED); }
+inline void plan_range(ea_t sEA, ea_t eEA)
+{
+  auto_mark_range(sEA, eEA, AU_USED);
+}
 /// Plan to make code
 inline void auto_make_code(ea_t ea)
-  { autoMark(ea,AU_CODE); }
+{
+  auto_mark(ea, AU_CODE);
+}
 /// Plan to make code&function
 inline void auto_make_proc(ea_t ea)
-  { auto_make_code(ea); autoMark(ea,AU_PROC); }
+{
+  auto_make_code(ea);
+  auto_mark(ea, AU_PROC);
+}
 
 /// Plan to reanalyze callers of the specified address.
 /// This function will add to ::AU_USED queue all instructions that
@@ -192,41 +199,41 @@ idaman void ida_export revert_ida_decisions(ea_t ea1, ea_t ea2);
 
 idaman void ida_export auto_apply_type(ea_t caller, ea_t callee);
 
+/// Plan to apply the tail_ea chunk to the parent
+/// \param tail_ea   linear address of start of tail
+/// \param parent_ea linear address within parent.  If BADADDR, automatically
+///                  try to find parent via xrefs.
 
-/// Analyze the specified area.
+idaman void ida_export auto_apply_tail(ea_t tail_ea, ea_t parent_ea);
+
+/// Analyze the specified range.
 /// Try to create instructions where possible.
-/// Make the final pass over the specified area.
-/// This function doesn't return until the area is analyzed.
+/// Make the final pass over the specified range if specified.
+/// This function doesn't return until the range is analyzed.
 /// \retval 1  ok
 /// \retval 0  Ctrl-Break was pressed
 
-idaman int ida_export analyze_area(ea_t sEA,ea_t eEA);
+idaman int ida_export plan_and_wait(ea_t ea1, ea_t ea2, bool final_pass=true);
 
 
 /// Process everything in the queues and return true.
 /// Return false if Ctrl-Break was pressed.
 
-idaman bool ida_export autoWait(void);
+idaman bool ida_export auto_wait(void);
 
 
 /// Remove an address range (ea1..ea2) from queues ::AU_CODE, ::AU_PROC, ::AU_USED.
-/// To remove an address range from other queues use autoUnmark() function.
+/// To remove an address range from other queues use auto_unmark() function.
 /// 'ea1' may be higher than 'ea2', the kernel will swap them in this case.
 /// 'ea2' doesn't belong to the range.
 
-idaman void ida_export autoCancel(ea_t ea1,ea_t ea2);
+idaman void ida_export auto_cancel(ea_t ea1, ea_t ea2);
 
 
 /// Are all queues empty?
 /// (i.e. has autoanalysis finished?).
 
-idaman bool ida_export autoIsOk(void);
-
-
-/// One step of autoanalyzer if 'autoEnabled' != 0.
-/// \return true if some address was removed from queues and was processed.
-
-idaman bool ida_export autoStep(void);
+idaman bool ida_export auto_is_ok(void);
 
 
 /// Peek into a queue 'type' for an address not lower than 'low_ea'.
@@ -241,14 +248,28 @@ idaman ea_t ida_export peek_auto_queue(ea_t low_ea, atype_t type);
 /// 'highEA' are found in the queues.
 /// Otherwise *type will have queue type.
 
-idaman ea_t ida_export auto_get(ea_t lowEA, ea_t highEA, atype_t *type);
+idaman ea_t ida_export auto_get(atype_t *type, ea_t lowEA, ea_t highEA);
 
 
-/// Get two-character queue name to display on the indicator
+/// Try to create instruction
+/// \param ea     linear address of callee
+/// \return the length of the instruction or 0
 
-idaman const char *ida_export autoGetName(atype_t type);
+idaman int ida_export auto_recreate_insn(ea_t ea);
+
+
+/// Get autoanalyzer state
+
+idaman bool ida_export is_auto_enabled(void);
+
+
+/// Temporarily enable/disable autoanalyzer. Not user-facing, but rather because
+/// IDA sometimes need to turn AA on/off regardless of inf.s_genflags:INFFL_AUTO
+/// \return old state
+
+idaman bool ida_export enable_auto(bool enable);
 
 
 
-#pragma pack(pop)
+
 #endif  //  _AUTO_HPP

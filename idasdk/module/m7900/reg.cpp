@@ -1,5 +1,3 @@
-
-
 /*
  *      Interactive disassembler (IDA).
  *      Version 3.05
@@ -24,7 +22,7 @@ static const char *const RegNames[] =
   "A", "B", "E", "X", "Y", "PC",  "S",
   "fIPL", "fN", "fV", "fD", "fI", "fZ", "fC",
   "DT", "PG", "DPReg", "DPR0","DPR1", "DPR2","DPR3","fM", "fX",
-  "cs",  "ds"
+  "cs", "ds"
 };
 
 
@@ -44,8 +42,7 @@ static const asm_t AS79 =
   UAS_NOSPA | UAS_SEGM,
   "Mitsubishi AS79 V4.10",
   0,
-  NULL,     //header
-  NULL,
+  NULL,       // header
   ".org",
   ".end",
 
@@ -71,10 +68,6 @@ static const asm_t AS79 =
   ".rs %s",     // uninited data (reserve space)
   ".equ",
   NULL,         // seg prefix
-  NULL,         // preline for checkarg
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg operations
-  NULL,         // XlatAsciiOutput
   "*",          // a_curip
   NULL,         // returns function header line
   NULL,         // returns function footer line
@@ -135,7 +128,7 @@ static const bytes_t retcodes[] =
 {
   { sizeof(retc_0), retc_0 },
   { sizeof(retc_1), retc_1 },
-  { sizeof(retc_2), retc_2},
+  { sizeof(retc_2), retc_2 },
   { sizeof(retc_3), retc_3 },
   { sizeof(retc_4), retc_4 },
   { sizeof(retc_5), retc_5 },
@@ -151,31 +144,30 @@ static const bytes_t retcodes[] =
 
 //----------------------------------------------------------------------
 static netnode helper;
-char device[MAXSTR] = "";
-static size_t numports = 0;
-static ioport_t *ports = NULL;
+qstring device;
+static ioports_t ports;
 
 #include "../iocommon.cpp"
 
 #define ADDRRESET 0xFFFE
 
 const char *idaapi set_idp_options(
-    const char *keyword,
-    int /*value_type*/,
-    const void * /*value*/ )
+        const char *keyword,
+        int /*value_type*/,
+        const void * /*value*/)
 {
     if ( keyword != NULL )
         return IDPOPT_BADKEY;
 
     char cfgfile[QMAXFILE];
     get_cfg_filename(cfgfile, sizeof(cfgfile));
-    if ( !choose_ioport_device(cfgfile, device, sizeof(device), NULL)
-      && strcmp(device, NONEPROC) == 0 )
+    if ( !choose_ioport_device(&device, cfgfile)
+      && device == NONEPROC )
     {
       warning("No devices are defined in the configuration file %s", cfgfile);
     }
 
-    set_device_name(device, IORESP_PORT|IORESP_INT );
+    set_device_name(device.c_str(), IORESP_PORT|IORESP_INT);
 
     return IDPOPT_OK;
 }
@@ -186,24 +178,24 @@ static bool choose_device()
 {
   char cfgfile[QMAXFILE];
   get_cfg_filename(cfgfile, sizeof(cfgfile));
-  bool ok = choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0);
+  bool ok = choose_ioport_device(&device, cfgfile, parse_area_line0);
   if ( !ok )
   {
-    qstrncpy(device, NONEPROC, sizeof(device));
+    device = NONEPROC;
 
     segment_t *sptr = get_first_seg();
     if ( sptr != NULL )
     {
-      //inf.beginEA = sptr->startEA;
-      //inf.startIP = 0;
+      //inf.start_ea = sptr->start_ea;
+      //inf.start_ip = 0;
 
       // No processor selected, so create RESET.
       // According to 7900 manual RESET resides at 0xFFFE address
-      doWord(ADDRRESET, 2);
+      create_word(ADDRRESET, 2);
       ea_t proc = get_word(ADDRRESET);
-      if ( proc != 0xFFFF && isEnabled(proc) )
+      if ( proc != 0xFFFF && is_mapped(proc) )
       {
-        set_offset(ADDRRESET, 0, 0);
+        op_plain_offset(ADDRRESET, 0, 0);
         add_entry(proc, proc, "__RESET", true);
         set_cmt(ADDRRESET, "RESET", false);
       }
@@ -212,19 +204,29 @@ static bool choose_device()
   return ok;
 }
 
-//------------------------------------------------------------------
-bool mitsubishi_find_ioport_bit(int port, int bit)
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_notify(void *, int notification_code, va_list va)
 {
-  const ioport_bit_t *b = find_ioport_bit(ports, numports, port, bit);
-  if ( b != NULL && b->name != NULL )
+  switch ( notification_code )
   {
-    out_line(b->name, COLOR_IMPNAME);
-    return true;
+     case idb_event::sgr_changed:
+      // In case of fM or fX segment registers undefine data above current address
+      {
+        int reg  = va_arg(va, int);
+        if ( reg == rfM || reg == rfX || reg == rDT || reg == rPG )
+        {
+//        msg("Deleting instructions in range %08a..%08a\n",ea1, ea2);
+//        for (ea_t x = ea1; x < ea2; x = next_that(x, ea2, is_code))
+//          del_items(x, DELIT_SIMPLE);
+        }
+      }
+      break;
+
   }
-  return false;
+  return 0;
 }
 
-
+//--------------------------------------------------------------------------
 static const char *const m7900_help_message =
   "AUTOHIDE REGISTRY\n"
   "You have loaded a file for the Mitsubishi 7900 family processor.\n\n"\
@@ -243,72 +245,60 @@ static const char *const m7900_help_message =
 
 
 //----------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+  int code = 0;
   switch ( msgid )
   {
 
-    case processor_t::init:
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_notify);
       helper.create("$ m7900");
       break;
 
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       {
        if ( choose_device() )
-         set_device_name(device, IORESP_ALL);
+         set_device_name(device.c_str(), IORESP_ALL);
 
        //  Set the default segment register values :
        //      -1 (badsel) for DR
        //      0 for fM and fX
-       for ( segment_t *s=get_first_seg(); s != NULL; s=get_next_seg(s->startEA) )
+       for ( segment_t *s=get_first_seg(); s != NULL; s=get_next_seg(s->start_ea) )
        {
-         set_default_segreg_value(s, rDPR0, 0x0);
-         set_default_segreg_value(s, rDPR1, 0x0);
-         set_default_segreg_value(s, rDPR2, 0x0);
-         set_default_segreg_value(s, rDPR3, 0x0);
-         set_default_segreg_value(s, rDT, 0x0);
-         set_default_segreg_value(s, rPG, 0x0);
-         set_default_segreg_value(s, rPC, 0xFFFE);
-         set_default_segreg_value(s, rPS, 0x0FFF);
+         set_default_sreg_value(s, rDPR0, 0x0);
+         set_default_sreg_value(s, rDPR1, 0x0);
+         set_default_sreg_value(s, rDPR2, 0x0);
+         set_default_sreg_value(s, rDPR3, 0x0);
+         set_default_sreg_value(s, rDT, 0x0);
+         set_default_sreg_value(s, rPG, 0x0);
+         set_default_sreg_value(s, rPC, 0xFFFE);
+         set_default_sreg_value(s, rPS, 0x0FFF);
 
-         set_default_segreg_value(s, rfI, 1);
-         set_default_segreg_value(s, rfD, 0);
-         set_default_segreg_value(s, rfX, 0);
-         set_default_segreg_value(s, rfM, 0);
-         set_default_segreg_value(s, rfIPL, 0);
+         set_default_sreg_value(s, rfI, 1);
+         set_default_sreg_value(s, rfD, 0);
+         set_default_sreg_value(s, rfX, 0);
+         set_default_sreg_value(s, rfM, 0);
+         set_default_sreg_value(s, rfIPL, 0);
 
-         set_default_segreg_value(s, rDPReg, 1);
+         set_default_sreg_value(s, rDPReg, 1);
        }
        info(m7900_help_message);
       }
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
-    default:
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_notify);
       break;
 
 
-    case processor_t::newprc:
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_PORT);
-      }
+    case processor_t::ev_newprc:
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_PORT);
       break;
 
-    case processor_t::newseg:    // new segment
+    case processor_t::ev_creating_segm:    // new segment
       {
        segment_t *s = va_arg(va, segment_t *);
        // Set default value of DS register for all segments
@@ -316,21 +306,79 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
       }
       break;
 
-     case processor_t::setsgr:
-      // In case of fM or fX segment registers undefine data above current address
+    case processor_t::ev_out_mnem:
       {
-        int reg  = va_arg(va, int);
-        if ( reg == rfM || reg == rfX || reg == rDT || reg == rPG  )
-        {
-//        msg("Deleting instructions in range %08a..%08a\n",ea1, ea2);
-//        for (ea_t x = ea1; x < ea2; x = nextthat(x, ea2, isCode))
-//          do_unknown(x, DOUNK_SIMPLE);
-        }
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
       }
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        m7900_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        m7900_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        m7900_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    default:
       break;
   }
-  va_end(va);
-  return 1;
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -338,17 +386,19 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,
-  PLFM_M7900,            // id
-  PR_RNAMESOK|           // can use register names for byte names
-  PR_BINMEM|             // The module creates RAM/ROM segments for binary files
-                         // (the kernel shouldn't ask the user about their sizes and addresses)
-  PR_SEGS|               // has segment registers?
-  PR_SGROTHER,           // the segment registers don't contain
-                         // the segment selectors, something else
-
-  8,                    // 8 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_M7900,             // id
+                          // flag
+    PR_RNAMESOK           // can use register names for byte names
+  | PR_BINMEM             // The module creates RAM/ROM segments for binary files
+                          // (the kernel shouldn't ask the user about their sizes and addresses)
+  | PR_SEGS               // has segment registers?
+  | PR_SGROTHER,          // the segment registers don't contain
+                          // the segment selectors, something else
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -357,65 +407,27 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  gen_segm_header,
-  std_gen_segm_footer,
-
-  NULL,
-
-  ana,
-  emu,
-
-  out,
-  outop,
-  intel_data,
-  NULL,         //  cmp_opnd,  // 0 if not cmp 1 if eq
-  NULL,         //  can_have_type,  //&op    // 1 -yes 0-no    //reg
-
-  qnumber(RegNames),            // Number of registers
-  RegNames,                     // Regsiter names
-  NULL,                         // get abstract register
-
-  0,                            // Number of register files
-  NULL,                         // Register file names
-  NULL,
-  NULL,                         // Pointer to CPU registers
+  RegNames,             // Regsiter names
+  qnumber(RegNames),    // Number of registers
 
   rDT,
   Rds,
-  0,                            // size of a segment register
+  0,                    // size of a segment register
   Rcs,Rds,
 
-  NULL,                         // No known code start sequences
+  NULL,                 // No known code start sequences
   retcodes,
 
   0,
   m7900_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   3,                    // int tbyte_size;  -- doesn't exist
 
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 0, 0, 0 },       // char real_width[4];
                             // number of symbols after decimal point
                             // 2byte float (0-does not exist)
                             // normal float
                             // normal double
                             // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x);
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,long v);
-  NULL,                 // Generate text representation of an item in a special segment
   m7900_rts,            // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  NULL,                 // int (*is_align_insn)(ea_t ea);
-  NULL                  // mvm_t *mvm;
 };

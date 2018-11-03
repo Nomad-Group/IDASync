@@ -2,13 +2,17 @@
 // IDA plugin to load function name information from PDB files
 //      26-02-2008 Complete rewrite to use DIA API
 
-#include <set>
-#include <map>
-
-#ifndef __NT__
+#ifdef __NT__
+#  define WIN32_LEAN_AND_MEAN
+#  include <windows.h>
+#  include <objidl.h>
+#else
 #  define ENABLE_REMOTEPDB
 #endif
 #define PDB_PLUGIN
+
+#include <set>
+#include <map>
 
 #include "cvconst.h"
 
@@ -25,8 +29,8 @@
 #include <struct.hpp>
 #include <typeinf.hpp>
 #include <demangle.hpp>
+#include <intel.hpp>
 #include "../../ldr/pe/pe.h"
-#include "../../include/intel.hpp"
 #include "common.h"
 #include <workarounds.hpp>
 
@@ -36,9 +40,6 @@ static void init_sympaths(void);
 
 #ifndef ENABLE_REMOTEPDB
 #  include "oldpdb.h"
-#  ifdef ENABLE_SRCDBG
-#    include "sip.cpp"
-#  endif
 #else
 #  include "../../ldr/pe/mycor.h"
 #endif
@@ -46,6 +47,10 @@ static void init_sympaths(void);
 
 #include "pdbreg.hpp"
 #include "pdb.hpp"
+
+#ifdef ENABLE_SRCDBG
+#  include "sip.cpp"
+#endif
 
 static peheader_t pe;
 static char download_path[QMAXPATH];
@@ -186,13 +191,13 @@ bool check_for_ids(ea_t ea, const char *name)
   {
     if ( default_compiler() == COMP_UNK )
       set_compiler_id(COMP_MS);
-    if ( get_named_type(idati, "GUID", NTF_TYPE) == 0 )
+    if ( get_named_type(NULL, "GUID", NTF_TYPE) == 0 )
     {
       static const char decl[] = "typedef struct _GUID { unsigned long  Data1; unsigned short Data2; unsigned short Data3; unsigned char Data4[8];} GUID;";
-      h2ti(idati, NULL, decl, HTI_DCL, NULL, NULL, msg);
+      h2ti(NULL, NULL, decl, HTI_DCL, NULL, NULL, msg);
     }
     // SID type is pretty complex, so we won't add it manually but just check if it exists
-    has_sid = get_named_type(idati, "SID", NTF_TYPE) != 0;
+    has_sid = get_named_type(NULL, "SID", NTF_TYPE) != 0;
     checked_types = true;
   }
   for ( int k=0; k < qnumber(ids); k++ )
@@ -207,7 +212,7 @@ bool check_for_ids(ea_t ea, const char *name)
         && (ptr[len] == '_' || ptr[len] == ' ') ) // space can be in demangled names
       {
         if ( ph.ti() )
-          apply_cdecl2(idati, ea, ids[k].type);
+          apply_cdecl(NULL, ea, ids[k].type);
         return true;
       }
     }
@@ -215,7 +220,7 @@ bool check_for_ids(ea_t ea, const char *name)
   if ( strncmp(name, "_guid", 5) == 0 )
   {
     if ( ph.ti() )
-      apply_cdecl2(idati, ea, ids[0].type);
+      apply_cdecl(NULL, ea, ids[0].type);
     return true;
   }
   return false;
@@ -244,47 +249,61 @@ static bool is_data_prefix(ea_t ea, const char *name)
     size_t len = ptr - hex;
     if ( len == 8 )
     {
-      doFloat(ea, 4);
+      create_float(ea, 4);
       return true;
     }
     if ( len == 16 )
     {
-      doDouble(ea, 8);
+      create_double(ea, 8);
       return true;
     }
     if ( len == 20 )
     { // i haven't seen this, but probably it exists too
-      doTbyt(ea, 10);
+      create_tbyte(ea, 10);
       return true;
     }
   }
   return false;
 }
 
+//-------------------------------------------------------------------------
+static int utf16_encidx = -1;
+static int get_utf16_encoding_idx()
+{
+  if ( utf16_encidx < 0 )
+    utf16_encidx = add_encoding(inf.is_be() ? "UTF-16BE" : "UTF-16LE");
+  return utf16_encidx;
+}
+
 //----------------------------------------------------------------------
 // maybe_func: -1:no, 0-maybe, 1-yes, 2:no,but iscode
 bool apply_name_in_idb(ea_t ea, const qstring &name, int maybe_func, uint32 the_machine_type)
 {
-  showAddr(ea); // so the user doesn't get bored
+  show_addr(ea); // so the user doesn't get bored
 
   char buf[MAXSTR];
   buf[0] = '\0';
+
   // check for meaningless 'string' names
   if ( strncmp(name.c_str(), "??_C@_", 6) == 0 )
   {
-      // ansi:    ??_C@_0<len>@xxx
-      // unicode: ??_C@_1<len>@xxx
-      // TODO: parse length?
-      make_ascii_string(ea, 0, name[6]=='1' ? ASCSTR_UNICODE : ASCSTR_C );
-      return true;
+    // ansi:    ??_C@_0<len>@xxx
+    // unicode: ??_C@_1<len>@xxx
+    // TODO: parse length?
+    uint32 strtype = STRTYPE_C;
+    if ( name[6] == '1' )
+      strtype = STRTYPE_C_16 | (get_utf16_encoding_idx() << 24);
+    create_strlit(ea, 0, strtype);
+    return true;
   }
   if ( maybe_func <= 0 && demangle(buf, sizeof(buf), name.c_str(), MNG_SHORT_FORM) > 0 )
   {
     if ( strcmp(buf, "`string'") == 0 )
     {
-      size_t s1 = get_max_ascii_length(ea, ASCSTR_C);
-      size_t s2 = get_max_ascii_length(ea, ASCSTR_UNICODE);
-      make_ascii_string(ea, 0, s1 >= s2 ? ASCSTR_C : ASCSTR_UNICODE);
+      uint32 utf16_strtype = STRTYPE_C_16 | (get_utf16_encoding_idx() << 24);
+      size_t s1 = get_max_strlit_length(ea, STRTYPE_C);
+      size_t s2 = get_max_strlit_length(ea, utf16_strtype);
+      create_strlit(ea, 0, s1 >= s2 ? STRTYPE_C : utf16_strtype);
       return true;
     }
   }
@@ -349,10 +368,11 @@ bool apply_name_in_idb(ea_t ea, const qstring &name, int maybe_func, uint32 the_
       if ( stype != SEG_NORM && stype != SEG_CODE ) // only for code or normal segments
         break;
 
-      if ( !decode_insn(ea) )
+      insn_t insn;
+      if ( decode_insn(&insn, ea) == 0 )
         break;
 
-      if ( !ph.notify(ph.is_sane_insn, 1) )
+      if ( ph.is_sane_insn(insn, 1) < 0 )
         break;
       maybe_func = 1;
     } while ( false );
@@ -388,9 +408,9 @@ void load_vc_til(void)
   if ( ph.id == PLFM_386 && pe.signature == PEEXE_ID )
   {
     if ( pe.is_userland() )
-      add_til2(pe.is_pe_plus() ? "vc10_64" : "mssdk", ADDTIL_INCOMP);
+      add_til(pe.is_pe_plus() ? "vc10_64" : "mssdk", ADDTIL_INCOMP);
     else
-      add_til2(pe.is_pe_plus() ? "ntddk64" : "ntddk", ADDTIL_INCOMP);
+      add_til(pe.is_pe_plus() ? "ntddk64" : "ntddk", ADDTIL_INCOMP);
   }
 }
 
@@ -506,7 +526,8 @@ static void apply_annotation(ea_t ea, const qstrvec_t &params)
 //----------------------------------------------------------------------------
 bool pdb_til_builder_t::handle_symbol_at_ea(
         pdb_sym_t &sym,
-        DWORD tag, DWORD /*id*/,
+        DWORD tag,
+        DWORD /*id*/,
         ea_t ea,
         qstring &name)
 {
@@ -564,15 +585,28 @@ bool pdb_til_builder_t::handle_symbol_at_ea(
   // symbols starting with __imp__ can not be functions
   if ( strncmp(name.c_str(), "__imp__", 7) == 0 )
   {
-    doDwrd(ea, 4);
+    create_dword(ea, 4);
     maybe_func = -1;
   }
 
-  BOOL is_code;
-  if ( sym.get_code(&is_code) == S_OK && !is_code )
+  BOOL iscode;
+  if ( sym.get_code(&iscode) == S_OK )
   {
-    // not a function
-    maybe_func = -1;
+    if ( iscode )
+    {
+      if ( is_notcode(ea) )
+      {
+        // clear wrong notcode mark
+        // (was seen happening with bogus SymTagData symbol for _guard_dispatch_icall_nop)
+        clr_notcode(ea);
+        create_insn(ea);
+      }
+    }
+    else
+    {
+      // not a function
+      maybe_func = -1;
+    }
   }
 
   tpinfo_t tpi;
@@ -586,7 +620,7 @@ bool pdb_til_builder_t::handle_symbol_at_ea(
     {
       // convert the type again, this time passing function symbol
       // this allows us to get parameter names and handle static class methods
-      pdb_sym_t func_sym(*pdb_access);
+      pdb_sym_t func_sym(pdb_access);
       if ( sym.get_type(&func_sym) == S_OK )
       {
         tpinfo_t tpi2;
@@ -608,8 +642,8 @@ bool pdb_til_builder_t::handle_symbol_at_ea(
       bool use_ti = true;
       func_type_data_t fti;
       if ( tpi.type.get_func_details(&fti)
-         && fti.empty()
-         && fti.rettype.is_decl_void() )
+        && fti.empty()
+        && fti.rettype.is_decl_void() )
       { // sometimes there are functions with linked FunctionType but no parameter or return type info in it
         // we get better results by not forcing type info on them
         use_ti = false;
@@ -617,7 +651,7 @@ bool pdb_til_builder_t::handle_symbol_at_ea(
       if ( use_ti )
       {
         type_created(ea, 0, NULL, tpi.type);
-        apply_tinfo2(ea, tpi.type, 0);
+        apply_tinfo(ea, tpi.type, 0);
       }
     }
   }
@@ -651,7 +685,7 @@ HRESULT pdb_til_builder_t::handle_function_child(
         child_sym.get_name(&name);
         const char *canon = print_pdb_register(pdb_access->get_machine_type(), reg_id);
         if ( pfn != NULL )
-          add_regvar(pfn, pfn->startEA, pfn->endEA, canon, name.c_str(), NULL);
+          add_regvar(pfn, pfn->start_ea, pfn->end_ea, canon, name.c_str(), NULL);
       }
       break;
 
@@ -671,29 +705,27 @@ HRESULT pdb_til_builder_t::handle_function_child(
             opinfo_t mt;
             size_t size;
             flags_t flags;
-            if ( get_idainfo_by_type3(tpi.type, &size, &flags, &mt, NULL) )
+            if ( get_idainfo_by_type(&size, &flags, &mt, tpi.type) )
             {
               // DIA's offset is bp-based, not frame-based like in IDA
               offset -= pfn->fpd;
-              if ( is_arm(pdb_access->get_machine_type()) && reg_id == CV_ARM_SP )
-                offset -= pfn->frsize;
               // make sure the new variable is not overwriting the return address
               // for some reason some PDBs have bogus offsets for some params/locals...
               if ( pdb_access->get_machine_type() != CV_CFL_80386
                 || offset > 0
                 || size <= -offset )
               {
-                if ( add_stkvar2(pfn, name.c_str(), offset, flags, &mt, size) )
+                if ( define_stkvar(pfn, name.c_str(), offset, flags, &mt, size) )
                 {
-                  cmd.ea = pfn->startEA;
-                  member_t *mptr = get_stkvar(*(op_t*)NULL, offset, NULL); //lint !e413 deref null ptr
+                  insn_t insn;
+                  insn.ea = pfn->start_ea;
+                  member_t *mptr = get_stkvar(NULL, insn, *(op_t*)NULL, offset); //lint !e413 deref null ptr
                   if ( mptr != NULL )
                   {
                     struc_t *sptr = get_frame(pfn);
-                    set_member_tinfo2(sptr, mptr, 0, tpi.type, 0);
+                    set_member_tinfo(sptr, mptr, 0, tpi.type, 0);
                     set_userti(mptr->id);
                   }
-                  cmd.ea = BADADDR;
                 }
               }
             }
@@ -706,8 +738,8 @@ HRESULT pdb_til_builder_t::handle_function_child(
       }
       break;
     default:
-      return til_builder_t::handle_function_child
-        (fun_sym, ea, child_sym, child_tag, child_loc_type);
+      return til_builder_t::handle_function_child(fun_sym, ea, child_sym,
+                                                  child_tag, child_loc_type);
   }
   return S_OK;
 }
@@ -733,17 +765,15 @@ void pdb_til_builder_t::handle_function_type(pdb_sym_t &sym, ea_t ea)
 
     // before adding a function, try to create all its instructions.
     // without this the frame analysis may fail.
-    func_t fn;
-    clear_func_struct(&fn);
-    fn.startEA = ea;
-    find_func_bounds(ea, &fn, FIND_FUNC_DEFINE);
+    func_t fn(ea);
+    find_func_bounds(&fn, FIND_FUNC_DEFINE);
 
     bool created = false;
     bool acceptable_end = end <= next_planned;   // end is wrong for fragmented functions
     if ( acceptable_end )
       created = add_func(ea, end);
     if ( !created )
-      add_func(ea, BADADDR);
+      add_func(ea);
 
     til_builder_t::handle_function_type(sym, ea);
   }
@@ -754,8 +784,8 @@ static HRESULT common_handler(pdb_access_t &pdb_access)
 {
   try
   {
-    pdb_til_builder_t builder(idati, &pdb_access);
-    pdb_sym_t global(pdb_access, pdb_access.get_global_symbol_id());
+    pdb_til_builder_t builder(CONST_CAST(til_t *)(get_idati()), &pdb_access);
+    pdb_sym_t global(&pdb_access, pdb_access.get_global_symbol_id());
     return builder.build(global);
   }
   catch ( const pdb_exception_t &e )
@@ -795,83 +825,21 @@ static HRESULT remote_handler(const pdbargs_t &args)
 void idaapi term(void)
 {
   namelist.clear();
-#ifndef ENABLE_REMOTEPDB
 #ifdef ENABLE_SRCDBG
   unregister_srcinfo_provider(&g_pdb_provider);
 #endif
-#endif
 }
 
-//--------------------------------------------------------------------------
-// callback for parsing config file
-const char *idaapi parse_options(
-        const char *keyword,
-        int value_type,
-        const void *value)
+//-------------------------------------------------------------------------
+static const cfgopt_t g_opts[] =
 {
-  {
-    bool is_port = false, is_port_64 = false;
-    if ( strcmp(keyword, "PDB_REMOTE_PORT") == 0 )
-    {
-      is_port = true;
-    }
-    else if ( strcmp(keyword, "PDB_REMOTE_PORT_64") == 0 )
-    {
-      is_port = true;
-      is_port_64 = true;
-    }
-    if ( is_port )
-    {
-      if ( value_type != IDPOPT_NUM )
-        return IDPOPT_BADTYPE;
-      uval_t val = *(uval_t*)value;
-      if ( val == 0 || val > 65535 )
-        return IDPOPT_BADVALUE;
-      if ( is_port_64 )
-        pdb_remote_port_64 = int(val);
-      else
-        pdb_remote_port = int(val);
-      return IDPOPT_OK;
-    }
-  }
-
-  if ( value_type != IDPOPT_STR )
-    return IDPOPT_BADTYPE;
-
-  if ( strcmp(keyword, "PDBSYM_DOWNLOAD_PATH") == 0 )
-  {
-    qstrncpy(download_path, (const char *)value, sizeof(download_path));
-    // empty string used for ida program directory
-    if ( download_path[0] != '\0' && !qisdir(download_path) )
-      return IDPOPT_BADVALUE;
-  }
-  else if ( strcmp(keyword, "PDBSYM_SYMPATH") == 0 )
-  {
-    qstrncpy(full_sympath, (const char *)value, sizeof(full_sympath));
-    return IDPOPT_OK;
-  }
-  else if ( strcmp(keyword, "PDB_REMOTE_SERVER") == 0 )
-  {
-    qstrncpy(pdb_remote_server, (const char *)value, sizeof(pdb_remote_server));
-    // empty string used for ida program directory
-    if ( pdb_remote_server[0] == '\0' )
-      return IDPOPT_BADVALUE;
-  }
-  else if ( strcmp(keyword, "PDB_REMOTE_PASSWD") == 0 )
-  {
-    qstrncpy(pdb_remote_passwd, (const char *)value, sizeof(pdb_remote_passwd));
-    // empty string used for ida program directory
-    if ( pdb_remote_server[0] == '\0' )
-      return IDPOPT_BADVALUE;
-  }
-  else
-  {
-    return IDPOPT_BADKEY;
-  }
-
-
-  return IDPOPT_OK;
-}
+  cfgopt_t("PDB_REMOTE_PORT", &pdb_remote_port, 0, 65535),
+  cfgopt_t("PDB_REMOTE_PORT_64", &pdb_remote_port_64, 0, 65535),
+  cfgopt_t("PDBSYM_DOWNLOAD_PATH", download_path, sizeof(download_path)),
+  cfgopt_t("PDBSYM_SYMPATH", full_sympath, sizeof(full_sympath)),
+  cfgopt_t("PDB_REMOTE_SERVER", pdb_remote_server, sizeof(pdb_remote_server)),
+  cfgopt_t("PDB_REMOTE_PASSWD", pdb_remote_passwd, sizeof(pdb_remote_passwd)),
+};
 
 //----------------------------------------------------------------------
 uint32 get_machine_from_idb()
@@ -886,7 +854,7 @@ uint32 get_machine_from_idb()
       mt = CV_CFL_MIPSR4000;
       break;
     case PLFM_PPC:
-      mt = inf.mf ? CV_CFL_PPCBE : CV_CFL_PPCFP;
+      mt = inf.is_be() ? CV_CFL_PPCBE : CV_CFL_PPCFP;
       break;
     case PLFM_SH:
       mt = CV_CFL_SH4;
@@ -908,11 +876,16 @@ static void init_sympaths()
   // user specified symbol path?
   download_path[0] = '\0';
   full_sympath[0] = '\0';
-  read_user_config_file("pdb", parse_options);
+  read_config_file("pdb", g_opts, qnumber(g_opts), NULL);
+
+  // and now a few checks...
+  if ( download_path[0] != '\0' && !qisdir(download_path) )
+    warning("PDBSYM_DOWNLOAD_PATH is not a directory: %s", download_path);
 
   // if download path is set, format the path for Microsoft symbol server
   if ( full_sympath[0] == '\0' && download_path[0] != '\0' )
-    qsnprintf(full_sympath, sizeof(full_sympath), "%s%s%s", spath_prefix, download_path, spath_suffix);
+    qsnprintf(full_sympath, sizeof(full_sympath), "%s%s%s",
+              g_spath_prefix, download_path, g_spath_suffix);
 }
 
 //----------------------------------------------------------------------
@@ -941,7 +914,7 @@ static qstring truncate_path(const qstring &path)
         start = str.find(slash, start + 1);
       } while ( len - (end - start) < MAX_DISP_PATH );
       start = prev_start + 1;
-      if  ( end > start )
+      if ( end > start )
       {
         str.remove(start, end - start);
         str.insert(start, "....");
@@ -990,16 +963,6 @@ static qstring get_input_path()
   if ( get_input_file_path(input_path, sizeof(input_path)) <= 0 )
     input_path[0] = '\0';
   return input_path;
-}
-
-//----------------------------------------------------------------------------
-// moved into a separate function to diminish the stack consumption
-static qstring get_supval(netnode node, uval_t idx)
-{
-  char buf[QMAXPATH];
-  if ( node.supstr(idx, buf, sizeof(buf)) <= 0 )
-    buf[0] = '\0';
-  return buf;
 }
 
 //--------------------------------------------------------------------------
@@ -1064,7 +1027,7 @@ static bool ask_pdb_details(pdbargs_t *args)
 
   CASSERT(sizeof(args->loaded_base) == sizeof(ea_t));
   sval_t typesonly = (args->flags & PDBFLG_ONLY_TYPES) != 0;
-  if ( !AskUsingForm_c(form, details_modcb, buf, &args->loaded_base, &typesonly) )
+  if ( !ask_form(form, details_modcb, buf, &args->loaded_base, &typesonly) )
     return false;
 
   set_file_by_ext(args, buf);
@@ -1073,75 +1036,14 @@ static bool ask_pdb_details(pdbargs_t *args)
   return true;
 }
 
-//----------------------------------------------------------------------------
-// Main function: do the real job here
-void idaapi run(int _call_code)
+//-------------------------------------------------------------------------
+bool apply_debug_info(pdbargs_t &pdbargs)
 {
-  pdbargs_t pdbargs;
-  if ( inf.filetype != f_PE && !is_miniidb() )
-    pdbargs.flags |= PDBFLG_ONLY_TYPES;
+  init_sympaths();
 
   netnode pdbnode;
   pdbnode.create(PDB_NODE_NAME);
 
-  netnode penode(PE_NODE);
-  penode.valobj(&pe, sizeof(pe));
-
-  pdb_callcode_t call_code = (pdb_callcode_t)_call_code;
-  pdbargs.pdb_path = get_supval(penode, PE_SUPSTR_PDBNM);
-
-  // loading additional dll?
-  if ( call_code == PDB_CC_DBG_MODULE_LOAD )
-  { // user explicitly asked to load debug info for a module
-    pdbargs.flags |= PDBFLG_DBG_MODULE;
-    pdbargs.loaded_base = pdbnode.altval(PDB_DLLBASE_NODE_IDX);
-    QASSERT(30168, pdbargs.loaded_base != 0);
-    pdbargs.input_path = get_supval(pdbnode, PDB_DLLNAME_NODE_IDX);
-    PLUGIN.flags &= ~PLUGIN_UNL;
-  }
-  else
-  {
-    pdbargs.input_path = get_input_path();
-    pdbargs.loaded_base = penode.altval(PE_ALT_IMAGEBASE);
-    if ( call_code == PDB_CC_USER ) // user explicitly invoked the plugin?
-    {
-      if ( !ask_pdb_details(&pdbargs) )
-        return;
-    }
-    else if ( call_code == PDB_CC_USER_WITH_DATA )
-    {
-      pdbargs.loaded_base = pdbnode.altval(PDB_DLLBASE_NODE_IDX);
-      QASSERT(30479, pdbargs.loaded_base != 0);
-      qstring tmp = get_supval(pdbnode, PDB_DLLNAME_NODE_IDX);
-      set_file_by_ext(&pdbargs, tmp.c_str());
-    }
-    else
-    {
-      if ( call_code == PDB_CC_IDA )
-      {
-        const char *fname = pdbargs.fname();
-        if ( askyn_c(ASKBTN_YES,
-                     "AUTOHIDE REGISTRY\nHIDECANCEL\n"
-                     "IDA has determined that the input file was linked with debug information, and the symbol filename is:\n"
-                     "'%s'\n"
-                     "Do you want to look for this file at the local symbol store\n"
-                     "and the Microsoft Symbol Server?", fname) != ASKBTN_YES )
-        {
-          return;
-        }
-      }
-    }
-    // read pdb signature from the database, if any
-    if ( !read_pdb_signature(&pdbargs.pdb_sign) )
-    {
-      // make it invalid but not empty
-      // so that check_and_load_pdb() does not fail silently
-      pdbargs.pdb_sign.age = 0xFFFFFFFF;
-    }
-  }
-
-
-  init_sympaths();
   if ( full_sympath[0] != '\0' )
     pdbargs.spath = full_sympath;
 
@@ -1157,7 +1059,7 @@ LOAD_PDB:
   {
     pdb_session_ref_t ref;
     hr = ref.open_session(pdbargs);
-    if ( SUCCEEDED(hr) )
+    if ( hr == S_OK )
       hr = common_handler(*ref.session->pdb_access);
   }
   catch ( const std::bad_alloc & )
@@ -1187,10 +1089,11 @@ LOAD_PDB:
     if ( hr != E_PDB_INVALID_SIG
       && hr != E_PDB_INVALID_AGE
       && hr != E_PDB_NOT_FOUND
-      && hr != E_PDB_INVALID_EXECUTABLE )
+      && hr != E_PDB_INVALID_EXECUTABLE
+      && (inf.s_cmtflg & SW_TESTMODE) == 0 )
     {
       g_machine_type = get_machine_from_idb(); // See 'g_machine_type' comment above
-      ok = old_pdb_plugin(pdbargs.loaded_base, pdbargs.input_path.c_str(), pdbargs.spath);
+      ok = old_pdb_plugin(pdbargs.loaded_base, pdbargs.input_path.c_str(), pdbargs.spath.c_str());
       if ( ok )
         msg("Old method of loading PDB files (dbghelp) was successful\n");
     }
@@ -1198,20 +1101,29 @@ LOAD_PDB:
     {
       was_load_error = true;
       qstring disp_path = truncate_path(pdbargs.input_path);
-      if ( askyn_c(ASKBTN_YES,
-                   "HIDECANCEL\nAUTOHIDE REGISTRY\n%s: failed to load pdb info.\n%s\n"
-                   "Do you want to browse for the pdb file on disk?",
-                   disp_path.c_str(),
-                   err_str == NULL ? "" : err_str) == ASKBTN_YES )
+      if ( ask_yn(ASKBTN_YES,
+                  "HIDECANCEL\n"
+                  "AUTOHIDE REGISTRY\n"
+                  "%s: failed to load pdb info.\n%s\n"
+                  "Do you want to browse for the pdb file on disk?",
+                  disp_path.c_str(),
+                  err_str == NULL ? "" : err_str) == ASKBTN_YES )
       {
-        char *pdb_file = askfile_c(false, "*.pdb", "Choose PDB file");
+        char *pdb_file = ask_file(false, "*.pdb", "Choose PDB file");
         if ( pdb_file != NULL )
         {
           pdbargs.pdb_path = pdb_file;
+          ok = true; // reset to default
           goto LOAD_PDB;
         }
       }
     }
+#else
+    if ( !pdbargs.is_dbg_module() ) // called as main plugin routine
+      warning("IDA could not open %s. Please check that the file "
+              "exists on the remote computer.", pdbargs.fname());
+    else
+      msg("No PDB information found for %s\n", pdbargs.fname());
 #endif
   }
 
@@ -1225,10 +1137,10 @@ LOAD_PDB:
       if ( pdbargs.is_dbg_module() )
         counter += set_debug_name(p->first, p->second.c_str());
       else
-        counter += do_name_anyway(p->first, p->second.c_str());
+        counter += force_name(p->first, p->second.c_str());
       // Every now & then, make sure the UI has had a chance to refresh.
       if ( (counter % 10) == 0 )
-        wasBreak();
+        user_cancelled();
     }
     namelist.clear();
     msg("PDB: total %d symbol%s loaded for %s\n",
@@ -1239,6 +1151,128 @@ LOAD_PDB:
 
   pdbnode.altset(PDB_DLLBASE_NODE_IDX, ok);
   check_added_types();
+  return ok;
+}
+
+//----------------------------------------------------------------------------
+bool idaapi run(size_t _call_code)
+{
+
+
+  pdbargs_t pdbargs;
+  if ( inf.filetype != f_PE && !is_miniidb() )
+    pdbargs.flags |= PDBFLG_ONLY_TYPES;
+
+  netnode pdbnode;
+  pdbnode.create(PDB_NODE_NAME);
+
+  netnode penode(PE_NODE);
+  penode.valobj(&pe, sizeof(pe));
+
+  pdb_callcode_t call_code = (pdb_callcode_t)_call_code;
+  penode.supstr(&pdbargs.pdb_path, PE_SUPSTR_PDBNM);
+#ifdef TESTABLE_BUILD
+  #define FORCE_PDB_PATH_KEY "FORCE_PDB_PATH"
+  if ( qgetenv(FORCE_PDB_PATH_KEY, &pdbargs.pdb_path) )
+    msg("Note: found %s; forcing PDB path to: \"%s\"\n",
+        FORCE_PDB_PATH_KEY, pdbargs.pdb_path.c_str());
+  #undef FORCE_PDB_PATH_KEY
+#endif
+
+  // loading additional dll?
+  if ( call_code == PDB_CC_DBG_MODULE_LOAD )
+  { // user explicitly asked to load debug info for a module
+    pdbargs.flags |= PDBFLG_DBG_MODULE;
+    ea_t dllbase = pdbnode.altval(PDB_DLLBASE_NODE_IDX);
+    if ( dllbase != 0 )
+      pdbargs.loaded_base = dllbase;
+
+    bool ok = true;
+    if ( pdbargs.loaded_base == 0 )
+    {
+      msg("PDB: PDB_CC_DBG_MODULE_LOAD called without an imagebase, cannot proceed\n");
+      ok = false;
+    }
+    pdbnode.supstr(&pdbargs.input_path, PDB_DLLNAME_NODE_IDX);
+    if ( pdbargs.input_path.empty() )
+    {
+      msg("PDB: PDB_CC_DBG_MODULE_LOAD called without a filename, cannot proceed\n");
+      ok = false;
+    }
+    if ( !ok )
+    {
+       // set failure result
+       pdbnode.altset(PDB_DLLBASE_NODE_IDX, 0);
+       return true;
+    }
+    PLUGIN.flags &= ~PLUGIN_UNL;
+  }
+  else
+  {
+    pdbargs.input_path = get_input_path();
+    pdbargs.loaded_base = penode.altval(PE_ALT_IMAGEBASE);
+    if ( call_code == PDB_CC_USER ) // user explicitly invoked the plugin?
+    {
+      if ( !ask_pdb_details(&pdbargs) )
+        return true;
+    }
+    else if ( call_code == PDB_CC_USER_WITH_DATA )
+    {
+      pdbargs.loaded_base = pdbnode.altval(PDB_DLLBASE_NODE_IDX);
+      bool ok = true;
+      if ( pdbargs.loaded_base == 0 )
+      {
+        msg("PDB: PDB_CC_USER_WITH_DATA called without an imagebase, cannot proceed\n");
+        ok = false;
+      }
+      qstring tmp;
+      pdbnode.supstr(&tmp, PDB_DLLNAME_NODE_IDX);
+      if ( tmp.empty() )
+      {
+        msg("PDB: PDB_CC_USER_WITH_DATA called without a filename, cannot proceed\n");
+        ok = false;
+      }
+      if ( !ok )
+      {
+         // set failure result
+         pdbnode.altset(PDB_DLLBASE_NODE_IDX, 0);
+         return true;
+      }
+      set_file_by_ext(&pdbargs, tmp.c_str());
+    }
+    else
+    {
+      if ( call_code == PDB_CC_IDA )
+      {
+        const char *fname = pdbargs.fname();
+        if ( ask_yn(ASKBTN_YES,
+                    "AUTOHIDE REGISTRY\nHIDECANCEL\n"
+                    "The input file was linked with debug information\n"
+                    " and the symbol filename is:\n"
+                    "'%s'\n"
+                    "Do you want to look for this file at the specified path\n"
+                    "and the Microsoft Symbol Server?\n",
+                    fname) != ASKBTN_YES )
+        {
+          return true;
+        }
+      }
+      // we may run out of memory on huge pdb files. prefer to keep the partial
+      // idb file in this case.
+      clr_database_flag(DBFL_KILL);
+    }
+
+    // read pdb signature from the database, if any
+    if ( !read_pdb_signature(&pdbargs.pdb_sign) )
+    {
+      // make it invalid but not empty
+      // so that check_and_load_pdb() does not fail silently
+      pdbargs.pdb_sign.age = 0xFFFFFFFF;
+    }
+  }
+
+  apply_debug_info(pdbargs);
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -1248,7 +1282,7 @@ int idaapi init(void)
   const char *opts = get_plugin_options("pdb");
   if ( opts != NULL && strcmp(opts, "off") == 0 )
     return PLUGIN_SKIP;
-#if !defined(ENABLE_REMOTEPDB) && defined(ENABLE_SRCDBG)
+#ifdef ENABLE_SRCDBG
   if ( register_srcinfo_provider(&g_pdb_provider) )
     return PLUGIN_KEEP;
   else

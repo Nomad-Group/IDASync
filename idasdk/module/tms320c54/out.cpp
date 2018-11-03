@@ -9,33 +9,53 @@
 
 #include "tms320c54.hpp"
 #include <frame.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <struct.hpp>
 
+// simple wrapper class for syntactic sugar of member functions
+// this class may have only simple member functions.
+// virtual functions and data fields are forbidden, otherwise the class
+// layout may change
+class out_tms320c54_t : public outctx_t
+{
+  out_tms320c54_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_address(ea_t ea, const op_t &x, bool mapping, bool at);
+  void out_cond8(char value);
+};
+CASSERT(sizeof(out_tms320c54_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_tms320c54_t)
+
 //----------------------------------------------------------------------
-static void out_address(ea_t ea, op_t &x, bool mapping, bool at)
+void out_tms320c54_t::out_address(ea_t ea, const op_t &x, bool mapping, bool at)
 {
   regnum_t reg = get_mapped_register(ea);
-  if ( mapping && reg != rnone) out_register(ph.regNames[reg] );
+  if ( mapping && reg != rnone )
+  {
+    out_register(ph.reg_names[reg]);
+  }
   else
   {
 #ifndef TMS320C54_NO_NAME_NO_REF
-    char buf[MAXSTR];
+    qstring qbuf;
     // since tms320c54 uses memory mapping, we turn off verification
-    // of name expression values (3d arg of get_name_expr is BADADDR)
-    if ( get_name_expr(cmd.ea+x.offb, x.n, ea, BADADDR, buf, sizeof(buf)) > 0 )
+    // of name expression values (4th arg of get_name_expr is BADADDR)
+    if ( get_name_expr(&qbuf, insn.ea+x.offb, x.n, ea, BADADDR) > 0 )
     {
-      if ( at)
-        out_symbol('@' );
-      OutLine(buf);
+      if ( at )
+        out_symbol('@');
+      out_line(qbuf.begin());
     }
     else
 #endif
     {
       out_tagon(COLOR_ERROR);
-      OutValue(x, OOFW_IMM|OOF_ADDR);
+      out_value(x, OOFW_IMM|OOF_ADDR);
       out_tagoff(COLOR_ERROR);
-      QueueSet(Q_noName, cmd.ea);
+      remember_problem(PR_NONAME, insn.ea);
     }
   }
 }
@@ -72,31 +92,31 @@ const char *get_cond8(char value)
   }
 }
 
-
-static void out_cond8(char value)
+//----------------------------------------------------------------------
+void out_tms320c54_t::out_cond8(char value)
 {
   const char *cond = get_cond8(value);
-  QASSERT(256, cond != NULL) ;
+  QASSERT(256, cond != NULL);
   out_line(cond, COLOR_REG);
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_tms320c54_t::out_operand(const op_t &x)
 {
   ea_t ea;
-
   switch ( x.type )
   {
     case o_void:
       return 0;
 
     case o_reg:
-      out_register(ph.regNames[x.reg]);
+      out_register(ph.reg_names[x.reg]);
       break;
 
     case o_near:
     case o_far:
-      out_address(calc_code_mem(x.addr, x.type == o_near), x, false, false);
+      ea = calc_code_mem(insn, x.addr, x.type == o_near);
+      out_address(ea, x, false, false);
       break;
 
     case o_imm:
@@ -106,22 +126,22 @@ bool idaapi outop(op_t &x)
           name = find_sym(x.value);
         if ( !x.NoCardinal )
           out_symbol('#');
-        if ( name != NULL )
+        if ( name != NULL && name[0] != '\0' )
         {
           out_line(name, COLOR_IMPNAME);
         }
         else
         {
           if ( !x.Signed )
-            OutValue(x, OOFW_IMM);
+            out_value(x, OOFW_IMM);
           else
-            OutValue(x, OOFS_IFSIGN|OOF_SIGNED|OOF_NUMBER|OOFW_IMM);
+            out_value(x, OOFS_IFSIGN|OOF_SIGNED|OOF_NUMBER|OOFW_IMM);
         }
         break;
       }
 
     case o_local:
-      OutValue(x, OOFW_IMM|OOF_ADDR);
+      out_value(x, OOFW_IMM|OOF_ADDR);
       break;
 
     case o_mmr:
@@ -132,19 +152,25 @@ bool idaapi outop(op_t &x)
         out_symbol('*');
         out_symbol('(');
       }
-      ea = calc_data_mem(x.addr, x.type == o_mem);
+      ea = calc_data_mem(insn, x.addr, x.type == o_mem);
       if ( ea != BADADDR )
-        out_address(ea, x, true, x.IndirectAddressingMOD != ABSOLUTE_INDIRECT_ADRESSING); // no '@' if absolute "indirect" adressing
+      {
+        // no '@' if absolute "indirect" adressing
+        bool at = x.IndirectAddressingMOD != ABSOLUTE_INDIRECT_ADRESSING;
+        out_address(ea, x, true, at);
+      }
       else
-        OutValue(x, OOFW_IMM|OOF_ADDR);
+      {
+        out_value(x, OOFW_IMM|OOF_ADDR);
+      }
       if ( x.IndirectAddressingMOD == ABSOLUTE_INDIRECT_ADRESSING )
         out_symbol(')');
       break;
 
     case o_displ: // Indirect addressing mode
       {
-        const char *reg = ph.regNames[x.reg];
         char buf[8];
+        const char *reg = ph.reg_names[x.reg];
         switch ( x.IndirectAddressingMOD )
         {
           case 0:
@@ -198,19 +224,19 @@ bool idaapi outop(op_t &x)
           case 0xC:
             qsnprintf(buf, sizeof(buf), "*%s(",reg);
             out_register(buf);
-            OutValue(x, OOF_ADDR|OOF_SIGNED|OOFW_16);
+            out_value(x, OOF_ADDR|OOF_SIGNED|OOFW_16);
             out_symbol(')');
             break;
           case 0xD:
             qsnprintf(buf, sizeof(buf), "*+%s(",reg);
             out_register(buf);
-            OutValue(x, OOF_ADDR|OOF_SIGNED|OOFW_16);
+            out_value(x, OOF_ADDR|OOF_SIGNED|OOFW_16);
             out_symbol(')');
             break;
           case 0xE:
             qsnprintf(buf, sizeof(buf), "*+%s(",reg);
             out_register(buf);
-            OutValue(x, OOF_ADDR|OOF_SIGNED|OOFW_16);
+            out_value(x, OOF_ADDR|OOF_SIGNED|OOFW_16);
             out_symbol(')');
             out_symbol('%');
             break;
@@ -218,7 +244,7 @@ bool idaapi outop(op_t &x)
           // case ABSOLUTE_INDIRECT_ADRESSING:
           //   out_symbol('*');
           //   out_symbol('(');
-          //   OutValue(x, OOF_ADDR|OOF_SIGNED|OOFW_16);
+          //   out_value(x, OOF_ADDR|OOF_SIGNED|OOFW_16);
           //   out_symbol(')');
           //   break;
           default:
@@ -233,7 +259,7 @@ bool idaapi outop(op_t &x)
           out_symbol('#');
         char buf[20];
         qsnprintf(buf, sizeof(buf), "%d", int(x.value));
-        out_line(buf,COLOR_REG);
+        out_line(buf, COLOR_REG);
         break;
       }
 
@@ -264,26 +290,21 @@ bool idaapi outop(op_t &x)
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_tms320c54_t::out_insn(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  OutMnem();
+  out_mnemonic();
   out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
-    if ( cmd.IsParallel )
+    if ( insn.IsParallel )
     { // new line for Parallel instructions
-      term_output_buffer();
-      MakeLine(buf);
-      init_output_buffer(buf, sizeof(buf));
+      flush_outbuf();
       out_line("|| ", COLOR_INSN);
       const char *insn2 = NULL;
-      switch ( cmd.itype )
+      switch ( insn.itype )
       {
         case TMS320C54_ld_mac:  insn2 = "mac  "; break;
         case TMS320C54_ld_macr: insn2 = "macr "; break;
@@ -301,25 +322,25 @@ void idaapi out(void)
       }
       out_line(insn2, COLOR_INSN);
     }
-    if ( cmd.Op3.type != o_void )
+    if ( insn.Op3.type != o_void )
     {
-      if ( !cmd.IsParallel )
+      if ( !insn.IsParallel )
       {
         out_symbol(',');
-        OutChar(' ');
+        out_char(' ');
       }
       out_one_operand(2);
-      if ( cmd.Op4_type != 0 )
+      if ( insn.Op4_type != 0 )
       {
         out_symbol(',');
-        OutChar(' ');
-        switch ( cmd.Op4_type )
+        out_char(' ');
+        switch ( insn.Op4_type )
         {
           case o_reg:
-            out_register(ph.regNames[cmd.Op4_value]);
+            out_register(ph.reg_names[insn.Op4_value]);
             break;
           case o_cond8:
-            out_cond8(cmd.Op4_value);
+            out_cond8(insn.Op4_value);
             break;
           default:
             break;
@@ -327,100 +348,100 @@ void idaapi out(void)
       }
     }
   }
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea, uFlag, 2) ) OutImmChar(cmd.Op3);
 
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-static void print_segment_register(int reg, sel_t value)
+static void print_segment_register(outctx_t &ctx, int reg, sel_t value)
 {
-  if ( reg == ph.regDataSreg ) return;
+  if ( reg == ph.reg_data_sreg )
+    return;
   if ( value != BADADDR )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), value);
-    gen_cmt_line("assume %s = %s", ph.regNames[reg], buf);
+    ctx.gen_cmt_line("assume %s = %s", ph.reg_names[reg], buf);
   }
   else
   {
-    gen_cmt_line("drop %s", ph.regNames[reg]);
+    ctx.gen_cmt_line("drop %s", ph.reg_names[reg]);
   }
 }
 
 //--------------------------------------------------------------------------
 // function to produce assume directives
-void idaapi assumes(ea_t ea)
+//lint -e{1764} ctx could be const
+void idaapi assumes(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( !inf.s_assume || seg == NULL )
+  if ( (inf.outflags & OFLG_GEN_ASSUME) == 0 || seg == NULL )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
-  for ( int i = ph.regFirstSreg; i <= ph.regLastSreg; ++i )
+  for ( int i = ph.reg_first_sreg; i <= ph.reg_last_sreg; ++i )
   {
-    if ( i == ph.regCodeSreg )
+    if ( i == ph.reg_code_sreg )
       continue;
-    segreg_area_t sra;
-    if ( !get_srarea2(&sra, ea, i) )
+    sreg_range_t sra;
+    if ( !get_sreg_range(&sra, ea, i) )
       continue;
-    if ( seg_started || sra.startEA == ea )
+    if ( seg_started || sra.start_ea == ea )
     {
-      sel_t now  = get_segreg(ea, i);
-      segreg_area_t prev;
-      bool prev_exists = get_srarea2(&prev, ea-1, i);
-      if ( seg_started || (prev_exists && get_segreg(prev.startEA, i) != now) )
-        print_segment_register(i, now);
+      sel_t now = get_sreg(ea, i);
+      sreg_range_t prev;
+      bool prev_exists = get_sreg_range(&prev, ea-1, i);
+      if ( seg_started || (prev_exists && get_sreg(prev.start_ea, i) != now) )
+        print_segment_register(ctx, i, now);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -e{818} seg could be const
+void idaapi segstart(outctx_t &ctx, segment_t *seg)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(seg->type) )
+    return;
 
-  char sclas[MAXNAMELEN];
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sclas;
+  get_segm_class(&sclas, seg);
 
-  if ( strcmp(sclas,"CODE") == 0 )
-    printf_line(inf.indent, COLSTR(".text", SCOLOR_ASMDIR));
-  else if ( strcmp(sclas,"DATA") == 0 )
-    printf_line(inf.indent, COLSTR(".data", SCOLOR_ASMDIR));
+  if ( sclas == "CODE" )
+    ctx.gen_printf(inf.indent, COLSTR(".text", SCOLOR_ASMDIR));
+  else if ( sclas == "DATA" )
+    ctx.gen_printf(inf.indent, COLSTR(".data", SCOLOR_ASMDIR));
 
-  if ( Sarea->orgbase != 0 )
+  if ( seg->orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
-    btoa(buf, sizeof(buf), Sarea->orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    btoa(buf, sizeof(buf), seg->orgbase);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t)
+void idaapi segend(outctx_t &, segment_t *)
 {
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL | GH_BYTESEX_HAS_HIGHBYTE);
-  MakeNull();
+  ctx.gen_header(GH_PRINT_ALL | GH_BYTESEX_HAS_HIGHBYTE);
+  ctx.gen_empty_line();
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi footer(outctx_t &ctx)
 {
-  printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR),ash.end);
+  ctx.gen_printf(inf.indent, COLSTR("%s",SCOLOR_ASMDIR), ash.end);
 }
 
 //--------------------------------------------------------------------------
-void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v)
+void idaapi gen_stkvar_def(outctx_t &ctx, const member_t *mptr, sval_t v)
 {
   char sign = ' ';
   if ( v < 0 )
@@ -429,18 +450,17 @@ void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval
     v = -v;
   }
 
-  qstring name = get_member_name2(mptr->id);
+  qstring name = get_member_name(mptr->id);
 
   char vstr[MAX_NUMBUF];
   btoa(vstr, sizeof(vstr), v);
-  qsnprintf(buf, bufsize,
-            COLSTR("%s",SCOLOR_KEYWORD) " "
-            COLSTR("%c%s",SCOLOR_DNUM)
-            COLSTR(",",SCOLOR_SYMBOL) " "
-            COLSTR("%s",SCOLOR_LOCNAME),
-            ash.a_equ,
-            sign,
-            vstr,
-            name.c_str());
+  ctx.out_printf(COLSTR("%s",SCOLOR_KEYWORD) " "
+                 COLSTR("%c%s",SCOLOR_DNUM)
+                 COLSTR(",",SCOLOR_SYMBOL) " "
+                 COLSTR("%s",SCOLOR_LOCNAME),
+                 ash.a_equ,
+                 sign,
+                 vstr,
+                 name.c_str());
 }
 

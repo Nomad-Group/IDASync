@@ -9,9 +9,9 @@
 #include "hppa.hpp"
 
 //--------------------------------------------------------------------------
-static void simplify(uint32 code)
+static void simplify(insn_t &insn, uint32 code)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     // B,L,n target, %r0                =>      B,n    target
     // B,L,n target, %r2                =>      CALL,n target
@@ -20,14 +20,14 @@ static void simplify(uint32 code)
         int sub = (code>>13) & 7;
         if ( sub == 1 || sub == 4 )
           break;  // ,gate or ,push
-        switch ( cmd.Op2.reg )
+        switch ( insn.Op2.reg )
         {
           case R0:
-            cmd.Op2.type = o_void;
+            insn.Op2.type = o_void;
             break;
           case R2:
-            cmd.itype = HPPA_call;
-            cmd.Op2.type = o_void;
+            insn.itype = HPPA_call;
+            insn.Op2.type = o_void;
             break;
         }
       }
@@ -38,16 +38,16 @@ static void simplify(uint32 code)
     case HPPA_bve:
       if ( code & BIT31 )
         break;        // ,push or ,pop
-      if ( cmd.Op2.type == o_reg )
+      if ( insn.Op2.type == o_reg )
       {
-        cmd.itype = HPPA_call;
-        cmd.Op1.type = o_void;
+        insn.itype = HPPA_call;
+        insn.Op1.type = o_void;
         break;
       }
-      if ( cmd.Op1.phrase == R2 )
+      if ( insn.Op1.phrase == R2 )
       {
-        cmd.itype = HPPA_ret;
-        cmd.Op1.type = o_void;
+        insn.itype = HPPA_ret;
+        insn.Op1.type = o_void;
       }
       break;
 
@@ -57,14 +57,14 @@ static void simplify(uint32 code)
     case HPPA_depw:
       if ( code & BIT21 )
         break;        // no Z flag
-      if ( cmd.Op2.type == o_imm
-        && cmd.Op3.type == o_imm
-        && (cmd.Op2.value+1) == cmd.Op3.value )
+      if ( insn.Op2.type == o_imm
+        && insn.Op3.type == o_imm
+        && (insn.Op2.value+1) == insn.Op3.value )
       {
-        cmd.itype    += (HPPA_shld-HPPA_depd);
-        cmd.Op2.value = (cmd.itype == HPPA_shld ? 63 : 31) - cmd.Op2.value;
-        cmd.Op3       = cmd.Op4;
-        cmd.Op4.type  = o_void;
+        insn.itype    += (HPPA_shld-HPPA_depd);
+        insn.Op2.value = (insn.itype == HPPA_shld ? 63 : 31) - insn.Op2.value;
+        insn.Op3       = insn.Op4;
+        insn.Op4.type  = o_void;
       }
       break;
 
@@ -72,14 +72,14 @@ static void simplify(uint32 code)
     case HPPA_depwi:
       if ( code & BIT21 )
         break;        // no Z flag
-      if ( cmd.Op2.type == o_imm && cmd.Op2.value == 31
-        && cmd.Op3.type == o_imm && cmd.Op3.value <= 16 )
+      if ( insn.Op2.type == o_imm && insn.Op2.value == 31
+        && insn.Op3.type == o_imm && insn.Op3.value <= 16 )
       {
-        cmd.itype     = HPPA_ldi;
-        cmd.Op1.value = (1 << cmd.Op3.value) - 1;
-        cmd.Op2       = cmd.Op4;
-        cmd.Op3.type  = o_void;
-        cmd.Op4.type  = o_void;
+        insn.itype     = HPPA_ldi;
+        insn.Op1.value = (uval_t(1) << insn.Op3.value) - 1;
+        insn.Op2       = insn.Op4;
+        insn.Op3.type  = o_void;
+        insn.Op4.type  = o_void;
       }
       break;
     // EXTRD,S,cond r,63-sa,64-sa,t     =>      SHRD,S,cond r,sa,t
@@ -88,40 +88,40 @@ static void simplify(uint32 code)
     // EXTRW,U,cond r,31-sa,32-sa,t     =>      SHRW,U,cond r,sa,t
     case HPPA_extrd:
     case HPPA_extrw:
-      if ( cmd.Op2.type == o_imm
-        && cmd.Op3.type == o_imm
-        && (cmd.Op2.value+1) == cmd.Op3.value )
+      if ( insn.Op2.type == o_imm
+        && insn.Op3.type == o_imm
+        && (insn.Op2.value+1) == insn.Op3.value )
       {
-        cmd.itype    += HPPA_shrd - HPPA_extrd;
-        cmd.Op2.value = (cmd.itype == HPPA_shrd ? 63 : 31) - cmd.Op2.value;
-        cmd.Op3       = cmd.Op4;
-        cmd.Op4.type  = o_void;
+        insn.itype    += HPPA_shrd - HPPA_extrd;
+        insn.Op2.value = (insn.itype == HPPA_shrd ? 63 : 31) - insn.Op2.value;
+        insn.Op3       = insn.Op4;
+        insn.Op4.type  = o_void;
       }
       break;
 
     // LDO i(%r0), t                    =>      LDI i, t
     // LDO 0(r), t                      =>      COPY r, t
     case HPPA_ldo:
-      if ( cmd.Op1.reg == R0 )
+      if ( insn.Op1.reg == R0 )
       {
-        cmd.itype = HPPA_ldi;
-        cmd.Op1.type = o_imm;
-        cmd.Op1.value = cmd.Op1.addr;
+        insn.itype = HPPA_ldi;
+        insn.Op1.type = o_imm;
+        insn.Op1.value = insn.Op1.addr;
         break;
       }
-      if ( cmd.Op1.addr == 0 )
+      if ( insn.Op1.addr == 0 )
       {
-        cmd.itype = HPPA_copy;
-        cmd.Op1.type = o_reg;
+        insn.itype = HPPA_copy;
+        insn.Op1.type = o_reg;
       }
       break;
 
     // MTCTL r, %sar                    =>      MTSAR r
     case HPPA_mtctl:
-      if ( cmd.Op2.reg == CR11 )
+      if ( insn.Op2.reg == CR11 )
       {
-        cmd.itype = HPPA_mtsar;
-        cmd.Op2.type = o_void;
+        insn.itype = HPPA_mtsar;
+        insn.Op2.type = o_void;
       }
       break;
 
@@ -131,27 +131,27 @@ static void simplify(uint32 code)
     case HPPA_or:
       if ( ((code>>13) & 7) )
         break;    // condition codes not zero
-      if ( cmd.Op1.reg == R0 )
+      if ( insn.Op1.reg == R0 )
       {
-        if ( cmd.Op2.reg == R0 && cmd.Op3.reg == R0 )
+        if ( insn.Op2.reg == R0 && insn.Op3.reg == R0 )
         {
-          cmd.itype = HPPA_nop;
-          cmd.Op1.type = o_void;
-          cmd.Op2.type = o_void;
-          cmd.Op3.type = o_void;
+          insn.itype = HPPA_nop;
+          insn.Op1.type = o_void;
+          insn.Op2.type = o_void;
+          insn.Op3.type = o_void;
           break;
         }
-        cmd.itype = HPPA_copy;
-        cmd.Op1 = cmd.Op2;
-        cmd.Op2 = cmd.Op3;
-        cmd.Op3.type = o_void;
+        insn.itype = HPPA_copy;
+        insn.Op1 = insn.Op2;
+        insn.Op2 = insn.Op3;
+        insn.Op3.type = o_void;
         break;
       }
-      if ( cmd.Op2.reg == R0 )
+      if ( insn.Op2.reg == R0 )
       {
-        cmd.itype = HPPA_copy;
-        cmd.Op2 = cmd.Op3;
-        cmd.Op3.type = o_void;
+        insn.itype = HPPA_copy;
+        insn.Op2 = insn.Op3;
+        insn.Op3.type = o_void;
       }
       break;
   }
@@ -161,7 +161,7 @@ static void simplify(uint32 code)
 struct table1_t
 {
   ushort itype;
-  char dtyp;
+  char dtype;
 };
 
 static const table1_t C1[] =
@@ -235,7 +235,7 @@ static const table1_t C1[] =
 struct ldst_t
 {
   ushort itype;
-  char dtyp;
+  char dtype;
 };
 
 static const ldst_t C6[] =
@@ -266,12 +266,12 @@ static void opr(op_t &x, uint32 rgnum)
   {
     x.type = o_imm;
     x.value = 0;
-    x.dtyp = dt_dword;
+    x.dtype = dt_dword;
   }
   else*/
   {
     x.type = o_reg;
-    x.dtyp = dt_qword;
+    x.dtype = dt_qword;
   }
 }
 
@@ -280,7 +280,7 @@ inline void opi(op_t &x, uval_t v)
 {
   x.type = o_imm;
   x.value = v;
-  x.dtyp = dt_dword;
+  x.dtype = dt_dword;
 }
 
 //--------------------------------------------------------------------------
@@ -288,52 +288,52 @@ inline void opb(op_t &x, int r)
 {
   x.type   = o_based;
   x.phrase = (uint16)r;
-  x.dtyp   = dt_dword;
+  x.dtype  = dt_dword;
 }
 
 //--------------------------------------------------------------------------
-inline void opbs(op_t &x, int sr, int r)
+inline void opbs(insn_t &insn, op_t &x, int sr, int r)
 {
   opb(x, r);
   x.sid = uchar(SR0+sr);
   if ( sr != 0 )
-    cmd.auxpref |= aux_space;
+    insn.auxpref |= aux_space;
 }
 
 //--------------------------------------------------------------------------
-inline void opx(op_t &x, int b, int xx, char dtyp)
+inline void opx(op_t &x, int b, int xx, char dtype)
 {
   x.type   = o_phrase;
   x.phrase = uint16(b);
   x.secreg = uchar(xx);
-  x.dtyp   = dtyp;
+  x.dtype  = dtype;
 }
 
 //--------------------------------------------------------------------------
-inline void opxs(op_t &x, int sr, int b, int xx, char dtyp)
+inline void opxs(insn_t &insn, op_t &x, int sr, int b, int xx, char dtype)
 {
-  opx(x, b, xx, dtyp);
+  opx(x, b, xx, dtype);
   x.sid = uchar(SR0+sr);
   if ( sr != 0 )
-    cmd.auxpref |= aux_space;
+    insn.auxpref |= aux_space;
 }
 
 //--------------------------------------------------------------------------
-inline void opd(op_t &x, int b, uval_t value, char dtyp)
+inline void opd(op_t &x, int b, uval_t value, char dtype)
 {
   x.type   = o_displ;
   x.phrase = uint16(b);
   x.addr   = value;
-  x.dtyp   = dtyp;
+  x.dtype  = dtype;
 }
 
 //--------------------------------------------------------------------------
-inline void opds(op_t &x, int sr, int b, uval_t value, char dtyp)
+inline void opds(insn_t &insn, op_t &x, int sr, int b, uval_t value, char dtype)
 {
-  opd(x, b, value, dtyp);
+  opd(x, b, value, dtype);
   x.sid = uchar(SR0+sr);
   if ( sr != 0 )
-    cmd.auxpref |= aux_space;
+    insn.auxpref |= aux_space;
 }
 
 //--------------------------------------------------------------------------
@@ -404,12 +404,12 @@ static ushort find_itype(const table_t *table, int code)
 }
 
 //--------------------------------------------------------------------------
-inline sval_t ls5(int i5)   { return (( i5>>1)&15)    | (( i5 & 1) ?    ~sval_t(15) : 0);  }
-inline sval_t ls11(int i11) { return ((i11>>1)&0x3FF) | ((i11 & 1) ? ~sval_t(0x1FF) : 0);  }
-inline sval_t s12(int imm12){ return (imm12 & 0x0800) ? (imm12 | ~sval_t(0x0FFF)) : imm12; }
-inline sval_t s16(int imm16){ return (imm16 & 0x8000) ? (imm16 | ~sval_t(0xFFFF)) : imm16; }
-inline sval_t s17(uint32 i17){ return (i17  & 0x10000) ? (i17  | ~sval_t(0x1FFFF)) : i17;   }
-inline sval_t s22(uint32 i22){ return (i22 & 0x200000) ? (i22 | ~sval_t(0x3FFFFF)) : i22;   }
+inline sval_t ls5(int i5)     { return (( i5>>1)&15)    | (( i5 & 1) ?    ~sval_t(15) : 0);  }
+inline sval_t ls11(int i11)   { return ((i11>>1)&0x3FF) | ((i11 & 1) ? ~sval_t(0x1FF) : 0);  }
+inline sval_t s12(int imm12)  { return (imm12 & 0x0800) ? (imm12 | ~sval_t(0x0FFF)) : imm12; }
+inline sval_t s16(int imm16)  { return (imm16 & 0x8000) ? (imm16 | ~sval_t(0xFFFF)) : imm16; }
+inline sval_t s17(uint32 i17) { return (i17  & 0x10000) ? (i17  | ~sval_t(0x1FFFF)) : i17;   }
+inline sval_t s22(uint32 i22) { return (i22 & 0x200000) ? (i22 | ~sval_t(0x3FFFFF)) : i22;   }
 inline int mfr(int r, bool d) { return (d ? F0 : F16L) + r; }
 inline int as3(int s)
 {
@@ -421,7 +421,7 @@ inline int fr(int r, int y)
 }
 
 //--------------------------------------------------------------------------
-static void handle_float_0C(uint32 code)
+static void handle_float_0C(insn_t &insn, uint32 code)
 {
   int uid = (code>> 6) & 7;
   if ( uid == 2 )               // performance coprocessor
@@ -430,13 +430,13 @@ static void handle_float_0C(uint32 code)
     switch ( sub )
     {
       case 1:
-        cmd.itype = HPPA_pmdis;
+        insn.itype = HPPA_pmdis;
         break;
       case 3:
-        cmd.itype = (code & BIT26) ? HPPA_null : HPPA_pmenb;
+        insn.itype = (code & BIT26) ? HPPA_null : HPPA_pmenb;
         break;
       default:
-        cmd.itype = HPPA_null;
+        insn.itype = HPPA_null;
         break;
     }
     return;
@@ -455,35 +455,35 @@ static void handle_float_0C(uint32 code)
           HPPA_fid,   HPPA_null, HPPA_fcpy, HPPA_fabs,
           HPPA_fsqrt, HPPA_frnd, HPPA_fneg, HPPA_fnegabs
         };
-        cmd.itype = itypes[(code>>13)&7];
-        if ( cmd.itype != HPPA_fid )
+        insn.itype = itypes[(code>>13)&7];
+        if ( insn.itype != HPPA_fid )
         {
-          opr(cmd.Op1, F0 + r06(code));
-          opr(cmd.Op2, F0 + r27(code));
+          opr(insn.Op1, F0 + r06(code));
+          opr(insn.Op2, F0 + r27(code));
         }
       }
       break;
     case 1:
-      cmd.itype = HPPA_fcnv;
-      opr(cmd.Op1, F0 + r06(code));
-      opr(cmd.Op2, F0 + r27(code));
+      insn.itype = HPPA_fcnv;
+      opr(insn.Op1, F0 + r06(code));
+      opr(insn.Op2, F0 + r27(code));
       break;
     case 2:
       if ( code & BIT26 )
       {
-        cmd.itype = HPPA_ftest;
+        insn.itype = HPPA_ftest;
         int y = (code>>13) & 7;
         if ( y != 1 )
-          opr(cmd.Op1, CA0+(y^1)-1);
+          opr(insn.Op1, CA0+(y^1)-1);
       }
       else
       {
-        cmd.itype = HPPA_fcmp;
-        opr(cmd.Op1, F0 + r06(code));
-        opr(cmd.Op2, F0 + r11(code));
+        insn.itype = HPPA_fcmp;
+        opr(insn.Op1, F0 + r06(code));
+        opr(insn.Op2, F0 + r11(code));
         int y = (code>>13) & 7;
         if ( y )
-          opr(cmd.Op3, CA0+y-1);
+          opr(insn.Op3, CA0+y-1);
       }
       break;
     case 3:
@@ -494,17 +494,17 @@ static void handle_float_0C(uint32 code)
           HPPA_frem, HPPA_null, HPPA_null, HPPA_null
         };
         int sub = (code>>13) & 7;
-        cmd.itype = (code & BIT26) ? HPPA_null : itypes[sub];
-        opr(cmd.Op1, F0 + r06(code));
-        opr(cmd.Op2, F0 + r11(code));
-        opr(cmd.Op3, F0 + r27(code));
+        insn.itype = (code & BIT26) ? HPPA_null : itypes[sub];
+        opr(insn.Op1, F0 + r06(code));
+        opr(insn.Op2, F0 + r11(code));
+        opr(insn.Op3, F0 + r27(code));
       }
       break;
   }
 }
 
 //--------------------------------------------------------------------------
-static void handle_float_0E(uint32 code)
+static void handle_float_0E(insn_t &insn, uint32 code)
 {
   int cls = (code>>9) & 3;
   switch ( cls )
@@ -516,24 +516,24 @@ static void handle_float_0E(uint32 code)
           HPPA_null,  HPPA_null, HPPA_fcpy, HPPA_fabs,
           HPPA_fsqrt, HPPA_frnd, HPPA_fneg, HPPA_fnegabs
         };
-        cmd.itype = itypes[(code>>13)&7];
-        opr(cmd.Op1, fr(r06(code), (code>>7)&1));
-        opr(cmd.Op2, fr(r27(code), (code>>6)&1));
+        insn.itype = itypes[(code>>13)&7];
+        opr(insn.Op1, fr(r06(code), (code>>7)&1));
+        opr(insn.Op2, fr(r27(code), (code>>6)&1));
       }
       break;
     case 1:
-      cmd.itype = HPPA_fcnv;
-      opr(cmd.Op1, fr(r06(code), (code>>7)&1));
-      opr(cmd.Op2, fr(r27(code), (code>>6)&1));
+      insn.itype = HPPA_fcnv;
+      opr(insn.Op1, fr(r06(code), (code>>7)&1));
+      opr(insn.Op2, fr(r27(code), (code>>6)&1));
       break;
     case 2:
       {
-        cmd.itype = HPPA_fcmp;
-        opr(cmd.Op1, fr(r06(code), (code>>7)&1));
-        opr(cmd.Op2, fr(r11(code), (code>>12)&1));
+        insn.itype = HPPA_fcmp;
+        opr(insn.Op1, fr(r06(code), (code>>7)&1));
+        opr(insn.Op2, fr(r11(code), (code>>12)&1));
         int y = (code>>13) & 7;
         if ( y )
-          opr(cmd.Op3, CA0+y-1);
+          opr(insn.Op3, CA0+y-1);
       }
       break;
     case 3:
@@ -544,102 +544,105 @@ static void handle_float_0E(uint32 code)
           HPPA_null, HPPA_null, HPPA_null, HPPA_null
         };
         int sub = (code>>13) & 7;
-        cmd.itype = itypes[sub];
+        insn.itype = itypes[sub];
         if ( code & BIT23 )
         {
-          cmd.itype = (sub == 2) ? HPPA_xmpyu : HPPA_null;
+          insn.itype = (sub == 2) ? HPPA_xmpyu : HPPA_null;
         }
-        opr(cmd.Op1, fr(r06(code), (code>>7)&1));
-        opr(cmd.Op2, fr(r11(code), (code>>12)&1));
-        opr(cmd.Op3, fr(r27(code), (code>>6)&1));
+        opr(insn.Op1, fr(r06(code), (code>>7)&1));
+        opr(insn.Op2, fr(r11(code), (code>>12)&1));
+        opr(insn.Op3, fr(r27(code), (code>>6)&1));
       }
       break;
   }
 }
 
 //--------------------------------------------------------------------------
-inline void opn(op_t &x, sval_t disp)
+inline void opn(op_t &x, sval_t disp, ea_t ip)
 {
   disp <<= 2;
   x.type = o_near;
-  x.addr = cmd.ip + 8 + disp;
+  x.addr = ip + 8 + disp;
 }
 
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
-  if ( cmd.ip & 3 )
+  if ( _insn == NULL )
+    return 0;
+  insn_t &insn = *_insn;
+  if ( insn.ip & 3 )
     return 0;           // alignment error
 
-  uint32 code = ua_next_long();
+  uint32 code = insn.get_next_dword();
 
   int op = opcode(code);
-  cmd.itype = C1[op].itype;
-  char dtyp = C1[op].dtyp;
+  insn.itype = C1[op].itype;
+  char dtype = C1[op].dtype;
   switch ( op )
   {
     case 0x00:
       switch ( (code>>5) & 0xFF )
       {
         case 0x00:
-          cmd.itype = HPPA_break;
-          opi(cmd.Op1, r27(code));
-          opi(cmd.Op2, (code>>13) & 0x1FFF);
+          insn.itype = HPPA_break;
+          opi(insn.Op1, r27(code));
+          opi(insn.Op2, (code>>13) & 0x1FFF);
           break;
         case 0x20:
-          cmd.itype = (code & BIT11) ? HPPA_syncdma : HPPA_sync;
+          insn.itype = (code & BIT11) ? HPPA_syncdma : HPPA_sync;
           break;
         case 0x60:
         case 0x65:
-          cmd.itype = HPPA_rfi;
+          insn.itype = HPPA_rfi;
           break;
         case 0x6B:
-          cmd.itype = HPPA_ssm;
+          insn.itype = HPPA_ssm;
 RSM_SSM:
-          opi(cmd.Op1, (code>>16)&0x3FF);
-          opr(cmd.Op2, r27(code));
+          opi(insn.Op1, (code>>16)&0x3FF);
+          opr(insn.Op2, r27(code));
           break;
         case 0x73:
-          cmd.itype = HPPA_rsm;
+          insn.itype = HPPA_rsm;
           goto RSM_SSM;
         case 0xC3:
-          cmd.itype = HPPA_mtsm;
-          opr(cmd.Op1, r11(code));
+          insn.itype = HPPA_mtsm;
+          opr(insn.Op1, r11(code));
           break;
         case 0x85:
-          cmd.itype = HPPA_ldsid;
-          opbs(cmd.Op1, (code>>14)&3, r06(code));
-          opr(cmd.Op2, r27(code));
+          insn.itype = HPPA_ldsid;
+          opbs(insn, insn.Op1, (code>>14)&3, r06(code));
+          opr(insn.Op2, r27(code));
           break;
         case 0xC1:
-          cmd.itype = HPPA_mtsp;
-          opr(cmd.Op1, r11(code));
-          opr(cmd.Op2, SR0+((code>>13)&7));
+          insn.itype = HPPA_mtsp;
+          opr(insn.Op1, r11(code));
+          opr(insn.Op2, SR0+((code>>13)&7));
           break;
         case 0x25:
-          cmd.itype = HPPA_mfsp;
-          opr(cmd.Op1, SR0+((code>>13)&7));
-          opr(cmd.Op2, r27(code));
+          insn.itype = HPPA_mfsp;
+          opr(insn.Op1, SR0+((code>>13)&7));
+          opr(insn.Op2, r27(code));
           break;
         case 0xA5:
-          cmd.itype = HPPA_mfia;
-          opr(cmd.Op1, r27(code));
+          insn.itype = HPPA_mfia;
+          opr(insn.Op1, r27(code));
           break;
         case 0xC2:
-          cmd.itype = HPPA_mtctl;
-          opr(cmd.Op1, r11(code));
-          opr(cmd.Op2, CR0+r06(code));
+          insn.itype = HPPA_mtctl;
+          opr(insn.Op1, r11(code));
+          opr(insn.Op2, CR0+r06(code));
           break;
         case 0xC6:
           if ( r06(code) != 0xB )
             return 0;
-          cmd.itype = HPPA_mtsarcm;
-          opr(cmd.Op1, r11(code));
+          insn.itype = HPPA_mtsarcm;
+          opr(insn.Op1, r11(code));
           break;
         case 0x45:
-          cmd.itype = HPPA_mfctl;
-          opr(cmd.Op1, CR0+r06(code));
-          opr(cmd.Op2, r27(code));
+          insn.itype = HPPA_mfctl;
+          opr(insn.Op1, CR0+r06(code));
+          opr(insn.Op2, r27(code));
           break;
         default:
           return 0;
@@ -652,63 +655,63 @@ RSM_SSM:
         switch ( (code>>6) & 0xFF )
         {
           case 0x60:
-            cmd.itype = HPPA_idtlbt;
-            opr(cmd.Op1, CR0+r06(code));
-            opr(cmd.Op2, r27(code));
+            insn.itype = HPPA_idtlbt;
+            opr(insn.Op1, CR0+r06(code));
+            opr(insn.Op2, r27(code));
             break;
           case 0x48:
           case 0x58:
-            cmd.itype = HPPA_pdtlb;
+            insn.itype = HPPA_pdtlb;
             goto PDT;
           case 0x49:
-            cmd.itype = HPPA_pdtlbe;
+            insn.itype = HPPA_pdtlbe;
 PDT:
-            opxs(cmd.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
+            opxs(insn, insn.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
             break;
           case 0x4A:
-            cmd.itype = HPPA_fdc;
-            opxs(cmd.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
+            insn.itype = HPPA_fdc;
+            opxs(insn, insn.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
             break;
           case 0xCA:
-            cmd.itype = HPPA_fdc;
-            opds(cmd.Op1, (code>>14)&3, r06(code), ls5(r11(code)), dt_dword);
+            insn.itype = HPPA_fdc;
+            opds(insn, insn.Op1, (code>>14)&3, r06(code), ls5(r11(code)), dt_dword);
             if ( code & BIT26 )
               return 0;
             break;
           case 0x4B:
-            cmd.itype = HPPA_fdce;
-            opxs(cmd.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
+            insn.itype = HPPA_fdce;
+            opxs(insn, insn.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
             break;
           case 0x4E:
-            cmd.itype = HPPA_pdc;
-            opxs(cmd.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
+            insn.itype = HPPA_pdc;
+            opxs(insn, insn.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
             break;
           case 0x4F:
-            cmd.itype = HPPA_fic;
-            opxs(cmd.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
+            insn.itype = HPPA_fic;
+            opxs(insn, insn.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
             break;
           case 0x46:
           case 0x47:
-            cmd.itype = HPPA_probe;
-            opbs(cmd.Op1, (code>>14)&3, r06(code));
-            opr(cmd.Op2, r11(code));
-            opr(cmd.Op3, r27(code));
+            insn.itype = HPPA_probe;
+            opbs(insn, insn.Op1, (code>>14)&3, r06(code));
+            opr(insn.Op2, r11(code));
+            opr(insn.Op3, r27(code));
             break;
           case 0xC6:
           case 0xC7:
-            cmd.itype = HPPA_probei;
-            opbs(cmd.Op1, (code>>14)&3, r06(code));
-            opi(cmd.Op2, r11(code));
-            opr(cmd.Op3, r27(code));
+            insn.itype = HPPA_probei;
+            opbs(insn, insn.Op1, (code>>14)&3, r06(code));
+            opi(insn.Op2, r11(code));
+            opr(insn.Op3, r27(code));
             break;
           case 0x4D:
-            cmd.itype = HPPA_lpa;
+            insn.itype = HPPA_lpa;
 MAKE_LPA:
-            opxs(cmd.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
-            opr(cmd.Op2, r27(code));
+            opxs(insn, insn.Op1, (code>>14)&3, r06(code), r11(code), dt_dword);
+            opr(insn.Op2, r27(code));
             break;
           case 0x4C:
-            cmd.itype = HPPA_lci;
+            insn.itype = HPPA_lci;
             if ( code & BIT26 )
               return 0;
             goto MAKE_LPA;
@@ -721,25 +724,25 @@ MAKE_LPA:
         switch ( (code>>6) & 0x7F )
         {
           case 0x20:
-            cmd.itype = HPPA_iitlbt;
-            opr(cmd.Op1, r11(code));
-            opr(cmd.Op2, r06(code));
+            insn.itype = HPPA_iitlbt;
+            opr(insn.Op1, r11(code));
+            opr(insn.Op2, r06(code));
             break;
           case 0x18:
           case 0x08:
-            cmd.itype = HPPA_pitlb;
+            insn.itype = HPPA_pitlb;
 PIT:
-            opxs(cmd.Op1, as3((code>>13)&7), r06(code), r11(code), dt_dword);
-            cmd.auxpref |= aux_space;
+            opxs(insn, insn.Op1, as3((code>>13)&7), r06(code), r11(code), dt_dword);
+            insn.auxpref |= aux_space;
             break;
           case 0x09:
-            cmd.itype = HPPA_pitlbe;
+            insn.itype = HPPA_pitlbe;
             goto PIT;
           case 0x0A:
-            cmd.itype = HPPA_fic;
+            insn.itype = HPPA_fic;
             goto PIT;
           case 0x0B:
-            cmd.itype = HPPA_fice;
+            insn.itype = HPPA_fice;
             goto PIT;
           default:
             return 0;
@@ -748,9 +751,9 @@ PIT:
       break;
 
     case 0x02:
-      cmd.auxpref = (code>>13) & aux_cndc; // condition
-      cmd.itype = find_itype(C5, (code>>6)&0x3F);
-      switch ( cmd.itype )
+      insn.auxpref = (code>>13) & aux_cndc; // condition
+      insn.itype = find_itype(C5, (code>>6)&0x3F);
+      switch ( insn.itype )
       {
         default:
         //case HPPA_add:
@@ -766,31 +769,31 @@ PIT:
         //case HPPA_hadd:
         //case HPPA_hsub:
         //case HPPA_havg:
-          opr(cmd.Op1, r11(code));
-          opr(cmd.Op2, r06(code));
-          opr(cmd.Op3, r27(code));
+          opr(insn.Op1, r11(code));
+          opr(insn.Op2, r06(code));
+          opr(insn.Op3, r27(code));
           break;
         case HPPA_dcor:
-          opr(cmd.Op1, r06(code));
-          opr(cmd.Op2, r27(code));
+          opr(insn.Op1, r06(code));
+          opr(insn.Op2, r27(code));
           break;
         case HPPA_shladd:
-          opr(cmd.Op1, r11(code));
-          opi(cmd.Op2, (code>>6)&3);
+          opr(insn.Op1, r11(code));
+          opi(insn.Op2, (code>>6)&3);
           if ( ((code>>6) & 3) == 0 )
             return 0;
-          opr(cmd.Op3, r06(code));
-          opr(cmd.Op4, r27(code));
+          opr(insn.Op3, r06(code));
+          opr(insn.Op4, r27(code));
           break;
         case HPPA_hshladd:
-          opr(cmd.Op1, r11(code));
-          opr(cmd.Op2, r06(code));
+          opr(insn.Op1, r11(code));
+          opr(insn.Op2, r06(code));
           if ( ((code>>6) & 3) == 0 )
             return 0;
-          if ( cmd.auxpref )
+          if ( insn.auxpref )
             return 0;  // condition should be never
-          opi(cmd.Op3, (code>>6)&3);
-          opr(cmd.Op4, r27(code));
+          opi(insn.Op3, (code>>6)&3);
+          opr(insn.Op4, r27(code));
           break;
       }
       break;
@@ -800,28 +803,28 @@ PIT:
         int idx = (code>>6) & 0xF;
         if ( (code & BIT19) == 0 && idx > 7 )
           return 0;
-        cmd.itype = C6[idx].itype;
-        dtyp = C6[idx].dtyp;
+        insn.itype = C6[idx].itype;
+        dtype = C6[idx].dtype;
         if ( code & BIT19 )             // short
         {
           if ( idx > 7 )        // store
           {
-            opr(cmd.Op1, r11(code));
-            opds(cmd.Op2, (code>>14)&3, r06(code), ls5(r27(code)), dtyp);
+            opr(insn.Op1, r11(code));
+            opds(insn, insn.Op2, (code>>14)&3, r06(code), ls5(r27(code)), dtype);
           }
           else                  // load
           {
-            opds(cmd.Op1, (code>>14)&3, r06(code), ls5(r11(code)), dtyp);
-            opr(cmd.Op2, r27(code));
+            opds(insn, insn.Op1, (code>>14)&3, r06(code), ls5(r11(code)), dtype);
+            opr(insn.Op2, r27(code));
           }
         }
         else                            // index
         {
-          opxs(cmd.Op1, (code>>14)&3, r06(code), r11(code), dtyp);
-          opr(cmd.Op2, r27(code));
+          opxs(insn, insn.Op1, (code>>14)&3, r06(code), r11(code), dtype);
+          opr(insn.Op2, r27(code));
         }
         if ( (idx & 7) == 6 )
-          cmd.auxpref &= ~aux_space; // ldwa, stwa
+          insn.auxpref &= ~aux_space; // ldwa, stwa
       }
       break;
 
@@ -829,37 +832,37 @@ PIT:
       switch ( (code>>9) & 3 )
       {
         case 0:
-          cmd.itype = HPPA_spop0;
+          insn.itype = HPPA_spop0;
           break;
         case 1:
-          cmd.itype = HPPA_spop1;
-          opr(cmd.Op1, r27(code));
+          insn.itype = HPPA_spop1;
+          opr(insn.Op1, r27(code));
           break;
         case 2:
-          cmd.itype = HPPA_spop2;
-          opr(cmd.Op1, r06(code));
+          insn.itype = HPPA_spop2;
+          opr(insn.Op1, r06(code));
           break;
         case 3:
-          cmd.itype = HPPA_spop3;
-          opr(cmd.Op1, r11(code));
-          opr(cmd.Op2, r06(code));
+          insn.itype = HPPA_spop3;
+          opr(insn.Op1, r11(code));
+          opr(insn.Op2, r06(code));
           break;
       }
       break;
 
     case 0x05:  // diag
-      opi(cmd.Op1, code & 0x3FFFFFF);
+      opi(insn.Op1, code & 0x3FFFFFF);
       break;
 
     case 0x06:  // fmpyadd
     case 0x26:  // fmpysub
       {
         bool d = !((code>>5) & 1);
-        opr(cmd.Op1, mfr(r06(code),d));
-        opr(cmd.Op2, mfr(r11(code),d));
-        opr(cmd.Op3, mfr(r27(code),d));
-        opr(cmd.Op4, mfr((code>>6)&0x1F,d));
-        opr(cmd.Op5, mfr((code>>11)&0x1F,d));
+        opr(insn.Op1, mfr(r06(code),d));
+        opr(insn.Op2, mfr(r11(code),d));
+        opr(insn.Op3, mfr(r27(code),d));
+        opr(insn.Op4, mfr((code>>6)&0x1F,d));
+        opr(insn.Op5, mfr((code>>11)&0x1F,d));
       }
       break;
 
@@ -867,8 +870,8 @@ PIT:
       return 0;
 
     case 0x08:  // ldil
-      opi(cmd.Op1, as21(code & 0x1FFFFF));
-      opr(cmd.Op2, r06(code));
+      opi(insn.Op1, as21(code & 0x1FFFFF));
+      opr(insn.Op2, r06(code));
       break;
 
     case 0x09: // cldw, cstw, fstd, fstw
@@ -878,58 +881,58 @@ PIT:
         int uid = (code>> 6) & 7;
         if ( code & BIT22 )
         {
-          cmd.itype = HPPA_cstd;
-          opr(cmd.Op1, r27(code));
-          x = &cmd.Op2;
+          insn.itype = HPPA_cstd;
+          opr(insn.Op1, r27(code));
+          x = &insn.Op2;
           if ( uid < 2 )
           {
-            cmd.itype = HPPA_fstd;
-            cmd.Op1.reg += F0 + ((code>>1)&0x20);
+            insn.itype = HPPA_fstd;
+            insn.Op1.reg += F0 + ((code>>1)&0x20);
           }
         }
         else
         {
-          cmd.itype = HPPA_cldd;
-          opr(cmd.Op2, r27(code));
-          x = &cmd.Op1;
+          insn.itype = HPPA_cldd;
+          opr(insn.Op2, r27(code));
+          x = &insn.Op1;
           if ( uid < 2 )
           {
-            cmd.itype = HPPA_fldd;
-            cmd.Op2.reg += F0 + ((code>>1)&0x20);
+            insn.itype = HPPA_fldd;
+            insn.Op2.reg += F0 + ((code>>1)&0x20);
           }
         }
-        dtyp = dt_qword;
+        dtype = dt_qword;
         if ( op == 0x09 )
         {
-          cmd.itype++; // cldw, cstw
-          dtyp = dt_dword;
+          insn.itype++; // cldw, cstw
+          dtype = dt_dword;
         }
         if ( code & BIT19 )
-          opds(*x, (code>>14)&3, r06(code), ls5(r11(code)), dtyp);
+          opds(insn, *x, (code>>14)&3, r06(code), ls5(r11(code)), dtype);
         else
-          opxs(*x, (code>>14)&3, r06(code), r11(code), dtyp);
+          opxs(insn, *x, (code>>14)&3, r06(code), r11(code), dtype);
       }
       break;
 
     case 0x0A:  // addil
-      opi(cmd.Op1, as21(code & 0x1FFFFF));
-      opr(cmd.Op2, r06(code));
-      opr(cmd.Op3, R1);
+      opi(insn.Op1, as21(code & 0x1FFFFF));
+      opr(insn.Op2, r06(code));
+      opr(insn.Op3, R1);
       break;
 
     case 0x0C:  // copr
-      handle_float_0C(code);
+      handle_float_0C(insn, code);
       break;
 
     case 0x0D:  // ldo
-      if ( getseg(cmd.ea)->use64() )
-        dtyp = dt_qword;
-      opd(cmd.Op1, r06(code), s16(get_ldo(code)), dtyp);
-      opr(cmd.Op2, r11(code));
+      if ( getseg(insn.ea)->use64() )
+        dtype = dt_qword;
+      opd(insn.Op1, r06(code), s16(get_ldo(code)), dtype);
+      opr(insn.Op2, r11(code));
       break;
 
     case 0x0E:
-      handle_float_0E(code);
+      handle_float_0E(insn, code);
       break;
 
     case 0x0F:
@@ -941,32 +944,32 @@ PIT:
     case 0x13:  // ldw (mod)
       {
         int s = (code>>14) & 3;
-        opds(cmd.Op1, s, r06(code), s16(assemble_16(s,code & 0x3FFF)), dtyp);
-        opr(cmd.Op2, r11(code));
+        opds(insn, insn.Op1, s, r06(code), s16(assemble_16(s,code & 0x3FFF)), dtype);
+        opr(insn.Op2, r11(code));
       }
       break;
 
     case 0x14:
       {
         int s = (code>>14) & 3;
-        cmd.itype = (code & BIT30) ? HPPA_fldd : HPPA_ldd;
+        insn.itype = (code & BIT30) ? HPPA_fldd : HPPA_ldd;
         int im10a = ((code>>3) & 0x7FE) | (code & 1);
-        opds(cmd.Op1, s, r06(code), s16(assemble_16(s,im10a)), dtyp);
-        opr(cmd.Op2, r11(code));
+        opds(insn, insn.Op1, s, r06(code), s16(assemble_16(s,im10a)), dtype);
+        opr(insn.Op2, r11(code));
         if ( code & BIT30 )
-          cmd.Op2.reg += F0;
+          insn.Op2.reg += F0;
       }
       break;
 
     case 0x1C:
       {
         int s = (code>>14) & 3;
-        cmd.itype = (code & BIT30) ? HPPA_fstd : HPPA_std;
+        insn.itype = (code & BIT30) ? HPPA_fstd : HPPA_std;
         int im10a = ((code>>3) & 0x7FE) | (code & 1);
-        opr(cmd.Op1, r11(code));
+        opr(insn.Op1, r11(code));
         if ( code & BIT30 )
-          cmd.Op1.reg += F0;
-        opds(cmd.Op2, s, r06(code), s16(assemble_16(s,im10a)), dtyp);
+          insn.Op1.reg += F0;
+        opds(insn, insn.Op2, s, r06(code), s16(assemble_16(s,im10a)), dtype);
       }
       break;
 
@@ -974,12 +977,12 @@ PIT:
     case 0x17:
       {
         int s = (code>>14) & 3;
-        cmd.itype = op & 1 && (code & BIT29) ? HPPA_ldw : HPPA_fldw;
+        insn.itype = op & 1 && (code & BIT29) ? HPPA_ldw : HPPA_fldw;
         int im11a = ((code>>3) & 0xFFE) | (code & 1);
-        opds(cmd.Op1, s, r06(code), s16(assemble_16(s,im11a)), dtyp);
-        opr(cmd.Op2, r11(code));
+        opds(insn, insn.Op1, s, r06(code), s16(assemble_16(s,im11a)), dtype);
+        opr(insn.Op2, r11(code));
         if ( code & BIT29 )
-          cmd.Op2.reg += F0 + ((code<<4) & 0x20);
+          insn.Op2.reg += F0 + ((code<<4) & 0x20);
       }
       break;
 
@@ -987,12 +990,12 @@ PIT:
     case 0x1F:
       {
         int s = (code>>14) & 3;
-        cmd.itype = op & 1 && (code & BIT29) ? HPPA_stw : HPPA_fstw;
+        insn.itype = op & 1 && (code & BIT29) ? HPPA_stw : HPPA_fstw;
         int im11a = ((code>>3) & 0xFFE) | (code & 1);
-        opr(cmd.Op1, r11(code));
+        opr(insn.Op1, r11(code));
         if ( code & BIT29 )
-          cmd.Op1.reg += F0 + ((code<<4) & 0x20);
-        opds(cmd.Op2, s, r06(code), s16(assemble_16(s,im11a)), dtyp);
+          insn.Op1.reg += F0 + ((code<<4) & 0x20);
+        opds(insn, insn.Op2, s, r06(code), s16(assemble_16(s,im11a)), dtype);
       }
       break;
 
@@ -1002,8 +1005,8 @@ PIT:
     case 0x1B:  // stw (mod)
       {
         int s = (code>>14) & 3;
-        opr(cmd.Op1, r11(code));
-        opds(cmd.Op2, s, r06(code), s16(assemble_16(s,code & 0x3FFF)), dtyp);
+        opr(insn.Op1, r11(code));
+        opds(insn, insn.Op2, s, r06(code), s16(assemble_16(s,code & 0x3FFF)), dtype);
       }
       break;
 
@@ -1018,10 +1021,10 @@ PIT:
     case 0x28:  // addb
     case 0x2A:  // addb
     case 0x32:  // movb
-      cmd.auxpref = (code>>13) & aux_cndc; // condition
-      opr(cmd.Op1, r11(code));
-      opr(cmd.Op2, r06(code));
-      opn(cmd.Op3, s12(get11(code)|((code&1)<<11)));
+      insn.auxpref = (code>>13) & aux_cndc; // condition
+      opr(insn.Op1, r11(code));
+      opr(insn.Op2, r06(code));
+      opn(insn.Op3, s12(get11(code)|((code&1)<<11)), insn.ip);
       break;
 
     case 0x21:  // cmpib
@@ -1030,144 +1033,144 @@ PIT:
     case 0x29:  // addib
     case 0x2B:  // addib
     case 0x33:  // movib
-      cmd.auxpref = (code>>13) & aux_cndc; // condition
-      opi(cmd.Op1, ls5(r11(code)));
-      opr(cmd.Op2, r06(code));
-      opn(cmd.Op3, s12(get11(code)|((code&1)<<11)));
+      insn.auxpref = (code>>13) & aux_cndc; // condition
+      opi(insn.Op1, ls5(r11(code)));
+      opr(insn.Op2, r06(code));
+      opn(insn.Op3, s12(get11(code)|((code&1)<<11)), insn.ip);
       break;
 
     case 0x24:  // cmpiclr
     case 0x25:  // subi
     case 0x2C:  // addi
     case 0x2D:  // addi
-      cmd.auxpref = (code>>13) & aux_cndc; // condition
-      opi(cmd.Op1, ls11(code & 0x7FF));
-      opr(cmd.Op2, r06(code));
-      opr(cmd.Op3, r11(code));
+      insn.auxpref = (code>>13) & aux_cndc; // condition
+      opi(insn.Op1, ls11(code & 0x7FF));
+      opr(insn.Op2, r06(code));
+      opr(insn.Op3, r11(code));
       break;
 
     case 0x2E:
       {
-        cmd.itype = (code & BIT26) ? HPPA_fmpynfadd : HPPA_fmpyfadd;
+        insn.itype = (code & BIT26) ? HPPA_fmpynfadd : HPPA_fmpyfadd;
         bool d = (code>>11) & 1;
-        opr(cmd.Op1, mfr(r06(code),d));
-        opr(cmd.Op2, mfr(r11(code),d));
+        opr(insn.Op1, mfr(r06(code),d));
+        opr(insn.Op2, mfr(r11(code),d));
         int ra = ((code>>10) & 0x38) | ((code>>8) & 0x7);
-        opr(cmd.Op3, F0+ra);
-        opr(cmd.Op4, mfr(r27(code),d));
+        opr(insn.Op3, F0+ra);
+        opr(insn.Op4, mfr(r27(code),d));
       }
       break;
 
     case 0x30:  // bb
     case 0x31:
-      opr(cmd.Op1, r11(code));
+      opr(insn.Op1, r11(code));
       if ( op & 1 )
       {
         int pos = r06(code) | ((code>>8) & 0x20);
-        opi(cmd.Op2, pos);
+        opi(insn.Op2, pos);
       }
       else
       {
-        opr(cmd.Op2, CR11);
+        opr(insn.Op2, CR11);
       }
-      opn(cmd.Op3, s12(get11(code)|((code&1)<<11)));
+      opn(insn.Op3, s12(get11(code)|((code&1)<<11)), insn.ip);
       break;
 
     case 0x34:
-      cmd.auxpref = (code>>13) & aux_cndc; // condition
+      insn.auxpref = (code>>13) & aux_cndc; // condition
       switch ( (code>>11) & 3 )     // bits 19, 20
       {
         case 0:
           if ( (code & BIT21) == 0 )            // format 11
           {
-            cmd.itype = (code & BIT22) ? HPPA_shrpd : HPPA_shrpw;
-            opr(cmd.Op1, r11(code));
-            opr(cmd.Op2, r06(code));
-            opr(cmd.Op3, CR11);
-            opr(cmd.Op4, r27(code));
+            insn.itype = (code & BIT22) ? HPPA_shrpd : HPPA_shrpw;
+            opr(insn.Op1, r11(code));
+            opr(insn.Op2, r06(code));
+            opr(insn.Op3, CR11);
+            opr(insn.Op4, r27(code));
             break;
           }
           // no break
         case 1:                                 // format 14
           {
-            cmd.itype = (code & BIT21) ? HPPA_shrpd : HPPA_shrpw;
-            opr(cmd.Op1, r11(code));
-            opr(cmd.Op2, r06(code));
-            int sa = (cmd.itype == HPPA_shrpd ? 63 : 31) - (r22(code)|((code>>10)&1));
-            opi(cmd.Op3, sa);
-            opr(cmd.Op4, r27(code));
+            insn.itype = (code & BIT21) ? HPPA_shrpd : HPPA_shrpw;
+            opr(insn.Op1, r11(code));
+            opr(insn.Op2, r06(code));
+            int sa = (insn.itype == HPPA_shrpd ? 63 : 31) - (r22(code)|((code>>10)&1));
+            opi(insn.Op3, sa);
+            opr(insn.Op4, r27(code));
           }
           break;
         case 2:                                 // format 12
           {
-            cmd.itype = (code & BIT22) ? HPPA_extrd : HPPA_extrw;
-            opr(cmd.Op1, r06(code));
-            opr(cmd.Op2, CR11);
+            insn.itype = (code & BIT22) ? HPPA_extrd : HPPA_extrw;
+            opr(insn.Op1, r06(code));
+            opr(insn.Op2, CR11);
             int cl = (code>>3) & 0x20;
             if ( (code & BIT22) == 0 && cl )
               return 0;
-            opi(cmd.Op3, (32-r27(code))|cl);
-            opr(cmd.Op4, r11(code));
+            opi(insn.Op3, (32-r27(code))|cl);
+            opr(insn.Op4, r11(code));
           }
           break;
         case 3:                                 // format 15
-          cmd.itype = HPPA_extrw;
-          opr(cmd.Op1, r06(code));
-          opi(cmd.Op2, r22(code));
-          opi(cmd.Op3, 32-r27(code));
-          opr(cmd.Op4, r11(code));
+          insn.itype = HPPA_extrw;
+          opr(insn.Op1, r06(code));
+          opi(insn.Op2, r22(code));
+          opi(insn.Op3, 32-r27(code));
+          opr(insn.Op4, r11(code));
           break;
       }
       break;
 
     case 0x35:
-      cmd.auxpref = (code>>13) & aux_cndc; // condition
+      insn.auxpref = (code>>13) & aux_cndc; // condition
       if ( code & BIT20 )                       // format 16
       {
         if ( code & BIT19 )
         {
-          cmd.itype = HPPA_depwi;
-          opi(cmd.Op1, ls5(r11(code)));
+          insn.itype = HPPA_depwi;
+          opi(insn.Op1, ls5(r11(code)));
         }
         else
         {
-          cmd.itype = HPPA_depw;
-          opr(cmd.Op1, r11(code));
+          insn.itype = HPPA_depw;
+          opr(insn.Op1, r11(code));
         }
-        opi(cmd.Op2, 31-r22(code));
-        opi(cmd.Op3, 32-r27(code));
-        opr(cmd.Op4, r06(code));
+        opi(insn.Op2, 31-r22(code));
+        opi(insn.Op3, 32-r27(code));
+        opr(insn.Op4, r06(code));
       }
       else                                      // format 13
       {
         if ( code & BIT19 )
         {
-          cmd.itype = (code & BIT22) ? HPPA_depdi : HPPA_depwi;
-          opi(cmd.Op1, ls5(r11(code)));
-          opr(cmd.Op2, CR11);
+          insn.itype = (code & BIT22) ? HPPA_depdi : HPPA_depwi;
+          opi(insn.Op1, ls5(r11(code)));
+          opr(insn.Op2, CR11);
         }
         else
         {
-          cmd.itype = (code & BIT22) ? HPPA_depd : HPPA_depw;
-          opr(cmd.Op1, r11(code));
-          opr(cmd.Op2, CR11);
+          insn.itype = (code & BIT22) ? HPPA_depd : HPPA_depw;
+          opr(insn.Op1, r11(code));
+          opr(insn.Op2, CR11);
         }
         int cl = (code>>3) & 0x20;
         if ( (code & BIT22) == 0 && cl )
           return 0;
-        opi(cmd.Op3, (32-r27(code))|cl);
-        opr(cmd.Op4, r06(code));
+        opi(insn.Op3, (32-r27(code))|cl);
+        opr(insn.Op4, r06(code));
       }
       break;
 
     case 0x36:  // extrd
       {
-        cmd.auxpref = (code>>13) & aux_cndc; // condition
-        opr(cmd.Op1, r06(code));
-        opi(cmd.Op2, ((code>>6)&0x20)|r22(code));
+        insn.auxpref = (code>>13) & aux_cndc; // condition
+        opr(insn.Op1, r06(code));
+        opi(insn.Op2, ((code>>6)&0x20)|r22(code));
         int cl = (code>>7) & 0x20;
-        opi(cmd.Op3, (32-r27(code))|cl);
-        opr(cmd.Op4, r11(code));
+        opi(insn.Op3, (32-r27(code))|cl);
+        opr(insn.Op4, r11(code));
       }
       break;
 
@@ -1178,12 +1181,12 @@ PIT:
     case 0x39:  // be
       {
         int32 w = get17(code);
-        opds(cmd.Op1, as3((code>>13)&7), r06(code), s17(w)<<2, dt_code);
-        cmd.auxpref |= aux_space;
+        opds(insn, insn.Op1, as3((code>>13)&7), r06(code), s17(w)<<2, dt_code);
+        insn.auxpref |= aux_space;
         if ( op & 1 )
         {
-          opr(cmd.Op2, SR0);
-          opr(cmd.Op3, R31);
+          opr(insn.Op2, SR0);
+          opr(insn.Op3, R31);
         }
       }
       break;
@@ -1196,43 +1199,43 @@ PIT:
           case 0x2:
             if ( code & BIT19 )
               return 0;
-            cmd.itype = HPPA_blr;
-            opr(cmd.Op1, r11(code));
-            opr(cmd.Op2, r06(code));
+            insn.itype = HPPA_blr;
+            opr(insn.Op1, r11(code));
+            opr(insn.Op2, r06(code));
             break;
           case 0x6:
-            cmd.itype = (code & BIT19) ? HPPA_bve : HPPA_bv;
-            if ( cmd.itype == HPPA_bv )
-              opx(cmd.Op1, r06(code), r11(code), dt_code);
+            insn.itype = (code & BIT19) ? HPPA_bve : HPPA_bv;
+            if ( insn.itype == HPPA_bv )
+              opx(insn.Op1, r06(code), r11(code), dt_code);
             else
-              opb(cmd.Op1, r06(code));
+              opb(insn.Op1, r06(code));
             break;
           case 0x7:
             if ( !(code & BIT19) )
               return 0;
-            cmd.itype = HPPA_bve;
-            opb(cmd.Op1, r06(code));
-            opr(cmd.Op1, R2);
+            insn.itype = HPPA_bve;
+            opb(insn.Op1, r06(code));
+            opr(insn.Op1, R2);
             break;
           case 0x0:
           case 0x1:
             {
-              cmd.itype = HPPA_b;
+              insn.itype = HPPA_b;
               int32 w = get17(code);
-              opn(cmd.Op1, s17(w));
-              opr(cmd.Op2, r06(code));
+              opn(insn.Op1, s17(w), insn.ip);
+              opr(insn.Op2, r06(code));
             }
             break;
           case 0x4:
           case 0x5:
             {
-              cmd.itype = HPPA_b;
+              insn.itype = HPPA_b;
               int32 w = ((code&1) << 21)
                      | (r06(code) << 16)
                      | (r11(code) << 11)
                      | get11(code);
-              opn(cmd.Op1, s22(w));
-              opr(cmd.Op2, R2);
+              opn(insn.Op1, s22(w), insn.ip);
+              opr(insn.Op2, R2);
             }
             break;
         }
@@ -1240,18 +1243,18 @@ PIT:
       break;
 
     case 0x3C:
-      cmd.itype = HPPA_depd;
-      opr(cmd.Op1, r11(code));
+      insn.itype = HPPA_depd;
+      opr(insn.Op1, r11(code));
 DEPD:
-      opi(cmd.Op2, (32-r22(code))|((code>>7)&0x20));
-      opi(cmd.Op3, r27(code));
-      opr(cmd.Op4, r06(code));
-      cmd.auxpref = (code>>13) & aux_cndc; // condition
+      opi(insn.Op2, (32-r22(code))|((code>>7)&0x20));
+      opi(insn.Op3, r27(code));
+      opr(insn.Op4, r06(code));
+      insn.auxpref = (code>>13) & aux_cndc; // condition
       break;
 
     case 0x3D:
-      cmd.itype = HPPA_depdi;
-      opi(cmd.Op1, ls5(r11(code)));
+      insn.itype = HPPA_depdi;
+      opi(insn.Op1, ls5(r11(code)));
       goto DEPD;
 
     case 0x3E:
@@ -1260,32 +1263,32 @@ DEPD:
         switch ( (code>>10) & 3 )
         {
           case 0:
-            cmd.itype = HPPA_mixw;
-            opr(cmd.Op1, r11(code));
-            opr(cmd.Op2, r06(code));
-            opr(cmd.Op3, r27(code));
+            insn.itype = HPPA_mixw;
+            opr(insn.Op1, r11(code));
+            opr(insn.Op2, r06(code));
+            opr(insn.Op3, r27(code));
             break;
           case 1:
-            cmd.itype = HPPA_mixh;
-            opr(cmd.Op1, r11(code));
-            opr(cmd.Op2, r06(code));
-            opr(cmd.Op3, r27(code));
+            insn.itype = HPPA_mixh;
+            opr(insn.Op1, r11(code));
+            opr(insn.Op2, r06(code));
+            opr(insn.Op3, r27(code));
             break;
           case 2:
             if ( ((code>>13)&3) == 0 )
             {
-              cmd.itype = HPPA_hshl;
-              opr(cmd.Op1, r11(code));
-              opi(cmd.Op2, (code>>6) & 0xF);
-              opr(cmd.Op3, r27(code));
+              insn.itype = HPPA_hshl;
+              opr(insn.Op1, r11(code));
+              opi(insn.Op2, (code>>6) & 0xF);
+              opr(insn.Op3, r27(code));
               break;
             }
             // no break;
           case 3:
-            cmd.itype = HPPA_hshr;
-            opr(cmd.Op1, r06(code));
-            opi(cmd.Op2, (code>>6) & 0xF);
-            opr(cmd.Op3, r27(code));
+            insn.itype = HPPA_hshr;
+            opr(insn.Op1, r06(code));
+            opi(insn.Op2, (code>>6) & 0xF);
+            opr(insn.Op3, r27(code));
             break;
           default:
             return 0;
@@ -1293,11 +1296,11 @@ DEPD:
       }
       else
       {
-        cmd.itype = HPPA_permh;
+        insn.itype = HPPA_permh;
         if ( r06(code) != r11(code) )
           return 0;
-        opr(cmd.Op1, r06(code));
-        opr(cmd.Op2, r27(code));
+        opr(insn.Op1, r06(code));
+        opr(insn.Op2, r27(code));
       }
       break;
 
@@ -1305,29 +1308,27 @@ DEPD:
       return 0;
 
     default:
-      interr("ana");
+      interr(insn, "ana");
   }
-  if ( cmd.itype == 0 )
+  if ( insn.itype == 0 )
     return 0;
 
   if ( dosimple() )
-    simplify(code);
+    simplify(insn, code);
 
   char buf[80];
-  if ( !build_insn_completer(code, buf, sizeof(buf)) )
+  if ( !build_insn_completer(insn, code, buf, sizeof(buf)) )
     return 0;
 
-  return cmd.size;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
-void interr(const char *module)
+void interr(const insn_t &insn, const char *module)
 {
   const char *name = NULL;
-  if ( cmd.itype < HPPA_last )
-    name = Instructions[cmd.itype].name;
-  else
-    cmd.itype = HPPA_null;
-  warning("%a(%s): internal error in %s", cmd.ea, name, module);
+  if ( insn.itype < HPPA_last )
+    name = Instructions[insn.itype].name;
+  warning("%a(%s): internal error in %s", insn.ea, name, module);
 }
 

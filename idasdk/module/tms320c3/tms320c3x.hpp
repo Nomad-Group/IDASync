@@ -87,47 +87,41 @@ enum regnum_t
 //19    "*arn++(ir0)B"
 
 #define itype2 segpref  // 2-nd command type (within parallel instruction)
-#define i2op insnpref   // number of first operand that belong to 2-nd cmd of parallel instruction
+#define i2op insnpref   // number of first operand that belong to 2-nd insn of parallel instruction
 // auxpref flags:
 #define DBrFlag 0x80    // Delayed branch flag
 #define ImmFltFlag 0x40 // Imm float Value
 
 //------------------------------------------------------------------
-extern char device[MAXSTR];     // specific device name
+extern qstring device;  // specific device name
 extern ea_t dataseg;
 extern netnode helper;
 extern ushort idpflags;
 
-ea_t calc_code_mem(op_t &x);
-ea_t calc_data_mem(op_t &x);
+ea_t calc_code_mem(const insn_t &insn, const op_t &x);
+ea_t calc_data_mem(const insn_t &insn, const op_t &x);
 
 regnum_t get_mapped_register(ea_t ea);
 const char *get_cond8(char value);
 int get_signed(int byte,int mask);
 
-const char *find_sym(ea_t address);
-const ioport_bit_t *find_bits(ea_t address);
-const char *find_bit(ea_t address, int bit);
 //------------------------------------------------------------------
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi header(outctx_t &ctx);
+void idaapi footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);         // function to produce assume directives
+void idaapi segstart(outctx_t &ctx, segment_t *seg);
+void idaapi segend(outctx_t &, segment_t *seg);
+void idaapi assumes(outctx_t &ctx);         // function to produce assume directives
 
-void idaapi out(void);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi ana(insn_t *insn);
+int  idaapi emu(const insn_t &insn);
+void idaapi data(outctx_t &ctx);
 void init_analyzer(void);
 
-void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v);
+void idaapi gen_stkvar_def(outctx_t &ctx, const member_t *mptr, sval_t v);
 bool idaapi create_func_frame(func_t *pfn);
 int  idaapi is_align_insn(ea_t ea);
-bool is_basic_block_end(void); // 0-no, 2-yes
-bool idaapi can_have_type(op_t &op);
+bool is_basic_block_end(const insn_t &insn);
+bool idaapi can_have_type(const op_t &op);
 
 #endif // _TMS320C3X_HPP

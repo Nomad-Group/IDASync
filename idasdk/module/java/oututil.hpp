@@ -10,50 +10,94 @@ const color_t COLOR_NONE = 0;
 extern size_t outcnt;
 extern bool no_prim;
 
-int     out_commented(const char *p, color_t ntag = COLOR_NONE);
-bool    change_line(bool main = false);
-bool    checkLine(size_t size);
-bool    chkOutLine(const char *str, size_t len);
-#define CHK_OUT_STR(p)  chkOutLine(p, sizeof(p)-1)
-static inline void OutKeyword(const char *str, size_t len)
-    { outcnt += len; out_keyword(str); }
-#define OUT_KEYWORD(p)  OutKeyword(p, sizeof(p)-1)
-bool    chkOutKeyword(const char *str, uint len);
-#define CHK_OUT_KEYWORD(p)  chkOutKeyword(p, sizeof(p)-1)
-bool    chkOutSymbol(char c);
-bool    chkOutChar(char c);
-bool    chkOutSymSpace(char c);
-static inline void outLine(const char *str, uint len)
-    { outcnt += len; OutLine(str); }
-#define OUT_STR(p)  outLine(p, sizeof(p)-1)
-static inline uchar chkOutDot(void)
-    { return chkOutChar('.'); }
-static inline void OutSpace(void)
-    { ++outcnt; OutChar(' '); }
-static inline uchar chkOutSpace(void)
-    { return chkOutChar(' '); }
-uchar   putShort(ushort value, uchar wsym = WARN_SYM);
-char    outName(ea_t from, int n, ea_t ea, uval_t off, uchar *rbad);
-uchar   putVal(const op_t &x, uchar mode, uchar warn);
-uchar   OutUtf8(ushort index, fmt_t mode, color_t ntag = COLOR_NONE);
-uchar   out_index(ushort index, fmt_t mode, color_t ntag, uchar as_index);
-uchar   out_alt_ind(uint32 val);
-void    out_method_label(uchar is_end);
-uchar   outOffName(ushort off);
-bool    block_begin(uchar off);
-bool    block_end(uint32 off);
-bool    block_close(uint32 off, const char *name);
-bool    close_comment(void);
-uchar   out_nodelist(uval_t nodeid, uchar pos, const char *pref);
-void    init_prompted_output(char str[MAXSTR*2], uchar pos = 0);
-void    term_prompted_output(void);
-uchar   OutConstant(op_t& x, uchar impdsc = 0);
-void    myBorder(void);
-uchar   out_problems(char str[MAXSTR], const char *prefix);
-uchar   putScope(ushort scope, uint32 doff);
-size_t  debLine(void);
+//----------------------------------------------------------------------
+class out_java_t : public outctx_t
+{
+  out_java_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  // oututil.cpp
+  int out_commented(const char *p, color_t color = COLOR_NONE);
+  bool change_line(bool main = false);
+  size_t putLine(void);
+  bool checkLine(size_t size);
+  bool chkOutLine(const char *str, size_t len);
+  bool chkOutKeyword(const char *str, uint len);
+  bool chkOutSymbol(char c);
+  bool chkOutChar(char c);
+  bool chkOutSymSpace(char c);
+  uchar putShort(ushort value, uchar wsym = WARN_SYM);
+  char outName(ea_t from, int n, ea_t ea, uval_t off, uchar *rbad);
+  uchar putVal(const op_t &x, uchar mode, uchar warn);
+  uchar OutUtf8(ushort index, fmt_t mode, color_t color = COLOR_NONE);
+  uchar out_index(ushort index, fmt_t mode, color_t color, uchar as_index);
+  uchar out_alt_ind(uint32 val);
+  void out_method_label(uchar is_end);
+  uchar outOffName(ushort off);
+  bool block_begin(uchar off);
+  bool block_end(uint32 off);
+  bool block_close(uint32 off, const char *name);
+  bool close_comment(void);
+  uchar out_nodelist(uval_t nodeid, uchar pos, const char *pref);
+  void init_prompted_output(uchar pos = 0);
+  void term_prompted_output(void);
+  uchar OutConstant(const op_t &_x, uchar impdsc = 0);
+  void myBorder(void);
+  uchar out_problems(char str[MAXSTR], const char *prefix);
+  uchar putScope(ushort scope, uint32 doff);
+  size_t debLine(void);
 
-// in out.cpp
-size_t  putDeb(uchar next);
+  void OutKeyword(const char *str, size_t len);
+  void outLine(const char *str, uint len);
+  uchar chkOutDot(void);
+  void OutSpace(void);
+  uchar chkOutSpace(void);
+
+  size_t putDeb(uchar next);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+
+  // npooluti.cpp
+  typedef size_t (out_java_t::*_PRMPT_)(void);
+  size_t _one_line(void) { return 0; }
+  int fmtString(ushort index, ssize_t size, fmt_t mode, _PRMPT_ putproc = NULL);
+  void trunc_name(uint num, uchar type = 0);
+
+  // out.cpp
+  bool out_sm_end(void);
+  bool out_deprecated(uchar pos);
+  bool out_sm_start(int same);
+  bool out_stackmap(const SMinfo *pinf);
+  uchar OutModes(uint32 mode);
+  uchar sign_out(ushort utsign, char mode);
+  void out_switch(void);
+  bool close_annotation(uint32 pos);
+  const ushort *annotation(const ushort *p, uint *plen, uint pos);
+  const ushort *annotation_element(const ushort *p, uint *plen, uint pos, ushort name);
+  uchar annotation_loop(const uval_t *pnodes, uint nodecnt);
+  uchar enclose_out(void);
+  uchar out_seg_type(fmt_t fmt);
+  uchar out_field_type(void);
+  uchar out_includes(uval_t node, uchar pos);
+  void java_header(void);
+  void java_segstart(segment_t *seg);
+  void java_segend(segment_t *seg);
+  void java_data(bool /*analyze_only*/);
+
+  // map.cpp
+  bool print_newline(void) const;
+  size_t write_utf(void);
+
+private:
+  char putMethodLabel(ushort off);
+};
+CASSERT(sizeof(out_java_t) == sizeof(outctx_t));
+
+//----------------------------------------------------------------------
+#define CHK_OUT_STR(p)  chkOutLine(p, sizeof(p)-1)
+#define OUT_KEYWORD(p)  OutKeyword(p, sizeof(p)-1)
+#define CHK_OUT_KEYWORD(p)  chkOutKeyword(p, sizeof(p)-1)
+#define OUT_STR(p)  outLine(p, sizeof(p)-1)
 
 #endif

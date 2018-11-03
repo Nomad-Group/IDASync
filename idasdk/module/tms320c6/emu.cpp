@@ -14,17 +14,17 @@
 
 static bool flow;
 //------------------------------------------------------------------------
-static void doImmdValue(int n)
+static void set_immd_bit(const insn_t &insn, int n, flags_t F)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag, n) )
+  set_immd(insn.ea);
+  if ( is_defarg(F, n) )
     return;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case TMS6_mvk:
-      if ( is_mvk_scst16_form(cmd.ea) )
+      if ( is_mvk_scst16_form(insn.ea) )
       {
-        op_hex(cmd.ea, n);
+        op_hex(insn.ea, n);
         break;
       }
       // fallthrough for scst5 form
@@ -46,13 +46,13 @@ static void doImmdValue(int n)
     case TMS6_clr:              // Rd = Op1 & ~Op2
     case TMS6_ext:              // Rd = Op1 & ~Op2
     case TMS6_extu:             // Rd = Op1 & ~Op2
-      op_dec(cmd.ea, n);
+      op_dec(insn.ea, n);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-static void TouchArg(op_t &x, bool isload)
+static void handle_operand(const insn_t &insn, const op_t &x, flags_t F, bool isload)
 {
   switch ( x.type )
   {
@@ -67,25 +67,25 @@ static void TouchArg(op_t &x, bool isload)
         goto badTouch;
       /* no break */
     case o_displ:
-      doImmdValue(x.n);
-      if ( op_adds_xrefs(uFlag, x.n) )
+      set_immd_bit(insn, x.n, F);
+      if ( op_adds_xrefs(F, x.n) )
       {
         int outf = x.type != o_imm ? OOF_ADDR : 0;
-        if ( x.dtyp == dt_word )
+        if ( x.dtype == dt_word )
           outf |= OOF_SIGNED;
-        ua_add_off_drefs2(x, dr_O, outf);
+        insn.add_off_drefs(x, dr_O, outf);
       }
       break;
     case o_near:
       {
-        ea_t ea = toEA(cmd.cs, x.addr);
+        ea_t ea = to_ea(insn.cs, x.addr);
         ea_t ref = find_first_insn_in_packet(ea);
-        ua_add_cref(x.offb, ref, fl_JN);
+        insn.add_cref(ref, x.offb, fl_JN);
       }
       break;
     default:
 badTouch:
-      warning("%a: %s,%d: bad optype %d", cmd.ea, cmd.get_canon_mnem(), x.n, x.type);
+      warning("%a: %s,%d: bad optype %d", insn.ea, insn.get_canon_mnem(), x.n, x.type);
       break;
   }
 }
@@ -99,8 +99,11 @@ ea_t find_first_insn_in_packet(ea_t ea)
     {
       ea_t ea2 = prev_not_tail(ea);
       if ( ea2 == BADADDR
-        || !isCode(get_flags_novalue(ea2))
-        || (get_long(ea2) & BIT0) == 0 ) break;
+        || !is_code(get_flags(ea2))
+        || (get_dword(ea2) & BIT0) == 0 )
+      {
+        break;
+      }
       ea = ea2;
     }
   }
@@ -108,12 +111,25 @@ ea_t find_first_insn_in_packet(ea_t ea)
 }
 
 //----------------------------------------------------------------------
-inline bool is_tms6_nop(uint32 code) { return (code & 0x21FFEL) == 0; }
+inline bool is_tms6_nop(uint32 code)
+{
+  return (code & 0x21FFEL) == 0;
+}
 
+//----------------------------------------------------------------------
+inline bool is_tms6_bnop(uint32 code)
+{
+  return (code & 0x00001FFC) == 0x00000120      // Branch Using a Displacement With NOP
+      || (code & 0x0F830FFE) == 0x00800362;     // Branch Using a Register With NOP
+}
+
+//----------------------------------------------------------------------
 static int get_delay(uint32 code)
 {
   if ( is_tms6_nop(code) )                        // NOP
     return int((code >> 13) & 0xF) + 1;
+  if ( is_tms6_bnop(code) )                       // BNOP
+    return int((code >> 13) & 0x7);
   return 1;
 }
 
@@ -164,7 +180,7 @@ static int calc_packet_delay(ea_t ea, call_info_t *ci)
   int delay = 1;
   while ( true )
   {
-    uint32 code = get_long(ea);
+    uint32 code = get_dword(ea);
     int d2 = get_delay(code);
     if ( d2 > delay )
       delay = d2;
@@ -172,7 +188,7 @@ static int calc_packet_delay(ea_t ea, call_info_t *ci)
     if ( (code & BIT0) == 0 )
       break;
     ea += 4;
-    if ( !isCode(get_flags_novalue(ea)) )
+    if ( !is_code(get_flags(ea)) )
       break;
   }
   return delay;
@@ -184,13 +200,13 @@ static ea_t find_prev_packet(ea_t ea)
   ea_t res = BADADDR;
   while ( 1 )
   {
-    ea_t ea2 = prev_not_tail(res!=BADADDR ? res : ea);
+    ea_t ea2 = prev_not_tail(res != BADADDR ? res : ea);
     if ( ea2 == BADADDR )
       break;
-    if ( !isCode(get_flags_novalue(ea2)) )
+    if ( !is_code(get_flags(ea2)) )
       break;
     res = ea2;
-    if ( (get_long(ea2) & BIT0) == 0 )
+    if ( (get_dword(ea2) & BIT0) == 0 )
       break;
   }
   return res;
@@ -201,7 +217,7 @@ static ea_t get_branch_ea(ea_t ea)
 {
   while ( 1 )
   {
-    uint32 code = get_long(ea);
+    uint32 code = get_dword(ea);
     if ( (code >> 28) == cAL )
     {
       switch ( (code >> 2) & 0x1F )
@@ -227,52 +243,78 @@ static ea_t get_branch_ea(ea_t ea)
     if ( (code & BIT0) == 0 )
       break;
     ea += 4;
-    if ( !isCode(get_flags_novalue(ea)) )
+    if ( !is_code(get_flags(ea)) )
       break;
   }
   return BADADDR;
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+int idaapi emu(const insn_t &insn)
 {
-  uint32 Feature = cmd.get_canon_feature();
+  uint32 Feature = insn.get_canon_feature();
   flow = ((Feature & CF_STOP) == 0);
 
-  if ( segtype(cmd.ea) == SEG_XTRN )
+  if ( segtype(insn.ea) == SEG_XTRN )
   {
     flow = false;
   }
-  else if ( (cmd.cflags & aux_para) == 0 )           // the last instruction of packet
+  else if ( (insn.cflags & aux_para) == 0 )           // the last instruction of packet
   {
-    insn_t saved = cmd;
-    ea_t ea = find_first_insn_in_packet(cmd.ea);
+    // From spru732j.pdf:
+    // Although branch instructions take one execute phase, there are five
+    // delay slots between the execution of the branch and execution of the
+    // target code.
+
+    // We look backwards for five delay slots to check for an unconditionnal
+    // branch instruction.
+
+    ea_t ea = find_first_insn_in_packet(insn.ea);
     int delay = 0;
-    call_info_t ci(cmd.ea+cmd.size);
+    call_info_t ci(insn.ea+insn.size);
     while ( 1 )
     {
-      if ( hasRef(get_flags_novalue(ea)) )
+      // If there are any crefs to this address, we cannot guarantee that
+      // the branch instruction really got executed.
+      if ( has_xref(get_flags(ea)) )
         break;
+
+      // Increment delay count for this packet.
       delay += calc_packet_delay(ea, &ci);
       if ( delay > 5 )
         break;
-      ea = find_prev_packet(ea);
-      if ( ea == BADADDR )
-        break;
-      ea = find_first_insn_in_packet(ea);
+
+      // Unless we have a bnop instruction, seek to the previous packet.
+      bool is_bnop = is_tms6_bnop(get_dword(ea));
+      if ( !is_bnop )
+      {
+        ea = find_prev_packet(ea);
+        if ( ea == BADADDR )
+          break;
+        ea = find_first_insn_in_packet(ea);
+      }
+
       ea_t brea;
       if ( delay == 5 && (brea=get_branch_ea(ea)) != BADADDR )
       {
+        // We seeked to the previous packet and it was a bnop. The check
+        // for delay == 5 is no longer correct, since we did not take into
+        // account the delays of the bnop instruction itself.
+        if ( is_tms6_bnop(get_dword(ea)) && !is_bnop )
+          break;
+
+        insn_t brins;
         calc_packet_delay(ea, &ci);      // just to test for MVK/MVKH
         bool iscall = ci.call_is_present();
-        decode_insn(brea);
-        if ( cmd.Op1.type == o_near )
+        decode_insn(&brins, brea);
+        nodeidx_t ndx2;
+        if ( brins.Op1.type == o_near )
         {
-          ea_t target = toEA(cmd.cs, cmd.Op1.addr);
+          ea_t target = to_ea(brins.cs, brins.Op1.addr);
           if ( iscall )
           {
             target = find_first_insn_in_packet(target);
-            ua_add_cref(cmd.Op1.offb, target, fl_CN);
+            brins.add_cref(target, brins.Op1.offb, fl_CN);
             if ( !func_does_return(target) )
               flow = false;
           }
@@ -281,51 +323,59 @@ int idaapi emu(void)
             flow = false;
             target++;
           }
-          tnode.altset(saved.ea, target);
+          ndx2 = ea2node(target);
         }
         else
         {
-          tnode.altset(saved.ea, iscall ? 2 : 1);
+          ndx2 = iscall ? 2 : 1;
           if ( !iscall )
             flow = false;
         }
+        tnode.altset_ea(insn.ea, ndx2);
         if ( iscall )
         {
-          if ( !isOff0(get_flags_novalue(ci.mvk))   )
-            op_offset(ci.mvk, 0, REF_LOW16, ci.next, cmd.cs, 0);
-          if ( !isOff0(get_flags_novalue(ci.mvkh)) )
-            op_offset(ci.mvkh, 0, REF_HIGH16, ci.next, cmd.cs, 0);
+          if ( !is_off0(get_flags(ci.mvk)) )
+            op_offset(ci.mvk, 0, REF_LOW16, ci.next, brins.cs, 0);
+          if ( !is_off0(get_flags(ci.mvkh)) )
+            op_offset(ci.mvkh, 0, REF_HIGH16, ci.next, brins.cs, 0);
         }
         break;
       }
+
+      // We don't check past one bnop instruction.
+      if ( is_bnop )
+        break;
     }
-    cmd = saved;
   }
 
-  if ( Feature & CF_USE1 ) TouchArg(cmd.Op1, true);
-  if ( Feature & CF_USE2 ) TouchArg(cmd.Op2, true);
-  if ( Feature & CF_USE3 ) TouchArg(cmd.Op3, true);
+  flags_t F = get_flags(insn.ea);
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, F, true);
+  if ( Feature & CF_USE2 ) handle_operand(insn, insn.Op2, F, true);
+  if ( Feature & CF_USE3 ) handle_operand(insn, insn.Op3, F, true);
 
-  if ( Feature & CF_CHG1 ) TouchArg(cmd.Op1, false);
-  if ( Feature & CF_CHG2 ) TouchArg(cmd.Op2, false);
-  if ( Feature & CF_CHG3 ) TouchArg(cmd.Op3, false);
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, F, false);
+  if ( Feature & CF_CHG2 ) handle_operand(insn, insn.Op2, F, false);
+  if ( Feature & CF_CHG3 ) handle_operand(insn, insn.Op3, F, false);
 
-  if ( flow ) ua_add_cref(0, cmd.ea + cmd.size, fl_F);
+  if ( flow )
+    add_cref(insn.ea, insn.ea + insn.size, fl_F);
   return 1;
 }
 
 //----------------------------------------------------------------------
 int idaapi is_align_insn(ea_t ea)
 {
-  decode_insn(ea);
-  switch ( cmd.itype )
+  insn_t insn;
+  decode_insn(&insn, ea);
+  switch ( insn.itype )
   {
     case TMS6_mv:
-      if ( cmd.Op1.reg == cmd.Op2.reg ) break;
+      if ( insn.Op1.reg == insn.Op2.reg )
+        break;
     default:
       return 0;
     case TMS6_nop:
       break;
   }
-  return cmd.size;
+  return insn.size;
 }

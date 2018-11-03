@@ -19,4 +19,24 @@ enum store_mode_values
   n_ovrbas = -5
 };
 
+//----------------------------------------------------------------------
+// The following events are supported by the PDP11 module in the ph.notify() function
+namespace pdp11_module_t
+{
+  enum event_codes_t
+  {
+    ev_get_ml_ptr = processor_t::ev_loader,
+  };
+
+  inline processor_t::event_t idp_ev(event_codes_t ev)
+  {
+    return processor_t::event_t(ev);
+  }
+
+  inline bool get_ml_ptr(pdp_ml_t **ml, netnode **ml_ovrtrans)
+  {
+    return ph.notify(idp_ev(ev_get_ml_ptr), ml, ml_ovrtrans) == 0;
+  }
+}
+
 #endif

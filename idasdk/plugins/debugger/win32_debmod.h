@@ -6,16 +6,7 @@
 #include "../../ldr/pe/pe.h"
 #include "winbase_debmod.h"
 
-// AMD64: for some reason the GetThreadContext function overwrites an area bigger
-// than the declared CONTEXT structure.
-// We redefine the structure to workaround this
-#ifdef __X64__
-struct MyContext : public CONTEXT
-{
-  uchar dummy[0x230];
-};
-#define CONTEXT MyContext
-#endif
+//-V::720 It is advised to utilize the 'SuspendThread' function only when developing a debugger
 
 // Type definitions
 
@@ -25,10 +16,10 @@ class win32_debmod_t;
 // image information
 struct image_info_t
 {
+  image_info_t() { memset(this, 0, sizeof(*this)); }
   image_info_t(win32_debmod_t *);
-  image_info_t(win32_debmod_t *, ea_t _base, const qstring &_name);
-  image_info_t(win32_debmod_t *, ea_t _base, uval_t _imagesize, const qstring &_name);
-  image_info_t(win32_debmod_t *, const LOAD_DLL_DEBUG_INFO &i, const char *_name);
+  image_info_t(win32_debmod_t *, ea_t _base, uint32 _imagesize, const qstring &_name);
+  image_info_t(win32_debmod_t *, const LOAD_DLL_DEBUG_INFO &i, uint32 _imagesize, const char *_name);
   image_info_t(win32_debmod_t *, const module_info_t &m);
 
   win32_debmod_t *sess;
@@ -53,12 +44,7 @@ typedef std::map<ea_t, image_info_t> images_t;
 // thread information
 struct thread_info_t : public CREATE_THREAD_DEBUG_INFO
 {
-  thread_info_t(const CREATE_THREAD_DEBUG_INFO &i, thid_t t)
-    : CREATE_THREAD_DEBUG_INFO(i), tid(t), suspend_count(0), bpt_ea(BADADDR),
-      flags(0), callgate_ea(0)
-  {
-    ctx.ContextFlags = 0;
-  }
+  thread_info_t(const CREATE_THREAD_DEBUG_INFO &i, thid_t t, wow64_state_t wow64_state);
   thid_t tid;                   // thread id
   int suspend_count;
   ea_t bpt_ea;
@@ -67,17 +53,37 @@ struct thread_info_t : public CREATE_THREAD_DEBUG_INFO
                                 // we use X86_RC.. constants here
 #define THR_TRACING 0x0100      // expecting a STEP event
 #define THR_FSSAVED 0x0200      // remembered FS value
+#define THR_WOW64   0x0400      // is wow64 process?
   CONTEXT ctx;
   ea_t callgate_ea;
 
   void invalidate_context(void) { flags &= ~THR_CLSMASK; ctx.ContextFlags = 0; }
   bool read_context(int clsmask);
+  bool write_context(int clsmask);
+#ifndef __ARM__
+  void cvt_from_wow64(const WOW64_CONTEXT &wow64ctx, int clsmask);
+  void cvt_to_wow64(WOW64_CONTEXT *wow64ctx, int clsmask) const;
+  bool toggle_tbit(bool set_tbit, class win32_debmod_t *debmod);
+#endif
   bool is_tracing(void) const { return (flags & THR_TRACING) != 0; }
   void set_tracing(void) { flags |= THR_TRACING; }
   void clr_tracing(void) { flags &= ~THR_TRACING; }
   ea_t get_ip(void) { return read_context(RC_GENERAL) ? ctx.Eip : BADADDR; }
 };
 
+//--------------------------------------------------------------------------
+inline thread_info_t::thread_info_t(
+        const CREATE_THREAD_DEBUG_INFO &i,
+        thid_t t,
+        wow64_state_t wow64_state)
+    : CREATE_THREAD_DEBUG_INFO(i), tid(t), suspend_count(0), bpt_ea(BADADDR),
+      flags(wow64_state > 0 ? THR_WOW64 : 0),
+      callgate_ea(0)
+{
+  ctx.ContextFlags = 0;
+}
+
+//--------------------------------------------------------------------------
 // Check if the context structure has valid values at the specified portion
 // portion is a conbination of CONTEXT_... bitmasks
 inline bool has_portion(const CONTEXT &ctx, int portion)
@@ -114,13 +120,18 @@ typedef std::map<ea_t, internal_bpt_info_t> bpt_info_t;
 typedef int (*process_cb_t)(debmod_t *, PROCESSENTRY32 *pe32, void *ud);
 typedef int (*module_cb_t)(debmod_t *, MODULEENTRY32 *me32, void *ud);
 
-typedef qvector<process_info_t> processes_t;
-
 //----------------------------------------------------------------------------
 // A live PDB session, that will be used remotely (typically by non-windows machines).
 struct pdb_remote_session_t;
 void close_pdb_remote_session(pdb_remote_session_t *);
 
+//Wow64-specific events
+#ifndef STATUS_WX86_BREAKPOINT
+#  define STATUS_WX86_BREAKPOINT 0x4000001f
+#endif
+#ifndef STATUS_WX86_SINGLE_STEP
+#  define STATUS_WX86_SINGLE_STEP 0x4000001e
+#endif
 //--------------------------------------------------------------------------
 class win32_debmod_t : public winbase_debmod_t
 {
@@ -128,25 +139,23 @@ class win32_debmod_t : public winbase_debmod_t
 private:
   gdecode_t get_debug_event(debug_event_t *event, int timeout_ms);
   void check_thread(bool must_be_main_thread) const;
+  void add_thread(const CREATE_THREAD_DEBUG_INFO &thr_info, thid_t tid);
   void install_callgate_workaround(thread_info_t *ti, const debug_event_t *event);
 public:
   // debugged process information
   qstring process_path;
-  DWORD pid;
   HANDLE thread_handle;
   HANDLE redirin_handle, redirout_handle;
   attach_status_t attach_status;
   HANDLE attach_evid;
-  ea_t debug_break_ea;          // The address of the kernel breakpoint
-                                // 0 means we haven't determined it yet
-                                // BADADDR means do not try to determine it
-  bool expecting_debug_break;
+  int8 expecting_debug_break;
+  bool stop_at_ntdll_bpts;
 
   images_t curproc; // image of the running process
   images_t dlls; // list of loaded DLLs
   images_t images; // list of detected PE images
-  images_t thread_areas; // list of areas related to threads
-  images_t class_areas;  // list of areas related to class names
+  images_t thread_ranges; // list of ranges related to threads
+  images_t class_ranges;  // list of ranges related to class names
 
   easet_t dlls_to_import;          // list of dlls to import information from
 
@@ -163,7 +172,7 @@ public:
   bool fake_suspend_event;
   bool exiting;
   bool DebugBreakProcess_requested;
-  processes_t processes;
+  procinfo_vec_t processes;
 
   // threads suspended by the fiber created for restoring broken connections
   threadvec_t _suspended_threads;
@@ -171,7 +180,8 @@ public:
   HANDLE broken_event_handle;
 
   // Module specific methods, to be implemented
-  virtual int  idaapi dbg_init(bool _debug_debugger);
+  virtual void idaapi dbg_set_debugging(bool _debug_debugger);
+  virtual int  idaapi dbg_init(void);
   virtual void idaapi dbg_term(void);
   virtual int  idaapi dbg_detach_process(void);
   virtual int  idaapi dbg_start_process(const char *path,
@@ -181,7 +191,7 @@ public:
     const char *input_path,
     uint32 input_file_crc32);
   virtual gdecode_t idaapi dbg_get_debug_event(debug_event_t *event, int timeout_ms);
-  virtual int  idaapi dbg_attach_process(pid_t process_id, int event_id);
+  virtual int  idaapi dbg_attach_process(pid_t process_id, int event_id, int flags);
   virtual int  idaapi dbg_prepare_to_pause_process(void);
   virtual int  idaapi dbg_exit_process(void);
   virtual int  idaapi dbg_continue_after_event(const debug_event_t *event);
@@ -192,30 +202,28 @@ public:
   virtual int  idaapi dbg_read_registers(thid_t thread_id,
     int clsmask,
     regval_t *values);
-  virtual int  idaapi dbg_write_register(thid_t thread_id,
+  virtual int idaapi dbg_write_register(thid_t thread_id,
     int reg_idx,
     const regval_t *value);
 
   void patch_context_struct(CONTEXT &ctx, int reg_idx, const regval_t *value) const;
-  virtual int  idaapi dbg_thread_get_sreg_base(thid_t thread_id,
-    int sreg_value,
-    ea_t *ea);
-  virtual int  idaapi dbg_get_memory_info(meminfo_vec_t &areas);
+  virtual int idaapi dbg_thread_get_sreg_base(ea_t *ea, thid_t thread_id, int sreg_value);
+  virtual int idaapi dbg_get_memory_info(meminfo_vec_t &ranges);
   virtual ssize_t idaapi dbg_read_memory(ea_t ea, void *buffer, size_t size);
   virtual ssize_t idaapi dbg_write_memory(ea_t ea, const void *buffer, size_t size);
-  virtual int  idaapi dbg_add_bpt(bpttype_t type, ea_t ea, int len);
-  virtual int  idaapi dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_bytes, int len);
-  virtual int  idaapi handle_ioctl(int fn, const void *buf, size_t size, void **outbuf, ssize_t *outsize);
+  virtual int idaapi dbg_add_bpt(bpttype_t type, ea_t ea, int len);
+  virtual int idaapi dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_bytes, int len);
+  virtual int idaapi handle_ioctl(int fn, const void *buf, size_t size, void **outbuf, ssize_t *outsize);
   //
   win32_debmod_t();
   ~win32_debmod_t() { cleanup(); }
 
   void handle_pdb_thread_request(void *data);
-  uint32 calc_imagesize(ea_t base);
+  uint32 calc_imagesize(eanat_t base);
   void get_filename_for(
-    ea_t image_name_ea,
+    eanat_t image_name_ea,
     bool is_unicode,
-    ea_t image_base,
+    eanat_t image_base,
     char *buf,
     size_t bufsize,
     HANDLE process_handle,
@@ -230,6 +238,7 @@ public:
     const char *args,
     const char *startdir,
     bool is_gui,
+    bool hide_window,
     PROCESS_INFORMATION *ProcessInformation);
 
   void show_debug_event(
@@ -237,8 +246,8 @@ public:
     HANDLE process_handle,
     const char *process_path);
 
-  ssize_t _read_memory(ea_t ea, void *buffer, size_t size, bool suspend = false);
-  ssize_t _write_memory(ea_t ea, const void *buffer, size_t size, bool suspend = false);
+  ssize_t _read_memory(eanat_t ea, void *buffer, size_t size, bool suspend = false);
+  ssize_t _write_memory(eanat_t ea, const void *buffer, size_t size, bool suspend = false);
 
   int rdmsr(int reg, uint64 *value);
   int wrmsr(int reg, uint64 value);
@@ -252,7 +261,7 @@ public:
     const EXCEPTION_RECORD &er,
     bool was_thread_bpt,
     bool firsttime);
-  ssize_t access_memory(ea_t ea, void *buffer, ssize_t size, bool write, bool suspend);
+  ssize_t access_memory(eanat_t ea, void *buffer, ssize_t size, bool write, bool suspend);
   inline void resume_all_threads(bool raw = false);
   inline void suspend_all_threads(bool raw = false);
   size_t add_dll(image_info_t &ii);
@@ -269,42 +278,37 @@ public:
   bool del_thread_bpts(ea_t ea);
   bool has_bpt_at(ea_t ea);
   bool can_access(ea_t addr);
-  ea_t get_kernel_bpt_ea(ea_t ea);
+  ea_t get_kernel_bpt_ea(ea_t ea, thid_t tid);
   void create_attach_event(debug_event_t *event, bool attached);
   void create_start_event(debug_event_t *event);
   bool check_for_hwbpt(debug_event_t *event, bool is_stepping=false);
-  ea_t get_region_info(page_bpts_t::iterator *pbpts, ea_t ea, memory_info_t *info);
+  ea_t get_region_info(ea_t ea, memory_info_t *info);
   bool get_dll_exports(
     const images_t &dlls,
     ea_t imagebase,
     name_info_t &ni,
     const char *exported_name = NULL);
-  bool get_filename_from_process(ea_t name_ea,
+  bool get_filename_from_process(eanat_t name_ea,
     bool is_unicode,
     char *buf,
     size_t bufsize);
-    bool get_debug_string(const DEBUG_EVENT &ev, char *buf, size_t bufsize);
-    bool add_thread_areas(
+  bool get_debug_string(const DEBUG_EVENT &ev, char *buf, size_t bufsize);
+  bool add_thread_ranges(
       HANDLE process_handle,
       thid_t tid,
-      images_t &thread_areas,
-      images_t &class_areas);
-  ea_t get_pe_header(ea_t ea, peheader_t *nh);
+      images_t &thread_ranges,
+      images_t &class_ranges);
+  ea_t get_pe_header(eanat_t imagebase, peheader_t *nh);
   bool set_debug_hook(ea_t base);
-  bool get_pe_export_name_from_process(ea_t imagebase,
-    char *name,
-    size_t namesize);
-
-  bool get_mapped_filename(
-    HANDLE process_handle,
-    ea_t imagebase,
-    char *buf,
-    size_t bufsize);
+  bool get_pe_export_name_from_process(
+        eanat_t imagebase,
+        char *name,
+        size_t namesize);
 
   void show_exception_record(const EXCEPTION_RECORD &er, int level=0);
 
-  ea_t pstos0(ea_t ea);
-  ea_t s0tops(ea_t ea);
+  eanat_t pstos0(eanat_t ea);
+  eanat_t s0tops(eanat_t ea);
 
   bool prepare_to_stop_process(debug_event_t *, const threads_t &);
   bool disable_hwbpts();
@@ -334,7 +338,9 @@ public:
   virtual bool idaapi dbg_prepare_broken_connection(void);
   virtual bool idaapi dbg_continue_broken_connection(pid_t pid);
 
-  pdb_remote_session_t *pdb_remote_session;
+  qvector<pdb_remote_session_t*> pdb_remote_sessions;
+  pdb_remote_session_t *get_pdb_session(int id);
+  void delete_pdb_session(int id);
 };
 
 ea_t s0tops(ea_t ea);

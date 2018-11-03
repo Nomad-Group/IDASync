@@ -9,26 +9,51 @@
 
 #include "tms320c55.hpp"
 #include <frame.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <struct.hpp>
 
 //? problem with stack variables:
 // SP+offsets point to a word, but stack variables works at the byte level
 // => variables offsets aren't just
 
+// simple wrapper class for syntactic sugar of member functions
+// this class may have only simple member functions.
+// virtual functions and data fields are forbidden, otherwise the class
+// layout may change
+class out_tms320c55_t : public outctx_t
+{
+  out_tms320c55_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+  void out_address(const op_t &op);
+  void out_shift(uval_t value);
+  void out_symbol_shift(const op_t &op, bool is_out = false);
+  void out_operators_begin(const op_t &op);
+  void out_operators_end(const op_t &op);
+  void out_reg(const op_t &op);
+  void out_cond(const op_t &x);
+  void out_relop(const op_t &op);
+};
+CASSERT(sizeof(out_tms320c55_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_tms320c55_t)
+
 //----------------------------------------------------------------------
-static void out_address(const op_t &op)
+void out_tms320c55_t::out_address(const op_t &op)
 {
   ea_t ea = BADADDR;
   if ( op.type == o_near )
-    ea = calc_code_mem(op.addr);
+    ea = calc_code_mem(insn, op.addr);
   else if ( op.type == o_mem )
-    ea = calc_data_mem(op);
+    ea = calc_data_mem(insn, op);
   else if ( op.type == o_io )
-   ea = calc_io_mem(op);
+   ea = calc_io_mem(insn, op);
 
   int reg = -1;
-  if ( op.type == o_mem) reg = get_mapped_register(ea );
+  if ( op.type == o_mem )
+    reg = get_mapped_register(ea);
 
   // print begin of the modifier
   switch ( op.tms_modifier )
@@ -36,12 +61,14 @@ static void out_address(const op_t &op)
     case TMS_MODIFIER_NULL:
       break;
     case TMS_MODIFIER_DMA:
-      if ( (int)reg == -1) out_symbol('@' );
+      if ( (int)reg == -1 )
+        out_symbol('@');
       break;
     case TMS_MODIFIER_ABS16:
     case TMS_MODIFIER_PTR:
       out_symbol('*');
-      if ( op.tms_modifier == TMS_MODIFIER_ABS16) out_line("abs16", COLOR_SYMBOL );
+      if ( op.tms_modifier == TMS_MODIFIER_ABS16 )
+        out_line("abs16", COLOR_SYMBOL);
       out_line("(#", COLOR_SYMBOL);
       break;
     case TMS_MODIFIER_MMAP:
@@ -57,12 +84,11 @@ static void out_address(const op_t &op)
       error("interr: out: o_address: modifier_begin");
   }
 
-
   if ( op.type != o_io )
   {
     if ( int(reg) != -1 ) // memory mapped register
     {
-      out_register(ph.regNames[reg]);
+      out_register(ph.reg_names[reg]);
     }
     else
     {
@@ -71,9 +97,9 @@ static void out_address(const op_t &op)
 #endif
       {
         out_tagon(COLOR_ERROR);
-        OutLong(op.addr, 16);
+        out_btoa(op.addr, 16);
         out_tagoff(COLOR_ERROR);
-        QueueSet(Q_noName, cmd.ea);
+        remember_problem(PR_NONAME, insn.ea);
       }
     }
   }
@@ -82,16 +108,17 @@ static void out_address(const op_t &op)
     if ( ea != BADADDR )
     {
       const char *name = NULL;
-      if ( idpflags & TMS320C55_IO) name = find_sym(ea );
-      if ( name )
+      if ( idpflags & TMS320C55_IO )
+        name = find_sym(ea);
+      if ( name != NULL && name[0] != '\0' )
         out_line(name, COLOR_IMPNAME);
       else
-        OutLong(ea, 16);
+        out_btoa(ea, 16);
     }
     else
     {
       out_tagon(COLOR_ERROR);
-      OutLong(op.addr, 16);
+      out_btoa(op.addr, 16);
       out_tagoff(COLOR_ERROR);
     }
   }
@@ -113,20 +140,22 @@ static void out_address(const op_t &op)
   }
 }
 
-static void out_shift(uval_t value)
+//--------------------------------------------------------------------------
+void out_tms320c55_t::out_shift(uval_t value)
 {
   out_symbol('#');
   char buf[8];
   qsnprintf(buf, sizeof(buf), "%d", (int)value);
-  out_line(buf,COLOR_DNUM);
+  out_line(buf, COLOR_DNUM);
 }
 
+//--------------------------------------------------------------------------
 // output shift symbol (if out = true, output outside of brackets)
-static void out_symbol_shift(const op_t &op, bool is_out = false)
+void out_tms320c55_t::out_symbol_shift(const op_t &op, bool is_out)
 {
   if ( op.tms_shift != TMS_OP_SHIFT_NULL )
   {
-    if ( ((op.tms_shift & TMS_OP_SHIFT_OUT)!=0) == is_out ) // check if the shift must be print inside or outside the brackets
+    if ( ((op.tms_shift & TMS_OP_SHIFT_OUT) != 0) == is_out ) // check if the shift must be print inside or outside the brackets
     {
       switch ( op.tms_shift & TMS_OP_SHIFT_TYPE )
       {
@@ -136,7 +165,7 @@ static void out_symbol_shift(const op_t &op, bool is_out = false)
           break;
         case TMS_OP_SHIFTL_REG:
           out_line(" << ",COLOR_SYMBOL);
-          out_register(ph.regNames[op.tms_shift_value]);
+          out_register(ph.reg_names[op.tms_shift_value]);
           break;
         case TMS_OP_SHIFTR_IMM:
           out_line(" >> ",COLOR_SYMBOL);
@@ -157,8 +186,8 @@ static void out_symbol_shift(const op_t &op, bool is_out = false)
   }
 }
 
-
-static void out_operators_begin(const op_t &op)
+//--------------------------------------------------------------------------
+void out_tms320c55_t::out_operators_begin(const op_t &op)
 {
   static const char *const strings[TMS_OPERATORS_SIZE] =
   {
@@ -168,26 +197,31 @@ static void out_operators_begin(const op_t &op)
    "port("
   };
   short operators = (op.tms_operator2 << 8) | (op.tms_operator1 &0xFF);
-  for (int i = 0; i < TMS_OPERATORS_SIZE; i++)
-    if ( operators & (1<<i)) out_line(strings[i], COLOR_SYMBOL );
+  for ( int i = 0; i < TMS_OPERATORS_SIZE; i++ )
+    if ( operators & (1<<i) )
+      out_line(strings[i], COLOR_SYMBOL);
 }
 
-static void out_operators_end(const op_t &op)
+//--------------------------------------------------------------------------
+void out_tms320c55_t::out_operators_end(const op_t &op)
 {
-  int i;
   short operators = (op.tms_operator2 << 8) | (op.tms_operator1 &0xFF);
   int brackets = 0;
-  for (i = 0; i < TMS_OPERATORS_SIZE; i++)
-    if ( operators & (1<<i) ) brackets++;
-  if ( operators & TMS_OPERATOR_T3 ) brackets--;
-  if ( operators & TMS_OPERATOR_NOT ) brackets--;
-  for (i = 0; i < brackets; i++) out_register(")");
+  for ( int i = 0; i < TMS_OPERATORS_SIZE; i++ )
+    if ( operators & (1<<i) )
+      brackets++;
+  if ( operators & TMS_OPERATOR_T3 )
+    brackets--;
+  if ( operators & TMS_OPERATOR_NOT )
+    brackets--;
+  for ( int i = 0; i < brackets; i++ )
+    out_line(")", COLOR_SYMBOL);
 }
 
-
-static void out_reg(const op_t &op)
+//--------------------------------------------------------------------------
+void out_tms320c55_t::out_reg(const op_t &op)
 {
-  const char *reg = ph.regNames[op.reg];
+  const char *reg = ph.reg_names[op.reg];
 
   switch ( op.tms_modifier )
   {
@@ -212,57 +246,59 @@ static void out_reg(const op_t &op)
       out_line("*(", COLOR_SYMBOL);
       out_register(reg);
       out_symbol('+');
-      out_register(ph.regNames[T0]);
+      out_register(ph.reg_names[T0]);
       out_symbol(')');
       break;
     case TMS_MODIFIER_REG_P_T1:
       out_line("*(", COLOR_SYMBOL);
       out_register(reg);
       out_symbol('+');
-      out_register(ph.regNames[T1]);
+      out_register(ph.reg_names[T1]);
       out_symbol(')');
       break;
     case TMS_MODIFIER_REG_M_T0:
       out_line("*(", COLOR_SYMBOL);
       out_register(reg);
       out_symbol('-');
-      out_register(ph.regNames[T0]);
+      out_register(ph.reg_names[T0]);
       out_symbol(')');
       break;
     case TMS_MODIFIER_REG_M_T1:
       out_line("*(", COLOR_SYMBOL);
       out_register(reg);
       out_symbol('-');
-      out_register(ph.regNames[T1]);
+      out_register(ph.reg_names[T1]);
       out_symbol(')');
       break;
     case TMS_MODIFIER_REG_T0:
       out_symbol('*');
       out_register(reg);
       out_symbol('(');
-      out_register(ph.regNames[T0]);
+      out_register(ph.reg_names[T0]);
       out_symbol(')');
       break;
     case TMS_MODIFIER_REG_OFFSET:
     case TMS_MODIFIER_P_REG_OFFSET:
       out_symbol('*');
-      if ( op.tms_modifier == TMS_MODIFIER_P_REG_OFFSET) out_symbol('+' );
+      if ( op.tms_modifier == TMS_MODIFIER_P_REG_OFFSET )
+        out_symbol('+');
       out_register(reg);
       out_line("(#", COLOR_SYMBOL);
-      OutValue(op, OOFS_IFSIGN|OOF_SIGNED|OOF_NUMBER|OOFW_IMM);
+      out_value(op, OOFS_IFSIGN|OOF_SIGNED|OOF_NUMBER|OOFW_IMM);
       out_symbol(')');
       break;
     case TMS_MODIFIER_REG_SHORT_OFFSET:
-      out_symbol('*'); out_register(reg);
+      out_symbol('*');
+      out_register(reg);
       out_line("(short(#", COLOR_SYMBOL);
-      OutValue(op, OOFS_IFSIGN|OOF_SIGNED|OOF_NUMBER|OOFW_IMM);
+      out_value(op, OOFS_IFSIGN|OOF_SIGNED|OOF_NUMBER|OOFW_IMM);
       out_line("))", COLOR_SYMBOL);
       break;
     case TMS_MODIFIER_REG_T1:
       out_symbol('*');
       out_register(reg);
       out_symbol('(');
-      out_register(ph.regNames[T1]);
+      out_register(ph.reg_names[T1]);
       out_symbol(')');
       break;
     case TMS_MODIFIER_P_REG:
@@ -292,10 +328,10 @@ static void out_reg(const op_t &op)
   }
 }
 
-
-static void out_cond(op_t &x)
+//--------------------------------------------------------------------------
+void out_tms320c55_t::out_cond(const op_t &x)
 {
-  const char *reg = ph.regNames[x.reg];
+  const char *reg = ph.reg_names[x.reg];
   switch ( x.value )
   {
     case 0x00:
@@ -334,35 +370,35 @@ static void out_cond(op_t &x)
       out_symbol(')');
       break;
     case 0x64:
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       break;
     case 0x65:
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x66:
-      out_register(ph.regNames[CARRY]);
+      out_register(ph.reg_names[CARRY]);
       break;
     case 0x68:
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" & ", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x69:
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" & !", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x6A:
       out_symbol('!');
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" & ", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x6B:
       out_symbol('!');
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" & !", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x70:
       out_line("!overflow(", COLOR_SYMBOL);
@@ -371,69 +407,69 @@ static void out_cond(op_t &x)
       break;
     case 0x74:
       out_symbol('!');
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       break;
     case 0x75:
       out_symbol('!');
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x76:
       out_symbol('!');
-      out_register(ph.regNames[CARRY]);
+      out_register(ph.reg_names[CARRY]);
       break;
     case 0x78:
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" | ", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x79:
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" | !", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x7A:
       out_symbol('!');
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" | ", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x7B:
       out_symbol('!');
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" | !", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x7C:
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" ^ ", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x7D:
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" ^ !", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x7E:
       out_symbol('!');
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" ^ ", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     case 0x7F:
       out_symbol('!');
-      out_register(ph.regNames[TC1]);
+      out_register(ph.reg_names[TC1]);
       out_line(" ^ !", COLOR_SYMBOL);
-      out_register(ph.regNames[TC2]);
+      out_register(ph.reg_names[TC2]);
       break;
     default:
       error("interr: out: o_cond");
   }
 }
 
-
-static void out_relop(const op_t &op)
+//--------------------------------------------------------------------------
+void out_tms320c55_t::out_relop(const op_t &op)
 {
-  out_register(ph.regNames[op.reg]);
+  out_register(ph.reg_names[op.reg]);
 
   const char *relop = NULL;
   switch ( op.tms_relop )
@@ -458,17 +494,17 @@ static void out_relop(const op_t &op)
   switch ( op.tms_relop_type )
   {
     case TMS_RELOP_REG:
-      out_register(ph.regNames[int(op.value)]);
+      out_register(ph.reg_names[int(op.value)]);
       break;
     case TMS_RELOP_IMM:
       out_symbol('#');
-      OutValue(op, OOFS_IFSIGN|OOF_SIGNED|OOF_NUMBER|OOFW_IMM);
+      out_value(op, OOFS_IFSIGN|OOF_SIGNED|OOF_NUMBER|OOFW_IMM);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &op)
+bool out_tms320c55_t::out_operand(const op_t &op)
 {
   switch ( op.type )
   {
@@ -497,9 +533,9 @@ bool idaapi outop(op_t &op)
       else
         out_symbol(op.tms_prefix);
       if ( op.tms_signed )
-        OutValue(op, OOFS_IFSIGN|OOF_SIGNED|OOFW_IMM);
+        out_value(op, OOFS_IFSIGN|OOF_SIGNED|OOFW_IMM);
       else
-        OutValue(op, OOFW_IMM);
+        out_value(op, OOFW_IMM);
       out_symbol_shift(op);
       break;
 
@@ -528,71 +564,71 @@ bool idaapi outop(op_t &op)
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_tms320c55_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  int op;
-
-  if ( !(cmd.SpecialModes & TMS_MODE_USER_PARALLEL) )
+  if ( (insn.SpecialModes & TMS_MODE_USER_PARALLEL) == 0 )
   {
-    if ( (cmd.SpecialModes & TMS_MODE_LR) || (cmd.SpecialModes & TMS_MODE_CR) )
+    if ( (insn.SpecialModes & (TMS_MODE_LR|TMS_MODE_CR)) != 0 )
     {
-      out_line(cmd.get_canon_mnem(), COLOR_INSN);
-      out_line((cmd.SpecialModes & TMS_MODE_LR) ? ".lr ":".cr ", COLOR_INSN);
+      out_line(insn.get_canon_mnem(), COLOR_INSN);
+      out_line((insn.SpecialModes & TMS_MODE_LR) ? ".lr ":".cr ", COLOR_INSN);
     }
     else
-      OutMnem();
+    {
+      out_mnem();
+    }
   }
   else
   { // user-defined parallelism
     out_line("|| ", COLOR_INSN);
-    out_line(cmd.get_canon_mnem(), COLOR_INSN);
+    out_line(insn.get_canon_mnem(), COLOR_INSN);
     out_line(" ", COLOR_INSN);
   }
+}
 
-  for (op = 0; op < UA_MAXOP; op++)
+//----------------------------------------------------------------------
+void out_tms320c55_t::out_insn(void)
+{
+  out_mnemonic();
+  for ( int op = 0; op < UA_MAXOP; op++ )
   {
-    if ( cmd.Operands[op].type == o_void ) break;
+    if ( insn.ops[op].type == o_void )
+      break;
     if ( op != 0 ) // not the first operand
     {
-      if ( cmd.Parallel != TMS_PARALLEL_BIT && op == cmd.Parallel ) // multi-line instruction
+      if ( insn.Parallel != TMS_PARALLEL_BIT && op == insn.Parallel ) // multi-line instruction
       {
-        term_output_buffer();
-        MakeLine(buf);
+        flush_outbuf();
         // print the second instruction line
-        init_output_buffer(buf, sizeof(buf));
-        if ( cmd.SpecialModes & TMS_MODE_SIMULATE_USER_PARALLEL )
+        if ( insn.SpecialModes & TMS_MODE_SIMULATE_USER_PARALLEL )
           out_line("|| ", COLOR_INSN);
         else
           out_line(":: ", COLOR_INSN);
-        const char *insn2 = cmd.get_canon_mnem();
+        const char *insn2 = insn.get_canon_mnem();
+        if ( insn2 == NULL )
+          insn2 = "?";
         insn2 += strlen(insn2);
         insn2++;
         out_line(insn2, COLOR_INSN);
       }
       else
         out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
     }
     // print the operand
     out_one_operand(op);
   }
 
   // print immediate values
-  for (op = 0; op < UA_MAXOP; op++)
-    if ( isVoid(cmd.ea, uFlag, op) ) OutImmChar(cmd.Operands[op]);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-static void print_segment_register(int reg, sel_t value)
+static void print_segment_register(outctx_t &ctx, int reg, sel_t value)
 {
-  if ( reg == ph.regDataSreg ) return;
+  if ( reg == ph.reg_data_sreg )
+    return;
   char buf[MAX_NUMBUF];
   btoa(buf, sizeof(buf), value);
   switch ( reg )
@@ -600,96 +636,101 @@ static void print_segment_register(int reg, sel_t value)
     case ARMS:
       if ( value == BADSEL )
         break;
-      printf_line(inf.indent,COLSTR(".arms_%s",SCOLOR_ASMDIR), value ? "on":"off");
+      ctx.gen_printf(inf.indent,COLSTR(".arms_%s",SCOLOR_ASMDIR), value ? "on":"off");
       return;
     case CPL:
       if ( value == BADSEL )
         break;
-      printf_line(inf.indent,COLSTR(".cpl_%s",SCOLOR_ASMDIR), value ? "on":"off");
+      ctx.gen_printf(inf.indent,COLSTR(".cpl_%s",SCOLOR_ASMDIR), value ? "on":"off");
       return;
     case DP:
       if ( value == BADSEL )
         break;
-      printf_line(inf.indent,COLSTR(".dp %s",SCOLOR_ASMDIR), buf);
+      ctx.gen_printf(inf.indent,COLSTR(".dp %s",SCOLOR_ASMDIR), buf);
       return;
   }
-  gen_cmt_line("assume %s = %s", ph.regNames[reg], buf);
+  ctx.gen_cmt_line("assume %s = %s", ph.reg_names[reg], buf);
 }
 
 //--------------------------------------------------------------------------
 // function to produce assume directives
-void idaapi assumes(ea_t ea)
+//lint -e{1764} ctx could be const
+void idaapi assumes(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( !inf.s_assume || seg == NULL )
+  if ( (inf.outflags & OFLG_GEN_ASSUME) == 0 || seg == NULL )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
-  for ( int i = ph.regFirstSreg; i <= ph.regLastSreg; ++i )
+  for ( int i = ph.reg_first_sreg; i <= ph.reg_last_sreg; ++i )
   {
-    if ( i == ph.regCodeSreg )
+    if ( i == ph.reg_code_sreg )
       continue;
-    segreg_area_t sra;
-    if ( !get_srarea2(&sra, ea, i) )
+    sreg_range_t sra;
+    if ( !get_sreg_range(&sra, ea, i) )
       continue;
-    if ( seg_started || sra.startEA == ea )
+    if ( seg_started || sra.start_ea == ea )
     {
-      sel_t now  = get_segreg(ea, i);
-      segreg_area_t prev;
-      bool prev_exists = get_srarea2(&prev, ea-1, i);
-      if ( seg_started || (prev_exists && get_segreg(prev.startEA, i) != now) )
-        print_segment_register(i, now);
+      sel_t now = get_sreg(ea, i);
+      sreg_range_t prev;
+      bool prev_exists = get_sreg_range(&prev, ea-1, i);
+      if ( seg_started || (prev_exists && get_sreg(prev.start_ea, i) != now) )
+        print_segment_register(ctx, i, now);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -e{818} seg could be const
+void idaapi segstart(outctx_t &ctx, segment_t *seg)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  ea_t ea = seg->start_ea;
+  segment_t *Srange = getseg(ea);
+  if ( is_spec_segm(Srange->type) )
+    return;
 
-  char sclas[MAXNAMELEN];
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sclas;
+  get_segm_class(&sclas, Srange);
 
-  if ( strcmp(sclas,"CODE") == 0 )
-    printf_line(inf.indent, COLSTR(".text", SCOLOR_ASMDIR));
-  else if ( strcmp(sclas,"DATA") == 0 )
-    printf_line(inf.indent, COLSTR(".data", SCOLOR_ASMDIR));
-//    printf_line(inf.indent, COLSTR(".sect %s", SCOLOR_ASMDIR), sname);
+  if ( sclas == "CODE" )
+    ctx.gen_printf(inf.indent, COLSTR(".text", SCOLOR_ASMDIR));
+  else if ( sclas == "DATA" )
+    ctx.gen_printf(inf.indent, COLSTR(".data", SCOLOR_ASMDIR));
+//    gen_printf(inf.indent, COLSTR(".sect %s", SCOLOR_ASMDIR), sname);
 
-  if ( Sarea->orgbase != 0 )
+  if ( Srange->orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
-    btoa(buf, sizeof(buf), Sarea->orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    btoa(buf, sizeof(buf), Srange->orgbase);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t)
+void idaapi segend(outctx_t &, segment_t *)
 {
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL | GH_BYTESEX_HAS_HIGHBYTE);
-  MakeNull();
-  printf_line(0,COLSTR("MY_BYTE .macro BYTE",SCOLOR_ASMDIR));
-  printf_line(0,COLSTR("        .emsg \"ERROR - Impossible to generate 8bit bytes on this processor. Please convert them to 16bit words.\"",SCOLOR_ASMDIR));
-  printf_line(0,COLSTR("        .endm",SCOLOR_ASMDIR));
-  MakeNull();
+  ctx.gen_header(GH_PRINT_ALL | GH_BYTESEX_HAS_HIGHBYTE);
+  ctx.gen_empty_line();
+  ctx.gen_printf(0,COLSTR("MY_BYTE .macro BYTE",SCOLOR_ASMDIR));
+  ctx.gen_printf(0,COLSTR("        .emsg \"ERROR - Impossible to generate 8bit bytes on this processor. Please convert them to 16bit words.\"",SCOLOR_ASMDIR));
+  ctx.gen_printf(0,COLSTR("        .endm",SCOLOR_ASMDIR));
+  ctx.gen_empty_line();
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi footer(outctx_t &ctx)
 {
-  printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR),ash.end);
+  ctx.gen_printf(inf.indent, COLSTR("%s",SCOLOR_ASMDIR), ash.end);
 }
 
 //--------------------------------------------------------------------------
-void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v)
+void idaapi gen_stkvar_def(outctx_t &ctx, const member_t *mptr, sval_t v)
 {
   char sign = ' ';
   if ( v < 0 )
@@ -698,17 +739,16 @@ void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval
     v = -v;
   }
 
-  qstring name = get_member_name2(mptr->id);
+  qstring name = get_member_name(mptr->id);
 
   char vstr[MAX_NUMBUF];
   btoa(vstr, sizeof(vstr), v);
-  qsnprintf(buf, bufsize,
-               COLSTR("  %s ",SCOLOR_KEYWORD)
-               COLSTR("%c%s",SCOLOR_DNUM)
-               COLSTR(",",SCOLOR_SYMBOL) " "
-               COLSTR("%s",SCOLOR_LOCNAME),
-               ash.a_equ,
-               sign,
-               vstr,
-               name.c_str());
+  ctx.out_printf(COLSTR("  %s ",SCOLOR_KEYWORD)
+                 COLSTR("%c%s",SCOLOR_DNUM)
+                 COLSTR(",",SCOLOR_SYMBOL) " "
+                 COLSTR("%s",SCOLOR_LOCNAME),
+                 ash.a_equ,
+                 sign,
+                 vstr,
+                 name.c_str());
 }

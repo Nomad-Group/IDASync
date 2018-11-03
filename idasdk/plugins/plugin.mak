@@ -1,11 +1,11 @@
 ifndef USE_STATIC_RUNTIME
-_CFLAGS=$(__CFLAGS) -D__IDP__ 
   ifndef DONT_BUILD_PLUGIN
-    _CFLAGS += -D__PLUGIN__
+    PLUGIN_DEF_FLAG=-D__PLUGIN__
   endif
-__IDP__=1
+  _CFLAGS=$(__CFLAGS) -D__IDP__ $(PLUGIN_DEF_FLAG)
+  __IDP__=1
 else
-_CFLAGS=$(__CFLAGS)
+  _CFLAGS=$(__CFLAGS)
 endif
 LINTFLAGS=$(_LINTFLAGS)
 
@@ -87,26 +87,32 @@ OBJS:=$(F)$(PROC)$(O) $(OBJ1) $(OBJ2) $(OBJ3) $(OBJ4) $(OBJ5) $(OBJ6) $(OBJ7) \
 BIN_PATH:=$(R)plugins/
 
 ifndef DONT_BUILD_PLUGIN
-  BINARY=$(BIN_PATH)$(PROC)$(PLUGIN)
+  ifndef BINARY
+    BINARY=$(BIN_PATH)$(PROC)$(PLUGIN)
+  endif
 endif
 
-all:	objdir $(BINARY) $(ADDITIONAL_GOALS)
+
+.SECONDEXPANSION:
+all:	objdir $(BINARY) $$(ADDITIONAL_GOALS)
 include ../../objdir.mak
 
 ifdef __UNIX__
   ifndef PLUGIN_SCRIPT
     ifdef __LINUX__
-      PLUGIN_SCRIPT=-Wl,--version-script=../../plugins/plugin.script
+      PLUGIN_SCRIPT=-Wl,--version-script=../../plugins/plugin.script$(MAP_PLUGIN_SCRIPT_LINUX)
     endif
     ifdef __MAC__
       PLUGIN_SCRIPT=-Wl,-install_name,$(@F)
+#
     endif
   endif
   DEFFILE=
 
   ifndef DONT_BUILD_PLUGIN
-$(BINARY): ../../plugins/plugin.script $(OBJS) makefile
-	$(CXX) $(ARCH_CFLAGS) $(CFLAGS) $(OUTDLL) $(OUTSW)$@ $(OBJS) -L$(R) $(LINKIDA) $(PLUGIN_SCRIPT) $(ADDITIONAL_LIBS) $(STDLIBS)
+$(BINARY): ../../plugins/plugin.script $$(OBJS) makefile
+	$(CCL) $(OUTDLL) $(OUTSW)$@ $(OBJS) -L$(L) $(LINKIDA) $(PLUGIN_SCRIPT) $(ADDITIONAL_LIBS) $(STDLIBS)
+	$(POSTACTION)
   endif
 else # windows
 
@@ -116,16 +122,22 @@ else # windows
     DEFFILE:=../../plugins/plugin.def
   endif
 
+
   ifneq ($(and $(__VC__),$(DEBUG)),)
     PDBSW=/PDB:$(BIN_PATH)$(PROC)$(SUFF64).pdb
   endif
 
   ifndef DONT_BUILD_PLUGIN
-$(BINARY): $(DEFFILE) $(OBJS) $(IDALIB) $(RESFILES)
-	$(LINKER) $(LINKOPTS) /STUB:../../plugins/stub /OUT:$@ $(PDBSW) $(OBJS) $(IDALIB) user32.lib $(ADDITIONAL_LIBS)
+$(BINARY): $(DEFFILE) $$(OBJS) $(IDALIB) $$(RESFILES)
+	$(LINKER) $(LINKOPTS) $(BINARY_LINKOPTS) /STUB:../../plugins/stub /OUT:$@ $(PDBSW) $(OBJS) $(IDALIB) user32.lib $(ADDITIONAL_LIBS)
+    ifndef DONT_ERASE_LIB
 	@$(RM) $(@:$(PLUGIN)=.exp) $(@:$(PLUGIN)=.lib)
+    endif
+	$(POSTACTION)
   endif
 endif
-ifdef POSTACTION
-	$(POSTACTION)
-endif
+
+clean::
+	rm -f $(BINARY) $(OBJS) $(F)$(PROC)$(PLUGIN).map $(addprefix $(C),$(CONFIGS)) $(addprefix $(RI),$(IDCS)) $(ADDITIONAL_CLEAN)
+	-@[ -d $(OBJDIR) ] && rmdir $(OBJDIR)
+	-@[ -d obj ] && rmdir obj

@@ -987,14 +987,14 @@ static const map3_pointer_t map3[] =
 static uchar code;
 static uchar code3;
 
-static bool op_reg(op_t &x, uint8 reg, ushort place, uint16 aux_assumed = aux_none);
-static bool op_phrase(op_t &x, uint8 reg, int pht, char dtyp = dt_byte);
-static bool op_phrase_prepost(op_t &x, uint8 reg, uint8 selector);
-static bool op_phrase_displ2(op_t &x, uint8 reg, uint8 displ);
-static void op_imm(op_t &x, uval_t val);
+static bool op_reg(const insn_t &insn, op_t &x, uint8 reg, ushort place, uint16 aux_assumed = aux_none);
+static bool op_phrase(const insn_t &insn, op_t &x, uint8 reg, int pht, op_dtype_t dtyp = dt_byte);
+static bool op_phrase_prepost(const insn_t &insn, op_t &x, uint8 reg, uint8 selector);
+static bool op_phrase_displ2(const insn_t &insn, op_t &x, uint8 reg, uint8 displ);
+static void op_imm(const insn_t &insn, op_t &x, uval_t val);
 static void op_imm_8(op_t &x, uint8 val);
 static void op_imm_3(op_t &x, uint8 val);
-static bool op_aa_8(op_t &x, uint8 val, char dtyp);
+static bool op_aa_8(const insn_t &insn, op_t &x, uint8 val, op_dtype_t dtyp);
 static bool op_reglist(op_t &x, uint8 reg, uint8 delta, bool is_inc);
 
 //--------------------------------------------------------------------------------------
@@ -1030,81 +1030,81 @@ static void trimaddr(op_t &x)
 }
 
 //--------------------------------------------------------------------------
-static void get_disp(op_t &x, bool disp32)
+static void get_disp(insn_t &insn, op_t &x, bool disp32)
 {
-  x.offb = (uchar)cmd.size;
+  x.offb = (uchar)insn.size;
   if ( !disp32 )
   {
     x.szfl |= disp_16;
-    x.addr = short(ua_next_word());
+    x.addr = short(insn.get_next_word());
   }
   else
   {
     x.szfl |= disp_32;
-    x.addr = ua_next_long();
+    x.addr = insn.get_next_dword();
   }
 }
 
 //--------------------------------------------------------------------------
-static void opimm8(op_t &x)
+static void opimm8(insn_t &insn, op_t &x)
 {
-  x.offb = (uchar)cmd.size;
+  x.offb = (uchar)insn.size;
   x.type = o_imm;
-  x.dtyp = dt_byte;
-  x.value = ua_next_byte();
+  x.dtype = dt_byte;
+  x.value = insn.get_next_byte();
 }
 
 //--------------------------------------------------------------------------
 static void opreg8(op_t &x, uint16 reg)
 {
   x.type = o_reg;
-  x.dtyp = dt_byte;
-  x.reg  = reg;
+  x.dtype = dt_byte;
+  x.reg = reg;
 }
 
 //--------------------------------------------------------------------------
 inline regnum_t r0(void) { return advanced() ? ER0 : R0; }
 
 //--------------------------------------------------------------------------
-static void opatHL(op_t &x, char dtyp)
+static void opatHL(op_t &x, op_dtype_t dtyp)
 {
   x.type = o_phrase;
-  x.dtyp = dtyp;
-  x.reg  = r0() + ((code>>4) & 7);
+  x.dtype = dtyp;
+  x.reg = r0() + ((code>>4) & 7);
   x.phtype = ph_normal;
 }
 
 //--------------------------------------------------------------------------
-static void oppost(op_t &x, uint16 reg, char dtyp)
+static void oppost(op_t &x, uint16 reg, op_dtype_t dtyp)
 {
   x.type   = o_phrase;
-  x.dtyp   = dtyp;
+  x.dtype  = dtyp;
   x.reg    = reg;
   x.phtype = ph_post_inc;
 }
 
 //--------------------------------------------------------------------------
-static void opdsp16(op_t &x, char dtyp)
+static void opdsp16(insn_t &insn, op_t &x, op_dtype_t dtyp)
 {
   x.type = o_displ;
-  x.dtyp = dtyp;
-  x.reg  = r0() + ((code>>4) & 7);
-  get_disp(x, false);
-  if ( isOff(get_flags_novalue(cmd.ea), -1) )
+  x.dtype = dtyp;
+  x.reg = r0() + ((code>>4) & 7);
+  get_disp(insn, x, false);
+  if ( is_off(get_flags(insn.ea), -1) )
     x.addr = ushort(x.addr);
 }
 
 //--------------------------------------------------------------------------
-static void opdsp32(op_t &x, char dtyp)
+static void opdsp32(insn_t &insn, op_t &x, op_dtype_t dtyp)
 {
   x.type = o_displ;
-  x.dtyp = dtyp;
-  x.reg  = r0() + ((code>>4) & 7);
-  get_disp(x, true);
+  x.dtype = dtyp;
+  x.reg = r0() + ((code>>4) & 7);
+  get_disp(insn, x, true);
 }
 
 //--------------------------------------------------------------------------
-static void opreg(op_t &x, uint16 reg, char dtyp)
+static void opreg(op_t &x, uint16 reg, op_dtype_t dtyp)
 {
   switch ( dtyp )
   {
@@ -1119,27 +1119,34 @@ static void opreg(op_t &x, uint16 reg, char dtyp)
       break;
   }
   x.type = o_reg;
-  x.dtyp = dtyp;
-  x.reg  = reg;
+  x.dtype = dtyp;
+  x.reg = reg;
 }
 
 //--------------------------------------------------------------------------
 static char calc_dtyp(ushort flags)
 {
-  char dtyp;
-  if      ( flags & B ) dtyp = dt_byte;
-  else if ( flags & W ) dtyp = dt_word;
-  else if ( flags & L ) dtyp = dt_dword;
-  else                  dtyp = dt_code;
+  op_dtype_t dtyp;
+  if ( flags & B )
+    dtyp = dt_byte;
+  else if ( flags & W )
+    dtyp = dt_word;
+  else if ( flags & L )
+    dtyp = dt_dword;
+  else
+    dtyp = dt_code;
   return dtyp;
 }
 
 //--------------------------------------------------------------------------
-static bool read_operand(op_t &x, ushort flags)
+static bool read_operand(insn_t &insn, op_t &x, ushort flags)
 {
-  if ( flags & NEXT ) code = ua_next_byte();
-  if ( (flags & zL) && (code & 0x0F) != 0 ) return false;
-  if ( (flags & zH) && (code & 0xF0) != 0 ) return false;
+  if ( flags & NEXT )
+    code = insn.get_next_byte();
+  if ( (flags & zL) && (code & 0x0F) != 0 )
+    return false;
+  if ( (flags & zH) && (code & 0xF0) != 0 )
+    return false;
 
   switch ( flags & OPTYPE )
   {
@@ -1147,35 +1154,35 @@ static bool read_operand(op_t &x, ushort flags)
       break;
     case i3:      // immediate 3 bits
       x.type = o_imm;
-      x.dtyp = dt_byte;
+      x.dtype = dt_byte;
       x.value = (code >> 4) & 7;
       break;
     case i4L:     // immediate 4 bits
       x.type = o_imm;
-      x.dtyp = dt_byte;
+      x.dtype = dt_byte;
       x.value = code & 0xF;
       break;
     case i4H:     // immediate 4 bits
       x.type = o_imm;
-      x.dtyp = dt_byte;
       x.value = (code >> 4) & 0xF;
-      x.dtyp = calc_dtyp(flags);
+      x.dtype = calc_dtyp(flags);
       break;
     case i8:      // immediate 8 bits
-      opimm8(x);
+      opimm8(insn, x);
       break;
     case i16:     // immediate 16 bits
-      x.offb = (uchar)cmd.size;
+      x.offb = (uchar)insn.size;
       x.type = o_imm;
-      x.dtyp = dt_word;
-      x.value = ua_next_word();
+      x.dtype = dt_word;
+      x.value = insn.get_next_word();
       break;
     case i32:     // immediate 32 bits
-      if ( !advanced() ) return false;
-      x.offb = (uchar)cmd.size;
+      if ( !advanced() )
+        return false;
+      x.offb = (uchar)insn.size;
       x.type = o_imm;
-      x.dtyp = dt_dword;
-      x.value = ua_next_long();
+      x.dtype = dt_dword;
+      x.value = insn.get_next_dword();
       break;
     case rCCR:    // CCR
       opreg8(x, CCR);
@@ -1185,13 +1192,13 @@ static bool read_operand(op_t &x, ushort flags)
       break;
     case rVBR:
       x.type = o_reg;
-      x.dtyp = dt_dword;
-      x.reg  = VBR;
+      x.dtype = dt_dword;
+      x.reg = VBR;
       break;
     case rSBR:
       x.type = o_reg;
-      x.dtyp = dt_dword;
-      x.reg  = SBR;
+      x.dtype = dt_dword;
+      x.reg = SBR;
       break;
     case rLB:     // register number in low nibble  (r0l..r7h)
       opreg8(x, R0H + (code & 15));
@@ -1202,111 +1209,122 @@ static bool read_operand(op_t &x, ushort flags)
     case rLW:     // register number in low nibble  (r0..e7)
 LW:
       x.type = o_reg;
-      x.dtyp = dt_word;
-      x.reg  = R0 + (code & 15);
+      x.dtype = dt_word;
+      x.reg = R0 + (code & 15);
       break;
     case rHW:     // register number in high nibble (r0..e7)
       x.type = o_reg;
-      x.dtyp = dt_word;
-      x.reg  = R0 + ((code>>4) & 15);
+      x.dtype = dt_word;
+      x.reg = R0 + ((code>>4) & 15);
       break;
     case rV0:     // register number in low nibble
-      if ( (code & 0x08) != 0 ) return false;
-      if ( !advanced() ) goto LW;
+      if ( (code & 0x08) != 0 )
+        return false;
+      if ( !advanced() )
+        goto LW;
       goto LL;
     case rLL0:    // register number in low nibble
-      if ( (code & 0x08) != 0 ) return false;
-      if ( !advanced() ) return false;
+      if ( (code & 0x08) != 0 )
+        return false;
+      if ( !advanced() )
+        return false;
 LL:
       x.type = o_reg;
-      x.dtyp = dt_dword;
-      x.reg  = ER0 + (code & 7);
+      x.dtype = dt_dword;
+      x.reg = ER0 + (code & 7);
       break;
     case rHL0:    // register number in high nibble
-      if ( (code & 0x80) != 0 ) return false;
-      if ( !advanced() ) return false;
+      if ( (code & 0x80) != 0 )
+        return false;
+      if ( !advanced() )
+        return false;
 HL:
       x.type = o_reg;
-      x.dtyp = dt_dword;
-      x.reg  = ER0 + ((code>>4) & 7);
+      x.dtype = dt_dword;
+      x.reg = ER0 + ((code>>4) & 7);
       break;
     case rMACH:
       x.type = o_reg;
-      x.dtyp = dt_dword;
-      x.reg  = MACH;
+      x.dtype = dt_dword;
+      x.reg = MACH;
       break;
     case rMACL:
       x.type = o_reg;
-      x.dtyp = dt_dword;
-      x.reg  = MACL;
+      x.dtype = dt_dword;
+      x.reg = MACL;
       break;
     case savedHL0:      // @ERx
-      if ( (code3 & 0x80) != 0 ) return false;
+      if ( (code3 & 0x80) != 0 )
+        return false;
       x.type = o_phrase;
-      x.dtyp = dt_dword;
-      x.reg  = r0() + ((code3>>4) & 7);
+      x.dtype = dt_dword;
+      x.reg = r0() + ((code3>>4) & 7);
       x.phtype = ph_normal;
       break;
     case atHL:          // @ERx
       opatHL(x, calc_dtyp(flags));
       break;
     case rLL1:    // register number in low nibble
-      if ( (code & 0x08) == 0 ) return false;
-      if ( !advanced() ) return false;
+      if ( (code & 0x08) == 0 )
+        return false;
+      if ( !advanced() )
+        return false;
       goto LL;
     case rHL1:    // register number in high nibble
-      if ( (code & 0x80) == 0 ) return false;
-      if ( !advanced() ) return false;
+      if ( (code & 0x80) == 0 )
+        return false;
+      if ( !advanced() )
+        return false;
       goto HL;
     case C1:      // constant #1
       x.type = o_imm;
-      x.dtyp = dt_byte;
+      x.dtype = dt_byte;
       x.value = 1;
       break;
     case C2:      // constant #2
       x.type = o_imm;
-      x.dtyp = dt_byte;
+      x.dtype = dt_byte;
       x.value = 2;
       break;
     case C4:      // constant #4
       x.type = o_imm;
-      x.dtyp = dt_byte;
+      x.dtype = dt_byte;
       x.value = 4;
       break;
     case C8:      // constant #8
       x.type = o_imm;
-      x.dtyp = dt_byte;
+      x.dtype = dt_byte;
       x.value = 8;
       break;
     case Cxh:     // hidden o_imm op
       x.type = o_imm;
-      x.dtyp = calc_dtyp(flags);
+      x.dtype = calc_dtyp(flags);
       x.value = 1;
       x.clr_shown();
       break;
     case savedAA:
       x.type = o_mem;
-      x.dtyp = dt_byte;
+      x.dtype = dt_byte;
       x.addr = ~0xFF | code3;
       trimaddr(x);
       break;
     case j8:
-      x.offb = (uchar)cmd.size;
+      x.offb = (uchar)insn.size;
       x.type = o_near;
-      x.dtyp = dt_code;
+      x.dtype = dt_code;
       {
-        signed char disp = ua_next_byte();
-        x.addr = cmd.ip + cmd.size + disp;
+        signed char disp = insn.get_next_byte();
+        x.addr = insn.ip + insn.size + disp;
         x.addr &= ~1;
       }
       break;
     case j16:
-      x.offb = (uchar)cmd.size;
+      x.offb = (uchar)insn.size;
       x.type = o_near;
-      x.dtyp = dt_code;
+      x.dtype = dt_code;
       {
-        signed short disp = ua_next_word();
-        x.addr = cmd.ip + cmd.size + disp;
+        signed short disp = insn.get_next_word();
+        x.addr = insn.ip + insn.size + disp;
         x.addr &= ~1;
         x.szfl |= disp_16;
       }
@@ -1314,49 +1332,50 @@ HL:
     case aa8:
       if ( !is_h8sx() )
       {
-        x.offb = (uchar)cmd.size;
+        x.offb = (uchar)insn.size;
         x.type = o_mem;
-        x.dtyp = calc_dtyp(flags);
-        x.addr = ~0xFF | ua_next_byte();
+        x.dtype = calc_dtyp(flags);
+        x.addr = ~0xFF | insn.get_next_byte();
         trimaddr(x);
       }
       else
       {
-        uint8 val = ua_next_byte();
-        op_aa_8(x, val, calc_dtyp(flags));
+        uint8 val = insn.get_next_byte();
+        op_aa_8(insn, x, val, calc_dtyp(flags));
       }
       break;
     case ai8:
-      x.offb = (uchar)cmd.size;
+      x.offb = (uchar)insn.size;
       x.type = o_mem;
       x.memtype = mem_ind;
-      x.dtyp = advanced() ? dt_dword : dt_word;
-      x.addr = ua_next_byte();
+      x.dtype = advanced() ? dt_dword : dt_word;
+      x.addr = insn.get_next_byte();
       break;
     case aa16:
       x.type = o_mem;
-      x.dtyp = calc_dtyp(flags);
-      get_disp(x, false);
+      x.dtype = calc_dtyp(flags);
+      get_disp(insn, x, false);
       trimaddr(x);
       break;
     case aa32:
       x.type = o_mem;
-      x.dtyp = calc_dtyp(flags);
-      get_disp(x, true);
+      x.dtype = calc_dtyp(flags);
+      get_disp(insn, x, true);
       break;
     case aa24:          // 24bit address (16bit in !advanced())
-      x.offb = (uchar)cmd.size;
+      x.offb = (uchar)insn.size;
       x.type = o_near;
-      x.dtyp = calc_dtyp(flags);
+      x.dtype = calc_dtyp(flags);
       {
-        uint32 high = ua_next_byte();
-        if ( !advanced() && high != 0 ) return false;
-        x.addr = (high << 16) | ua_next_word();
+        uint32 high = insn.get_next_byte();
+        if ( !advanced() && high != 0 )
+          return false;
+        x.addr = (high << 16) | insn.get_next_word();
         x.szfl |= advanced() ? disp_24 : disp_16;
       }
       break;
     case d16:           // @(d:16, ERs)
-      opdsp16(x, calc_dtyp(flags));
+      opdsp16(insn, x, calc_dtyp(flags));
       break;
     default:
       INTERR(10092);
@@ -1366,117 +1385,125 @@ HL:
 
 //--------------------------------------------------------------------------
 // 01 4?
-static bool map014(void)
+static bool map014(insn_t &insn)
 {
   switch ( code )
   {
     case 0x40:
-      opreg8(cmd.Op2, CCR);
+      opreg8(insn.Op2, CCR);
       break;
     case 0x41:
-      opreg8(cmd.Op2, EXR);
+      opreg8(insn.Op2, EXR);
       break;
     default:
       return false;
   }
 
-  cmd.itype = H8_ldc;
-  code = ua_next_byte();
-  char dtyp = dt_word;
+  insn.itype = H8_ldc;
+  code = insn.get_next_byte();
+  op_dtype_t dtyp = dt_word;
   switch ( code )
   {
     case 0x04:
-      cmd.itype = H8_orc;
+      insn.itype = H8_orc;
       dtyp = dt_byte;
-      opimm8(cmd.Op1);
+      opimm8(insn, insn.Op1);
       break;
     case 0x05:
-      cmd.itype = H8_xorc;
+      insn.itype = H8_xorc;
       dtyp = dt_byte;
-      opimm8(cmd.Op1);
+      opimm8(insn, insn.Op1);
       break;
     case 0x06:
-      cmd.itype = H8_andc;
+      insn.itype = H8_andc;
       dtyp = dt_byte;
-      opimm8(cmd.Op1);
+      opimm8(insn, insn.Op1);
       break;
     case 0x07:
       dtyp = dt_byte;
-      opimm8(cmd.Op1);
+      opimm8(insn, insn.Op1);
       break;
     case 0x69:
-      code = ua_next_byte();
-      if ( code & 0x0F ) return false;
-      opatHL(cmd.Op1, dtyp);
+      code = insn.get_next_byte();
+      if ( code & 0x0F )
+        return false;
+      opatHL(insn.Op1, dtyp);
       break;
     case 0x6B:
-      cmd.Op1.type = o_mem;
-      cmd.Op1.dtyp = dtyp;
-      code = ua_next_byte();
+      insn.Op1.type = o_mem;
+      insn.Op1.dtype = dtyp;
+      code = insn.get_next_byte();
       switch ( code & 0x70 )
       {
         case 0x00:
-          get_disp(cmd.Op1, false);
+          get_disp(insn, insn.Op1, false);
           break;
         case 0x20:
-          get_disp(cmd.Op1, true);
+          get_disp(insn, insn.Op1, true);
           break;
         default:
           return false;
       }
-      trimaddr(cmd.Op1);
+      trimaddr(insn.Op1);
       break;
     case 0x6D:
-      code = ua_next_byte();
-      if ( code & 0x0F ) return false;
-      oppost(cmd.Op1, r0() + ((code>>4) & 7),  dtyp);
+      code = insn.get_next_byte();
+      if ( code & 0x0F )
+        return false;
+      oppost(insn.Op1, r0() + ((code>>4) & 7), dtyp);
       break;
     case 0x6F:
-      code = ua_next_byte();
-      if ( code & 0x0F ) return false;
-      opdsp16(cmd.Op1, dtyp);
+      code = insn.get_next_byte();
+      if ( code & 0x0F )
+        return false;
+      opdsp16(insn, insn.Op1, dtyp);
       break;
     case 0x78:
-      code = ua_next_byte();
-      if ( code & 0x8F ) return false;
-      if ( ua_next_byte() != 0x6B ) return false;
-      code3 = ua_next_byte();
-      if ( (code3 & 0x70) != 0x20 ) return false;
-      opdsp32(cmd.Op1, dtyp);
+      code = insn.get_next_byte();
+      if ( code & 0x8F )
+        return false;
+      if ( insn.get_next_byte() != 0x6B )
+        return false;
+      code3 = insn.get_next_byte();
+      if ( (code3 & 0x70) != 0x20 )
+        return false;
+      opdsp32(insn, insn.Op1, dtyp);
       code = code3;
       break;
     default:
       return false;
   }
-  if ( cmd.itype == H8_ldc )
-    cmd.auxpref = (dtyp == dt_word) ? aux_word : aux_byte;
+  if ( insn.itype == H8_ldc )
+    insn.auxpref = (dtyp == dt_word) ? aux_word : aux_byte;
   return true;
 }
 
 //--------------------------------------------------------------------------
 // 6A 1?
 // 6A 3?
-static bool map4(void)
+static bool map4(insn_t &insn)
 {
   uchar pref = code;
-  cmd.Op2.type = o_mem;
-  cmd.Op2.dtyp = dt_byte;
-  get_disp(cmd.Op2, pref >= 0x30);
-  trimaddr(cmd.Op2);
-  uchar pcode = ua_next_byte();
-  code = ua_next_byte();
-  if ( code & 0x0F ) return false;
+  insn.Op2.type = o_mem;
+  insn.Op2.dtype = dt_byte;
+  get_disp(insn, insn.Op2, pref >= 0x30);
+  trimaddr(insn.Op2);
+  uchar pcode = insn.get_next_byte();
+  code = insn.get_next_byte();
+  if ( code & 0x0F )
+    return false;
   if ( pcode >= 0x60 && pcode <= 0x63 )
   {
-    opreg8(cmd.Op1, R0H + (code >> 4));
+    opreg8(insn.Op1, R0H + (code >> 4));
   }
   else
   {
-    cmd.Op1.type = o_imm;
-    cmd.Op1.dtyp = dt_byte;
-    cmd.Op1.value = (code >> 4) & 7;
-    if( pcode >= 0x70 && pcode <= 0x73 )
-      if ( code & 0x80 ) return false;
+    insn.Op1.type = o_imm;
+    insn.Op1.dtype = dt_byte;
+    insn.Op1.value = (code >> 4) & 7;
+    if ( pcode >= 0x70 && pcode <= 0x73 )
+      if ( code & 0x80 )
+        return false;
   }
   switch ( pref )
   {
@@ -1486,19 +1513,19 @@ static bool map4(void)
       {
         case 0x63:
         case 0x73:
-          cmd.itype = H8_btst;
+          insn.itype = H8_btst;
           break;
         case 0x74:
-          cmd.itype = H8_bor;
+          insn.itype = H8_bor;
           break;
         case 0x75:
-          cmd.itype = H8_bxor;
+          insn.itype = H8_bxor;
           break;
         case 0x76:
-          cmd.itype = H8_band;
+          insn.itype = H8_band;
           break;
         case 0x77:
-          cmd.itype = H8_bld;
+          insn.itype = H8_bld;
           break;
         default:
           return false;
@@ -1511,18 +1538,18 @@ static bool map4(void)
       {
         case 0x60:
         case 0x70:
-          cmd.itype = H8_bset;
+          insn.itype = H8_bset;
           break;
         case 0x61:
         case 0x71:
-          cmd.itype = H8_bnot;
+          insn.itype = H8_bnot;
           break;
         case 0x62:
         case 0x72:
-          cmd.itype = H8_bclr;
+          insn.itype = H8_bclr;
           break;
         case 0x67:
-          cmd.itype = H8_bst;
+          insn.itype = H8_bst;
           break;
       }
       break;
@@ -1534,45 +1561,46 @@ static bool map4(void)
 }
 
 //--------------------------------------------------------------------------
-inline void swap_Op1_Op2()
+inline void swap_Op1_Op2(insn_t &insn)
 {
-  op_t x = cmd.Op1;
-  cmd.Op1 = cmd.Op2;
-  cmd.Op2 = x;
-  cmd.Op1.n = 0;
-  cmd.Op2.n = 1;
+  op_t x = insn.Op1;
+  insn.Op1 = insn.Op2;
+  insn.Op2 = x;
+  insn.Op1.n = 0;
+  insn.Op2.n = 1;
 }
 
 //--------------------------------------------------------------------------
-static int exit_40(void);
-static int exit_54_56(uint8 rts, uint8 rtsl);
-static int exit_59_5D(uint16 jump, uint16 branch);
-static int exit_7B(void);
-static int h8sx_01(void);
-static int h8sx_03(void);
-static int h8sx_0A(void);
-static int h8sx_0F(void);
-static int h8sx_10(void);
-static int h8sx_11(void);
-static int h8sx_1A(void);
-static int h8sx_1F(void);
-static int h8sx_6A(void);
-static int h8sx_6B(void);
-static int h8sx_78(void);
-static int h8sx_79(void);
-static int h8sx_7A(void);
-static int h8sx_7C(void);
-static int h8sx_7D(void);
-static int h8sx_7E(void);
-static int h8sx_7F(void);
+static int exit_40(insn_t &insn);
+static int exit_54_56(insn_t &insn, uint8 rts, uint8 rtsl);
+static int exit_59_5D(insn_t &insn, uint16 jump, uint16 branch);
+static int exit_7B(insn_t &insn);
+static int h8sx_01(insn_t &insn);
+static int h8sx_03(insn_t &insn);
+static int h8sx_0A(insn_t &insn);
+static int h8sx_0F(insn_t &insn);
+static int h8sx_10(insn_t &insn);
+static int h8sx_11(insn_t &insn);
+static int h8sx_1A(insn_t &insn);
+static int h8sx_1F(insn_t &insn);
+static int h8sx_6A(insn_t &insn);
+static int h8sx_6B(insn_t &insn);
+static int h8sx_78(insn_t &insn);
+static int h8sx_79(insn_t &insn);
+static int h8sx_7A(insn_t &insn);
+static int h8sx_7C(insn_t &insn);
+static int h8sx_7D(insn_t &insn);
+static int h8sx_7E(insn_t &insn);
+static int h8sx_7F(insn_t &insn);
 
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *pinsn)
 {
-  code = ua_next_byte();
+  insn_t &insn = *pinsn;
+  code = insn.get_next_byte();
   uchar code0 = code;
 
-  char dtyp;
+  op_dtype_t dtyp;
   int idx = code;
   const map_t *m = map;
   int i = -1;
@@ -1581,105 +1609,125 @@ int idaapi ana(void)
   {
     uint32 p3;
     m += idx;
-    if ( (m->proc & ptype) == 0 ) return 0;
-    cmd.itype = m->itype;
-    switch ( cmd.itype )
+    if ( (m->proc & ptype) == 0 )
+      return 0;
+    insn.itype = m->itype;
+    switch ( insn.itype )
     {
       case H8_null:
         return 0;
 
       case EXIT_40:
-        return exit_40();
+        return exit_40(insn);
 
       case EXIT_54:
-        return exit_54_56(H8_rts, H8_rtsl);
+        return exit_54_56(insn, H8_rts, H8_rtsl);
 
       case EXIT_56:
-        return exit_54_56(H8_rte, H8_rtel);
+        return exit_54_56(insn, H8_rte, H8_rtel);
 
       case EXIT_59:
-        return exit_59_5D(H8_jmp, H8_bra);
+        return exit_59_5D(insn, H8_jmp, H8_bra);
 
       case EXIT_5D:
-        return exit_59_5D(H8_jsr, H8_bsr);
+        return exit_59_5D(insn, H8_jsr, H8_bsr);
 
       case EXIT_7B:
-        return exit_7B();
+        return exit_7B(insn);
 
       case H8_ldm:              // 01 [123]?
-        if ( !advanced() ) return false;
-        if ( code & 15 ) return 0;
-        cmd.Op2.nregs  = (code >> 4) + 1;
-        if ( ua_next_byte() != 0x6D ) return 0;
-        code = ua_next_byte();
-        if ( (code & 0x78) != 0x70 ) return 0;
-        cmd.auxpref = aux_long;                // .l
-        cmd.Op1.type   = o_phrase;
-        cmd.Op1.phtype = ph_post_inc;
-        cmd.Op1.dtyp   = dt_dword;
-        cmd.Op1.phrase = ER7;
-        cmd.Op2.type   = o_reglist;
-        cmd.Op2.dtyp   = dt_dword;
-        cmd.Op2.reg    = ER0 + (code & 7);
-        if ( (code & 0x80) == 0 ) cmd.Op2.reg -= cmd.Op2.nregs - 1;
-        switch ( cmd.Op2.nregs )
+        if ( !advanced() )
+          return false;
+        if ( code & 15 )
+          return 0;
+        insn.Op2.nregs = (code >> 4) + 1;
+        if ( insn.get_next_byte() != 0x6D )
+          return 0;
+        code = insn.get_next_byte();
+        if ( (code & 0x78) != 0x70 )
+          return 0;
+        insn.auxpref = aux_long;                // .l
+        insn.Op1.type   = o_phrase;
+        insn.Op1.phtype = ph_post_inc;
+        insn.Op1.dtype  = dt_dword;
+        insn.Op1.phrase = ER7;
+        insn.Op2.type   = o_reglist;
+        insn.Op2.dtype  = dt_dword;
+        insn.Op2.reg    = ER0 + (code & 7);
+        if ( (code & 0x80) == 0 )
+          insn.Op2.reg -= insn.Op2.nregs - 1;
+        switch ( insn.Op2.nregs )
         {
           case 2:
-            if ( cmd.Op2.reg != ER0
-              && cmd.Op2.reg != ER2
-              && cmd.Op2.reg != ER4
-              && cmd.Op2.reg != ER6 ) return 0;
+            if ( insn.Op2.reg != ER0
+              && insn.Op2.reg != ER2
+              && insn.Op2.reg != ER4
+              && insn.Op2.reg != ER6 )
+            {
+              return 0;
+            }
             break;
           case 3:
           case 4:
-            if ( cmd.Op2.reg != ER0
-              && cmd.Op2.reg != ER4 ) return 0;
+            if ( insn.Op2.reg != ER0
+              && insn.Op2.reg != ER4 )
+            {
+              return 0;
+            }
             break;
         }
         break;
 
       case H8_mac:              // 01 6?
-        if ( code & 15 ) return 0;
-        if ( ua_next_byte() != 0x6D ) return 0;
-        code = ua_next_byte();
-        if ( code & 0x88 ) return 0;
-        oppost(cmd.Op1, ER0 + ((code>>4) & 7),  dt_dword);
-        oppost(cmd.Op2, ER0 + ( code     & 7),  dt_dword);
+        if ( code & 15 )
+          return 0;
+        if ( insn.get_next_byte() != 0x6D )
+          return 0;
+        code = insn.get_next_byte();
+        if ( code & 0x88 )
+          return 0;
+        oppost(insn.Op1, ER0 + ((code>>4) & 7),  dt_dword);
+        oppost(insn.Op2, ER0 + ( code     & 7),  dt_dword);
         break;
 
       case H8_mov:
         if ( (m->op1 & MANUAL) == 0 )
         {
-          if ( code0 == 0xC || code0 == 0xD ) noswap = true;
+          if ( code0 == 0xC || code0 == 0xD )
+            noswap = true;
           break;
         }
         switch ( code )
         {
           case 0x00:            // 01 0?
-            if ( !advanced() ) return false;
-            cmd.auxpref = aux_long;
+            if ( !advanced() )
+              return false;
+            insn.auxpref = aux_long;
             dtyp = dt_dword;
-            switch ( ua_next_byte() )
+            switch ( insn.get_next_byte() )
             {
               case 0x69:
-                code = ua_next_byte();
-                if ( code & 0x08 ) return 0;
-                opatHL(cmd.Op1, dtyp);
-                opreg(cmd.Op2, code & 7, dtyp);
+                code = insn.get_next_byte();
+                if ( code & 0x08 )
+                  return 0;
+                opatHL(insn.Op1, dtyp);
+                opreg(insn.Op2, code & 7, dtyp);
                 break;
               case 0x6B:
                 goto MOVABS;
               case 0x6D:
                 goto MOVPOST;
               case 0x6F:
-                code = ua_next_byte();
-                opdsp16(cmd.Op1, dtyp);
-                opreg(cmd.Op2, code & 7, dtyp);
+                code = insn.get_next_byte();
+                opdsp16(insn, insn.Op1, dtyp);
+                opreg(insn.Op2, code & 7, dtyp);
                 break;
               case 0x78:
-                code = ua_next_byte();
-                if ( code & 0x0F ) return 0;
-                if ( ua_next_byte() != 0x6B ) return 0;
+                code = insn.get_next_byte();
+                if ( code & 0x0F )
+                  return 0;
+                if ( insn.get_next_byte() != 0x6B )
+                  return 0;
                 goto MOVDISP32;
               default:
                 return 0;
@@ -1687,78 +1735,81 @@ int idaapi ana(void)
             break;
           case 0x6B:            // mov.w @aa, Rd
             if ( is_h8sx() )
-              return h8sx_6B();
+              return h8sx_6B(insn);
 
-            cmd.auxpref = aux_word;
+            insn.auxpref = aux_word;
             dtyp = dt_word;
 MOVABS:
-            code = ua_next_byte();
-            cmd.Op1.type = o_mem;
-            cmd.Op1.dtyp = dtyp;
+            code = insn.get_next_byte();
+            insn.Op1.type = o_mem;
+            insn.Op1.dtype = dtyp;
             switch ( (code >> 4) & 7 )
             {
               case 0x0:
-                get_disp(cmd.Op1, false);
+                get_disp(insn, insn.Op1, false);
                 break;
               case 0x2:
-                get_disp(cmd.Op1, true);
+                get_disp(insn, insn.Op1, true);
                 break;
               default:
                 return 0;
             }
-            trimaddr(cmd.Op1);
-            opreg(cmd.Op2, code & 15, dtyp);
+            trimaddr(insn.Op1);
+            opreg(insn.Op2, code & 15, dtyp);
             break;
           case 0x6C:            // byte  mov.b @ERs+, Rd
             dtyp = dt_byte;
-            cmd.auxpref = aux_byte;
+            insn.auxpref = aux_byte;
             goto MOVPOST;
           case 0x6D:            // word  mov.w @ERs+, Rd
             dtyp = dt_word;
-            cmd.auxpref = aux_word;
+            insn.auxpref = aux_word;
 MOVPOST:
-            code = ua_next_byte();
-            if ( dtyp == dt_dword && (code & 0x08) ) return 0;
+            code = insn.get_next_byte();
+            if ( dtyp == dt_dword && (code & 0x08) )
+              return 0;
             switch ( code & 0xF0 )
             {
               case 0x70:        // pop
-                cmd.itype = H8_pop;
-                opreg(cmd.Op1, (code & 15), dtyp);
+                insn.itype = H8_pop;
+                opreg(insn.Op1, (code & 15), dtyp);
                 break;
               case 0xF0:        // push
-                cmd.itype = H8_push;
-                opreg(cmd.Op1, (code & 15), dtyp);
+                insn.itype = H8_push;
+                opreg(insn.Op1, (code & 15), dtyp);
                 break;
               default:          // mov
-                oppost(cmd.Op1, r0() + ((code>>4) & 7),  dtyp);
-                opreg(cmd.Op2, (code & 15), dtyp);
+                oppost(insn.Op1, r0() + ((code>>4) & 7), dtyp);
+                opreg(insn.Op2, (code & 15), dtyp);
                 break;
             }
             break;
           case 0x78:            // 78 ?0 6A 2?
             if ( is_h8sx() )
-              return h8sx_78();
+              return h8sx_78(insn);
             {
-              code = ua_next_byte();
-              if ( code & 0x8F ) return 0;
-              switch ( ua_next_byte() )
+              code = insn.get_next_byte();
+              if ( code & 0x8F )
+                return 0;
+              switch ( insn.get_next_byte() )
               {
                 case 0x6A:        // byte
-                  cmd.auxpref = aux_byte;
+                  insn.auxpref = aux_byte;
                   dtyp = dt_byte;
                   break;
                 case 0x6B:        // word
                   dtyp = dt_word;
-                  cmd.auxpref = aux_word;
+                  insn.auxpref = aux_word;
                   break;
                 default:
                   return 0;
               }
 MOVDISP32:
-              code3 = ua_next_byte();
-              if ( (code3 & 0x70) != 0x20 ) return 0;
-              opdsp32(cmd.Op1, dtyp);
-              opreg(cmd.Op2, code3 & 15, dtyp);
+              code3 = insn.get_next_byte();
+              if ( (code3 & 0x70) != 0x20 )
+                return 0;
+              opdsp32(insn, insn.Op1, dtyp);
+              opreg(insn.Op2, code3 & 15, dtyp);
               code = code3;       // to swap operands if required
             }
             break;
@@ -1768,53 +1819,67 @@ MOVDISP32:
         break;
 
       case H8_tas:
-        if ( code != 0xE0 ) return 0;
-        if ( ua_next_byte() != 0x7B ) return 0;
-        code = ua_next_byte();
-        if ( (code & 0x8F) != 0x0C ) return 0;
-        opatHL(cmd.Op1, dt_byte);
+        if ( code != 0xE0 )
+          return 0;
+        if ( insn.get_next_byte() != 0x7B )
+          return 0;
+        code = insn.get_next_byte();
+        if ( (code & 0x8F) != 0x0C )
+          return 0;
+        opatHL(insn.Op1, dt_byte);
         break;
 
       case H8_trapa:
-        code = ua_next_byte();
-        if ( (code & 0xC3) != 0x0 ) return 0;
-        cmd.Op1.type = o_imm;
-        cmd.Op1.dtyp = dt_byte;
-        cmd.Op1.value = code >> 4;
+        code = insn.get_next_byte();
+        if ( (code & 0xC3) != 0x0 )
+          return 0;
+        insn.Op1.type = o_imm;
+        insn.Op1.dtype = dt_byte;
+        insn.Op1.value = code >> 4;
         break;
 
       case MAP2:
-        if      ( code == 0x01 && is_h8sx() ) { return h8sx_01(); }
-        else if ( code == 0x03 && is_h8sx() ) { return h8sx_03(); }
-        else if ( code == 0x0A && is_h8sx() ) { return h8sx_0A(); }
-        else if ( code == 0x0F && is_h8sx() ) { return h8sx_0F(); }
-        else if ( code == 0x10 && is_h8sx() ) { return h8sx_10(); }
-        else if ( code == 0x11 && is_h8sx() ) { return h8sx_11(); }
-        else if ( code == 0x1A && is_h8sx() ) { return h8sx_1A(); }
-        else if ( code == 0x1F && is_h8sx() ) { return h8sx_1F(); }
-        else if ( code == 0x6A && is_h8sx() ) { return h8sx_6A(); }
-        else if ( code == 0x79 && is_h8sx() ) { return h8sx_79(); }
-        else if ( code == 0x7A && is_h8sx() ) { return h8sx_7A(); }
+        if ( is_h8sx() )
         {
-          for ( i=0; i < qnumber(map2); i++ )
-            if ( map2[i].prefix == code )
-              break;
-          if ( i >= qnumber(map2) )
-            INTERR(10093);
-          m = map2[i].map;
-          code = ua_next_byte();
-          idx = code >> 4;
-          continue;
+          switch ( code )
+          {
+            case 0x01: return h8sx_01(insn);
+            case 0x03: return h8sx_03(insn);
+            case 0x0A: return h8sx_0A(insn);
+            case 0x0F: return h8sx_0F(insn);
+            case 0x10: return h8sx_10(insn);
+            case 0x11: return h8sx_11(insn);
+            case 0x1A: return h8sx_1A(insn);
+            case 0x1F: return h8sx_1F(insn);
+            case 0x6A: return h8sx_6A(insn);
+            case 0x79: return h8sx_79(insn);
+            case 0x7A: return h8sx_7A(insn);
+          }
         }
+        for ( i=0; i < qnumber(map2); i++ )
+          if ( map2[i].prefix == code )
+            break;
+        if ( i >= qnumber(map2) )
+          INTERR(10093);
+        m = map2[i].map;
+        code = insn.get_next_byte();
+        idx = code >> 4;
+        continue;
 
       case MAP3:
-        if      ( code == 0x7C && is_h8sx() ) { return h8sx_7C(); }
-        else if ( code == 0x7D && is_h8sx() ) { return h8sx_7D(); }
-        else if ( code == 0x7E && is_h8sx() ) { return h8sx_7E(); }
-        else if ( code == 0x7F && is_h8sx() ) { return h8sx_7F(); }
+        if ( is_h8sx() )
+        {
+          switch ( code )
+          {
+            case 0x7C: return h8sx_7C(insn);
+            case 0x7D: return h8sx_7D(insn);
+            case 0x7E: return h8sx_7E(insn);
+            case 0x7F: return h8sx_7F(insn);
+          }
+        }
         if ( i == -1 )
         {
-          code3 = ua_next_byte();
+          code3 = insn.get_next_byte();
           p3 = (code << 12);
         }
         else
@@ -1822,21 +1887,25 @@ MOVDISP32:
           code3 = code;
           p3 = (map2[i].prefix << 12);
         }
-        code = ua_next_byte();
+        code = insn.get_next_byte();
         p3 |= (code3<<4) | (code>>4);
         for ( i=0; i < qnumber(map3); i++ )
-          if ( map3[i].prefix == (p3 & ~map3[i].mask) ) break;
-        if ( i == qnumber(map3) ) return 0;
+          if ( map3[i].prefix == (p3 & ~map3[i].mask) )
+            break;
+        if ( i == qnumber(map3) )
+          return 0;
         m = map3[i].map;
         idx = code & 7;
         continue;
 
       case MAP4:
-        if ( !map4() ) return 0;
+        if ( !map4(insn) )
+          return 0;
         break;
 
       case MAP014:
-        if ( !map014() ) return 0;
+        if ( !map014(insn) )
+          return 0;
         break;
     }
     break;
@@ -1845,44 +1914,49 @@ MOVDISP32:
   // m points to the target map entry
   if ( (m->op1 & X) == 0 ) switch ( m->op1 & CMD_SIZE )
   {
-    case B: cmd.auxpref = aux_byte; break;
-    case W: cmd.auxpref = aux_word; break;
-    case L: cmd.auxpref = aux_long; break;
-    case V: cmd.auxpref = advanced() ? aux_long : aux_word; break;
+    case B: insn.auxpref = aux_byte; break;
+    case W: insn.auxpref = aux_word; break;
+    case L: insn.auxpref = aux_long; break;
+    case V: insn.auxpref = advanced() ? aux_long : aux_word; break;
   }
-  if ( !read_operand(cmd.Op1, m->op1) ) return 0;
-  if ( !read_operand(cmd.Op2, m->op2) ) return 0;
+  if ( !read_operand(insn, insn.Op1, m->op1) )
+    return 0;
+  if ( !read_operand(insn, insn.Op2, m->op2) )
+    return 0;
 
-  if ( code & 0x80 ) switch ( cmd.itype )
+  if ( code & 0x80 ) switch ( insn.itype )
   {
-    case H8_bor:  cmd.itype = H8_bior;   break;
-    case H8_bxor: cmd.itype = H8_bixor;  break;
-    case H8_band: cmd.itype = H8_biand;  break;
-    case H8_bld:  cmd.itype = H8_bild;   break;
-    case H8_bst:  cmd.itype = H8_bist;   break;
+    case H8_bor:  insn.itype = H8_bior;   break;
+    case H8_bxor: insn.itype = H8_bixor;  break;
+    case H8_band: insn.itype = H8_biand;  break;
+    case H8_bld:  insn.itype = H8_bild;   break;
+    case H8_bst:  insn.itype = H8_bist;   break;
     case H8_btst:
     case H8_bset:
     case H8_bnot:
     case H8_bclr:
-      if ( cmd.Op1.type == o_imm ) return 0;
+      if ( insn.Op1.type == o_imm )
+        return 0;
       break;
     case H8_ldc:
-      cmd.itype = H8_stc;
+      insn.itype = H8_stc;
       goto SWAP;
     case H8_ldm:
-      cmd.itype = H8_stm;
+      insn.itype = H8_stm;
+      // fallthrough
     case H8_mov:
 SWAP:
       if ( !noswap )
       {
-        swap_Op1_Op2();
-        if ( cmd.Op2.type == o_imm ) return 0;
-        if ( cmd.Op2.type == o_phrase && cmd.Op2.phtype == ph_post_inc )
-          cmd.Op2.phtype = ph_pre_dec;
+        swap_Op1_Op2(insn);
+        if ( insn.Op2.type == o_imm )
+          return 0;
+        if ( insn.Op2.type == o_phrase && insn.Op2.phtype == ph_post_inc )
+          insn.Op2.phtype = ph_pre_dec;
       }
       break;
   }
-  return cmd.size;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
@@ -1892,152 +1966,155 @@ inline uint8 hi_ni(uint8 reg)
 }
 
 //--------------------------------------------------------------------------
-inline void shift_Op1()
+inline void shift_Op1(insn_t &insn)
 {
-  cmd.Op2 = cmd.Op1;
-  cmd.Op2.n = 1;
+  insn.Op2 = insn.Op1;
+  insn.Op2.n = 1;
 }
 
 //--------------------------------------------------------------------------
-static int exit_40()
+static int exit_40(insn_t &insn)
 {
-  cmd.itype = H8_bra;
-  cmd.Op1.offb = (uchar)cmd.size;
-  cmd.Op1.type = o_near;
-  cmd.Op1.dtyp = dt_code;
+  insn.itype = H8_bra;
+  insn.Op1.offb = (uchar)insn.size;
+  insn.Op1.type = o_near;
+  insn.Op1.dtype = dt_code;
 
-  signed char displ = ua_next_byte();
+  signed char displ = insn.get_next_byte();
   if ( is_h8sx() && (displ & 1) != 0 )
-    cmd.itype = H8_bras;
+    insn.itype = H8_bras;
   displ &= ~1;
-  cmd.Op1.addr = cmd.ip + cmd.size + displ;
-  return cmd.size;
+  insn.Op1.addr = insn.ip + insn.size + displ;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
-static int exit_54_56(uint8 rts, uint8 rtsl)
+static int exit_54_56(insn_t &insn, uint8 rts, uint8 rtsl)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
 
   if ( code == 0x70 )
   {
-    cmd.itype = rts;
-    return cmd.size;
+    insn.itype = rts;
+    return insn.size;
   }
   else if ( is_h8sx() )
   {
-    cmd.itype = rtsl;
+    insn.itype = rtsl;
     uint8 hiNi = (code >> 4) & 0xF;
-    if ( hiNi > 3 ) return 0;
+    if ( hiNi > 3 )
+      return 0;
     bool res = hiNi == 0 ?
-      read_operand(cmd.Op1, rLL0) :
-      op_reglist(cmd.Op1, code & 0x0F, hiNi, true);
-    cmd.Op1.dtyp = dt_code;
-    return res ? cmd.size : 0;
+      read_operand(insn, insn.Op1, rLL0) :
+      op_reglist(insn.Op1, code & 0x0F, hiNi, true);
+    insn.Op1.dtype = dt_code;
+    return res ? insn.size : 0;
   }
   return 0;
 }
 
 //--------------------------------------------------------------------------
-static int exit_59_5D(uint16 jump, uint16 branch)
+static int exit_59_5D(insn_t &insn, uint16 jump, uint16 branch)
 {
-  cmd.itype = jump;
-  code = ua_next_byte();
+  insn.itype = jump;
+  code = insn.get_next_byte();
   if ( (code & 0x8F) == 0 )
   { // JMP @ERn
-    return op_phrase(cmd.Op1, code >> 4, ph_normal, dt_code) ? cmd.size : 0;
+    return op_phrase(insn, insn.Op1, code >> 4, ph_normal, dt_code) ? insn.size : 0;
   }
-  if ( !is_h8sx() ) return 0;
+  if ( !is_h8sx() )
+    return 0;
 
   if ( (code & 0x80) != 0 )
   { // JMP @@vec:7
-    cmd.Op1.type = o_mem;
-    cmd.Op1.memtype = mem_vec7;
-    cmd.Op1.dtyp = advanced() ? dt_dword : dt_word;
-    cmd.Op1.addr = /* (0x80 + (code & ~0x80)) */ code * (advanced() ? 4 : 2);
-    return cmd.size;
+    insn.Op1.type = o_mem;
+    insn.Op1.memtype = mem_vec7;
+    insn.Op1.dtype = advanced() ? dt_dword : dt_word;
+    insn.Op1.addr = /* (0x80 + (code & ~0x80)) */ code * (advanced() ? 4 : 2);
+    return insn.size;
   }
 
   if ( code == 8 )
   { // JMP @aa:32
-    return read_operand(cmd.Op1, W | aa32) ? cmd.size : 0;
+    return read_operand(insn, insn.Op1, W | aa32) ? insn.size : 0;
   }
 
-  cmd.itype = branch;
-  cmd.Op1.type = o_pcidx;
-  cmd.Op1.dtyp = dt_code;
+  insn.itype = branch;
+  insn.Op1.type = o_pcidx;
+  insn.Op1.dtype = dt_code;
   regnum_t r;
   switch ( code & 0x0F )
   {
     case 5: // BRA Rn.B
       r = R0L;
-      cmd.Op1.szfl |= idx_byte;
+      insn.Op1.szfl |= idx_byte;
       break;
     case 6: // BRA Rn.W
       r = R0;
-      cmd.Op1.szfl |= idx_word;
+      insn.Op1.szfl |= idx_word;
       break;
     case 7: // BRA ERn.L
       r = ER0;
-      cmd.Op1.szfl |= idx_long;
+      insn.Op1.szfl |= idx_long;
       break;
     default:
       return 0;
   }
-  cmd.Op1.reg = r + (code>>4);
+  insn.Op1.reg = r + (code>>4);
 
-  return cmd.size;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
-static int exit_7B()
+static int exit_7B(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
 
   if ( code == 0x5C || code == 0xD4 )
   {
-    cmd.itype = H8_eepmov;
-    cmd.auxpref = code == 0x5C ? aux_byte : aux_word;
-    return ua_next_word() == 0x598F ? cmd.size : 0;
+    insn.itype = H8_eepmov;
+    insn.auxpref = code == 0x5C ? aux_byte : aux_word;
+    return insn.get_next_word() == 0x598F ? insn.size : 0;
   }
-  if ( !is_h8sx() ) return 0;
+  if ( !is_h8sx() )
+    return 0;
 
-  cmd.itype = H8_movmd;
+  insn.itype = H8_movmd;
   switch ( code )
   {
     case 0x94:
-      cmd.auxpref = aux_byte;
-      return cmd.size;
+      insn.auxpref = aux_byte;
+      return insn.size;
     case 0xA4:
-      cmd.auxpref = aux_word;
-      return cmd.size;
+      insn.auxpref = aux_word;
+      return insn.size;
     case 0xB4:
-      cmd.auxpref = aux_long;
-      return cmd.size;
+      insn.auxpref = aux_long;
+      return insn.size;
     case 0x84:
-      cmd.itype = H8_movsd;
-      cmd.auxpref = aux_byte;
-      return read_operand(cmd.Op1, j16) ? cmd.size : 0;
+      insn.itype = H8_movsd;
+      insn.auxpref = aux_byte;
+      return read_operand(insn, insn.Op1, j16) ? insn.size : 0;
   }
   return 0;
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_010_00dd(void);
-static bool h8sx_010_01dd(uint16 postfix);
-static bool h8sx_0108(void);
-static bool h8sx_0109_010A(op_t& regop, op_t& genop);
-static bool h8sx_010D(void);
-static bool h8sx_010E(void);
-static bool h8sx_ldm(void);
-static bool insn_ldc(uint8 byte2, regnum_t reg);
-static bool h8sx_01_exr(void);
-static bool insn_mac(void);
-static bool insn_mova(void);
-static int insn_mova_reg(uint8 opcode, uint8 rs, bool is_reg_equal);
-static bool insn_tas(void);
-static bool insn_or_xor_and(void);
-static bool h8sx_01_other(void);
+static bool h8sx_010_00dd(insn_t &insn);
+static bool h8sx_010_01dd(insn_t &insn, uint16 postfix);
+static bool h8sx_0108(insn_t &insn);
+static bool h8sx_0109_010A(insn_t &insn, op_t &regop, op_t &genop);
+static bool h8sx_010D(insn_t &insn);
+static bool h8sx_010E(insn_t &insn);
+static bool h8sx_ldm(insn_t &insn);
+static bool insn_ldc(insn_t &insn, uint8 byte2, regnum_t reg);
+static bool h8sx_01_exr(insn_t &insn);
+static bool insn_mac(insn_t &insn);
+static bool insn_mova(insn_t &insn);
+static int insn_mova_reg(insn_t &insn, uint8 opcode, uint8 rs, bool is_reg_equal);
+static bool insn_tas(insn_t &insn);
+static bool insn_or_xor_and(insn_t &insn);
+static bool h8sx_01_other(insn_t &insn);
 
 // for insn_sh_neg() and others
 #define SET_BYTE  0x0001        // .B insn set
@@ -2046,27 +2123,27 @@ static bool h8sx_01_other(void);
 #define SET_BIT_1 0x0010        // btst, bor, bxor, band, bld
 #define SET_BIT_2 0x0020        // bclr, bset, bst, bnot
 
-static bool insn_sh_neg(uint8 byte4, uint8 byte5, uint16 mask);
-static bool insn_addcmp(uint8 bt);
-static bool insn_addcmp_reg(uint8 byte2, uint8 byte3, bool swap, uint16 mask);
-static bool insn_addcmp_i3(uint8 byte2, uint8 byte3);
-static bool insn_addcmp_i8(uint8 byte4, uint8 byte5);
-static bool insn_addx_reg(op_t &x, uint8 byte2, uint8 byte3, uint16 mask, ushort place);
-static bool insn_addx_reg_Op1(uint8 byte2, uint8 byte3, uint16 mask, ushort place);
-static bool insn_addx_imm(op_t &x, uint8 byte2, uint8 byte3, uint16 mask, bool check_byte3);
-static bool insn_addx_i8(uint8 byte4, uint8 byte5);
-static bool insn_bit(uint8 byte2, uint8 byte3, uint16 mask);
-static bool insn_bra(uint8 byte2, uint8 byte3);
-static bool insn_bfld_bfst(uint8 byte2, uint8 byte3, bool is_bfld);
-static bool use_leaf_map(const map_t* m, uint8 idx);
-static bool op_from_byte(op_t &x, uint8 byte2);
-static bool read_1st_op(uint8 byte2, uint8 byte3_hiNi);
-static bool op_displ_regidx(op_t &x, uint8 selector, bool is_32, uint8 reg);
+static bool insn_sh_neg(insn_t &insn, uint8 byte4, uint8 byte5, uint16 mask);
+static bool insn_addcmp(insn_t &insn, uint8 bt);
+static bool insn_addcmp_reg(insn_t &insn, uint8 byte2, uint8 byte3, bool swap, uint16 mask);
+static bool insn_addcmp_i3(insn_t &insn, uint8 byte2, uint8 byte3);
+static bool insn_addcmp_i8(insn_t &insn, uint8 byte4, uint8 byte5);
+static bool insn_addx_reg(insn_t &insn, op_t &x, uint8 byte2, uint8 byte3, uint16 mask, ushort place);
+static bool insn_addx_reg_Op1(insn_t &insn, uint8 byte2, uint8 byte3, uint16 mask, ushort place);
+static bool insn_addx_imm(insn_t &insn, op_t &x, uint8 byte2, uint8 byte3, uint16 mask, bool check_byte3);
+static bool insn_addx_i8(insn_t &insn, uint8 byte4, uint8 byte5);
+static bool insn_bit(insn_t &insn, uint8 byte2, uint8 byte3, uint16 mask);
+static bool insn_bra(insn_t &insn, uint8 byte2, uint8 byte3);
+static bool insn_bfld_bfst(insn_t &insn, uint8 byte2, uint8 byte3, bool is_bfld);
+static bool use_leaf_map(insn_t &insn, const map_t *m, uint8 idx);
+static bool op_from_byte(insn_t &insn, op_t &x, uint8 byte2);
+static bool read_1st_op(insn_t &insn, uint8 byte2, uint8 byte3_hiNi);
+static bool op_displ_regidx(insn_t &insn, op_t &x, uint8 selector, bool is_32, uint8 reg);
 
 //--------------------------------------------------------------------------
-static int h8sx_01()
+static int h8sx_01(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
 
   bool success = false;
   switch ( code )
@@ -2075,455 +2152,467 @@ static int h8sx_01()
     case 0x01:
     case 0x02:
     case 0x03:
-      cmd.auxpref = aux_long;
-      success = h8sx_010_00dd();
+      insn.auxpref = aux_long;
+      success = h8sx_010_00dd(insn);
       break;
     case 0x04:
     case 0x05:
     case 0x06:
     case 0x07:
-      success = h8sx_010_01dd(aux_long);
+      success = h8sx_010_01dd(insn, aux_long);
       break;
     case 0x08:
-      cmd.auxpref = aux_long;
-      success = h8sx_0108();
+      insn.auxpref = aux_long;
+      success = h8sx_0108(insn);
       break;
     case 0x09:
-      cmd.auxpref = aux_long;
-      success = h8sx_0109_010A(cmd.Op1, cmd.Op2);
+      insn.auxpref = aux_long;
+      success = h8sx_0109_010A(insn, insn.Op1, insn.Op2);
       break;
     case 0x0A:
-      cmd.auxpref = aux_long;
-      success = h8sx_0109_010A(cmd.Op2, cmd.Op1);
+      insn.auxpref = aux_long;
+      success = h8sx_0109_010A(insn, insn.Op2, insn.Op1);
       break;
     case 0x0D:
-      cmd.auxpref = aux_long;
-      success = h8sx_010D();
+      insn.auxpref = aux_long;
+      success = h8sx_010D(insn);
       break;
     case 0x0E:
-      cmd.auxpref = aux_long;
-      success = h8sx_010E();
+      insn.auxpref = aux_long;
+      success = h8sx_010E(insn);
       break;
     case 0x10:
     case 0x20:
     case 0x30:
-      success = h8sx_ldm();
+      success = h8sx_ldm(insn);
       break;
     case 0x40:
-      success = insn_ldc(ua_next_byte(), CCR);
+      success = insn_ldc(insn, insn.get_next_byte(), CCR);
       break;
     case 0x41:
-      success = h8sx_01_exr();
+      success = h8sx_01_exr(insn);
       break;
     case 0x50:
     case 0x51:
     case 0x52:
     case 0x53:
-      cmd.auxpref = aux_word;
-      success = h8sx_010_00dd();
+      insn.auxpref = aux_word;
+      success = h8sx_010_00dd(insn);
       break;
     case 0x54:
     case 0x55:
     case 0x56:
     case 0x57:
-      success = h8sx_010_01dd(aux_word);
+      success = h8sx_010_01dd(insn, aux_word);
       break;
     case 0x58:
-      cmd.auxpref = aux_word;
-      success = h8sx_0108();
+      insn.auxpref = aux_word;
+      success = h8sx_0108(insn);
       break;
     case 0x59:
-      cmd.auxpref = aux_word;
-      success = h8sx_0109_010A(cmd.Op1, cmd.Op2);
+      insn.auxpref = aux_word;
+      success = h8sx_0109_010A(insn, insn.Op1, insn.Op2);
       break;
     case 0x5A:
-      cmd.auxpref = aux_word;
-      success = h8sx_0109_010A(cmd.Op2, cmd.Op1);
+      insn.auxpref = aux_word;
+      success = h8sx_0109_010A(insn, insn.Op2, insn.Op1);
       break;
     case 0x5D:
-      cmd.auxpref = aux_word;
-      success = h8sx_010D();
+      insn.auxpref = aux_word;
+      success = h8sx_010D(insn);
       break;
     case 0x5E:
-      cmd.auxpref = aux_word;
-      success = h8sx_010E();
+      insn.auxpref = aux_word;
+      success = h8sx_010E(insn);
       break;
     case 0x60:
-      success = insn_mac();
+      success = insn_mac(insn);
       break;
     case 0x70:
     case 0x71:
     case 0x72:
     case 0x73:
-      cmd.auxpref = aux_byte;
-      success = h8sx_010_00dd();
+      insn.auxpref = aux_byte;
+      success = h8sx_010_00dd(insn);
       break;
     case 0x74:
     case 0x75:
     case 0x76:
     case 0x77:
-      success = h8sx_010_01dd(aux_byte);
+      success = h8sx_010_01dd(insn, aux_byte);
       break;
     case 0x78:
-      cmd.auxpref = aux_byte;
-      success = h8sx_0108();
+      insn.auxpref = aux_byte;
+      success = h8sx_0108(insn);
       break;
     case 0x79:
-      cmd.auxpref = aux_byte;
-      success = h8sx_0109_010A(cmd.Op1, cmd.Op2);
+      insn.auxpref = aux_byte;
+      success = h8sx_0109_010A(insn, insn.Op1, insn.Op2);
       break;
     case 0x7A:
-      cmd.auxpref = aux_byte;
-      success = h8sx_0109_010A(cmd.Op2, cmd.Op1);
+      insn.auxpref = aux_byte;
+      success = h8sx_0109_010A(insn, insn.Op2, insn.Op1);
       break;
     case 0x7D:
-      cmd.auxpref = aux_byte;
-      success = h8sx_010D();
+      insn.auxpref = aux_byte;
+      success = h8sx_010D(insn);
       break;
     case 0x5F:
     case 0x7F:
-      success = insn_mova();
+      success = insn_mova(insn);
       break;
     case 0x80:
-      cmd.itype = H8_sleep;
+      insn.itype = H8_sleep;
       success = true;
       break;
     case 0xA0:
-      cmd.itype = H8_clrmac;
+      insn.itype = H8_clrmac;
       success = true;
       break;
     case 0xE0:
-      success = insn_tas();
+      success = insn_tas(insn);
       break;
     case 0xF0:
-      success = insn_or_xor_and();
+      success = insn_or_xor_and(insn);
       break;
     default:
-      success = h8sx_01_other();
+      success = h8sx_01_other(insn);
       break;
   }
-  return success ? cmd.size : 0;
+  return success ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_03()
+static int h8sx_03(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   switch ( hi_ni(code) )
   {
     case 0:
-      cmd.itype = H8_ldc;
-      cmd.auxpref = aux_byte;
-      read_operand(cmd.Op2, rCCR);
+      insn.itype = H8_ldc;
+      insn.auxpref = aux_byte;
+      read_operand(insn, insn.Op2, rCCR);
       break;
     case 1:
-      cmd.itype = H8_ldc;
-      cmd.auxpref = aux_byte;
-      read_operand(cmd.Op2, rEXR);
+      insn.itype = H8_ldc;
+      insn.auxpref = aux_byte;
+      read_operand(insn, insn.Op2, rEXR);
       break;
     case 2:
-      cmd.itype = H8_ldmac;
-      read_operand(cmd.Op2, rMACH);
+      insn.itype = H8_ldmac;
+      read_operand(insn, insn.Op2, rMACH);
       break;
     case 3:
-      cmd.itype = H8_ldmac;
-      read_operand(cmd.Op2, rMACL);
+      insn.itype = H8_ldmac;
+      read_operand(insn, insn.Op2, rMACL);
       break;
     case 6:
-      cmd.itype = H8_ldc;
-      cmd.auxpref = aux_long;
-      read_operand(cmd.Op2, rVBR);
+      insn.itype = H8_ldc;
+      insn.auxpref = aux_long;
+      read_operand(insn, insn.Op2, rVBR);
       break;
     case 7:
-      cmd.itype = H8_ldc;
-      cmd.auxpref = aux_long;
-      read_operand(cmd.Op2, rSBR);
+      insn.itype = H8_ldc;
+      insn.auxpref = aux_long;
+      read_operand(insn, insn.Op2, rSBR);
       break;
     case 8: // 100x
     case 9: // 100x
       {
-        uint8 byte2 = ua_next_byte();
-        uint8 byte3 = ua_next_byte();
-        if      ( byte2 == 0x10 ) cmd.itype = H8_shll;
-        else if ( byte2 == 0x11 ) cmd.itype = H8_shlr;
-        else return 0;
+        uint8 byte2 = insn.get_next_byte();
+        uint8 byte3 = insn.get_next_byte();
+        if ( byte2 == 0x10 )
+          insn.itype = H8_shll;
+        else if ( byte2 == 0x11 )
+          insn.itype = H8_shlr;
+        else
+          return 0;
         switch ( byte3 >> 4 )
         {
-          case 0: cmd.auxpref = aux_byte; cmd.Op1.dtyp = dt_byte; break;
-          case 1: cmd.auxpref = aux_word; cmd.Op1.dtyp = dt_word; break;
-          case 3: cmd.auxpref = aux_long; cmd.Op1.dtyp = dt_dword; break;
+          case 0: insn.auxpref = aux_byte; insn.Op1.dtype = dt_byte; break;
+          case 1: insn.auxpref = aux_word; insn.Op1.dtype = dt_word; break;
+          case 3: insn.auxpref = aux_long; insn.Op1.dtype = dt_dword; break;
           default: return 0;
         }
-        cmd.Op1.type = o_imm;
-        cmd.Op1.value = code & 0x1F;
-        return op_reg(cmd.Op2, byte3, rL) ? cmd.size : 0;
+        insn.Op1.type = o_imm;
+        insn.Op1.value = code & 0x1F;
+        return op_reg(insn, insn.Op2, byte3, rL) ? insn.size : 0;
       }
     default:
       return 0;
   }
-  return op_reg(cmd.Op1, code, rL, aux_long /* for ldmac */) ? cmd.size : 0;
+  return op_reg(insn, insn.Op1, code, rL, aux_long /* for ldmac */) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int op_imm3_reg(uint8 byte1)
+static int op_imm3_reg(insn_t &insn, uint8 byte1)
 {
   uint8 hiNi = (byte1 >> 4) & 7;
-  bool is_word = (byte1 & 0x80) == 0;   // else long
+  bool isword = (byte1 & 0x80) == 0;   // else long
 
   bool res = true;
-  if ( is_word )
+  if ( isword )
   {
-    cmd.auxpref = aux_word;
-    cmd.Op1.type = o_imm;
-    cmd.Op1.dtyp = dt_word;
-    cmd.Op1.value = hiNi;
+    insn.auxpref = aux_word;
+    insn.Op1.type = o_imm;
+    insn.Op1.dtype = dt_word;
+    insn.Op1.value = hiNi;
   }
   else
   {
-    cmd.auxpref = aux_long;
+    insn.auxpref = aux_long;
     if ( byte1 & 8 )
     {
       byte1 &= 7;
-      cmd.Op1.type = o_imm;
-      cmd.Op1.dtyp = dt_dword;
-      cmd.Op1.value = hiNi;
+      insn.Op1.type = o_imm;
+      insn.Op1.dtype = dt_dword;
+      insn.Op1.value = hiNi;
     }
     else
     {
-      res = op_reg(cmd.Op1, hiNi, rL);
+      res = op_reg(insn, insn.Op1, hiNi, rL);
     }
   }
-  return res && op_reg(cmd.Op2, byte1, rL) ? cmd.size : 0;
+  return res && op_reg(insn, insn.Op2, byte1, rL) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_0A()
+static int h8sx_0A(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
 
   if ( hi_ni(code) == 0 )
   {
-    cmd.itype = H8_inc;
-    cmd.auxpref = aux_byte;
-    read_operand(cmd.Op1, B | Cxh);
-    return op_reg(cmd.Op2, code, rL) ? cmd.size : 0;
+    insn.itype = H8_inc;
+    insn.auxpref = aux_byte;
+    read_operand(insn, insn.Op1, B | Cxh);
+    return op_reg(insn, insn.Op2, code, rL) ? insn.size : 0;
   }
 
-  cmd.itype = H8_add;
-  return op_imm3_reg(code);
+  insn.itype = H8_add;
+  return op_imm3_reg(insn, code);
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_0F()
+static int h8sx_0F(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
 
   if ( hi_ni(code) == 0 )
   {
-    cmd.itype = H8_daa;
-    return op_reg(cmd.Op1, code, rL, aux_byte) ? cmd.size : 0;
+    insn.itype = H8_daa;
+    return op_reg(insn, insn.Op1, code, rL, aux_byte) ? insn.size : 0;
   }
 
-  cmd.itype = H8_mov;
-  return op_imm3_reg(code);
+  insn.itype = H8_mov;
+  return op_imm3_reg(insn, code);
 }
 
 //--------------------------------------------------------------------------
-static int unpack_8bit_shift(const map_t* m, uint16 insn, uint16 insn2)
+static int unpack_8bit_shift(const map_t *m, insn_t &insn, uint16 itype, uint16 itype2)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   uint8 hiNi = hi_ni(code);
 
   if ( hiNi == 3 )
   {
-    cmd.itype = insn;
-    cmd.auxpref = aux_long;
-    if ( !op_reg(cmd.Op1, code & 7, rL) ) return 0;
-    shift_Op1();
-    op_imm(cmd.Op1, 4);
+    insn.itype = itype;
+    insn.auxpref = aux_long;
+    if ( !op_reg(insn, insn.Op1, code & 7, rL) )
+      return 0;
+    shift_Op1(insn);
+    op_imm(insn, insn.Op1, 4);
     if ( (code & 8) == 0 )
-      cmd.Op1.clr_shown();
-    return cmd.size;
+      insn.Op1.clr_shown();
+    return insn.size;
   }
   else if ( hiNi == 7 )
   {
-    cmd.itype = insn;
-    cmd.auxpref = aux_long;
-    op_imm(cmd.Op1, code & 8 ? 8 : 2);
-    return op_reg(cmd.Op2, code & 7, rL) ? cmd.size : 0;
+    insn.itype = itype;
+    insn.auxpref = aux_long;
+    op_imm(insn, insn.Op1, code & 8 ? 8 : 2);
+    return op_reg(insn, insn.Op2, code & 7, rL) ? insn.size : 0;
   }
   else if ( hiNi == 0xF )
   {
-    cmd.itype = code & 8 ? insn : insn2;
-    cmd.auxpref = aux_long;
-    op_imm(cmd.Op1, code & 8 ? 16 : 2);
-    return op_reg(cmd.Op2, code & 7, rL) ? cmd.size : 0;
+    insn.itype = code & 8 ? itype : itype2;
+    insn.auxpref = aux_long;
+    op_imm(insn, insn.Op1, code & 8 ? 16 : 2);
+    return op_reg(insn, insn.Op2, code & 7, rL) ? insn.size : 0;
   }
 
-  return use_leaf_map(m, hiNi) ? cmd.size : 0;
+  return use_leaf_map(insn, m, hiNi) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_10()
+static int h8sx_10(insn_t &insn)
 {
-  return unpack_8bit_shift(&map2_10[0], H8_shll, H8_shal);
+  return unpack_8bit_shift(&map2_10[0], insn, H8_shll, H8_shal);
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_11()
+static int h8sx_11(insn_t &insn)
 {
-  return unpack_8bit_shift(&map2_11[0], H8_shlr, H8_shar);
+  return unpack_8bit_shift(&map2_11[0], insn, H8_shlr, H8_shar);
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_1A()
+static int h8sx_1A(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   uint8 hiNi = hi_ni(code);
 
   if ( hiNi == 0 )
   {
-    cmd.itype = H8_dec;
-    cmd.auxpref = aux_byte;
-    read_operand(cmd.Op1, B | Cxh);
-    return op_reg(cmd.Op2, code, rL) ? cmd.size : 0;
+    insn.itype = H8_dec;
+    insn.auxpref = aux_byte;
+    read_operand(insn, insn.Op1, B | Cxh);
+    return op_reg(insn, insn.Op2, code, rL) ? insn.size : 0;
   }
 
-  cmd.itype = H8_sub;
-  return op_imm3_reg(code);
+  insn.itype = H8_sub;
+  return op_imm3_reg(insn, code);
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_1F()
+static int h8sx_1F(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   uint8 hiNi = hi_ni(code);
 
   if ( hiNi == 0 )
   {
-    cmd.itype = H8_das;
-    return op_reg(cmd.Op1, code, rL, aux_byte) ? cmd.size : 0;
+    insn.itype = H8_das;
+    return op_reg(insn, insn.Op1, code, rL, aux_byte) ? insn.size : 0;
   }
 
-  cmd.itype = H8_cmp;
-  return op_imm3_reg(code);
+  insn.itype = H8_cmp;
+  return op_imm3_reg(insn, code);
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_6A()
+static int h8sx_6A(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   uint8 hiNi = (code >> 4) & 0x0F;
   uint8 loNi = code & 0x0F;
 
-  if ( !(code == 0x10
-      || code == 0x15
-      || code == 0x18
-      || code == 0x30
-      || code == 0x35
-      || code == 0x38) )
-    return use_leaf_map(&map2_6A_h8sx[0], hiNi) ? cmd.size : 0;
+  if ( code != 0x10
+    && code != 0x15
+    && code != 0x18
+    && code != 0x30
+    && code != 0x35
+    && code != 0x38 )
+  {
+    return use_leaf_map(insn, &map2_6A_h8sx[0], hiNi) ? insn.size : 0;
+  }
+  if ( !read_operand(insn, insn.Op1, B | (hiNi == 1 ? aa16 : aa32)) )
+    return 0;
 
-  if ( !read_operand(cmd.Op1, B | (hiNi == 1 ? aa16 : aa32)) ) return 0;
-
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
   if ( loNi == 5 )
   {
-    if ( byte3 & 0x0F ) return 0;
+    if ( byte3 & 0x0F )
+      return 0;
 
-    cmd.auxpref = aux_byte;
-    return op_from_byte(cmd.Op2, byte2)
-        && insn_addcmp(byte3) ? cmd.size : 0;
+    insn.auxpref = aux_byte;
+    return op_from_byte(insn, insn.Op2, byte2)
+        && insn_addcmp(insn, byte3) ? insn.size : 0;
   }
   else if ( loNi == 0 )
   {
-    return insn_addcmp_reg(byte2, byte3, false, SET_BYTE)
-        || insn_bit(byte2, byte3, SET_BIT_1)
-        || insn_bra(byte2, byte3)
-        || insn_bfld_bfst(byte2, byte3, true) ? cmd.size : 0;
+    return insn_addcmp_reg(insn, byte2, byte3, false, SET_BYTE)
+        || insn_bit(insn, byte2, byte3, SET_BIT_1)
+        || insn_bra(insn, byte2, byte3)
+        || insn_bfld_bfst(insn, byte2, byte3, true) ? insn.size : 0;
   }
   // ( loNi == 8 )
-  return insn_sh_neg(byte2, byte3, SET_BYTE)
-      || insn_addcmp_i8(byte2, byte3)
-      || insn_addcmp_reg(byte2, byte3, true, SET_BYTE)
-      || insn_bit(byte2, byte3, SET_BIT_2)
-      || insn_bra(byte2, byte3)
-      || insn_bfld_bfst(byte2, byte3, false) ? cmd.size : 0;
+  return insn_sh_neg(insn, byte2, byte3, SET_BYTE)
+      || insn_addcmp_i8(insn, byte2, byte3)
+      || insn_addcmp_reg(insn, byte2, byte3, true, SET_BYTE)
+      || insn_bit(insn, byte2, byte3, SET_BIT_2)
+      || insn_bra(insn, byte2, byte3)
+      || insn_bfld_bfst(insn, byte2, byte3, false) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_6B()
+static int h8sx_6B(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   uint8 hiNi = (code >> 4) & 0x0F;
   uint8 loNi = code & 0x0F;
 
-  if ( !(code == 0x10
-      || code == 0x15
-      || code == 0x18
-      || code == 0x30
-      || code == 0x35
-      || code == 0x38) )
-    return use_leaf_map(&map2_6B_h8sx[0], hiNi) ? cmd.size : 0;
+  if ( code != 0x10
+    && code != 0x15
+    && code != 0x18
+    && code != 0x30
+    && code != 0x35
+    && code != 0x38 )
+    return use_leaf_map(insn, &map2_6B_h8sx[0], hiNi) ? insn.size : 0;
 
-  if ( !read_operand(cmd.Op1, W | (hiNi == 1 ? aa16 : aa32)) ) return 0;
+  if ( !read_operand(insn, insn.Op1, W | (hiNi == 1 ? aa16 : aa32)) )
+    return 0;
 
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
   if ( loNi == 5 )
   {
-    if ( byte3 & 0x0F ) return 0;
+    if ( byte3 & 0x0F )
+      return 0;
 
-    cmd.auxpref = aux_word;
-    return op_from_byte(cmd.Op2, byte2)
-        && insn_addcmp(byte3) ? cmd.size : 0;
+    insn.auxpref = aux_word;
+    return op_from_byte(insn, insn.Op2, byte2)
+        && insn_addcmp(insn, byte3) ? insn.size : 0;
   }
   else if ( loNi == 0 )
   {
-    return insn_addcmp_reg(byte2, byte3, false, SET_WORD) ? cmd.size : 0;
+    return insn_addcmp_reg(insn, byte2, byte3, false, SET_WORD) ? insn.size : 0;
   }
   // ( loNi == 8 )
-  return insn_addcmp_reg(byte2, byte3, true, SET_WORD)
-      || insn_addcmp_i3(byte2, byte3)
-      || insn_sh_neg(byte2, byte3, SET_WORD) ? cmd.size : 0;
+  return insn_addcmp_reg(insn, byte2, byte3, true, SET_WORD)
+      || insn_addcmp_i3(insn, byte2, byte3)
+      || insn_sh_neg(insn, byte2, byte3, SET_WORD) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_78()
+static int h8sx_78(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   uint8 hiNi = hi_ni(code);
   uint8 loNi = code & 0x0F;
 
-  if ( loNi > 9 ) return 0;
+  if ( loNi > 9 )
+    return 0;
 
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
   if ( loNi <= 7 )
   {
     if ( byte2 == 0x6A )
     {
-      cmd.auxpref = aux_byte;
-      if ( hiNi & 8 ) return 0;
+      insn.auxpref = aux_byte;
+      if ( hiNi & 8 )
+        return 0;
     }
     else if ( byte2 == 0x6B )
     {
-      cmd.auxpref = hiNi & 8 ? aux_long : aux_word;
+      insn.auxpref = hiNi & 8 ? aux_long : aux_word;
       hiNi &= ~8;
     }
     else
       return 0;
 
-    if ( !op_displ_regidx(cmd.Op1, loNi, true, hiNi) ) return 0;
+    if ( !op_displ_regidx(insn, insn.Op1, loNi, true, hiNi) )
+      return 0;
 
     if ( loNi <= 3 )
     {
-      cmd.itype = H8_mov;
-      op_reg(cmd.Op2, byte3, rL);
+      insn.itype = H8_mov;
+      op_reg(insn, insn.Op2, byte3, rL);
       bool swap;
       switch ( byte3 & 0xF0 )
       {
@@ -2532,216 +2621,235 @@ static int h8sx_78()
         default: return 0;
       }
       if ( swap )
-        swap_Op1_Op2();
-      return cmd.size;
+        swap_Op1_Op2(insn);
+      return insn.size;
     }
     // 3 < loNi <= 7
-    uint8 byte4 = ua_next_byte();
-    uint8 byte5 = ua_next_byte();
+    uint8 byte4 = insn.get_next_byte();
+    uint8 byte5 = insn.get_next_byte();
 
     if ( byte3 == 0x28 )
     {
-      return insn_sh_neg(byte4, byte5, SET_BYTE | SET_WORD | SET_LONG)
-          || insn_addcmp_i8(byte4, byte5) ? cmd.size : 0;
+      return insn_sh_neg(insn, byte4, byte5, SET_BYTE | SET_WORD | SET_LONG)
+          || insn_addcmp_i8(insn, byte4, byte5) ? insn.size : 0;
     }
     // else if ( byte3 == 0x24 ) doc error?
     else if ( byte3 == 0x2C )
     {
-      if ( byte5 & 0x0F ) return 0;
-      return op_from_byte(cmd.Op2, byte4)
-          && insn_addcmp(byte5) ? cmd.size : 0;
+      if ( byte5 & 0x0F )
+        return 0;
+      return op_from_byte(insn, insn.Op2, byte4)
+          && insn_addcmp(insn, byte5) ? insn.size : 0;
     }
 
     return 0;
   } // loNi <= 7
 
   if ( byte2 == 0x7A )
-    return insn_mova_reg(byte3, hi_ni(code), false);
+    return insn_mova_reg(insn, byte3, hi_ni(code), false);
 
   if ( loNi == 8 )
   {
-    if      ( byte2 == 0x10 ) cmd.itype = H8_shll;
-    else if ( byte2 == 0x11 ) cmd.itype = H8_shlr;
-    else return 0;
+    if ( byte2 == 0x10 )
+      insn.itype = H8_shll;
+    else if ( byte2 == 0x11 )
+      insn.itype = H8_shlr;
+    else
+      return 0;
     switch ( byte3 & 0xF0 )
     {
-      case 0x00: cmd.auxpref = aux_byte; break;
-      case 0x10: cmd.auxpref = aux_word; break;
-      case 0x30: cmd.auxpref = aux_long; break;
+      case 0x00: insn.auxpref = aux_byte; break;
+      case 0x10: insn.auxpref = aux_word; break;
+      case 0x30: insn.auxpref = aux_long; break;
       default: return 0;
     }
-    return read_operand(cmd.Op1, rHB)
-        && op_reg(cmd.Op2, byte3, rL) ? cmd.size : 0;
+    return read_operand(insn, insn.Op1, rHB)
+        && op_reg(insn, insn.Op2, byte3, rL) ? insn.size : 0;
   }
 
   return 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_79()
+static int h8sx_79(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   uint8 hiNi = (code >> 4) & 0xF;
 
   if ( hiNi <= 6 )
-    return use_leaf_map(&map2_79[0], hiNi) ? cmd.size : 0;
+    return use_leaf_map(insn, &map2_79[0], hiNi) ? insn.size : 0;
 
-  cmd.itype = H8_mov;
-  cmd.auxpref = aux_word;
-  if ( !read_operand(cmd.Op1, i16) ) return 0;
+  insn.itype = H8_mov;
+  insn.auxpref = aux_word;
+  if ( !read_operand(insn, insn.Op1, i16) )
+    return 0;
 
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
-  if ( byte3 != 0 ) return 0;
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
+  if ( byte3 != 0 )
+    return 0;
 
-  return op_from_byte(cmd.Op2, byte2) ? cmd.size : 0;
+  return op_from_byte(insn, insn.Op2, byte2) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_7A()
+static int h8sx_7A(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
   uint8 hiNi = (code >> 4) & 0xF;
 
   if ( hiNi <= 6 )
   {
     if ( hiNi == 0 )
-      cmd.itype = H8_mov;
-    else
-      if ( !insn_addcmp(code) ) return 0;
-    cmd.auxpref = aux_long;
+      insn.itype = H8_mov;
+    else if ( !insn_addcmp(insn, code) )
+      return 0;
+    insn.auxpref = aux_long;
     ushort op1_imm = code & 8 ? i16 : i32;
-    return op_reg(cmd.Op2, code & 7, rL)
-        && read_operand(cmd.Op1, op1_imm) ? cmd.size : 0;
+    return op_reg(insn, insn.Op2, code & 7, rL)
+        && read_operand(insn, insn.Op1, op1_imm) ? insn.size : 0;
   }
   else if ( 8 <= hiNi && hiNi <= 0xD )
   {
-    return insn_mova_reg(code, 0, true);
+    return insn_mova_reg(insn, code, 0, true);
   }
   else
   {
-    cmd.itype = H8_mov;
-    cmd.auxpref = aux_long;
+    insn.itype = H8_mov;
+    insn.auxpref = aux_long;
     ushort op1_imm;
-    if      ( code == 0x74 ) op1_imm = i32;
-    else if ( code == 0x7C ) op1_imm = i16;
-    else return 0;
-    if ( !read_operand(cmd.Op1, op1_imm) ) return 0;
+    if ( code == 0x74 )
+      op1_imm = i32;
+    else if ( code == 0x7C )
+      op1_imm = i16;
+    else
+      return 0;
+    if ( !read_operand(insn, insn.Op1, op1_imm) )
+      return 0;
 
-    uint8 byte2 = ua_next_byte();
-    uint8 byte3 = ua_next_byte();
-    if ( byte3 != 0 ) return 0;
+    uint8 byte2 = insn.get_next_byte();
+    uint8 byte3 = insn.get_next_byte();
+    if ( byte3 != 0 )
+      return 0;
 
-    return op_from_byte(cmd.Op2, byte2) ? cmd.size : 0;
+    return op_from_byte(insn, insn.Op2, byte2) ? insn.size : 0;
   }
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_7C()
+static int h8sx_7C(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
 
-  bool is_word = (code & 0x80) == 0x80;   // else - byte
-  op_phrase(cmd.Op1, (code >> 4) & 0x07, ph_normal);
+  bool isword = (code & 0x80) == 0x80;   // else - byte
+  op_phrase(insn, insn.Op1, (code >> 4) & 0x07, ph_normal);
   uint8 loNi = code & 0x0F;
 
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
   if ( loNi == 5 )
   {
-    cmd.auxpref = is_word ? aux_word : aux_byte;
-    return op_from_byte(cmd.Op2, byte2)
-        && insn_addcmp(byte3) ? cmd.size : 0;
+    insn.auxpref = isword ? aux_word : aux_byte;
+    return op_from_byte(insn, insn.Op2, byte2)
+        && insn_addcmp(insn, byte3) ? insn.size : 0;
   }
 
   if ( loNi == 1 && (byte2 == 0x09 || byte2 == 0x19)
-   ||  loNi == 0 && (byte2 == 0x0E || byte2 == 0x1E) )
+    || loNi == 0 && (byte2 == 0x0E || byte2 == 0x1E) )
   {
-    return insn_addx_reg(cmd.Op2, byte2, byte3, SET_BYTE | SET_WORD, rL | zH) ? cmd.size : 0;
+    return insn_addx_reg(insn, insn.Op2, byte2, byte3, SET_BYTE | SET_WORD, rL | zH) ? insn.size : 0;
   }
-  if ( loNi != 0 ) return 0;
+  if ( loNi != 0 )
+    return 0;
 
-  return insn_addcmp_reg(byte2, byte3, false, is_word ? SET_WORD : SET_BYTE)
-      || insn_bit(byte2, byte3, SET_BIT_1)
-      || insn_bra(byte2, byte3)
-      || insn_bfld_bfst(byte2, byte3, true) ? cmd.size : 0;
+  return insn_addcmp_reg(insn, byte2, byte3, false, isword ? SET_WORD : SET_BYTE)
+      || insn_bit(insn, byte2, byte3, SET_BIT_1)
+      || insn_bra(insn, byte2, byte3)
+      || insn_bfld_bfst(insn, byte2, byte3, true) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_7D()
+static int h8sx_7D(insn_t &insn)
 {
-  code = ua_next_byte();
+  code = insn.get_next_byte();
 
-  bool is_word = (code & 0x80) == 0x80;   // else - byte
-  op_phrase(cmd.Op1, (code >> 4) & 0x07, ph_normal);
+  bool isword = (code & 0x80) == 0x80;   // else - byte
+  op_phrase(insn, insn.Op1, (code >> 4) & 0x07, ph_normal);
   uint8 loNi = code & 0x0F;
 
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
   if ( loNi == 1 )
   {
-    shift_Op1();
-    return insn_addx_reg(cmd.Op1, byte2, byte3, SET_WORD, rH | zL)
-        || insn_addx_imm(cmd.Op1, byte2, byte3, SET_WORD, true) ? cmd.size : 0;
+    shift_Op1(insn);
+    return insn_addx_reg(insn, insn.Op1, byte2, byte3, SET_WORD, rH | zL)
+        || insn_addx_imm(insn, insn.Op1, byte2, byte3, SET_WORD, true) ? insn.size : 0;
   }
-  if ( loNi != 0 ) return 0;
+  if ( loNi != 0 )
+    return 0;
 
-  return insn_sh_neg(byte2, byte3, (is_word ? SET_WORD : SET_BYTE))
-      || insn_bit(byte2, byte3, SET_BIT_2)
-      || (is_word ? false : insn_addx_i8(byte2, byte3))
-      || insn_addcmp_reg(byte2, byte3, true, is_word ? SET_WORD : SET_BYTE)
-      || (is_word ? false : insn_addcmp_i8(byte2, byte3))
-      || insn_bfld_bfst(byte2, byte3, false)
-      || insn_addcmp_i3(byte2, byte3)
-      || insn_addx_reg_Op1(byte2, byte3, SET_BYTE, rH | zL) ? cmd.size : 0;
+  return insn_sh_neg(insn, byte2, byte3, (isword ? SET_WORD : SET_BYTE))
+      || insn_bit(insn, byte2, byte3, SET_BIT_2)
+      || (isword ? false : insn_addx_i8(insn, byte2, byte3))
+      || insn_addcmp_reg(insn, byte2, byte3, true, isword ? SET_WORD : SET_BYTE)
+      || (isword ? false : insn_addcmp_i8(insn, byte2, byte3))
+      || insn_bfld_bfst(insn, byte2, byte3, false)
+      || insn_addcmp_i3(insn, byte2, byte3)
+      || insn_addx_reg_Op1(insn, byte2, byte3, SET_BYTE, rH | zL) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_7E()
+static int h8sx_7E(insn_t &insn)
 {
-  code = ua_next_byte();
-  op_aa_8(cmd.Op1, code, dt_byte);
+  code = insn.get_next_byte();
+  op_aa_8(insn, insn.Op1, code, dt_byte);
 
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  return insn_addcmp_reg(byte2, byte3, false, SET_BYTE)
-      || insn_bra(byte2, byte3)
-      || insn_bit(byte2, byte3, SET_BIT_1)
-      || insn_bfld_bfst(byte2, byte3, true) ? cmd.size : 0;
+  return insn_addcmp_reg(insn, byte2, byte3, false, SET_BYTE)
+      || insn_bra(insn, byte2, byte3)
+      || insn_bit(insn, byte2, byte3, SET_BIT_1)
+      || insn_bfld_bfst(insn, byte2, byte3, true) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static int h8sx_7F()
+static int h8sx_7F(insn_t &insn)
 {
-  code = ua_next_byte();
-  op_aa_8(cmd.Op1, code, dt_byte);
+  code = insn.get_next_byte();
+  op_aa_8(insn, insn.Op1, code, dt_byte);
 
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  return insn_addcmp_reg(byte2, byte3, true, SET_BYTE)
-      || insn_addcmp_i8(byte2, byte3)
-      || insn_sh_neg(byte2, byte3, SET_BYTE)
-      || insn_bit(byte2, byte3, SET_BIT_2)
-      || insn_bfld_bfst(byte2, byte3, false) ?  cmd.size : 0;
+  return insn_addcmp_reg(insn, byte2, byte3, true, SET_BYTE)
+      || insn_addcmp_i8(insn, byte2, byte3)
+      || insn_sh_neg(insn, byte2, byte3, SET_BYTE)
+      || insn_bit(insn, byte2, byte3, SET_BIT_2)
+      || insn_bfld_bfst(insn, byte2, byte3, false) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_010_00dd()
+static bool h8sx_010_00dd(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
   if ( byte2 == 0x7A && code != 0x01
-    || (byte2 == 0x09 || byte2 == 0x19 || byte2 == 0x79) && code != 0x51 ) return false;
+    || (byte2 == 0x09 || byte2 == 0x19 || byte2 == 0x79) && code != 0x51 )
+  {
+    return false;
+  }
 
-  if ( !op_reg(cmd.Op2, byte3, rL) ) return false;
+  if ( !op_reg(insn, insn.Op2, byte3, rL) )
+    return false;
 
-  if ( insn_addx_reg(cmd.Op1, byte2, byte3, SET_WORD | SET_LONG, rH) ) return true;
-  if ( insn_addx_imm(cmd.Op1, byte2, byte3, SET_WORD | SET_LONG, false) ) return true;
+  if ( insn_addx_reg(insn, insn.Op1, byte2, byte3, SET_WORD | SET_LONG, rH) )
+    return true;
+  if ( insn_addx_imm(insn, insn.Op1, byte2, byte3, SET_WORD | SET_LONG, false) )
+    return true;
 
   uint8 hiNi = (byte3 >> 4) & 7;
   bool swap = (byte3 & 0x80) != 0;
@@ -2749,279 +2857,316 @@ static bool h8sx_010_00dd()
   if ( code == 0 && byte2 == 0x6D && hiNi == 7 )
   {
     // pop, push
-    cmd.itype = swap ? H8_push : H8_pop;
-    cmd.Op1 = cmd.Op2; cmd.Op1.n = 0;
-    cmd.Op2.type = 0;
+    insn.itype = swap ? H8_push : H8_pop;
+    insn.Op1 = insn.Op2; insn.Op1.n = 0;
+    insn.Op2.type = 0;
     return true;
   }
 
-  cmd.itype = H8_mov;
-  if ( !read_1st_op(byte2, hiNi) ) return false;
+  insn.itype = H8_mov;
+  if ( !read_1st_op(insn, byte2, hiNi) )
+    return false;
   if ( swap )
   {
-    swap_Op1_Op2();
-    if ( cmd.Op2.type == o_phrase && cmd.Op2.phtype != ph_normal )
-      cmd.Op2.phtype ^= 3;  // swap pre- & post-, see h8.hpp
+    swap_Op1_Op2(insn);
+    if ( insn.Op2.type == o_phrase && insn.Op2.phtype != ph_normal )
+      insn.Op2.phtype ^= 3;  // swap pre- & post-, see h8.hpp
   }
 
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_010_01dd(uint16 postfix)
+static bool h8sx_010_01dd(insn_t &insn, uint16 postfix)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  if ( byte3 & 0x80 ) return false;
+  if ( byte3 & 0x80 )
+    return false;
   uint8 loNi = byte3 & 0xF;
   uint8 hiNi = byte3 >> 4;
 
-  cmd.auxpref = postfix;
-  if ( !read_1st_op(byte2, hiNi) ) return false;
+  insn.auxpref = postfix;
+  if ( !read_1st_op(insn, byte2, hiNi) )
+    return false;
 
-  uint8 byte4 = ua_next_byte();
-  uint8 byte5 = ua_next_byte();
+  uint8 byte4 = insn.get_next_byte();
+  uint8 byte5 = insn.get_next_byte();
 
   switch ( loNi )
   {
     case 8:
-      return postfix == aux_byte ?
-               insn_addx_reg_Op1(byte4, byte5, SET_BYTE, rH | zL)
-               || insn_addcmp_i8(byte4, byte5)
-               || insn_addx_i8(byte4, byte5)
-               || insn_sh_neg(byte4, byte5, SET_BYTE) :
-               insn_sh_neg(byte4, byte5, postfix == aux_word ? SET_WORD : SET_LONG);
+      return postfix == aux_byte
+           ? insn_addx_reg_Op1(insn, byte4, byte5, SET_BYTE, rH | zL)
+          || insn_addcmp_i8(insn, byte4, byte5)
+          || insn_addx_i8(insn, byte4, byte5)
+          || insn_sh_neg(insn, byte4, byte5, SET_BYTE)
+           : insn_sh_neg(insn, byte4, byte5, postfix == aux_word ? SET_WORD : SET_LONG);
 
     case 0xC:
-      if ( (byte5 & 0x0F) != 0 ) return false;
-      return op_from_byte(cmd.Op2, byte4)
-          && insn_addcmp(byte5);
+      if ( (byte5 & 0x0F) != 0 )
+        return false;
+      return op_from_byte(insn, insn.Op2, byte4)
+          && insn_addcmp(insn, byte5);
 
     case 0:
-      if ( !(code == 0x76 && byte2 == 0x6C) ) return false;
-      return insn_addx_reg(cmd.Op2, byte4, byte5, SET_BYTE, rL | zH);
+      if ( !(code == 0x76 && byte2 == 0x6C) )
+        return false;
+      return insn_addx_reg(insn, insn.Op2, byte4, byte5, SET_BYTE, rL | zH);
     case 1:
-      if ( !(code == 0x04 && byte2 == 0x69
-          || code == 0x06 && byte2 == 0x6D
-          || code == 0x54 && byte2 == 0x69
-          || code == 0x56 && byte2 == 0x6D) ) return false;
-      return insn_addx_reg(cmd.Op2, byte4, byte5, SET_WORD | SET_LONG, rL | zH);
+      if ( (code != 0x04 || byte2 != 0x69)
+        && (code != 0x06 || byte2 != 0x6D)
+        && (code != 0x54 || byte2 != 0x69)
+        && (code != 0x56 || byte2 != 0x6D) )
+      {
+        return false;
+      }
+      return insn_addx_reg(insn, insn.Op2, byte4, byte5, SET_WORD | SET_LONG, rL | zH);
 
     case 0xD:
-      if ( !(code == 0x04 && byte2 == 0x69
-          || code == 0x06 && byte2 == 0x6D
-          || code == 0x54 && byte2 == 0x69
-          || code == 0x56 && byte2 == 0x6D
-          || code == 0x74 && byte2 == 0x68
-          || code == 0x76 && byte2 == 0x6C) ) return false;
+      if ( (code != 0x04 || byte2 != 0x69)
+        && (code != 0x06 || byte2 != 0x6D)
+        && (code != 0x54 || byte2 != 0x69)
+        && (code != 0x56 || byte2 != 0x6D)
+        && (code != 0x74 || byte2 != 0x68)
+        && (code != 0x76 || byte2 != 0x6C) )
+      {
+        return false;
+      }
+      if ( byte5 == 0x10 )
+        insn.itype = H8_addx;
+      else if ( byte5 == 0x30 )
+        insn.itype = H8_subx;
+      else
+        return false;
 
-      if      ( byte5 == 0x10 ) cmd.itype = H8_addx;
-      else if ( byte5 == 0x30 ) cmd.itype = H8_subx;
-      else return false;
-
-      if ( !( (byte4 & 0xF8) == 0 || (byte4 & 0xF0) == 0xA0 ) ) return false;
-      op_phrase(cmd.Op2, byte4 & 7, ph_normal);
+      if ( !( (byte4 & 0xF8) == 0 || (byte4 & 0xF0) == 0xA0 ) )
+        return false;
+      op_phrase(insn, insn.Op2, byte4 & 7, ph_normal);
       if ( (byte4 & 0xF0) == 0xA0 )
-        cmd.Op2.phtype = ph_post_dec;
-      return cmd.size != 0;
+        insn.Op2.phtype = ph_post_dec;
+      return insn.size != 0;
 
     case 9:
-      if ( !(code == 0x04 && byte2 == 0x69
-          || code == 0x06 && byte2 == 0x6D
-          || code == 0x54 && byte2 == 0x69
-          || code == 0x56 && byte2 == 0x6D) ) return false;
+      if ( (code != 0x04 || byte2 != 0x69)
+        && (code != 0x06 || byte2 != 0x6D)
+        && (code != 0x54 || byte2 != 0x69)
+        && (code != 0x56 || byte2 != 0x6D) )
+      {
+        return false;
+      }
 
-      shift_Op1();
-      return insn_addx_reg(cmd.Op1, byte4, byte5, SET_BYTE | SET_WORD | SET_LONG, rH | zL)
-          || insn_addx_imm(cmd.Op1, byte4, byte5, SET_WORD | SET_LONG, true);
+      shift_Op1(insn);
+      return insn_addx_reg(insn, insn.Op1, byte4, byte5, SET_BYTE | SET_WORD | SET_LONG, rH | zL)
+          || insn_addx_imm(insn, insn.Op1, byte4, byte5, SET_WORD | SET_LONG, true);
   }
 
   return false;
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_0108()
+static bool h8sx_0108(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  cmd.itype = H8_mov;
-  return op_from_byte(cmd.Op1, byte2)
-      && op_from_byte(cmd.Op2, byte3);
+  insn.itype = H8_mov;
+  return op_from_byte(insn, insn.Op1, byte2)
+      && op_from_byte(insn, insn.Op2, byte3);
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_0109_010A(op_t& regop, op_t& genop)
+static bool h8sx_0109_010A(insn_t &insn, op_t &regop, op_t &genop)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  return insn_addcmp(byte3)
-      && op_reg(regop, byte3, rL)
-      && op_from_byte(genop, byte2);
+  return insn_addcmp(insn, byte3)
+      && op_reg(insn, regop, byte3, rL)
+      && op_from_byte(insn, genop, byte2);
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_010D()
+static bool h8sx_010D(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
 
-  cmd.itype = H8_mov;
-  return read_operand(cmd.Op1, i8)
-      && op_from_byte(cmd.Op2, byte2);
+  insn.itype = H8_mov;
+  return read_operand(insn, insn.Op1, i8)
+      && op_from_byte(insn, insn.Op2, byte2);
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_010E()
+static bool h8sx_010E(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  return op_from_byte(cmd.Op2, byte2)
-      && insn_addcmp(byte3)
-      && read_operand(cmd.Op1, byte3 & 8 ? i32 : i16);
+  return op_from_byte(insn, insn.Op2, byte2)
+      && insn_addcmp(insn, byte3)
+      && read_operand(insn, insn.Op1, byte3 & 8 ? i32 : i16);
 }
 
 //--------------------------------------------------------------------------
 // any register range
-static bool h8sx_ldm()
+static bool h8sx_ldm(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
-  if ( byte2 != 0x6D ) return false;
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
+  if ( byte2 != 0x6D )
+    return false;
 
   uint8 hiNi = byte3 & 0xF0;
   uint8 loNi = byte3 & 0x0F;
-  if ( loNi & 8 ) return false;
+  if ( loNi & 8 )
+    return false;
 
   uint8 delta = code >> 4;
 
-  cmd.auxpref = aux_long;
+  insn.auxpref = aux_long;
   if ( hiNi == 0x70 )
   {
-    cmd.itype = H8_ldm;
-    return op_phrase(cmd.Op1, 7, ph_post_inc)
-        && op_reglist(cmd.Op2, loNi, delta, true);
+    insn.itype = H8_ldm;
+    return op_phrase(insn, insn.Op1, 7, ph_post_inc)
+        && op_reglist(insn.Op2, loNi, delta, true);
   }
   else if ( hiNi == 0xF0 )
   {
-    cmd.itype = H8_stm;
-    return op_reglist(cmd.Op1, loNi, delta, false)
-        && op_phrase(cmd.Op2, 7, ph_pre_dec);
+    insn.itype = H8_stm;
+    return op_reglist(insn.Op1, loNi, delta, false)
+        && op_phrase(insn, insn.Op2, 7, ph_pre_dec);
   }
   return false;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_ldc(uint8 byte2, regnum_t reg)
+static bool insn_ldc(insn_t &insn, uint8 byte2, regnum_t reg)
 {
-  uint8 byte3 = ua_next_byte();
+  uint8 byte3 = insn.get_next_byte();
   uint8 hiNi = (byte3 & 0x70) >> 4;
   bool swap = (byte3 & 0x80) != 0;
 
-  cmd.itype = H8_ldc;
-  cmd.auxpref = aux_word;
+  insn.itype = H8_ldc;
+  insn.auxpref = aux_word;
 
-  cmd.Op2.type = o_reg;
-  cmd.Op2.dtyp = dt_word;
-  cmd.Op2.reg = reg;
+  insn.Op2.type = o_reg;
+  insn.Op2.dtype = dt_word;
+  insn.Op2.reg = reg;
 
   if ( byte2 == 0x78 )
   {
-    if ( byte3 & 0x8F ) return false;
+    if ( byte3 & 0x8F )
+      return false;
 
-    uint16 opcode3 = ua_next_word();
-    if      ( opcode3 == 0x6BA0 ) swap = true;
-    else if ( opcode3 == 0x6B20 ) swap = false;
-    else return false;
+    uint16 opcode3 = insn.get_next_word();
+    if ( opcode3 == 0x6BA0 )
+      swap = true;
+    else if ( opcode3 == 0x6B20 )
+      swap = false;
+    else
+      return false;
     code = byte3;
-    opdsp32(cmd.Op1, dt_word);
+    opdsp32(insn, insn.Op1, dt_word);
   }
   else
   {
-    if ( !read_1st_op(byte2, hiNi) ) return false;
+    if ( !read_1st_op(insn, byte2, hiNi) )
+      return false;
   }
 
   if ( swap )
   {
-    cmd.itype = H8_stc;
-    swap_Op1_Op2();
-    if ( cmd.Op2.type == o_phrase && cmd.Op2.phtype != ph_normal )
-      cmd.Op2.phtype ^= 3;  // swap pre- & post-, see h8.hpp
+    insn.itype = H8_stc;
+    swap_Op1_Op2(insn);
+    if ( insn.Op2.type == o_phrase && insn.Op2.phtype != ph_normal )
+      insn.Op2.phtype ^= 3;  // swap pre- & post-, see h8.hpp
   }
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_01_exr()
+static bool h8sx_01_exr(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
 
-  if      ( byte2 == 4 ) { cmd.itype = H8_orc; }
-  else if ( byte2 == 5 ) { cmd.itype = H8_xorc; }
-  else if ( byte2 == 6 ) { cmd.itype = H8_andc; }
-  else if ( byte2 == 7 ) { cmd.itype = H8_ldc; cmd.auxpref = aux_byte; }
+  if ( byte2 == 4 )
+  {
+    insn.itype = H8_orc;
+  }
+  else if ( byte2 == 5 )
+  {
+    insn.itype = H8_xorc;
+  }
+  else if ( byte2 == 6 )
+  {
+    insn.itype = H8_andc;
+  }
+  else if ( byte2 == 7 )
+  {
+    insn.itype = H8_ldc;
+    insn.auxpref = aux_byte;
+  }
   else
   {
     code = 0x40;
-    return insn_ldc(byte2, EXR);
+    return insn_ldc(insn, byte2, EXR);
   }
 
-  cmd.Op2.type = o_reg;
-  cmd.Op2.dtyp = dt_word;
-  cmd.Op2.reg = EXR;
-  return read_operand(cmd.Op1, i8);
+  insn.Op2.type = o_reg;
+  insn.Op2.dtype = dt_word;
+  insn.Op2.reg = EXR;
+  return read_operand(insn, insn.Op1, i8);
 }
 
 //--------------------------------------------------------------------------
-static bool insn_mac()
+static bool insn_mac(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  if ( byte2 != 0x6D
-    && (byte3 & 0x88) != 0 ) return 0;
+  if ( byte2 != 0x6D && (byte3 & 0x88) != 0 )
+    return 0;
 
-  cmd.itype = H8_mac;
-  return op_phrase(cmd.Op1, byte3 >> 4, ph_post_inc)
-      && op_phrase(cmd.Op2, byte3 & 0x0F, ph_post_inc);
+  insn.itype = H8_mac;
+  return op_phrase(insn, insn.Op1, byte3 >> 4, ph_post_inc)
+      && op_phrase(insn, insn.Op2, byte3 & 0x0F, ph_post_inc);
 }
 
 //--------------------------------------------------------------------------
-static bool insn_mova_op(uint8 opcode)
+static bool insn_mova_op(insn_t &insn, uint8 opcode)
 {
   switch ( (opcode >> 4) & 0xF )
   {
     case 0x8:
-      cmd.itype     = H8_movab;
-      cmd.Op1.dtyp  = dt_byte;
-      cmd.Op1.szfl |= idx_byte;
+      insn.itype     = H8_movab;
+      insn.Op1.dtype = dt_byte;
+      insn.Op1.szfl |= idx_byte;
       break;
     case 0x9:
-      cmd.itype     = H8_movab;
-      cmd.Op1.dtyp  = dt_byte;
-      cmd.Op1.szfl |= idx_word;
+      insn.itype     = H8_movab;
+      insn.Op1.dtype = dt_byte;
+      insn.Op1.szfl |= idx_word;
       break;
     case 0xA:
-      cmd.itype     = H8_movaw;
-      cmd.Op1.dtyp  = dt_word;
-      cmd.Op1.szfl |= idx_byte;
+      insn.itype     = H8_movaw;
+      insn.Op1.dtype = dt_word;
+      insn.Op1.szfl |= idx_byte;
       break;
     case 0xB:
-      cmd.itype     = H8_movaw;
-      cmd.Op1.dtyp  = dt_word;
-      cmd.Op1.szfl |= idx_word;
+      insn.itype     = H8_movaw;
+      insn.Op1.dtype = dt_word;
+      insn.Op1.szfl |= idx_word;
       break;
     case 0xC:
-      cmd.itype     = H8_moval;
-      cmd.Op1.dtyp  = dt_dword;
-      cmd.Op1.szfl |= idx_byte;
+      insn.itype     = H8_moval;
+      insn.Op1.dtype = dt_dword;
+      insn.Op1.szfl |= idx_byte;
       break;
     case 0xD:
-      cmd.itype     = H8_moval;
-      cmd.Op1.dtyp  = dt_dword;
-      cmd.Op1.szfl |= idx_word;
+      insn.itype     = H8_moval;
+      insn.Op1.dtype = dt_dword;
+      insn.Op1.szfl |= idx_word;
       break;
     default:
       return false;
@@ -3030,372 +3175,385 @@ static bool insn_mova_op(uint8 opcode)
 }
 
 //--------------------------------------------------------------------------
-static bool insn_mova()
+static bool insn_mova(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  if ( !insn_mova_op(byte3) ) return false;
+  if ( !insn_mova_op(insn, byte3) )
+    return false;
 
   op_t ea;
   memset(&ea, 0, sizeof(ea));
-  cmd.auxpref = cmd.Op1.szfl & idx_byte ? aux_byte : aux_word;
-  if ( !op_from_byte(ea, byte2) ) return false;
-  cmd.auxpref = aux_none;
+  insn.auxpref = insn.Op1.szfl & idx_byte ? aux_byte : aux_word;
+  if ( !op_from_byte(insn, ea, byte2) )
+    return false;
+  insn.auxpref = aux_none;
 
-  (byte3 & 8 ? opdsp32 : opdsp16)(cmd.Op1, cmd.Op1.dtyp);
+  (byte3 & 8 ? opdsp32 : opdsp16)(insn, insn.Op1, insn.Op1.dtype);
 
-  cmd.Op1.idxt = ea.type;
-  cmd.Op1.offo = ea.offb;
-  cmd.Op1.phrase = ea.phrase;
-  cmd.Op1.idxdt = ea.phtype;
-  cmd.Op1.value = ea.addr;
-  cmd.Op1.idxsz = ea.szfl;
-  if ( cmd.Op1.idxt == o_displ
-    || cmd.Op1.idxt == o_mem )
+  insn.Op1.idxt = ea.type;
+  insn.Op1.offo = ea.offb;
+  insn.Op1.phrase = ea.phrase;
+  insn.Op1.idxdt = ea.phtype;
+  insn.Op1.value = ea.addr;
+  insn.Op1.idxsz = ea.szfl;
+  if ( insn.Op1.idxt == o_displ
+    || insn.Op1.idxt == o_mem )
   {
-    cmd.Op1.flags |= OF_OUTER_DISP;
+    insn.Op1.flags |= OF_OUTER_DISP;
   }
 
-  cmd.Op1.displtype = dt_movaop1;
+  insn.Op1.displtype = dt_movaop1;
 
-  cmd.auxpref = aux_long;
-  return op_reg(cmd.Op2, byte3 & 7, rL);
+  insn.auxpref = aux_long;
+  return op_reg(insn, insn.Op2, byte3 & 7, rL);
 }
 
 //--------------------------------------------------------------------------
-static int insn_mova_reg(uint8 opcode, uint8 rs, bool is_reg_equal)
+static int insn_mova_reg(insn_t &insn, uint8 opcode, uint8 rs, bool is_reg_equal)
 {
-  if ( !insn_mova_op(opcode) ) return 0;
+  if ( !insn_mova_op(insn, opcode) )
+    return 0;
 
-  (opcode & 8 ? opdsp16 : opdsp32)(cmd.Op1, cmd.Op1.dtyp);
+  (opcode & 8 ? opdsp16 : opdsp32)(insn, insn.Op1, insn.Op1.dtype);
 
-  cmd.Op1.idxt = o_reg;
+  insn.Op1.idxt = o_reg;
   rs = is_reg_equal ? opcode & 7 : rs & 0xF;
-  cmd.Op1.reg = (cmd.Op1.szfl & idx_byte ? (is_reg_equal ? R0L : R0H) : R0)
+  insn.Op1.reg = (insn.Op1.szfl & idx_byte ? (is_reg_equal ? R0L : R0H) : R0)
                 + (is_reg_equal ? opcode & 7 : rs & 0xF);
-  cmd.Op1.idxsz = cmd.Op1.szfl;
+  insn.Op1.idxsz = insn.Op1.szfl;
 
-  cmd.Op1.displtype = dt_movaop1;
-  cmd.Op1.dtyp = dt_dword;
+  insn.Op1.displtype = dt_movaop1;
+  insn.Op1.dtype = dt_dword;
 
-  cmd.auxpref = aux_long;
-  return op_reg(cmd.Op2, opcode & 7, rL) ? cmd.size : 0;
+  insn.auxpref = aux_long;
+  return op_reg(insn, insn.Op2, opcode & 7, rL) ? insn.size : 0;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_tas()
+static bool insn_tas(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
-  if ( !(byte2 == 0x7B && (byte3 & 0x8F) == 0x0C) ) return false;
+  if ( !(byte2 == 0x7B && (byte3 & 0x8F) == 0x0C) )
+    return false;
 
-  cmd.itype = H8_tas;
-  return op_phrase(cmd.Op1, byte3 >> 4, ph_normal);
+  insn.itype = H8_tas;
+  return op_phrase(insn, insn.Op1, byte3 >> 4, ph_normal);
 }
 
 //--------------------------------------------------------------------------
-static bool insn_or_xor_and()
+static bool insn_or_xor_and(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
-  if ( byte3 & 0x88 ) return false;
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
+  if ( byte3 & 0x88 )
+    return false;
 
-  if      ( byte2 == 0x64 ) cmd.itype = H8_or;
-  else if ( byte2 == 0x65 ) cmd.itype = H8_xor;
-  else if ( byte2 == 0x66 ) cmd.itype = H8_and;
-  else return false;
+  if ( byte2 == 0x64 )
+    insn.itype = H8_or;
+  else if ( byte2 == 0x65 )
+    insn.itype = H8_xor;
+  else if ( byte2 == 0x66 )
+    insn.itype = H8_and;
+  else
+    return false;
 
-  cmd.auxpref = aux_long;
-  return op_reg(cmd.Op1, byte3, rH)
-      && op_reg(cmd.Op2, byte3, rL);
+  insn.auxpref = aux_long;
+  return op_reg(insn, insn.Op1, byte3, rH)
+      && op_reg(insn, insn.Op2, byte3, rL);
 }
 
 //--------------------------------------------------------------------------
-static bool h8sx_01_other()
+static bool h8sx_01_other(insn_t &insn)
 {
-  uint8 byte2 = ua_next_byte();
-  uint8 byte3 = ua_next_byte();
+  uint8 byte2 = insn.get_next_byte();
+  uint8 byte3 = insn.get_next_byte();
 
   uint8 byte1 = code;
   code = byte3;
   switch ( byte1 )
   {
     case 0xC0:
-      cmd.itype = H8_mulxs;
+      insn.itype = H8_mulxs;
       if ( byte2 == 0x50 )
       {
-        cmd.auxpref = aux_byte;
-        return read_operand(cmd.Op1, rHB)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_byte;
+        return read_operand(insn, insn.Op1, rHB)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x52 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, rHW)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, rHW)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xD0:
-      cmd.itype = H8_divxs;
+      insn.itype = H8_divxs;
       if ( byte2 == 0x51 )
       {
-        cmd.auxpref = aux_byte;
-        return read_operand(cmd.Op1, rHB)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_byte;
+        return read_operand(insn, insn.Op1, rHB)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x53 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, rHW)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, rHW)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xC2:
-      cmd.itype = H8_muls;
+      insn.itype = H8_muls;
       if ( byte2 == 0x50 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, rHW)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, rHW)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x52 )
       {
-        cmd.auxpref = aux_long;
-        return read_operand(cmd.Op1, rHL0)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_long;
+        return read_operand(insn, insn.Op1, rHL0)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xD2:
-      cmd.itype = H8_divs;
+      insn.itype = H8_divs;
       if ( byte2 == 0x51 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, rHW)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, rHW)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x53 )
       {
-        cmd.auxpref = aux_long;
-        return read_operand(cmd.Op1, rHL0)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_long;
+        return read_operand(insn, insn.Op1, rHL0)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xC3:
-      if ( byte2 != 0x52 ) return false;
-      cmd.itype = H8_mulsu;
-      cmd.auxpref = aux_long;
-      return read_operand(cmd.Op1, rHL0)
-          && read_operand(cmd.Op2, rLL0);
+      if ( byte2 != 0x52 )
+        return false;
+      insn.itype = H8_mulsu;
+      insn.auxpref = aux_long;
+      return read_operand(insn, insn.Op1, rHL0)
+          && read_operand(insn, insn.Op2, rLL0);
 
     case 0xC4:
-      cmd.itype = H8_mulxs;
+      insn.itype = H8_mulxs;
       if ( byte2 == 0x50 )
       {
-        cmd.auxpref = aux_byte;
-        return read_operand(cmd.Op1, B | i4H)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_byte;
+        return read_operand(insn, insn.Op1, B | i4H)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x52 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, W | i4H)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, W | i4H)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xD4:
-      cmd.itype = H8_divxs;
+      insn.itype = H8_divxs;
       if ( byte2 == 0x51 )
       {
-        cmd.auxpref = aux_byte;
-        return read_operand(cmd.Op1, B | i4H)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_byte;
+        return read_operand(insn, insn.Op1, B | i4H)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x53 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, W | i4H)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, W | i4H)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xC6:
-      cmd.itype = H8_muls;
+      insn.itype = H8_muls;
       if ( byte2 == 0x50 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, W | i4H)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, W | i4H)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x52 )
       {
-        cmd.auxpref = aux_long;
-        return read_operand(cmd.Op1, L | i4H)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_long;
+        return read_operand(insn, insn.Op1, L | i4H)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xD6:
-      cmd.itype = H8_divs;
+      insn.itype = H8_divs;
       if ( byte2 == 0x51 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, W | i4H)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, W | i4H)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x53 )
       {
-        cmd.auxpref = aux_long;
-        return read_operand(cmd.Op1, L | i4H)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_long;
+        return read_operand(insn, insn.Op1, L | i4H)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xC7:
-      if ( byte2 != 0x52 ) return false;
-      cmd.itype = H8_mulsu;
-      cmd.auxpref = aux_long;
-      return read_operand(cmd.Op1, L | i4H)
-          && read_operand(cmd.Op2, rLL0);
+      if ( byte2 != 0x52 )
+        return false;
+      insn.itype = H8_mulsu;
+      insn.auxpref = aux_long;
+      return read_operand(insn, insn.Op1, L | i4H)
+          && read_operand(insn, insn.Op2, rLL0);
 
     case 0xCA:
-      cmd.itype = H8_mulu;
+      insn.itype = H8_mulu;
       if ( byte2 == 0x50 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, rHW)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, rHW)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x52 )
       {
-        cmd.auxpref = aux_long;
-        return read_operand(cmd.Op1, rHL0)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_long;
+        return read_operand(insn, insn.Op1, rHL0)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xDA:
-      cmd.itype = H8_divu;
+      insn.itype = H8_divu;
       if ( byte2 == 0x51 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, rHW)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, rHW)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x53 )
       {
-        cmd.auxpref = aux_long;
-        return read_operand(cmd.Op1, rHL0)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_long;
+        return read_operand(insn, insn.Op1, rHL0)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xCB:
-      if ( byte2 != 0x52 ) return false;
-      cmd.itype = H8_muluu;
-      cmd.auxpref = aux_long;
-      return read_operand(cmd.Op1, rHL0)
-          && read_operand(cmd.Op2, rLL0);
+      if ( byte2 != 0x52 )
+        return false;
+      insn.itype = H8_muluu;
+      insn.auxpref = aux_long;
+      return read_operand(insn, insn.Op1, rHL0)
+          && read_operand(insn, insn.Op2, rLL0);
 
     case 0xCC:
-      cmd.itype = H8_mulxu;
+      insn.itype = H8_mulxu;
       if ( byte2 == 0x50 )
       {
-        cmd.auxpref = aux_byte;
-        return read_operand(cmd.Op1, B | i4H)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_byte;
+        return read_operand(insn, insn.Op1, B | i4H)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x52 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, W | i4H)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, W | i4H)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xDC:
-      cmd.itype = H8_divxu;
+      insn.itype = H8_divxu;
       if ( byte2 == 0x51 )
       {
-        cmd.auxpref = aux_byte;
-        return read_operand(cmd.Op1, B | i4H)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_byte;
+        return read_operand(insn, insn.Op1, B | i4H)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x53 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, W | i4H)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, W | i4H)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xCE:
-      cmd.itype = H8_mulu;
+      insn.itype = H8_mulu;
       if ( byte2 == 0x50 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, W | i4H)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, W | i4H)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x52 )
       {
-        cmd.auxpref = aux_long;
-        return read_operand(cmd.Op1, L | i4H)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_long;
+        return read_operand(insn, insn.Op1, L | i4H)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xDE:
-      cmd.itype = H8_divu;
+      insn.itype = H8_divu;
       if ( byte2 == 0x51 )
       {
-        cmd.auxpref = aux_word;
-        return read_operand(cmd.Op1, W | i4H)
-            && read_operand(cmd.Op2, rLW);
+        insn.auxpref = aux_word;
+        return read_operand(insn, insn.Op1, W | i4H)
+            && read_operand(insn, insn.Op2, rLW);
       }
       else if ( byte2 == 0x53 )
       {
-        cmd.auxpref = aux_long;
-        return read_operand(cmd.Op1, L | i4H)
-            && read_operand(cmd.Op2, rLL0);
+        insn.auxpref = aux_long;
+        return read_operand(insn, insn.Op1, L | i4H)
+            && read_operand(insn, insn.Op2, rLL0);
       }
       return false;
 
     case 0xCF:
-      if ( byte2 != 0x52 ) return false;
-      cmd.itype = H8_muluu;
-      cmd.auxpref = aux_long;
-      return read_operand(cmd.Op1, L | i4H)
-          && read_operand(cmd.Op2, rLL0);
+      if ( byte2 != 0x52 )
+        return false;
+      insn.itype = H8_muluu;
+      insn.auxpref = aux_long;
+      return read_operand(insn, insn.Op1, L | i4H)
+          && read_operand(insn, insn.Op2, rLL0);
   }
   return false;
 }
 
 //--------------------------------------------------------------------------
-inline char dtyp_by_auxpref()
+inline op_dtype_t dtype_by_auxpref(const insn_t &insn)
 {
   CASSERT(aux_byte == dt_byte + 1 && aux_word == dt_word + 1 && aux_long == dt_dword + 1);
-  // x.dtyp = cmd.auxpref == aux_long ? dt_dword : cmd.auxpref == aux_word ? dt_word : dt_byte;
-  return cmd.auxpref - 1;
+  // x.dtype = insn.auxpref == aux_long ? dt_dword : insn.auxpref == aux_word ? dt_word : dt_byte;
+  return op_dtype_t(insn.auxpref - 1);
 }
 
 //--------------------------------------------------------------------------
-static bool sh_ops_imm(nameNum insn, uint16 ap, uint8 v, bool shown)
+static bool sh_ops_imm(insn_t &insn, nameNum itype, uint16 ap, uint8 v, bool shown)
 {
-  cmd.itype = insn;
-  cmd.auxpref = ap;
-  shift_Op1();
-  cmd.Op1.type = o_imm;
-  cmd.Op1.dtyp = dtyp_by_auxpref();
-  cmd.Op1.value = v;
+  insn.itype = itype;
+  insn.auxpref = ap;
+  shift_Op1(insn);
+  insn.Op1.type = o_imm;
+  insn.Op1.dtype = dtype_by_auxpref(insn);
+  insn.Op1.value = v;
   if ( !shown )
-    cmd.Op1.clr_shown();
+    insn.Op1.clr_shown();
   return true;
 }
 
@@ -3407,259 +3565,263 @@ static bool sh_ops_imm(nameNum insn, uint16 ap, uint8 v, bool shown)
 #define MB2   if ( !(SET_BIT_2 & mask) ) return false
 
 //--------------------------------------------------------------------------
-static bool insn_sh_neg(uint8 byte4, uint8 byte5, uint16 mask)
+static bool insn_sh_neg(insn_t &insn, uint8 byte4, uint8 byte5, uint16 mask)
 {
   uint16 opcode2 = (byte4 << 8) | byte5;
   switch ( opcode2 )
   {
-    case 0x1000: M1; return sh_ops_imm(H8_shll, aux_byte, 1, false); // SHLL.B
-    case 0x1040: M1; return sh_ops_imm(H8_shll, aux_byte, 2, true ); // SHLL.B #2
-    case 0x10A0: M1; return sh_ops_imm(H8_shll, aux_byte, 4, true ); // SHLL.B #4
-    case 0x1010: M2; return sh_ops_imm(H8_shll, aux_word, 1, false); // SHLL.W
-    case 0x1050: M2; return sh_ops_imm(H8_shll, aux_word, 2, true ); // SHLL.W #2
-    case 0x1020: M2; return sh_ops_imm(H8_shll, aux_word, 4, true ); // SHLL.W #4
-    case 0x1060: M2; return sh_ops_imm(H8_shll, aux_word, 8, true ); // SHLL.W #8
-    case 0x1030: M3; return sh_ops_imm(H8_shll, aux_long, 1, false); // SHLL.L
-    case 0x1070: M3; return sh_ops_imm(H8_shll, aux_long, 2, true ); // SHLL.L #2
-    case 0x1038: M3; return sh_ops_imm(H8_shll, aux_long, 4, true ); // SHLL.L #4
-    case 0x1078: M3; return sh_ops_imm(H8_shll, aux_long, 8, true ); // SHLL.L #8
-    case 0x10F8: M3; return sh_ops_imm(H8_shll, aux_long, 16, true); // SHLL.L #16
+    case 0x1000: M1; return sh_ops_imm(insn, H8_shll, aux_byte, 1, false); // SHLL.B
+    case 0x1040: M1; return sh_ops_imm(insn, H8_shll, aux_byte, 2, true ); // SHLL.B #2
+    case 0x10A0: M1; return sh_ops_imm(insn, H8_shll, aux_byte, 4, true ); // SHLL.B #4
+    case 0x1010: M2; return sh_ops_imm(insn, H8_shll, aux_word, 1, false); // SHLL.W
+    case 0x1050: M2; return sh_ops_imm(insn, H8_shll, aux_word, 2, true ); // SHLL.W #2
+    case 0x1020: M2; return sh_ops_imm(insn, H8_shll, aux_word, 4, true ); // SHLL.W #4
+    case 0x1060: M2; return sh_ops_imm(insn, H8_shll, aux_word, 8, true ); // SHLL.W #8
+    case 0x1030: M3; return sh_ops_imm(insn, H8_shll, aux_long, 1, false); // SHLL.L
+    case 0x1070: M3; return sh_ops_imm(insn, H8_shll, aux_long, 2, true ); // SHLL.L #2
+    case 0x1038: M3; return sh_ops_imm(insn, H8_shll, aux_long, 4, true ); // SHLL.L #4
+    case 0x1078: M3; return sh_ops_imm(insn, H8_shll, aux_long, 8, true ); // SHLL.L #8
+    case 0x10F8: M3; return sh_ops_imm(insn, H8_shll, aux_long, 16, true); // SHLL.L #16
 
-    case 0x1100: M1; return sh_ops_imm(H8_shlr, aux_byte, 1, false); // SHLR.B
-    case 0x1140: M1; return sh_ops_imm(H8_shlr, aux_byte, 2, true ); // SHLR.B #2
-    case 0x11A0: M1; return sh_ops_imm(H8_shlr, aux_byte, 4, true ); // SHLR.B #4
-    case 0x1110: M2; return sh_ops_imm(H8_shlr, aux_word, 1, false); // SHLR.W
-    case 0x1150: M2; return sh_ops_imm(H8_shlr, aux_word, 2, true ); // SHLR.W #2
-    case 0x1120: M2; return sh_ops_imm(H8_shlr, aux_word, 4, true ); // SHLR.W #4
-    case 0x1160: M2; return sh_ops_imm(H8_shlr, aux_word, 8, true ); // SHLR.W #8
-    case 0x1130: M3; return sh_ops_imm(H8_shlr, aux_long, 1, false); // SHLR.L
-    case 0x1170: M3; return sh_ops_imm(H8_shlr, aux_long, 2, true ); // SHLR.L #2
-    case 0x1138: M3; return sh_ops_imm(H8_shlr, aux_long, 4, true ); // SHLR.L #4
-    case 0x1178: M3; return sh_ops_imm(H8_shlr, aux_long, 8, true ); // SHLR.L #8
-    case 0x11F8: M3; return sh_ops_imm(H8_shlr, aux_long, 16, true); // SHLR.L #16
+    case 0x1100: M1; return sh_ops_imm(insn, H8_shlr, aux_byte, 1, false); // SHLR.B
+    case 0x1140: M1; return sh_ops_imm(insn, H8_shlr, aux_byte, 2, true ); // SHLR.B #2
+    case 0x11A0: M1; return sh_ops_imm(insn, H8_shlr, aux_byte, 4, true ); // SHLR.B #4
+    case 0x1110: M2; return sh_ops_imm(insn, H8_shlr, aux_word, 1, false); // SHLR.W
+    case 0x1150: M2; return sh_ops_imm(insn, H8_shlr, aux_word, 2, true ); // SHLR.W #2
+    case 0x1120: M2; return sh_ops_imm(insn, H8_shlr, aux_word, 4, true ); // SHLR.W #4
+    case 0x1160: M2; return sh_ops_imm(insn, H8_shlr, aux_word, 8, true ); // SHLR.W #8
+    case 0x1130: M3; return sh_ops_imm(insn, H8_shlr, aux_long, 1, false); // SHLR.L
+    case 0x1170: M3; return sh_ops_imm(insn, H8_shlr, aux_long, 2, true ); // SHLR.L #2
+    case 0x1138: M3; return sh_ops_imm(insn, H8_shlr, aux_long, 4, true ); // SHLR.L #4
+    case 0x1178: M3; return sh_ops_imm(insn, H8_shlr, aux_long, 8, true ); // SHLR.L #8
+    case 0x11F8: M3; return sh_ops_imm(insn, H8_shlr, aux_long, 16, true); // SHLR.L #16
 
-    case 0x1080: M1; return sh_ops_imm(H8_shal, aux_byte, 1, false); // SHAL.B
-    case 0x10C0: M1; return sh_ops_imm(H8_shal, aux_byte, 2, true ); // SHAL.B #2
-    case 0x1090: M2; return sh_ops_imm(H8_shal, aux_word, 1, false); // SHAL.W
-    case 0x10D0: M2; return sh_ops_imm(H8_shal, aux_word, 2, true ); // SHAL.W #2
-    case 0x10B0: M3; return sh_ops_imm(H8_shal, aux_long, 1, false); // SHAL.L
-    case 0x10F0: M3; return sh_ops_imm(H8_shal, aux_long, 2, true ); // SHAL.L #2
+    case 0x1080: M1; return sh_ops_imm(insn, H8_shal, aux_byte, 1, false); // SHAL.B
+    case 0x10C0: M1; return sh_ops_imm(insn, H8_shal, aux_byte, 2, true ); // SHAL.B #2
+    case 0x1090: M2; return sh_ops_imm(insn, H8_shal, aux_word, 1, false); // SHAL.W
+    case 0x10D0: M2; return sh_ops_imm(insn, H8_shal, aux_word, 2, true ); // SHAL.W #2
+    case 0x10B0: M3; return sh_ops_imm(insn, H8_shal, aux_long, 1, false); // SHAL.L
+    case 0x10F0: M3; return sh_ops_imm(insn, H8_shal, aux_long, 2, true ); // SHAL.L #2
 
-    case 0x1180: M1; return sh_ops_imm(H8_shar, aux_byte, 1, false); // SHAR.B
-    case 0x11C0: M1; return sh_ops_imm(H8_shar, aux_byte, 2, true ); // SHAR.B #2
-    case 0x1190: M2; return sh_ops_imm(H8_shar, aux_word, 1, false); // SHAR.W
-    case 0x11D0: M2; return sh_ops_imm(H8_shar, aux_word, 2, true ); // SHAR.W #2
-    case 0x11B0: M3; return sh_ops_imm(H8_shar, aux_long, 1, false); // SHAR.L
-    case 0x11F0: M3; return sh_ops_imm(H8_shar, aux_long, 2, true ); // SHAR.L #2
+    case 0x1180: M1; return sh_ops_imm(insn, H8_shar, aux_byte, 1, false); // SHAR.B
+    case 0x11C0: M1; return sh_ops_imm(insn, H8_shar, aux_byte, 2, true ); // SHAR.B #2
+    case 0x1190: M2; return sh_ops_imm(insn, H8_shar, aux_word, 1, false); // SHAR.W
+    case 0x11D0: M2; return sh_ops_imm(insn, H8_shar, aux_word, 2, true ); // SHAR.W #2
+    case 0x11B0: M3; return sh_ops_imm(insn, H8_shar, aux_long, 1, false); // SHAR.L
+    case 0x11F0: M3; return sh_ops_imm(insn, H8_shar, aux_long, 2, true ); // SHAR.L #2
 
-    case 0x1280: M1; return sh_ops_imm(H8_rotl, aux_byte, 1, false); // ROTL.B
-    case 0x12C0: M1; return sh_ops_imm(H8_rotl, aux_byte, 2, true ); // ROTL.B #2
-    case 0x1290: M2; return sh_ops_imm(H8_rotl, aux_word, 1, false); // ROTL.W
-    case 0x12D0: M2; return sh_ops_imm(H8_rotl, aux_word, 2, true ); // ROTL.W #2
-    case 0x12B0: M3; return sh_ops_imm(H8_rotl, aux_long, 1, false); // ROTL.L
-    case 0x12F0: M3; return sh_ops_imm(H8_rotl, aux_long, 2, true ); // ROTL.L #2
+    case 0x1280: M1; return sh_ops_imm(insn, H8_rotl, aux_byte, 1, false); // ROTL.B
+    case 0x12C0: M1; return sh_ops_imm(insn, H8_rotl, aux_byte, 2, true ); // ROTL.B #2
+    case 0x1290: M2; return sh_ops_imm(insn, H8_rotl, aux_word, 1, false); // ROTL.W
+    case 0x12D0: M2; return sh_ops_imm(insn, H8_rotl, aux_word, 2, true ); // ROTL.W #2
+    case 0x12B0: M3; return sh_ops_imm(insn, H8_rotl, aux_long, 1, false); // ROTL.L
+    case 0x12F0: M3; return sh_ops_imm(insn, H8_rotl, aux_long, 2, true ); // ROTL.L #2
 
-    case 0x1380: M1; return sh_ops_imm(H8_rotr, aux_byte, 1, false); // ROTR.B
-    case 0x13C0: M1; return sh_ops_imm(H8_rotr, aux_byte, 2, true ); // ROTR.B #2
-    case 0x1390: M2; return sh_ops_imm(H8_rotr, aux_word, 1, false); // ROTR.W
-    case 0x13D0: M2; return sh_ops_imm(H8_rotr, aux_word, 2, true ); // ROTR.W #2
-    case 0x13B0: M3; return sh_ops_imm(H8_rotr, aux_long, 1, false); // ROTR.L
-    case 0x13F0: M3; return sh_ops_imm(H8_rotr, aux_long, 2, true ); // ROTR.L #2
+    case 0x1380: M1; return sh_ops_imm(insn, H8_rotr, aux_byte, 1, false); // ROTR.B
+    case 0x13C0: M1; return sh_ops_imm(insn, H8_rotr, aux_byte, 2, true ); // ROTR.B #2
+    case 0x1390: M2; return sh_ops_imm(insn, H8_rotr, aux_word, 1, false); // ROTR.W
+    case 0x13D0: M2; return sh_ops_imm(insn, H8_rotr, aux_word, 2, true ); // ROTR.W #2
+    case 0x13B0: M3; return sh_ops_imm(insn, H8_rotr, aux_long, 1, false); // ROTR.L
+    case 0x13F0: M3; return sh_ops_imm(insn, H8_rotr, aux_long, 2, true ); // ROTR.L #2
 
-    case 0x1200: M1; return sh_ops_imm(H8_rotxl, aux_byte, 1, false); // ROTXL.B
-    case 0x1240: M1; return sh_ops_imm(H8_rotxl, aux_byte, 2, true ); // ROTXL.B #2
-    case 0x1210: M2; return sh_ops_imm(H8_rotxl, aux_word, 1, false); // ROTXL.W
-    case 0x1250: M2; return sh_ops_imm(H8_rotxl, aux_word, 2, true ); // ROTXL.W #2
-    case 0x1230: M3; return sh_ops_imm(H8_rotxl, aux_long, 1, false); // ROTXL.L
-    case 0x1270: M3; return sh_ops_imm(H8_rotxl, aux_long, 2, true ); // ROTXL.L #2
+    case 0x1200: M1; return sh_ops_imm(insn, H8_rotxl, aux_byte, 1, false); // ROTXL.B
+    case 0x1240: M1; return sh_ops_imm(insn, H8_rotxl, aux_byte, 2, true ); // ROTXL.B #2
+    case 0x1210: M2; return sh_ops_imm(insn, H8_rotxl, aux_word, 1, false); // ROTXL.W
+    case 0x1250: M2; return sh_ops_imm(insn, H8_rotxl, aux_word, 2, true ); // ROTXL.W #2
+    case 0x1230: M3; return sh_ops_imm(insn, H8_rotxl, aux_long, 1, false); // ROTXL.L
+    case 0x1270: M3; return sh_ops_imm(insn, H8_rotxl, aux_long, 2, true ); // ROTXL.L #2
 
-    case 0x1300: M1; return sh_ops_imm(H8_rotxr, aux_byte, 1, false); // ROTXR.B
-    case 0x1340: M1; return sh_ops_imm(H8_rotxr, aux_byte, 2, true ); // ROTXR.B #2
-    case 0x1310: M2; return sh_ops_imm(H8_rotxr, aux_word, 1, false); // ROTXR.W
-    case 0x1350: M2; return sh_ops_imm(H8_rotxr, aux_word, 2, true ); // ROTXR.W #2
-    case 0x1330: M3; return sh_ops_imm(H8_rotxr, aux_long, 1, false); // ROTXR.L
-    case 0x1370: M3; return sh_ops_imm(H8_rotxr, aux_long, 2, true ); // ROTXR.L #2
+    case 0x1300: M1; return sh_ops_imm(insn, H8_rotxr, aux_byte, 1, false); // ROTXR.B
+    case 0x1340: M1; return sh_ops_imm(insn, H8_rotxr, aux_byte, 2, true ); // ROTXR.B #2
+    case 0x1310: M2; return sh_ops_imm(insn, H8_rotxr, aux_word, 1, false); // ROTXR.W
+    case 0x1350: M2; return sh_ops_imm(insn, H8_rotxr, aux_word, 2, true ); // ROTXR.W #2
+    case 0x1330: M3; return sh_ops_imm(insn, H8_rotxr, aux_long, 1, false); // ROTXR.L
+    case 0x1370: M3; return sh_ops_imm(insn, H8_rotxr, aux_long, 2, true ); // ROTXR.L #2
 
-    case 0x17D0: M2; return sh_ops_imm(H8_exts, aux_word, 1, false); // EXTS.W
-    case 0x17F0: M3; return sh_ops_imm(H8_exts, aux_long, 1, false); // EXTS.L
-    case 0x17E0: M3; return sh_ops_imm(H8_exts, aux_long, 2, true ); // EXTS.L #2
+    case 0x17D0: M2; return sh_ops_imm(insn, H8_exts, aux_word, 1, false); // EXTS.W
+    case 0x17F0: M3; return sh_ops_imm(insn, H8_exts, aux_long, 1, false); // EXTS.L
+    case 0x17E0: M3; return sh_ops_imm(insn, H8_exts, aux_long, 2, true ); // EXTS.L #2
 
-    case 0x1750: M2; return sh_ops_imm(H8_extu, aux_word, 1, false); // EXTU.W
-    case 0x1770: M3; return sh_ops_imm(H8_extu, aux_long, 1, false); // EXTU.L
-    case 0x1760: M3; return sh_ops_imm(H8_extu, aux_long, 2, true ); // EXTU.L #2
+    case 0x1750: M2; return sh_ops_imm(insn, H8_extu, aux_word, 1, false); // EXTU.W
+    case 0x1770: M3; return sh_ops_imm(insn, H8_extu, aux_long, 1, false); // EXTU.L
+    case 0x1760: M3; return sh_ops_imm(insn, H8_extu, aux_long, 2, true ); // EXTU.L #2
 
-    case 0x1700: M1; cmd.itype = H8_not; cmd.auxpref = aux_byte; return true; // NOT.B
-    case 0x1710: M2; cmd.itype = H8_not; cmd.auxpref = aux_word; return true; // NOT.W
-    case 0x1730: M3; cmd.itype = H8_not; cmd.auxpref = aux_long; return true; // NOT.L
+    case 0x1700: M1; insn.itype = H8_not; insn.auxpref = aux_byte; return true; // NOT.B
+    case 0x1710: M2; insn.itype = H8_not; insn.auxpref = aux_word; return true; // NOT.W
+    case 0x1730: M3; insn.itype = H8_not; insn.auxpref = aux_long; return true; // NOT.L
 
-    case 0x1780: M1; cmd.itype = H8_neg; cmd.auxpref = aux_byte; return true; // NEG.B
-    case 0x1790: M2; cmd.itype = H8_neg; cmd.auxpref = aux_word; return true; // NEG.W
-    case 0x17B0: M3; cmd.itype = H8_neg; cmd.auxpref = aux_long; return true; // NEG.L
+    case 0x1780: M1; insn.itype = H8_neg; insn.auxpref = aux_byte; return true; // NEG.B
+    case 0x1790: M2; insn.itype = H8_neg; insn.auxpref = aux_word; return true; // NEG.W
+    case 0x17B0: M3; insn.itype = H8_neg; insn.auxpref = aux_long; return true; // NEG.L
   }
 
   return false;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_addcmp(uint8 bt)
+static bool insn_addcmp(insn_t &insn, uint8 bt)
 {
   switch ( bt >> 4 )
   {
-    case 0x1: cmd.itype = H8_add; break;
-    case 0x2: cmd.itype = H8_cmp; break;
-    case 0x3: cmd.itype = H8_sub; break;
-    case 0x4: cmd.itype = H8_or ; break;
-    case 0x5: cmd.itype = H8_xor; break;
-    case 0x6: cmd.itype = H8_and; break;
+    case 0x1: insn.itype = H8_add; break;
+    case 0x2: insn.itype = H8_cmp; break;
+    case 0x3: insn.itype = H8_sub; break;
+    case 0x4: insn.itype = H8_or ; break;
+    case 0x5: insn.itype = H8_xor; break;
+    case 0x6: insn.itype = H8_and; break;
     default: return false;
   }
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_addcmp_reg(uint8 byte2, uint8 byte3, bool swap, uint16 mask)
+static bool insn_addcmp_reg(insn_t &insn, uint8 byte2, uint8 byte3, bool swap, uint16 mask)
 {
   switch ( byte2 )
   {
-    case 0x08: M1; cmd.auxpref = aux_byte; cmd.itype = H8_add; break; // ADD.B
-    case 0x09: M2; cmd.auxpref = aux_word; cmd.itype = H8_add; break; // ADD.W
-    case 0x18: M1; cmd.auxpref = aux_byte; cmd.itype = H8_sub; break; // SUB.B
-    case 0x19: M2; cmd.auxpref = aux_word; cmd.itype = H8_sub; break; // SUB.W
-    case 0x1C: M1; cmd.auxpref = aux_byte; cmd.itype = H8_cmp; break; // CMP.B
-    case 0x1D: M2; cmd.auxpref = aux_word; cmd.itype = H8_cmp; break; // CMP.W
-    case 0x14: M1; cmd.auxpref = aux_byte; cmd.itype = H8_or ; break; // OR.B
-    case 0x64: M2; cmd.auxpref = aux_word; cmd.itype = H8_or ; break; // OR.W
-    case 0x15: M1; cmd.auxpref = aux_byte; cmd.itype = H8_xor; break; // XOR.B
-    case 0x65: M2; cmd.auxpref = aux_word; cmd.itype = H8_xor; break; // XOR.W
-    case 0x16: M1; cmd.auxpref = aux_byte; cmd.itype = H8_and; break; // AND.B
-    case 0x66: M2; cmd.auxpref = aux_word; cmd.itype = H8_and; break; // AND.W
+    case 0x08: M1; insn.auxpref = aux_byte; insn.itype = H8_add; break; // ADD.B
+    case 0x09: M2; insn.auxpref = aux_word; insn.itype = H8_add; break; // ADD.W
+    case 0x18: M1; insn.auxpref = aux_byte; insn.itype = H8_sub; break; // SUB.B
+    case 0x19: M2; insn.auxpref = aux_word; insn.itype = H8_sub; break; // SUB.W
+    case 0x1C: M1; insn.auxpref = aux_byte; insn.itype = H8_cmp; break; // CMP.B
+    case 0x1D: M2; insn.auxpref = aux_word; insn.itype = H8_cmp; break; // CMP.W
+    case 0x14: M1; insn.auxpref = aux_byte; insn.itype = H8_or ; break; // OR.B
+    case 0x64: M2; insn.auxpref = aux_word; insn.itype = H8_or ; break; // OR.W
+    case 0x15: M1; insn.auxpref = aux_byte; insn.itype = H8_xor; break; // XOR.B
+    case 0x65: M2; insn.auxpref = aux_word; insn.itype = H8_xor; break; // XOR.W
+    case 0x16: M1; insn.auxpref = aux_byte; insn.itype = H8_and; break; // AND.B
+    case 0x66: M2; insn.auxpref = aux_word; insn.itype = H8_and; break; // AND.W
     default: return false;
   }
 
   bool res;
   if ( swap )
   {
-    shift_Op1();
-    res = op_reg(cmd.Op1, byte3, rH | zL);
+    shift_Op1(insn);
+    res = op_reg(insn, insn.Op1, byte3, rH | zL);
   }
   else
   {
-    res = op_reg(cmd.Op2, byte3, rL | zH);
+    res = op_reg(insn, insn.Op2, byte3, rL | zH);
   }
   return res;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_addcmp_i3(uint8 byte2, uint8 byte3)
+static bool insn_addcmp_i3(insn_t &insn, uint8 byte2, uint8 byte3)
 {
-  if ( byte3 & 0x8F ) return 0;
+  if ( byte3 & 0x8F )
+    return 0;
 
   switch ( byte2 )
   {
-    case 0x0A: cmd.auxpref = aux_word; cmd.itype = H8_add; break; // ADD.W #xx:3
-    case 0x1A: cmd.auxpref = aux_word; cmd.itype = H8_sub; break; // SUB.W #xx:3
-    case 0x1F: cmd.auxpref = aux_word; cmd.itype = H8_cmp; break; // CMP.W #xx:3
+    case 0x0A: insn.auxpref = aux_word; insn.itype = H8_add; break; // ADD.W #xx:3
+    case 0x1A: insn.auxpref = aux_word; insn.itype = H8_sub; break; // SUB.W #xx:3
+    case 0x1F: insn.auxpref = aux_word; insn.itype = H8_cmp; break; // CMP.W #xx:3
     default: return false;
   }
 
-  shift_Op1();
-  op_imm_3(cmd.Op1, byte3);
+  shift_Op1(insn);
+  op_imm_3(insn.Op1, byte3);
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_addcmp_i8(uint8 byte4, uint8 byte5)
+static bool insn_addcmp_i8(insn_t &insn, uint8 byte4, uint8 byte5)
 {
   switch ( byte4 )
   {
-    case 0x80: cmd.itype = H8_add; break;
-    case 0xA0: cmd.itype = H8_cmp; break;
-    case 0xA1: cmd.itype = H8_sub; break;
-    case 0xC0: cmd.itype = H8_or;  break;
-    case 0xD0: cmd.itype = H8_xor; break;
-    case 0xE0: cmd.itype = H8_and; break;
+    case 0x80: insn.itype = H8_add; break;
+    case 0xA0: insn.itype = H8_cmp; break;
+    case 0xA1: insn.itype = H8_sub; break;
+    case 0xC0: insn.itype = H8_or;  break;
+    case 0xD0: insn.itype = H8_xor; break;
+    case 0xE0: insn.itype = H8_and; break;
     default: return false;
   }
 
-  shift_Op1();
+  shift_Op1(insn);
 
-  cmd.auxpref = aux_byte;
-  cmd.Op1.type  = o_imm;
-  cmd.Op1.dtyp  = dt_byte;
-  cmd.Op1.value = byte5;
+  insn.auxpref = aux_byte;
+  insn.Op1.type  = o_imm;
+  insn.Op1.dtype = dt_byte;
+  insn.Op1.value = byte5;
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_addx_reg(op_t &x, uint8 byte2, uint8 byte3, uint16 mask, ushort place)
+static bool insn_addx_reg(insn_t &insn, op_t &x, uint8 byte2, uint8 byte3, uint16 mask, ushort place)
 {
   switch ( byte2 )
   {
     case 0x0E: // ADDX.B
       M1;
-      cmd.auxpref = aux_byte;
-      cmd.itype = H8_addx;
+      insn.auxpref = aux_byte;
+      insn.itype = H8_addx;
       break;
     case 0x1E: // SUBX.B
       M1;
-      cmd.auxpref = aux_byte;
-      cmd.itype = H8_subx;
+      insn.auxpref = aux_byte;
+      insn.itype = H8_subx;
       break;
 
     case 0x09: // ADDX.W
       M2;
-      cmd.auxpref = aux_word;
-      cmd.itype = H8_addx;
+      insn.auxpref = aux_word;
+      insn.itype = H8_addx;
       break;
     case 0x19: // SUBX.W
       M2;
-      cmd.auxpref = aux_word;
-      cmd.itype = H8_subx;
+      insn.auxpref = aux_word;
+      insn.itype = H8_subx;
       break;
 
     case 0x0A: // ADDX.L
-      cmd.itype = H8_addx;
+      insn.itype = H8_addx;
       goto ADDXL;
     case 0x1A: // SUBX.L
-      cmd.itype = H8_subx;
+      insn.itype = H8_subx;
 ADDXL:
       M3;
-      if ( (byte3 & 0x80) != 0x80 ) return false;
+      if ( (byte3 & 0x80) != 0x80 )
+        return false;
       byte3 &= ~0x80;
-      cmd.auxpref = aux_long;
+      insn.auxpref = aux_long;
       break;
 
     default:
       return false;
   }
-  return op_reg(x, byte3, place);
+  return op_reg(insn, x, byte3, place);
 }
 
 //--------------------------------------------------------------------------
-static bool insn_addx_reg_Op1(uint8 byte2, uint8 byte3, uint16 mask, ushort place)
+static bool insn_addx_reg_Op1(insn_t &insn, uint8 byte2, uint8 byte3, uint16 mask, ushort place)
 {
   op_t op;
   memset(&op, 0, sizeof(op));
-  if ( !insn_addx_reg(op, byte2, byte3, mask, place ) ) return false;
-  shift_Op1();
-  cmd.Op1.type = op.type;
-  cmd.Op1.reg  = op.reg ;
-  cmd.Op1.dtyp = op.dtyp;
+  if ( !insn_addx_reg(insn, op, byte2, byte3, mask, place ) )
+    return false;
+  shift_Op1(insn);
+  insn.Op1.type = op.type;
+  insn.Op1.reg = op.reg;
+  insn.Op1.dtype = op.dtype;
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_addx_imm(op_t &x, uint8 byte2, uint8 byte3, uint16 mask, bool check_byte3)
+static bool insn_addx_imm(insn_t &insn, op_t &x, uint8 byte2, uint8 byte3, uint16 mask, bool check_byte3)
 {
-  if ( check_byte3 && (byte3 & 0x0F) != 0 ) return false;
+  if ( check_byte3 && (byte3 & 0x0F) != 0 )
+    return false;
 
   switch ( byte3 & 0xF0 )
   {
     case 0x10:
-      cmd.itype = H8_addx;
+      insn.itype = H8_addx;
       break;
     case 0x30:
-      cmd.itype = H8_subx;
+      insn.itype = H8_subx;
       break;
     default:
       return false;
@@ -3669,42 +3831,42 @@ static bool insn_addx_imm(op_t &x, uint8 byte2, uint8 byte3, uint16 mask, bool c
   {
     case 0x79:  // .W
       M2;
-      cmd.auxpref = aux_word;
-      return read_operand(x, i16);
+      insn.auxpref = aux_word;
+      return read_operand(insn, x, i16);
     case 0x7A:  // .L
       M3;
-      cmd.auxpref = aux_long;
-      return read_operand(x, i32);
+      insn.auxpref = aux_long;
+      return read_operand(insn, x, i32);
   }
   return false;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_addx_i8(uint8 byte4, uint8 byte5)
+static bool insn_addx_i8(insn_t &insn, uint8 byte4, uint8 byte5)
 {
   switch ( byte4 )
   {
     case 0x90:
-      cmd.itype = H8_addx;
+      insn.itype = H8_addx;
       break;
     case 0xB0:
-      cmd.itype = H8_subx;
+      insn.itype = H8_subx;
       break;
     default:
       return false;
   }
 
-  shift_Op1();
+  shift_Op1(insn);
 
-  cmd.auxpref = aux_byte;
-  cmd.Op1.type  = o_imm;
-  cmd.Op1.dtyp  = dt_byte;
-  cmd.Op1.value = byte5;
+  insn.auxpref = aux_byte;
+  insn.Op1.type  = o_imm;
+  insn.Op1.dtype = dt_byte;
+  insn.Op1.value = byte5;
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_bit_reg(uint8 byte2, uint8 byte3, uint16 mask)
+static bool insn_bit_reg(insn_t &insn, uint8 byte2, uint8 byte3, uint16 mask)
 {
   switch ( byte2 )
   {
@@ -3712,43 +3874,45 @@ static bool insn_bit_reg(uint8 byte2, uint8 byte3, uint16 mask)
       MB2;
       switch ( byte3 & 0x0F )
       {
-        case 0: cmd.itype = H8_bset;   break;
-        case 6: cmd.itype = H8_bsetne; break;
-        case 7: cmd.itype = H8_bseteq; break;
+        case 0: insn.itype = H8_bset;   break;
+        case 6: insn.itype = H8_bsetne; break;
+        case 7: insn.itype = H8_bseteq; break;
         default: return false;
       }
       break;
     case 0x61:
       MB2;
-      if ( byte3 & 0x0F ) return false;
-      cmd.itype = H8_bnot;
+      if ( byte3 & 0x0F )
+        return false;
+      insn.itype = H8_bnot;
       break;
     case 0x62:
       MB2;
       switch ( byte3 & 0x0F )
       {
-        case 0: cmd.itype = H8_bclr;   break;
-        case 6: cmd.itype = H8_bclrne; break;
-        case 7: cmd.itype = H8_bclreq; break;
+        case 0: insn.itype = H8_bclr;   break;
+        case 6: insn.itype = H8_bclrne; break;
+        case 7: insn.itype = H8_bclreq; break;
         default: return false;
       }
       break;
 
     case 0x63:
       MB1;
-      if ( byte3 & 0x0F ) return false;
-      cmd.itype = H8_btst;
+      if ( byte3 & 0x0F )
+        return false;
+      insn.itype = H8_btst;
       break;
     default:
       return false;
   }
 
-  shift_Op1();
-  return op_reg(cmd.Op1, byte3, rH, aux_byte);
+  shift_Op1(insn);
+  return op_reg(insn, insn.Op1, byte3, rH, aux_byte);
 }
 
 //--------------------------------------------------------------------------
-static bool insn_bit_i3(uint8 byte2, uint8 byte3, uint16 mask)
+static bool insn_bit_i3(insn_t &insn, uint8 byte2, uint8 byte3, uint16 mask)
 {
   switch ( byte2 )
   {
@@ -3756,10 +3920,10 @@ static bool insn_bit_i3(uint8 byte2, uint8 byte3, uint16 mask)
       MB2;
       switch ( byte3 & 0x8F )
       {
-        case 0x00: cmd.itype = H8_bst;   break;
-        case 0x07: cmd.itype = H8_bstz;  break;
-        case 0x80: cmd.itype = H8_bist;  break;
-        case 0x87: cmd.itype = H8_bistz; break;
+        case 0x00: insn.itype = H8_bst;   break;
+        case 0x07: insn.itype = H8_bstz;  break;
+        case 0x80: insn.itype = H8_bist;  break;
+        case 0x87: insn.itype = H8_bistz; break;
         default: return false;
       }
       break;
@@ -3767,146 +3931,159 @@ static bool insn_bit_i3(uint8 byte2, uint8 byte3, uint16 mask)
       MB2;
       switch ( byte3 & 0x8F )
       {
-        case 0x00: cmd.itype = H8_bset;   break;
-        case 0x06: cmd.itype = H8_bsetne; break;
-        case 0x07: cmd.itype = H8_bseteq; break;
+        case 0x00: insn.itype = H8_bset;   break;
+        case 0x06: insn.itype = H8_bsetne; break;
+        case 0x07: insn.itype = H8_bseteq; break;
         default: return false;
       }
       break;
     case 0x71:
       MB2;
-      if ( byte3 & 0x8F ) return false;
-      cmd.itype = H8_bnot;
+      if ( byte3 & 0x8F )
+        return false;
+      insn.itype = H8_bnot;
       break;
     case 0x72:
       MB2;
       switch ( byte3 & 0x8F )
       {
-        case 0x00: cmd.itype = H8_bclr;   break;
-        case 0x06: cmd.itype = H8_bclrne; break;
-        case 0x07: cmd.itype = H8_bclreq; break;
+        case 0x00: insn.itype = H8_bclr;   break;
+        case 0x06: insn.itype = H8_bclrne; break;
+        case 0x07: insn.itype = H8_bclreq; break;
         default: return false;
       }
       break;
 
     case 0x73:
       MB1;
-      if ( byte3 & 0x8F ) return false;
-      cmd.itype = H8_btst;
+      if ( byte3 & 0x8F )
+        return false;
+      insn.itype = H8_btst;
       break;
     case 0x74:
       MB1;
-      if ( byte3 & 0x0F ) return false;
-      cmd.itype = byte3 & 0x80 ? H8_bior  : H8_bor;
+      if ( byte3 & 0x0F )
+        return false;
+      insn.itype = byte3 & 0x80 ? H8_bior : H8_bor;
       break;
     case 0x75:
       MB1;
-      if ( byte3 & 0x0F ) return false;
-      cmd.itype = byte3 & 0x80 ? H8_bixor : H8_bxor;
+      if ( byte3 & 0x0F )
+        return false;
+      insn.itype = byte3 & 0x80 ? H8_bixor : H8_bxor;
       break;
     case 0x76:
       MB1;
-      if ( byte3 & 0x0F ) return false;
-      cmd.itype = byte3 & 0x80 ? H8_biand : H8_band;
+      if ( byte3 & 0x0F )
+        return false;
+      insn.itype = byte3 & 0x80 ? H8_biand : H8_band;
       break;
     case 0x77:
       MB1;
-      if ( byte3 & 0x0F ) return false;
-      cmd.itype = byte3 & 0x80 ? H8_bild  : H8_bld;
+      if ( byte3 & 0x0F )
+        return false;
+      insn.itype = byte3 & 0x80 ? H8_bild : H8_bld;
       break;
     default:
       return false;
   }
-  shift_Op1();
-  op_imm_3(cmd.Op1, byte3);
+  shift_Op1(insn);
+  op_imm_3(insn.Op1, byte3);
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool insn_bit(uint8 byte2, uint8 byte3, uint16 mask)
+static bool insn_bit(insn_t &insn, uint8 byte2, uint8 byte3, uint16 mask)
 {
-  return insn_bit_reg(byte2, byte3, mask) || insn_bit_i3(byte2, byte3, mask);
+  return insn_bit_reg(insn, byte2, byte3, mask)
+      || insn_bit_i3(insn, byte2, byte3, mask);
 }
 
 //--------------------------------------------------------------------------
-static bool insn_bra(uint8 byte2, uint8 byte3)
+static bool insn_bra(insn_t &insn, uint8 byte2, uint8 byte3)
 {
   if ( (byte2 & 0xF0) == 0x40 )
   {
-    if ( byte3 & 1 ) return 0;
-    cmd.itype = byte2 & 8 ? H8_brabs : H8_brabc;
-    shift_Op1();
-    op_imm_8(cmd.Op1, byte2 & 7);
-    cmd.Op3.type = o_near;
-    cmd.Op3.dtyp = dt_code;
-    cmd.Op3.offb = (uchar)cmd.size - 1;
+    if ( byte3 & 1 )
+      return 0;
+    insn.itype = byte2 & 8 ? H8_brabs : H8_brabc;
+    shift_Op1(insn);
+    op_imm_8(insn.Op1, byte2 & 7);
+    insn.Op3.type = o_near;
+    insn.Op3.dtype = dt_code;
+    insn.Op3.offb = (uchar)insn.size - 1;
     signed char disp = byte3;
-    cmd.Op3.addr = cmd.ip + cmd.size + disp;
-    cmd.Op3.addr &= ~1;
-    return cmd.size != 0;
+    insn.Op3.addr = insn.ip + insn.size + disp;
+    insn.Op3.addr &= ~1;
+    return insn.size != 0;
   }
 
-  if      ( byte2 == 0x58 )
-    cmd.itype = byte3 & 0x80 ? H8_brabs : H8_brabc;
+  if ( byte2 == 0x58 )
+    insn.itype = byte3 & 0x80 ? H8_brabs : H8_brabc;
   else if ( byte2 == 0x5C )
-    cmd.itype = byte3 & 0x80 ? H8_bsrbs : H8_bsrbc;
-  else return false;
+    insn.itype = byte3 & 0x80 ? H8_bsrbs : H8_bsrbc;
+  else
+    return false;
 
-  if ( byte3 & 0x0F ) return false;
-  shift_Op1();
-  op_imm_8(cmd.Op1, (byte3 >> 4) & 7);
-  return read_operand(cmd.Op3, j16);
+  if ( byte3 & 0x0F )
+    return false;
+  shift_Op1(insn);
+  op_imm_8(insn.Op1, (byte3 >> 4) & 7);
+  return read_operand(insn, insn.Op3, j16);
 }
 
 //--------------------------------------------------------------------------
-static bool insn_bfld_bfst(uint8 byte2, uint8 byte3, bool is_bfld)
+static bool insn_bfld_bfst(insn_t &insn, uint8 byte2, uint8 byte3, bool is_bfld)
 {
-  if ( (byte2 & 0xF0) != 0xF0 ) return false;
+  if ( (byte2 & 0xF0) != 0xF0 )
+    return false;
 
   if ( is_bfld )
   {
-    cmd.itype = H8_bfld;
-    shift_Op1();
-    op_imm_8(cmd.Op1, byte3);
+    insn.itype = H8_bfld;
+    shift_Op1(insn);
+    op_imm_8(insn.Op1, byte3);
     code = byte2;
-    return read_operand(cmd.Op3, rLB);
+    return read_operand(insn, insn.Op3, rLB);
   }
   else
   {
-    cmd.itype = H8_bfst;
-    cmd.Op3 = cmd.Op1; cmd.Op3.n = 2;
+    insn.itype = H8_bfst;
+    insn.Op3 = insn.Op1; insn.Op3.n = 2;
     code = byte2;
-    op_imm_8(cmd.Op2, byte3);
-    return read_operand(cmd.Op1, rLB);
+    op_imm_8(insn.Op2, byte3);
+    return read_operand(insn, insn.Op1, rLB);
   }
 }
 
 //--------------------------------------------------------------------------
-static bool use_leaf_map(const map_t* m, uint8 idx)
+static bool use_leaf_map(insn_t &insn, const map_t *m, uint8 idx)
 {
   m += idx;
   if ( (m->proc & ptype) == 0
     || m->itype == H8_null
-    || m->itype >= H8_last ) return false;
-
-  cmd.itype = m->itype;
+    || m->itype >= H8_last )
+  {
+    return false;
+  }
+  insn.itype = m->itype;
   if ( (m->op1 & X) == 0 ) switch ( m->op1 & CMD_SIZE )
   {
-    case B: cmd.auxpref = aux_byte; break;
-    case W: cmd.auxpref = aux_word; break;
-    case L: cmd.auxpref = aux_long; break;
-    case V: cmd.auxpref = advanced() ? aux_long : aux_word; break;
+    case B: insn.auxpref = aux_byte; break;
+    case W: insn.auxpref = aux_word; break;
+    case L: insn.auxpref = aux_long; break;
+    case V: insn.auxpref = advanced() ? aux_long : aux_word; break;
   }
 
-  return read_operand(cmd.Op1, m->op1)
-      && read_operand(cmd.Op2, m->op2);
+  return read_operand(insn, insn.Op1, m->op1)
+      && read_operand(insn, insn.Op2, m->op2);
 }
 
 //--------------------------------------------------------------------------
-static bool op_from_byte(op_t &x, uint8 byte2)
+static bool op_from_byte(insn_t &insn, op_t &x, uint8 byte2)
 {
 #ifndef NDEBUG
-  QASSERT(10001, cmd.auxpref != aux_none);
+  QASSERT(10001, insn.auxpref != aux_none);
 #endif
 
   uint8 hiNi = hi_ni(byte2);
@@ -3918,59 +4095,63 @@ static bool op_from_byte(op_t &x, uint8 byte2)
     case 0x1:
     case 0x2:
     case 0x3:
-      return op_phrase_displ2(x, loNi, hiNi);
+      return op_phrase_displ2(insn, x, loNi, hiNi);
     case 0x4:
-      return loNi == 0 ? read_operand(x, aa16) :
-             loNi == 8 ? read_operand(x, aa32) : false;
+      return loNi == 0 ? read_operand(insn, x, aa16)
+           : loNi == 8 ? read_operand(insn, x, aa32) : false;
     case 0x8:
     case 0x9:
     case 0xA:
     case 0xB:
-      return op_phrase_prepost(x, loNi, hiNi);
+      return op_phrase_prepost(insn, x, loNi, hiNi);
     case 0xC:
     case 0xD:
     case 0xE:
     case 0xF:
-      return op_displ_regidx(x, hiNi, (loNi & 8) != 0, loNi & ~8);
+      return op_displ_regidx(insn, x, hiNi, (loNi & 8) != 0, loNi & ~8);
   }
   return false;
 }
 
 //--------------------------------------------------------------------------
-static bool read_1st_op(uint8 byte2, uint8 byte3_hiNi)
+static bool read_1st_op(insn_t &insn, uint8 byte2, uint8 byte3_hiNi)
 {
   uint8 code_2bits = code & 3;
   switch ( byte2 )
   {
     case 0x68:
-      return 0x71 <= code && code <= 0x77 ?
-        op_phrase_displ2(cmd.Op1, byte3_hiNi, code_2bits) : false;
+      return 0x71 <= code && code <= 0x77
+           ? op_phrase_displ2(insn, insn.Op1, byte3_hiNi, code_2bits) : false;
     case 0x69:
-      return op_phrase_displ2(cmd.Op1, byte3_hiNi, code_2bits);
+      return op_phrase_displ2(insn, insn.Op1, byte3_hiNi, code_2bits);
     case 0x6B:
-      if ( code_2bits != 0 ) return false;
-      if ( !(byte3_hiNi == 0 || byte3_hiNi == 2) ) return false;
-      return read_operand(cmd.Op1, byte3_hiNi == 0 ? aa16 | L : aa32 | L);
+      if ( code_2bits != 0 )
+        return false;
+      if ( !(byte3_hiNi == 0 || byte3_hiNi == 2) )
+        return false;
+      return read_operand(insn, insn.Op1, byte3_hiNi == 0 ? aa16 | L : aa32 | L);
     case 0x6C:
-      if ( (code & 0xF0) != 0x70 ) return false;
+      if ( (code & 0xF0) != 0x70 )
+        return false;
       // no break;
     case 0x6D:
-      return op_phrase_prepost(cmd.Op1, byte3_hiNi, code_2bits);
+      return op_phrase_prepost(insn, insn.Op1, byte3_hiNi, code_2bits);
     case 0x6E:
-      if ( (code & 0xF0) != 0x70 ) return false;
+      if ( (code & 0xF0) != 0x70 )
+        return false;
       // no break;
     case 0x6F:
-      return op_displ_regidx(cmd.Op1, code, false, byte3_hiNi);
+      return op_displ_regidx(insn, insn.Op1, code, false, byte3_hiNi);
   }
   return false;
 }
 
 //--------------------------------------------------------------------------
-static bool op_reg(op_t &x, uint8 reg, ushort place, uint16 aux_assumed)
+static bool op_reg(const insn_t &insn, op_t &x, uint8 reg, ushort place, uint16 aux_assumed)
 {
 #ifndef NDEBUG
   QASSERT(10001, (place & OPTYPE) == rH || (place & OPTYPE) == rL);
-  QASSERT(10002, cmd.auxpref != aux_none || aux_assumed != aux_none);
+  QASSERT(10002, insn.auxpref != aux_none || aux_assumed != aux_none);
 #endif
 
   static const regnum_t base_reg[] = { regnum_t(-1), R0H, R0, ER0 };
@@ -3984,79 +4165,82 @@ static bool op_reg(op_t &x, uint8 reg, ushort place, uint16 aux_assumed)
   if ( (place & OPTYPE) == rH )
     reg >>= 4;
   reg &= 0x0F;
-  if ( cmd.auxpref == aux_long && reg & 8 ) return false;
+  if ( insn.auxpref == aux_long && reg & 8 )
+    return false;
 
   x.type = o_reg;
-  if ( cmd.auxpref != aux_none )
+  if ( insn.auxpref != aux_none )
   {
-    x.reg  = base_reg[cmd.auxpref] + reg;
-    x.dtyp = dtyp_by_auxpref();
+    x.reg = base_reg[insn.auxpref] + reg;
+    x.dtype = dtype_by_auxpref(insn);
   }
   else
   {
     x.reg = base_reg[aux_assumed] + reg;
-    x.dtyp = aux_assumed - 1;
+    x.dtype = aux_assumed - 1;
   }
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool op_phrase(op_t &x, uint8 reg, int pht, char dtyp)
+static bool op_phrase(const insn_t &insn, op_t &x, uint8 reg, int pht, op_dtype_t dtype)
 {
 #ifndef NDEBUG
-  QASSERT(10003, cmd.auxpref != aux_none || dtyp != aux_byte);
+  QASSERT(10003, insn.auxpref != aux_none || dtype != aux_byte);
 #endif
-  if ( reg & 8 ) return false;
+  if ( reg & 8 )
+   return false;
   x.type = o_phrase;
-  x.dtyp = cmd.auxpref != aux_none ? dtyp_by_auxpref() : dtyp;
-  x.reg  = r0() + reg;
+  x.dtype = insn.auxpref != aux_none ? dtype_by_auxpref(insn) : dtype;
+  x.reg = r0() + reg;
   x.phtype = pht;
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool op_phrase_prepost(op_t &x, uint8 reg, uint8 selector)
+static bool op_phrase_prepost(const insn_t &insn, op_t &x, uint8 reg, uint8 selector)
 {
   selector &= 3;
-  return op_phrase(x, reg,
-                   selector == 0 ? ph_post_inc :
-                   selector == 1 ? ph_pre_inc  :
-                   selector == 2 ? ph_post_dec : ph_pre_dec);
+  op_dtype_t dtyp = selector == 0 ? ph_post_inc
+    : selector == 1 ? ph_pre_inc
+    : selector == 2 ? ph_post_dec : ph_pre_dec;
+  return op_phrase(insn, x, reg, dtyp);
 }
 
 //--------------------------------------------------------------------------
-static bool op_phrase_displ2(op_t &x, uint8 reg, uint8 displ)
+static bool op_phrase_displ2(const insn_t &insn, op_t &x, uint8 reg, uint8 displ)
 {
 #ifndef NDEBUG
-  QASSERT(10004, cmd.auxpref != aux_none);
+  QASSERT(10004, insn.auxpref != aux_none);
 #endif
-  if ( reg & 8 ) return false;
+  if ( reg & 8 )
+    return false;
   if ( displ == 0 )
   {
-    return op_phrase(x, reg, ph_normal);
+    return op_phrase(insn, x, reg, ph_normal);
   }
   x.type = o_displ;
-  x.dtyp = dtyp_by_auxpref();
+  x.dtype = dtype_by_auxpref(insn);
   x.reg  = ER0 + reg;
-  x.addr = cmd.auxpref == aux_long ? displ << 2 :
-           cmd.auxpref == aux_word ? displ << 1 : displ;
+  x.addr = insn.auxpref == aux_long ? displ << 2 :
+           insn.auxpref == aux_word ? displ << 1 : displ;
   x.szfl |= disp_2;
   return true;
 }
 
 //--------------------------------------------------------------------------
-static void op_imm(op_t &x, uval_t val)
+static void op_imm(const insn_t &insn, op_t &x, uval_t val)
 {
   x.type = o_imm;
   x.value = val;
-  x.dtyp = dtyp_by_auxpref();
+  x.dtype = dtype_by_auxpref(insn);
 }
 
 //--------------------------------------------------------------------------
 static void op_imm_8(op_t &x, uint8 val)
 {
   x.type = o_imm;
-  x.dtyp = dt_byte;
+  x.dtype = dt_byte;
   x.value = val;
 }
 
@@ -4064,14 +4248,15 @@ static void op_imm_8(op_t &x, uint8 val)
 static void op_imm_3(op_t &x, uint8 val)
 {
   x.type = o_imm;
-  x.dtyp = dt_byte;
+  x.dtype = dt_byte;
   x.value = (val >> 4) & 7;
 }
 
 //--------------------------------------------------------------------------
-static bool op_displ_regidx(op_t &x, uint8 selector, bool is_32, uint8 reg)
+static bool op_displ_regidx(insn_t &insn, op_t &x, uint8 selector, bool is_32, uint8 reg)
 {
-  if ( reg & 8 ) return false;
+  if ( reg & 8 )
+    return false;
 
   regnum_t r;
   switch ( selector & 3 )
@@ -4095,17 +4280,17 @@ static bool op_displ_regidx(op_t &x, uint8 selector, bool is_32, uint8 reg)
       x.szfl |= idx_long;
       break;
   }
-  (is_32 ? opdsp32 : opdsp16)(x, dtyp_by_auxpref());
+  (is_32 ? opdsp32 : opdsp16)(insn, x, dtype_by_auxpref(insn));
   x.reg  = r + reg;
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool op_aa_8(op_t &x, uint8 val, char dtyp)
+static bool op_aa_8(const insn_t &insn, op_t &x, uint8 val, op_dtype_t dtyp)
 {
   x.type = o_mem;
-  x.offb = (uchar)cmd.size - sizeof(val);
-  x.dtyp = dtyp;
+  x.offb = (uchar)insn.size - sizeof(val);
+  x.dtype = dtyp;
   x.addr = val;
   x.memtype = mem_sbr;
   return true;
@@ -4115,11 +4300,11 @@ static bool op_aa_8(op_t &x, uint8 val, char dtyp)
 static bool op_reglist(op_t &x, uint8 reg, uint8 delta, bool is_inc)
 {
   x.type  = o_reglist;
-  x.dtyp  = dt_dword;
+  x.dtype = dt_dword;
   x.nregs = delta + 1;
   if ( is_inc && reg >= delta )
     x.reg = ER0 + reg - delta;
-  else if (!is_inc && reg + delta <= 7)
+  else if ( !is_inc && reg + delta <= 7 )
     x.reg = ER0 + reg;
   else
     return false;

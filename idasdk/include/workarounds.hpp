@@ -26,7 +26,7 @@ function anywhere in the standard libraries), so preventing the linker from
 using the standard nothrow.obj at all has the effect of removing this ugly
 export altogether.
 */
-#endif (_MSC_VER < 1700)
+#endif // (_MSC_VER < 1700)
 #endif // _MSC_VER
 
 #ifdef __LINUX__

@@ -11,12 +11,11 @@
 #include "../idaidp.hpp"
 #include <idd.hpp>
 #include <dbg.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <typeinf.hpp>
-#include "ins.hpp"
-#include "arm_arch.hpp"
 
-#pragma pack(push, 4)
+#include <set>
+
 //---------------------------------
 // ARM cmd.auxpref bits
 #define aux_cond        0x0001  // set condition codes (S postfix is required)
@@ -45,8 +44,12 @@ inline bool is_gas(void)
   return (ash.uflag & UAS_GNU) != 0;
 }
 
+struct arm_arch_t;
+extern arm_arch_t arch;
+
 //---------------------------------
 
+#define dt_half         0x7f  // special value for op_t.dtype for half-precision registers
 #define it_mask         insnpref        // mask field of IT-insn
 
 // data type of NEON and vector VFP instructions (for the suffix)
@@ -76,19 +79,71 @@ enum neon_datatype_t ENUM_SIZE(char)
   DT_F64,
 };
 
+//-------------------------------------------------------------------------
 // we will store the suffix in insnpref, since it's used only by the IT instruction
 // if we need two suffixes (VCVTxx), we'll store the second one in Op1.specflag1
-inline void set_neon_suffix(neon_datatype_t suf1, neon_datatype_t suf2 = DT_NONE)
+inline void set_neon_suffix(insn_t &insn, neon_datatype_t suf1, neon_datatype_t suf2 = DT_NONE)
 {
   if ( suf1 != DT_NONE )
   {
-    cmd.insnpref = char(0x80 | suf1);
+    insn.insnpref = char(0x80 | suf1);
     if ( suf2 != DT_NONE )
-      cmd.Op1.specflag1 = suf2;
+      insn.Op1.specflag1 = suf2;
   }
 }
-inline neon_datatype_t get_neon_suffix()  { if ( cmd.insnpref & 0x80 ) return neon_datatype_t(cmd.insnpref & 0x7F); else return DT_NONE; }
-inline neon_datatype_t get_neon_suffix2() { return neon_datatype_t(cmd.Op1.specflag1); }
+
+//-------------------------------------------------------------------------
+inline neon_datatype_t get_neon_suffix(const insn_t &insn)
+{
+  if ( insn.insnpref & 0x80 )
+    return neon_datatype_t(insn.insnpref & 0x7F);
+  else
+    return DT_NONE;
+}
+
+//-------------------------------------------------------------------------
+inline neon_datatype_t get_neon_suffix2(const insn_t &insn)
+{
+  return neon_datatype_t(insn.Op1.specflag1);
+}
+
+//----------------------------------------------------------------------
+inline char dtype_from_dt(neon_datatype_t dt)
+{
+  switch ( dt )
+  {
+    case DT_8:
+    case DT_S8:
+    case DT_U8:
+    case DT_I8:
+    case DT_P8:
+      return dt_byte;
+    case DT_16:
+    case DT_S16:
+    case DT_U16:
+    case DT_I16:
+    case DT_P16:
+      return dt_word;
+    case DT_32:
+    case DT_S32:
+    case DT_U32:
+    case DT_I32:
+      return dt_dword;
+    case DT_64:
+    case DT_S64:
+    case DT_U64:
+    case DT_I64:
+    case DT_NONE:
+    default:
+      return dt_qword;
+    case DT_F16:
+      return dt_half;
+    case DT_F32:
+      return dt_float;
+    case DT_F64:
+      return dt_double;
+  }
+}
 
 // Operand types:
 #define o_shreg         o_idpspec0         // Shifted register
@@ -105,7 +160,7 @@ inline neon_datatype_t get_neon_suffix2() { return neon_datatype_t(cmd.Op1.specf
                                            // minimal alignment is 16 (a==1)
 
 #define simd_sz         specflag1          // o_reg: SIMD vector element size
-                                           // 0=scalar, 1=8 bits, 2=16 bits, 3=32 bits, 4=64 bits)
+                                           // 0=scalar, 1=8 bits, 2=16 bits, 3=32 bits, 4=64 bits, 5=128 bits)
                                            // number of lanes is derived from the vector size (dtype)
 #define simd_idx        specflag3          // o_reg: SIMD scalar index plus 1 (Vn.H[i])
 
@@ -176,7 +231,7 @@ enum shift_t
   SXTX,
 };
 
-#define dt_half         0x7f  // special value for op_t.dtyp for half-precision registers
+#define dt_half         0x7f  // special value for op_t.dtype for half-precision registers
 //------------------------------------------------------------------
 // Bit definitions. Just for convenience:
 #define BIT0    0x00000001L
@@ -247,6 +302,8 @@ enum shift_t
 // match has actual values for important bits
 // e.g. : xx0x0 means mask is 11010 and match is aa0a0
 #define MATCH(value, mask, match) ( ((value) & (mask)) == (match) )
+
+int bitcount(uint32 x);
 
 //------------------------------------------------------------------
 // The condition code of instruction will be kept in cmd.segpref:
@@ -319,7 +376,7 @@ enum RegNo
 
 // we use specflag1 to store register values
 // so they must fit into a byte
-CASSERT(ARM_MAXREG<0x100);
+CASSERT(ARM_MAXREG < 0x100);
 
 extern const char *arm_regnames[];
 
@@ -352,8 +409,8 @@ inline int getreg(const op_t &x)
 {
   return x.type == o_reg
       || x.type == o_shreg
-       && x.shtype == LSL
-       && x.shcnt == 0 ? x.reg : -1;
+      && x.shtype == LSL
+      && x.shcnt == 0 ? x.reg : -1;
 }
 
 inline bool isreg(const op_t &x, int reg)
@@ -363,18 +420,113 @@ inline bool isreg(const op_t &x, int reg)
 
 // is it simply [Rx, Ry]?
 // no shift, no negation, no post-index, no writeback
-inline bool is_simple_phrase(const op_t &x)
+inline bool is_simple_phrase(const insn_t &insn, const op_t &x)
 {
   return x.type == o_phrase
       && x.shtype == LSL
       && x.shcnt == 0
-      && (cmd.auxpref & (aux_negoff|aux_postidx|aux_wback)) == 0;
+      && (insn.auxpref & (aux_negoff|aux_postidx|aux_wback)) == 0;
 }
 
 inline bool issp(const op_t &x) { return isreg(x, SP) || isreg(x, XSP); }
 inline bool issp(int reg) { return reg == SP || reg == XSP; }
 
 #define is_a64reg(reg) ((reg) >= X0 && (reg) < ARM_MAXREG)
+
+inline bool is_gr(int reg)
+{
+  return reg >= R0 && reg <= R14
+      || reg >= X0 && reg <= X30;
+}
+
+// is callee-saved (preserved) register? (according to Procedure Call Standard)
+/* Procedure Call Standard for the ARM Architecture:
+5.1.1. A subroutine must preserve the contents of the registers r4-r8,
+r10, r11 and SP (and r9 in PCS variants that designate r9 as v6).
+Procedure Call Standard for the ARM 64-bit Architecture:
+5.1.1. A subroutine invocation must preserve the contents of the
+registers r19-r29 and SP.
+*/
+inline bool is_callee_saved_gr(int reg)
+{
+  return reg >= R4  && reg <= R11
+      || reg >= X19 && reg <= X29;
+}
+/* Procedure Call Standard for the ARM Architecture:
+5.1.2.1 Registers s16-s31 (d8-d15, q4-q7) must be preserved across
+subroutine calls; registers s0-s15 (d0-d7, q0-q3) do not need to be
+preserved (and can be used for passing arguments or returning results in
+standard procedure-call variants)
+Procedure Call Standard for the ARM 64-bit Architecture:
+5.1.2. Registers v8-v15 must be preserved by a callee across subroutine
+calls.
+*/
+inline bool is_callee_saved_vr(int reg)
+{
+  return reg >= S16 && reg <= S31
+      || reg >= D8  && reg <= D15
+      || reg >= Q4  && reg <= Q7
+      || reg >= V8  && reg <= V15;
+}
+
+//----------------------------------------------------------------------
+// get full value of the immediate operand
+// (performing optional shift operator)
+inline uval_t get_immfull(const op_t &x)
+{
+  // FIXME support other types of shift
+  return x.type != o_imm  ? 0
+       : x.value == 0     ? 0
+       : x.ishcnt == 0    ? x.value
+       : x.ishtype == LSL ? x.value << x.ishcnt
+       : x.ishtype == MSL ? ((x.value + 1) << x.ishcnt) - 1
+       :                    0;
+}
+//----------------------------------------------------------------------
+// check if 'reg' is present in 'reglist' (only ARM32 GPRs supported!)
+inline bool in_reglist(uint32 reglist, int reg)
+{
+  return (reg <= R15) && (reglist & (1u << reg)) != 0;
+}
+//----------------------------------------------------------------------
+// calculate the total number of bytes represented by a register list
+inline uval_t calc_reglist_size(uint32 reglist)
+{
+  return uval_t(4) * bitcount(reglist & 0xFFFF);
+}
+
+//----------------------------------------------------------------------
+// Is register 'reg' spoiled by the current instruction?
+// If flag <use_pcs> is set then it is assumed that call instruction
+// doesn't spoil callee-saved registers (according to Procedure Call
+// Standard the are r4-r8, r10, r11, SP for AArch32, r19-r29, SP for
+// AArch64). If this flag is not set then this function assumes that
+// call instruction spoils LR and r0 (why?).
+bool spoils(const insn_t &insn, int reg, bool use_pcs = false);
+// If flag <use_pcs> is set then it is assumed that call instruction
+// doesn't spoil callee-saved registers else this function assumes that
+// call instruction spoils everything (why?).
+int  spoils(const insn_t &insn, const uint32 *regs, int n, bool use_pcs = false);
+// is PSR (Program Status Register) spoiled by the instruction ?
+bool spoils_psr(const insn_t &insn);
+
+//----------------------------------------------------------------------
+// find out pre- or post-indexed addressing mode of given operand <op>;
+// if <delta> arg is specified than we check o_displ operand only and
+// return register offset in <delta>;
+// returns base register or -1
+inline int get_pre_post_delta(const insn_t &insn, const op_t &op, sval_t *delta = NULL)
+{
+  if ( (insn.auxpref & (aux_wback | aux_postidx)) != 0
+    && (op.type == o_displ && op.addr != 0
+     || op.type == o_phrase && delta == NULL) )
+  {
+    if ( delta )
+      *delta = op.addr;
+    return op.reg;
+  }
+  return -1;
+}
 
 //------------------------------------------------------------------
 // PSR format:
@@ -459,64 +611,52 @@ enum cond_t
   cLE,          // 1101 Z | (N & !V) | (!N & V)  Less than or equal
   cAL,          // 1110 Always
   cNV,          // 1111 Never
+  cLAST
 };
+inline cond_t invert_cond(cond_t cond)
+{
+  if ( cond < cLAST )
+    return cond_t(cond ^ 1);
+  return cLAST;
+}
 
 //------------------------------------------------------------------
 extern netnode helper;      // altval(-1): idp flags
-                            // altval(ea): callee address for indirect calls
+#define CALLEE_TAG   'A'    // altval(ea): callee address for indirect calls
 #define DXREF_TAG    'd'    // altval(ea): resolved address for complex calculation (e.g. ADD R1, PC)
 #define DELAY_TAG    'D'    // altval(ea) == 1: analyze ea for a possible offset
 #define ITBLOCK_TAG  'I'    // altval(ea): packed it_info_t
-#define FBASE_REG    'R'    // altval(ea): fbase register for function at ea
-#define FBASE_VAL    'B'    // altval(ea): fbase value (usually GOT address) for function at ea
-#define FPTR_REG     'F'    // altval(ea): frame pointer register (plus 1) for function at ea
-#define FPTR_EA      'f'    // altval(ea): address where the fp register is set
+#define FPTR_REG_TAG 'F'    // supval(ea): frame pointer info fptr_info_t
 #define FIXED_STKPNT 'x'    // charval(ea): may not modify sp value at this address
 #define PUSHINFO_TAG 's'    // blob(ea): packed pushinfo_t
 #define ARCHINFO_TAG 'a'    // blob(0): packed arm_arch_t
 
-// fbase reg is a register used to access GOT in the current function
-// it is usually R10
-inline bool get_fbase_reg(ea_t ea, ushort *reg, ea_t *value)
-{
-  uval_t v = helper.altval(ea, FBASE_VAL);
-  if ( v == 0 )
-    return false;
-  *reg = (ushort)helper.altval(ea, FBASE_REG);
-  *value = v;
-  return true;
-}
+inline void set_callee(ea_t ea, ea_t callee) { helper.easet(ea, callee, CALLEE_TAG); }
+inline ea_t get_callee(ea_t ea) { return helper.eaget(ea, CALLEE_TAG); }
+inline void del_callee(ea_t ea) { helper.eadel(ea, CALLEE_TAG); }
 
-inline void set_fbase_reg(ea_t ea, ushort reg, ea_t value)
-{
-  helper.altset(ea, reg, FBASE_REG);
-  helper.altset(ea, value, FBASE_VAL);
-}
+inline void set_dxref(ea_t ea, ea_t dxref) { helper.easet(ea, dxref, DXREF_TAG); }
+inline ea_t get_dxref(ea_t ea) { return helper.eaget(ea, DXREF_TAG); }
+inline void del_dxref(ea_t ea) { helper.eadel(ea, DXREF_TAG); }
 
-// return register that is used as frame pointer for current function
-// usually it's R11 or R7
+struct fptr_info_t
+{
+  ea_t addr;   // address where the fp register is set
+  ushort reg;  // frame pointer for current function (usually R11 or R7)
+};
+
+void set_fptr_info(ea_t func_ea, ushort reg, ea_t addr);
+bool get_fptr_info(fptr_info_t *fpi, ea_t func_ea);
 inline ushort get_fptr_reg(ea_t func_ea)
 {
-  return ushort(helper.altval(func_ea, FPTR_REG) - 1);
+  fptr_info_t fpi;
+  return get_fptr_info(&fpi, func_ea) ? fpi.reg : ushort(-1);
 }
 
-inline void set_fptr_reg(ea_t func_ea, ushort reg)
-{
-  helper.altset(func_ea, reg+1, FPTR_REG);
-}
-
-// The address where the frame pointer register is set
 inline ea_t get_fp_ea(ea_t func_ea)
 {
-  sval_t off = helper.altval(func_ea, FPTR_EA) - 1;
-  if ( off != BADADDR )
-    off += func_ea;
-  return off;
-}
-
-inline void set_fp_ea(ea_t func_ea, ea_t insn_ea)
-{
-  helper.altset(func_ea, insn_ea+1-func_ea, FPTR_EA);
+  fptr_info_t fpi;
+  return get_fptr_info(&fpi, func_ea) ? fpi.addr : BADADDR;
 }
 
 extern bool file_loaded;
@@ -558,9 +698,9 @@ inline bool may_set_carry(ushort itype)
 
 //----------------------------------------------------------------------
 // if true, then ASPR.C is set to bit 31 of the immediate constant
-inline bool imm_sets_carry(const insn_t &ins)
+inline bool imm_sets_carry(const insn_t &insn)
 {
-  switch ( ins.itype )
+  switch ( insn.itype )
   {
     case ARM_and:
     case ARM_bic:
@@ -570,30 +710,35 @@ inline bool imm_sets_carry(const insn_t &ins)
     case ARM_orn:
     case ARM_orr:
       // flags are updated if S suffix is used
-      return (ins.auxpref & (aux_immcarry|aux_cond)) == (aux_immcarry|aux_cond);
+      return (insn.auxpref & (aux_immcarry|aux_cond)) == (aux_immcarry|aux_cond);
     case ARM_teq:
     case ARM_tst:
       // these two always update flags
-      return (ins.auxpref & aux_immcarry) != 0;
+      return (insn.auxpref & aux_immcarry) != 0;
   }
   return false;
 }
+
+inline bool has_arm();
 
 //----------------------------------------------------------------------
 inline bool is_thumb_ea(ea_t ea)
 {
   if ( !has_arm() )
     return true;
-  sel_t t = get_segreg(ea, T);
+  sel_t t = get_sreg(ea, T);
   return t != BADSEL && t != 0;
 }
 
 //----------------------------------------------------------------------
 inline bool is_arm64_ea(ea_t ea)
 {
-#ifndef __EA64__
+#if !defined(__EA64__)
   qnotused(ea);
   return false;
+#elif defined(__LINUX__) && defined(__ARM__)    // android_server64
+  qnotused(ea);
+  return true;
 #else
   segment_t *seg = getseg(ea);
   return seg != NULL && seg->use64();
@@ -607,154 +752,502 @@ struct pushreg_t
   uval_t off;           // offset from the frame top (sp delta)
   uval_t width;         // size of allocated area in bytes
   int reg;              // register number (-1 means stack space allocation)
-  bool spoiled;         // is register spoiled?
 };
 typedef qvector<pushreg_t> pushregs_t;
 
 struct pushinfo_t : public pushregs_t
 {
-  enum { PUSHINFO_VERSION = 1 };
+  enum { PUSHINFO_VERSION = 2 };
   uint32 flags;
 #define APSI_VARARG     0x01      // is vararg function?
 #define APSI_FIRST_VARG_MASK 0x06 // index of the first register in push {rx..r3}
+#define APSI_HAVE_SSIZE 0x08      // pushinfo_t structure contains its own size (field 'cb')
+#define APSI_OFFSET_WO_DELTA 0x10 // do not use delta-coding for <off>
   inline int get_first_vararg_reg(void) { return (flags & APSI_FIRST_VARG_MASK) >> 1; }
   uval_t savedregs;     // size of the 'saved regs' area
   eavec_t prolog_insns; // additional prolog instruction addresses
                         // (in addition to instructions from pushregs_t)
   uval_t fpd;           // frame pointer delta
 
-  pushinfo_t(void) : flags(0), savedregs(0), fpd(0) {}
+  int cb;               // size of this structure (it would be better if
+                        // this field was the first one)
+
+  // vararg info
+  uval_t gr_top;        // offset from the frame top general registers
+                        // vararg save area
+  uval_t vr_top;        // offset from the frame top FP/SIMD registers
+                        // vararg save area
+  uval_t gr_width;      // size of general registers vararg save area
+  uval_t vr_width;      // size of FP/SIMD registers vararg save area
+
+  pushinfo_t(void)
+    : flags(APSI_HAVE_SSIZE),
+      savedregs(0), fpd(0),
+      cb(sizeof(pushinfo_t)),
+      gr_top(0), vr_top(0), gr_width(0), vr_width(0)
+  {}
+
   void save_to_idb(ea_t ea);
   bool restore_from_idb(ea_t ea);
+
+  //--------------------------------------------------------------------
+  void mark_prolog_insns(void)
+  {
+    for ( int i=0; i < size(); i++ )
+      mark_prolog_insn(at(i).ea);
+    for ( int i=0; i < prolog_insns.size(); i++ )
+      mark_prolog_insn(prolog_insns[i]);
+  }
 };
 
 //----------------------------------------------------------------------
-// The following events are supported by the ARM module in the ph.notify() function
-namespace arm_module_t
+enum arm_base_arch_t
 {
-  enum event_codes_t
+  // values taken from ARM IHI 0045C, Tag_CPU_arch
+  arch_ARM_old  = 0,    // Pre-v4
+  arch_ARMv4    = 1,    // e.g. SA110
+  arch_ARMv4T   = 2,    // e.g. ARM7TDMI
+  arch_ARMv5T   = 3,    // e.g. ARM9TDMI
+  arch_ARMv5TE  = 4,    // e.g. ARM946E-S
+  arch_ARMv5TEJ = 5,    // e.g. ARM926EJ-S
+  arch_ARMv6    = 6,    // e.g. ARM1136J-S
+  arch_ARMv6KZ  = 7,    // e.g. ARM1176JZ-S
+  arch_ARMv6T2  = 8,    // e.g. ARM1156T2F-S
+  arch_ARMv6K   = 9,    // e.g. ARM1136J-S
+  arch_ARMv7    = 10,   // e.g. Cortex A8, Cortex M3
+  arch_ARMv6M   = 11,   // e.g. Cortex M1
+  arch_ARMv6SM  = 12,   // v6-M with the System extensions
+  arch_ARMv7EM  = 13,   // v7-M with DSP extensions
+  arch_ARMv8    = 14,   // v8
+  arch_curr_max = arch_ARMv8,
+  arch_ARM_meta = 9999, // decode everything
+};
+
+enum arm_arch_profile_t
+{
+  arch_profile_unkn = 0, // Architecture profile is not applicable (e.g. pre v7, or cross-profile code)
+  arch_profile_A = 'A',  // The application profile (e.g. for Cortex A8)
+  arch_profile_R = 'R',  // The real-time profile (e.g. for Cortex R4)
+  arch_profile_M = 'M',  // The microcontroller profile (e.g. for Cortex M3)
+  arch_profile_S = 'S',  // Application or real-time profile (i.e. the 'classic' programmer's model)
+};
+
+enum fp_arch_t
+{
+  fp_arch_none  = 0, // The user did not permit this entity to use instructions requiring FP hardware
+  fp_arch_v1    = 1, // The user permitted use of instructions from v1 of the floating point (FP) ISA
+  fp_arch_v2    = 2, // Use of the v2 FP ISA was permitted (implies use of the v1 FP ISA)
+  fp_arch_v3    = 3, // Use of the v3 FP ISA was permitted (implies use of the v2 FP ISA)
+  fp_arch_v3_16 = 4, // Use of the v3 FP ISA was permitted, but only citing registers D0-D15, S0-S31
+  fp_arch_v4    = 5, // Use of the v4 FP ISA was permitted (implies use of the non-vector v3 FP ISA)
+  fp_arch_v4_16 = 6, // Use of the v4 FP ISA was permitted, but only citing registers D0-D15, S0-S31
+  fp_arch_v8    = 7, // Use of the ARM v8-A FP ISA was permitted
+  fp_arch_v8_16 = 8, // Use of the ARM v8-A FP ISA was permitted, but only citing registers D0-D15, S0-S31
+};
+
+enum adv_simd_arch_t
+{
+  adv_simd_arch_none = 0, // The user did not permit this entity to use the Advanced SIMD Architecture (Neon)
+  adv_simd_arch_base = 1, // Use of the Advanced SIMD Architecture (Neon) was permitted
+  adv_simd_arch_fma  = 2, // Use of Advanced SIMD Architecture (Neon) with fused MAC operations was permitted
+  adv_simd_arch_v8   = 3, // Use of the ARM v8-A Advanced SIMD Architecture (Neon) was permitted
+};
+
+struct arm_arch_t
+{
+  arm_base_arch_t base_arch;
+  arm_arch_profile_t profile;
+  fp_arch_t fp_arch;
+  adv_simd_arch_t neon_arch;
+
+  int arm_isa_use;   // 0 = no ARM instructions (e.g. v7-M)
+                     // 1 = allow ARM instructions
+  int thumb_isa_use; // 0 = no Thumb instructions
+                     // 1 = 16-bit Thumb instructions + BL
+                     // 2 = plus 32-bit Thumb instructions
+  int xscale_arch;   // 0 = no XScale extension
+                     // 1 = XScale extension (MAR/MRA etc)
+  int wmmx_arch;     // 0 = no WMMX
+                     // 1 = WMMX v1
+                     // 2 = WMMX v2
+  int hp_ext;        // 0 = no half-precision extension
+                     // 1 = VFPv3/Advanced SIMD optional half-precision extension
+  int t2_ee;         // 0 = no Thumb2-EE extension
+                     // 1 = Thumb2-EE extension (ENTERX and LEAVEX)
+  qstring arch_name; // e.g. ARMv7-M
+  qstring core_name; // e.g. ARM1176JZF-S
+
+  bool be8;          // image is BE-8, i.e. little-endian code but big-endian data
+
+  static const char *get_canonical_name(int archno);
+  bool set_from_name(const char *name); // arch name or core name
+  bool set_options(const char *opts); // semicolon-delimited option string
+  void save_to_idb() const;
+  bool restore_from_idb();
+  qstring to_string() const;
+  arm_arch_t(void) { memset(this, 0, sizeof(*this)); }
+
+  bool is_mprofile()
   {
-    set_thumb_mode = processor_t::loader,
-                        // switch to thumb mode
-                        // in: ea_t ea
-    set_arm_mode,       // switch to arm mode
-                        // in: ea_t ea
-    restore_pushinfo,   // Restore function prolog info from the database
-                        // in: ea_t func_start
-                        //     pushinfo_t *pi
-                        // Returns: 2-ok, otherwise-failed
-    save_pushinfo,      // Save function prolog info to the database
-                        // in: ea_t func_start
-                        //     pushinfo_t *pi
-                        // Returns: 2-ok, otherwise-failed
-    is_push_insn,       // Is push instruction?
-                        // in: uint32 *reglist
-                        // cmd struct is filled
-                        // Returns: 2-yes, -1-no
-    is_pop_insn,        // Is pop instruction?
-                        // in: uint32 *reglist
-                        //     bool allow_ldmed
-                        // cmd struct is filled
-                        // Returns: 2-yes, -1-no
-    is_gnu_mcount_nc,   // Is __gnu_mcount_nc function?
-  };
-}
+    if ( profile == arch_profile_unkn )
+    {
+      return base_arch >= arch_ARMv6M && base_arch <= arch_ARMv7EM;
+    }
+    return profile == arch_profile_M;
+  }
+};
+
+extern arm_arch_t arch;
+
+inline bool has_arm()    { return arch.arm_isa_use != 0; }
+inline bool has_thumb()  { return arch.thumb_isa_use != 0; }
+inline bool has_thumb2() { return arch.thumb_isa_use >= 2; }
+inline bool has_xscale() { return arch.xscale_arch != 0; }
+inline bool has_vfp()    { return arch.fp_arch != fp_arch_none; }
+inline bool has_neon()   { return arch.neon_arch != adv_simd_arch_none; }
+#ifndef ENABLE_LOWCNDS
+inline bool has_armv5()  { return arch.base_arch >= arch_ARMv5T; }
+inline bool has_armv7a() { return arch.base_arch == arch_ARMv7 || arch.base_arch > arch_ARMv7EM; }
+inline bool has_armv8()  { return arch.base_arch >= arch_ARMv8; }
+inline bool is_mprofile() { return arch.is_mprofile(); }
+#endif
+inline bool is_be8()     { return arch.be8 != 0; }
+
+//------------------------------------------------------------------
+struct mmtype_t
+{
+  const char *name;
+  const type_t *type;
+  const type_t *fields;
+  tinfo_t tif;
+};
 
 //------------------------------------------------------------------
 void init_ana(void);
 void term_ana(void);
-void add_it_block(ea_t ea);
+void move_it_blocks(ea_t from, ea_t to, asize_t size);
+void add_it_block(const insn_t &insn);
 void del_insn_info(ea_t ea);
-int get_it_size(void);
-void idaapi header(void);
-void idaapi footer(void);
+int get_it_size(const insn_t &insn);
+void idaapi header(outctx_t &ctx);
+void idaapi footer(outctx_t &ctx);
 
-void idaapi assumes(ea_t ea);
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
+void idaapi assumes(outctx_t &ctx);
+void idaapi segstart(outctx_t &ctx, segment_t *seg);
+void idaapi segend(outctx_t &ctx, segment_t *seg);
 
 extern int mnem_width;
-extern int cfh_pg21_id;
-extern int cfh_lo12_id;
+extern int ref_pg21_id;
+extern int ref_lo12_id;
 
-void idaapi out(void);
-bool idaapi outspec(ea_t ea,uchar segtype);
+bool idaapi outspec(outctx_t &ctx, uchar segtype);
 
-int idaapi ana(void);
-int ana_arm(void);
-int ana_thumb(void);
+int idaapi ana(insn_t *out);
+int ana_arm(insn_t &insn);
+int ana64(insn_t &insn);
+int ana_thumb(insn_t &insn);
+bool ana_coproc(insn_t &insn, uint32 code);
 uint64 expand_imm_vfp(uint8 imm8, int sz);
-int idaapi emu(void);
-bool idaapi outop(op_t &op);
+int idaapi emu(const insn_t &insn);
 int idaapi is_align_insn(ea_t ea);
+bool idaapi equal_ops(const op_t &x, const op_t &y);
 
-int may_be_func(void);
+int may_be_func(const insn_t &insn);
 int is_jump_func(func_t *pfn, ea_t *jump_target, ea_t *function_pointer);
-int is_arm_sane_insn(int asn_flags);
+int is_arm_sane_insn(const insn_t &insn, int asn_flags);
 #define ASN_NOCREFS    0x01 // there are no crefs to the insn
 #define ASN_THUMB      0x02 // use thumb mode
 #define ASN_CHECK_MODE 0x04 // check thumb/arm mode of the next insn
-bool is_call_insn(void);
-bool is_return_insn(bool only_lr = false);
-bool is_push_insn(uint32 *reglist=NULL);
-bool is_pop_insn(uint32 *reglist=NULL, bool allow_ed=false);
-int arm_create_switch_xrefs(ea_t insn_ea, const switch_info_ex_t &si);
+bool is_arm_call_insn(const insn_t &insn);
+bool is_return_insn(const insn_t &insn, bool only_lr = false);
+bool is_branch_insn(const insn_t &insn);
+bool is_push_insn(const insn_t &insn, uint32 *reglist=NULL);
+bool is_pop_insn(const insn_t &insn, uint32 *reglist=NULL, bool allow_ed=false);
+int arm_create_switch_xrefs(ea_t insn_ea, const switch_info_t &si);
 void mark_arm_codeseqs(void);
 void destroy_macro_with_internal_cref(ea_t to);
 void arm_erase_info(ea_t ea1, ea_t ea2);
-void arm_move_segm(ea_t from, const segment_t *s);
+void arm_move_segm(ea_t from, const segment_t *s, bool changed_netmap);
+bool can_resolve_seg(ea_t ea);
 #if defined(NALT_HPP) && defined(_XREF_HPP)
-int arm_calc_switch_cases(ea_t insn_ea, const switch_info_ex_t *si, casevec_t *casevec, eavec_t *targets);
+int arm_calc_switch_cases(casevec_t *casevec, eavec_t *targets, ea_t insn_ea, const switch_info_t &si);
 #endif
 
-int  idaapi sp_based(const op_t &x);
+int  idaapi sp_based(const insn_t &insn, const op_t &x);
 bool idaapi create_func_frame(func_t *pfn);
-int  idaapi arm_get_frame_retsize(func_t *pfn);
-bool copy_insn_optype(op_t &x, ea_t ea, void *value = NULL, bool force = false);
+bool create_func_frame32(func_t *pfn);
+bool create_func_frame64(func_t *pfn);
+int  idaapi arm_get_frame_retsize(const func_t *pfn);
+bool copy_insn_optype(const insn_t &insn, const op_t &x, ea_t ea, void *value = NULL, bool force = false);
 
-int get_arm_fastcall_regs(const int **regs);
+bool get_arm_callregs(callregs_t *callregs, cm_t cc);
 bool calc_arm_arglocs(func_type_data_t *fti);
-bool calc_arm_varglocs(
-        func_type_data_t *fti,
-        regobjs_t *regargs,
-        int nfixed);
-bool calc_arm_retloc(const tinfo_t &tif, cm_t cc, argloc_t *retloc);
+bool calc_arm_varglocs(func_type_data_t *fti, regobjs_t *regargs, int nfixed);
+bool calc_arm_retloc(argloc_t *retloc, const tinfo_t &rettype, cm_t cc);
+bool adjust_arm_argloc(argloc_t *argloc, const tinfo_t *tif, int size);
+void arm_lower_func_arg_types(intvec_t *argnums, const func_type_data_t &fti);
 int use_arm_regarg_type(ea_t ea, const funcargvec_t &rargs);
 void use_arm_arg_types(
         ea_t ea,
         func_type_data_t *fti,
         funcargvec_t *rargs);
+void term_arm_simdtypes(void);
+int get_arm_simd_types(
+        simd_info_vec_t *outtypes,
+        const simd_info_t *pattern,
+        const argloc_t *argloc,
+        bool do_create);
 
 //----------------------------------------------------------------------
 typedef const regval_t &idaapi getreg_t(const char *name, const regval_t *regvalues);
 
-bool arm_get_operand_info(ea_t ea,
-                          int n,
-                          int tid,
-                          getreg_t *getreg,
-                          const regval_t *rv,
-                          idd_opinfo_t *opinf);
-ea_t arm_next_exec_insn(ea_t ea,
-                         int tid,
-                         getreg_t *getreg,
-                         const regval_t *regvalues);
+bool arm_get_operand_info(
+        idd_opinfo_t *opinf,
+        ea_t ea,
+        int n,
+        int tid,
+        getreg_t *getreg,
+        const regval_t *rv);
+ea_t arm_next_exec_insn(
+        ea_t ea,
+        int tid,
+        getreg_t *getreg,
+        const regval_t *regvalues);
 ea_t arm_calc_step_over(ea_t ip);
-int arm_calc_next_eas(bool over, ea_t *res, int *nsubs);
+int arm_calc_next_eas(eavec_t *res, const insn_t &insn, bool over);
 ea_t arm_get_macro_insn_head(ea_t ip);
-int arm_get_dbr_opnum(ea_t ea);
-ssize_t arm_get_reg_name(int _reg, size_t width, char *buf, size_t bufsize, int reghi);
-ssize_t arm_get_one_reg_name(int _reg, size_t width, char *outbuf, size_t bufsize);
+int arm_get_dbr_opnum(const insn_t &insn);
+ssize_t arm_get_reg_name(qstring *buf, int _reg, size_t width, int reghi);
+ssize_t arm_get_one_reg_name(qstring *buf, int _reg, size_t width);
 int arm_get_reg_index(const char *name, bitrange_t *pbitrange);
-const char *arm_get_reg_info(const char *name, bitrange_t *pbitrange);
+bool arm_get_reg_info(const char **main_name, bitrange_t *pbitrange, const char *name);
 bool try_code_start(ea_t ea, bool respect_low_bit);
 int try_offset(ea_t ea);
-bool ana_neon(uint32 code, bool thumb);
+bool ana_neon(insn_t &insn, uint32 code, bool thumb);
 void opimm_vfp(op_t &x, uint32 imm8, int sz);
-void check_displ(op_t &x, bool alignPC = false);
-void set_gotea(ea_t ea);
-bool is_gnu_mcount_nc(ea_t ea);
+void check_displ(const insn_t &insn, op_t &x, bool alignPC = false);
+void arm_set_gotea(ea_t ea);
 bool verify_sp(func_t *pfn);
-bool equal_ops(const op_t &x, const op_t &y);
+void ana_hint(insn_t &insn, int hint);
+char get_it_info(ea_t ea);
 
-#pragma pack(pop)
+//======================================================================
+// common inline functions used by analyzer
+//----------------------------------------------------------------------
+inline int bitcount(int x)
+{
+  int cnt = 0;
+  while ( x )
+  {
+    x &= x - 1;
+    cnt++;
+  }
+  return cnt;
+}
+
+//----------------------------------------------------------------------
+inline void oreglist(op_t &x, int regs)
+{
+  x.type = o_reglist;
+  x.dtype = dt_dword;
+  x.reglist = regs;
+}
+
+//----------------------------------------------------------------------
+inline void onear(op_t &x, uval_t target)
+{
+  x.type = o_near;
+  x.dtype = dt_code;
+  x.addr = target;
+}
+
+//----------------------------------------------------------------------
+inline void otext(op_t &x, const char *txt)
+{
+  x.type = o_text;
+  qstrncpy((char *)&x.value, txt, sizeof(x) - qoffsetof(op_t, value));
+}
+
+//----------------------------------------------------------------------
+// Get register number
+inline uchar getreg(uint32 code, int lbit)
+{
+  return uchar((code >> lbit) & 0xF);
+}
+
+//----------------------------------------------------------------------
+// Create operand of register type
+inline void fillreg(op_t &x, uint32 code, int lbit)
+{
+  x.reg = getreg(code, lbit);
+  x.type = o_reg;
+  x.dtype = dt_dword;
+}
+
+//----------------------------------------------------------------------
+inline void opreg(op_t &x, int rgnum)
+{
+  x.reg = uint16(rgnum);
+  x.type = o_reg;
+  x.dtype = dt_dword;
+}
+
+struct reg_mode_t
+{
+  uint16 reg;
+  uchar mode;
+};
+
+//----------------------------------------------------------------------
+// Create operand of banked_reg type
+extern const reg_mode_t banked0[32];
+extern const reg_mode_t banked1[32];
+inline bool opbanked(op_t &x, int R, uchar sysm)
+{
+  const reg_mode_t &rm = R ? banked1[sysm] : banked0[sysm];
+  if ( rm.reg == 0xFFFF )
+    return false;
+  x.reg = rm.reg;
+  x.specflag1 = rm.mode | BANKED_MODE;
+  x.type = o_reg;
+  x.dtype = dt_dword;
+  return true;
+}
+
+//----------------------------------------------------------------------
+// Create operand of immediate type
+inline void op_imm(op_t &x, uval_t value)
+{
+  x.type = o_imm;
+  x.dtype = dt_dword;
+  x.value = value;
+  x.ishtype = LSL;
+  x.ishcnt = 0;
+}
+
+//----------------------------------------------------------------------
+// Create operand of immediate type (4 bits)
+inline void op_imm4(op_t &x, uint32 code, int lbit)
+{
+  op_imm(x, getreg(code, lbit));
+}
+
+//----------------------------------------------------------------------
+inline void barrier_op(op_t &x, int code)
+{
+  const char *op = NULL;
+  switch ( code )
+  {
+    case B8(0001): op = "OSHLD"; break;
+    case B8(0010): op = "OSHST"; break;
+    case B8(0011): op = "OSH";   break;
+    case B8(0101): op = "NSHLD"; break;
+    case B8(0110): op = "NSHST"; break;
+    case B8(0111): op = "NSH";   break;
+    case B8(1001): op = "ISHLD"; break;
+    case B8(1010): op = "ISHST"; break;
+    case B8(1011): op = "ISH";   break;
+    case B8(1101): op = "LD";    break;
+    case B8(1110): op = "ST";    break;
+    case B8(1111): op = "SY";    break;
+  }
+  if ( op != NULL )
+    otext(x, op);
+  else
+    op_imm(x, code & 0xF);
+}
+
+// is the current insn inside an it-block?
+inline bool inside_itblock(char itcnd)
+{
+  return itcnd != -1;
+}
+
+//======================================================================
+// common data sructures and functions for emulator
+//----------------------------------------------------------------------
+
+// since these is a lot of recursion in this module, we will keep
+// all data as local as possible. no static data since we will have
+// to save/restore it a lot
+struct arm_saver_t
+{
+  insn_t insn; // current instruction
+  bool flow;
+
+  arm_saver_t() : insn(), flow(true) {}
+  arm_saver_t(const insn_t &insn_) : insn(insn_), flow(true) {}
+
+  void handle_operand(const op_t &x, bool isload);
+  void emulate(void);
+  void handle_code_ref(const op_t &x, ea_t ea, bool iscall);
+  bool detect_glue_code(
+          ea_t ea,
+          int flags,
+#define DGC_HANDLE 0x0001  // create offsets and names
+#define DGC_FIND   0x0002  // ea points to the end of the glue code
+          ea_t *p_target = NULL,
+          ea_t *p_fptr = NULL,
+          size_t *p_glue_size = NULL);
+  bool detect_glue_code(
+          int flags,
+          ea_t *p_target = NULL,
+          ea_t *p_fptr = NULL,
+          size_t *p_glue_size = NULL);
+  bool arm_is_switch(void);
+  // this is a copy of the function from u_ana.cpp
+  void clean_insn(ea_t ea, ea_t cs, ea_t ip)
+  {
+    memset(&insn, 0, sizeof(insn));
+    insn.ea = ea;
+    insn.cs = cs;
+    insn.ip = ip;
+    insn.Op1.flags = OF_SHOW;
+    insn.Op2.flags = OF_SHOW;
+    insn.Op3.flags = OF_SHOW;
+    insn.Op4.flags = OF_SHOW;
+    insn.Op5.flags = OF_SHOW;
+    insn.Op6.flags = OF_SHOW;
+    insn.Op2.n = 1;
+    insn.Op3.n = 2;
+    insn.Op4.n = 3;
+    insn.Op5.n = 4;
+    insn.Op6.n = 5;
+  }
+  // try to decode instruction at ea as arm or thumb
+  //-V:try_decode:501 identical sub-expressions
+  bool try_decode(ea_t ea, bool is_thumb, bool check_sane = true)
+  {
+    segment_t *s = getseg(ea);
+    if ( s == NULL )
+      return false;
+    uval_t cs = get_segm_para(s);
+    uval_t ip = ea - to_ea(cs, 0);
+    clean_insn(ea, cs, ip);
+    int sz = is_thumb ? ana_thumb(insn) : ana_arm(insn);
+    int asn_flags = ASN_NOCREFS;
+    if ( is_thumb )
+      asn_flags |= ASN_THUMB;
+    return sz > 0 && (!check_sane || is_arm_sane_insn(insn, asn_flags));
+  }
+};
+
+// SPD value for security_push_cookie/security_pop_cookie
+inline sval_t security_cookie_spd()
+{
+  return inf.is_64bit() ? 0x10 : 0x4;
+}
+
+// SPD value for a special function
+inline sval_t special_func_spd(special_func_t spf)
+{
+  return spf == SPF_GNU_MCOUNT_NC        ? 4
+       : spf == SPF_SECURITY_POP_COOKIE  ? security_cookie_spd()
+       : spf == SPF_SECURITY_PUSH_COOKIE ? -security_cookie_spd()
+       :                                   0;
+}
+
+int calc_fpreglist_size(const insn_t &ins);
+int calc_advsimdlist_size(const insn_t &ins);
+
 #endif // _ARM_HPP

@@ -16,6 +16,7 @@
 
 //--------------------------------------------------------------------------
 static qstrvec_t graph_text;
+static graph_viewer_t *gv = NULL;
 
 //--------------------------------------------------------------------------
 static const char *get_node_name(int n)
@@ -34,9 +35,9 @@ static const char *get_node_name(int n)
 }
 
 //--------------------------------------------------------------------------
-static int idaapi callback(void *, int code, va_list va)
+static ssize_t idaapi callback(void *, int code, va_list va)
 {
-  int result = 0;
+  ssize_t result = 0;
   switch ( code )
   {
     case grcode_calculating_layout:
@@ -291,57 +292,96 @@ static int idaapi callback(void *, int code, va_list va)
   return result;
 }
 
-//--------------------------------------------------------------------------
-bool idaapi menu_callback(void *ud)
+//-------------------------------------------------------------------------
+static const char wanted_title[] = "Sample graph";
+
+//-------------------------------------------------------------------------
+struct change_layout_ah_t : public action_handler_t
 {
-  graph_viewer_t *gv = (graph_viewer_t *)ud;
-  mutable_graph_t *g = get_viewer_graph(gv);
-  int code = askbuttons_c("Circle", "Tree", "Digraph", 1, "Please select layout type");
-  node_info_t ni;
-  ni.bg_color = 0x44FF55;
-  ni.text = "Hello from plugin!";
-  set_node_info2(g->gid, 7, ni, NIF_BG_COLOR | NIF_TEXT);
-  g->current_layout = code + 2;
-  g->circle_center = point_t(200, 200);
-  g->circle_radius = 200;
-  g->redo_layout();
-  refresh_viewer(gv);
-  return true;
+  virtual int idaapi activate(action_activation_ctx_t *ctx)
+  {
+    gv = (graph_viewer_t *) ctx->widget;
+    mutable_graph_t *g = get_viewer_graph(gv);
+    int code = ask_buttons("Circle", "Tree", "Digraph", 1, "Please select layout type");
+    node_info_t ni;
+    ni.bg_color = 0x44FF55;
+    ni.text = "Hello from plugin!";
+    set_node_info(g->gid, 7, ni, NIF_BG_COLOR | NIF_TEXT);
+    g->current_layout = code + 2;
+    g->circle_center = point_t(200, 200);
+    g->circle_radius = 200;
+    g->redo_layout();
+    refresh_viewer(gv);
+    return 1;
+  }
+
+  virtual action_state_t idaapi update(action_update_ctx_t *ctx)
+  {
+    if ( ctx->widget == (TWidget *) gv )
+      return AST_ENABLE_FOR_WIDGET;
+    else
+      return AST_DISABLE_FOR_WIDGET;
+  }
+};
+static change_layout_ah_t change_layout_ah;
+static const action_desc_t change_layout_desc = ACTION_DESC_LITERAL(
+        "ugraph:ChangeLayout",
+        "User function",
+        &change_layout_ah,
+        NULL,
+        NULL,
+        -1);
+
+
+//-------------------------------------------------------------------------
+static ssize_t idaapi ui_hook(void *, int notification_code, va_list va)
+{
+  if ( notification_code == view_close )
+  {
+    TWidget *view = va_arg(va, TWidget *);
+    if ( view == (TWidget *) gv )
+      gv = NULL;
+  }
+  return 0;
 }
 
 //--------------------------------------------------------------------------
 int idaapi init(void)
 {
-  return ( callui(ui_get_hwnd).vptr != NULL || is_idaq() ) ? PLUGIN_OK : PLUGIN_SKIP;
+  hook_to_notification_point(HT_VIEW, ui_hook);
+  return is_idaq() ? PLUGIN_OK : PLUGIN_SKIP;
 }
 
 //--------------------------------------------------------------------------
 void idaapi term(void)
 {
+  unhook_from_notification_point(HT_VIEW, ui_hook);
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
-  HWND hwnd = NULL;
-  TForm *form = create_tform("Sample graph", &hwnd);
-  if ( hwnd != NULL )
+  TWidget *widget = find_widget(wanted_title);
+  if ( widget == NULL )
   {
     // get a unique graph id
     netnode id;
     id.create("$ ugraph sample");
-    graph_viewer_t *gv = create_graph_viewer(form,  id, callback, NULL, 0);
-    open_tform(form, FORM_TAB|FORM_MENU|FORM_QWIDGET);
+    gv = create_graph_viewer(wanted_title, id, callback, NULL, 0);
     if ( gv != NULL )
     {
+      display_widget(gv, WOPN_TAB|WOPN_MENU);
       viewer_fit_window(gv);
-      viewer_add_menu_item(gv, "User function", menu_callback, gv, NULL, 0);
+      register_action(change_layout_desc);
+      viewer_attach_menu_item(gv, change_layout_desc.name);
     }
   }
   else
   {
-    close_tform(form, 0);
+    close_widget(widget, 0);
   }
+
+  return true;
 }
 
 //--------------------------------------------------------------------------

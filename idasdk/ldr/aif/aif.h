@@ -86,7 +86,8 @@ inline int is_bl(uint32 code) { return (code & BLMASK) == BL; }
 #define AIF_DEB_FPMAP   32 // FP map fragment
 
 //-------------------------------------------------------------------------
-struct section_t {
+struct section_t
+{
   uint32 code;          // Section code and length
   uchar lang;           // Language codes:
 #define LANG_NONE    0  // Low-level debugging data only

@@ -23,21 +23,19 @@ extern int is_cmos;     // is CMOS (otherwise, NMOS)
 #define UAS_SECT        0x0002          // Segments are named .SECTION
 #define UAS_NOSEG       0x0004          // No 'segment' directives
 #define UAS_SELSG       0x0010          // Segment should be selected by its name
-#define UAS_CDSEG       0x0080          // Only DSEG,CSEG,XSEG
+#define UAS_CDSEG       0x0080          // Only DSEG, CSEG, XSEG
 #define UAS_NOENS       0x0200          // don't specify start addr in the .end directive
 //------------------------------------------------------------------------
-enum M65_registers { rA,rX,rY,rVcs,rVds,riX,riY,zX,zY };
+enum M65_registers { rA, rX, rY, rVcs, rVds, riX, riY, zX, zY };
 
 //------------------------------------------------------------------------
-void    idaapi header(void);
-void    idaapi footer(void);
+void    idaapi header(outctx_t &ctx);
+void    idaapi footer(outctx_t &ctx);
 
-void    idaapi segstart(ea_t ea);
+void    idaapi segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi ana(void);
-int     idaapi emu(void);
-void    idaapi out(void);
-bool    idaapi outop(op_t &op);
-void    idaapi assumes(ea_t ea);
+int     idaapi ana(insn_t *insn);
+int     idaapi emu(const insn_t &insn);
+void    idaapi assumes(outctx_t &ctx, ea_t ea);
 
 #endif

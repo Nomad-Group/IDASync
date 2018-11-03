@@ -7,8 +7,8 @@
   (walker_ea) = prev_head((walker_ea), (walker_ea) - 4);  \
   if ( (walker_ea) == BADADDR )                           \
     break;                                                \
-  flags_t F = get_flags_novalue(walker_ea);               \
-  if ( isFunc(F) || !isCode(F) )                          \
+  flags_t F = get_flags(walker_ea);               \
+  if ( is_func(F) || !is_code(F) )                          \
     break;                                                \
   opcode_var = get_byte(walker_ea);                       \
   itype_var = get_opcode_info(opcode_var).itype;
@@ -25,7 +25,7 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
   //   const func_t * const func = get_fchunk(from_ea);
   //   if (func == NULL)
   //     return -1;
-  //   ea_t chunk_start_ea = func->startEA;
+  //   ea_t chunk_start_ea = func->start_ea;
   // ---
   // in order to determine where we had to stop backtracking
   // values.
@@ -112,7 +112,6 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
   switch ( source )
   {
     case BT_STACK:
-    {
       while ( true )
       {
         BTWALK_PREAMBLE(cur_ea, opcode, itype);
@@ -139,11 +138,11 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
             case M65816_pha:    // Push A
               return backtrack_value(cur_ea, size, BT_A);
             case M65816_phb:    // Push B (data bank register)
-              return get_segreg(cur_ea, rB);
+              return get_sreg(cur_ea, rB);
             case M65816_phd:    // Push D (direct page register)
-              return get_segreg(cur_ea, rD);
+              return get_sreg(cur_ea, rD);
             case M65816_phk:    // Push K (program bank register)
-              return (cur_ea >> 16) & 0xff;
+              return get_sreg(cur_ea, rPB);
             case M65816_php:    // Push processor status
               return -1;
             case M65816_phx:    // Push X
@@ -156,22 +155,19 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
         }
         else if ( M65_ITYPE_PULL(itype) )
         {
-          // We won't keep track of additional
-          // displacements in the stack. That'd be for
-          // some v2 or whatever.
+          // TODO: keep track of additional displacements in the stack
           return -1;
         }
       }
-    }
-    break;
+      break;
     case BT_A:
-    {
       while ( true )
       {
         BTWALK_PREAMBLE(cur_ea, opcode, itype);
+        uint8 opsize = from_ea - cur_ea;
         uint8 cur_ea_acc_is_16 = is_acc_16_bits(cur_ea);
         uint8 new_size = cur_ea_acc_is_16 ? 2 : 1;
-        switch( itype )
+        switch ( itype )
         {
           // All these modify A in a way we cannot
           // easily determine its value anymore.
@@ -200,31 +196,30 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
             break;
           case M65816_lda:    // Load A from memory
             if ( opcode == 0xa9 ) // LDA    imm
-              return (cur_ea_acc_is_16 ? get_word(cur_ea + 1) : get_byte(cur_ea + 1));
+              return opsize == 3 ? get_word(cur_ea + 1) : get_byte(cur_ea + 1);
             else
               return -1;
           case M65816_pla:    // Pull A
             return backtrack_value(cur_ea, new_size, BT_STACK);
           case M65816_tdc:    // Transfer 16-bit D to A
-            return get_segreg(cur_ea, rD);
+            return get_sreg(cur_ea, rD);
           case M65816_tsc:    // Transfer S to A
-            return get_segreg(cur_ea, rS);
+            return get_sreg(cur_ea, rS);
           case M65816_txa:    // Transfer X to A
             return backtrack_value(cur_ea, new_size, BT_X);
           case M65816_tya:    // Transfer Y to A
             return backtrack_value(cur_ea, new_size, BT_Y);
         }
       }
-    }
-    break;
+      break;
     case BT_X:
-    {
       while ( true )
       {
         BTWALK_PREAMBLE(cur_ea, opcode, itype);
+        uint8 opsize = from_ea - cur_ea;
         uint8 cur_ea_xy_is_16 = is_xy_16_bits(cur_ea);
         uint8 new_size = cur_ea_xy_is_16 ? 2 : 1;
-        switch( itype )
+        switch ( itype )
         {
           // All these modify X in a way we cannot
           // easily determine its value anymore.
@@ -236,7 +231,7 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
             return -1;
           case M65816_ldx:    // Load X from memory
             if ( opcode == 0xa2 ) // LDX    imm
-              return (cur_ea_xy_is_16 ? get_word(cur_ea + 1) : get_byte(cur_ea + 1));
+              return opsize == 3 ? get_word(cur_ea + 1) : get_byte(cur_ea + 1);
             else
               return -1;
           case M65816_plx:    // Pull X
@@ -244,21 +239,20 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
           case M65816_tax:    // Transfer A to X
             return backtrack_value(cur_ea, new_size, BT_A);
           case M65816_tsx:    // Transfer S to X
-            return get_segreg(cur_ea, rS);
+            return get_sreg(cur_ea, rS);
           case M65816_tyx:    // Transfer Y to X
             return backtrack_value(cur_ea, new_size, BT_Y);
         }
       }
-    }
-    break;
+      break;
     case BT_Y:
-    {
       while ( true )
       {
         BTWALK_PREAMBLE(cur_ea, opcode, itype);
+        uint8 opsize = from_ea - cur_ea;
         uint8 cur_ea_xy_is_16 = is_xy_16_bits(cur_ea);
         uint8 new_size = cur_ea_xy_is_16 ? 2 : 1;
-        switch( itype )
+        switch ( itype )
         {
           // All these modify X in a way we cannot
           // easily determine its value anymore.
@@ -270,7 +264,7 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
             return -1;
           case M65816_ldy:    // Load Y from memory
             if ( opcode == 0xa0 ) // LDY    imm
-              return (cur_ea_xy_is_16 ? get_word(cur_ea + 1) : get_byte(cur_ea + 1));
+              return opsize == 3 ? get_word(cur_ea + 1) : get_byte(cur_ea + 1);
             else
               return -1;
           case M65816_ply:    // Pull Y
@@ -281,8 +275,23 @@ int32 backtrack_value(ea_t from_ea, uint8 size, btsource_t source)
             return backtrack_value(cur_ea, new_size, BT_X);
         }
       }
-    }
-    break;
+      break;
+    case BT_DP:
+      while ( true )
+      {
+        BTWALK_PREAMBLE(cur_ea, opcode, itype);
+        switch ( itype )
+        {
+          // All these modify D in a way we cannot
+          // easily determine its value anymore.
+          // We'll thus stop.
+          case M65816_pld:    // Pull D
+            return backtrack_value(cur_ea, size, BT_STACK);
+          case M65816_tcd:    // Transfer 16-bit Accumulator to Direct Page Register
+            return backtrack_value(cur_ea, size, BT_A);
+        }
+      }
+      break;
     default:
       msg("WARNING: backtrack_value() of unsupported BT-type: %d\n", source);
       break;

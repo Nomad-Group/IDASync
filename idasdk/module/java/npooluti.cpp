@@ -2,6 +2,12 @@
 #include <diskio.hpp>
 #include <entry.hpp>
 #include "npooluti.hpp"
+#include "oututil.hpp"
+
+
+#ifndef NCPS
+#define NCPS 0x110000
+#endif
 
 ClassInfo   curClass;
 SegInfo     curSeg;
@@ -16,7 +22,6 @@ uchar       loadMode;
 uint32      errload;
 ushort      *tsPtr;
 uchar       *smBuf, *annBuf;
-char        *_spcnamechar;
 uint32      FileSize;
 
 // Normally static buffers of MAX_NODENAME_SIZE are forbidden but since
@@ -80,7 +85,7 @@ void load_msg(const char *format, ...)
 const char *mk_diag(uchar mode, char str[128])
 {
   static const char *const diag[] = { "Code in method", "Field", "Method" };
-  CASSERT(ARQ_CODE == 0 && ARQ_FIELD == 1 && ARQ_METHOD == 2 && ARQ_FILE == 3); //-V501
+  CASSERT(ARQ_CODE == 0 && ARQ_FIELD == 1 && ARQ_METHOD == 2 && ARQ_FILE == 3);
   str[0] = '\0';
   if ( mode < ARQ_FILE )
     qsnprintf(str,
@@ -94,7 +99,7 @@ const char *mk_diag(uchar mode, char str[128])
 void BadRef(ea_t ea, const char *to, ushort id, uchar mode)
 {
   if ( ea != BADADDR )
-    QueueSet(Q_disasm, ea);
+    remember_problem(PR_DISASM, ea);
 
   char diastr[128];
   load_msg("Illegal %s reference (%u)%s\n", to, id, mk_diag(mode, diastr));
@@ -220,7 +225,6 @@ void skipData(uint32 size)
 }
 
 //-----------------------------------------------------------------------
-//-----------------------------------------------------------------------
 uchar set_parent_object(void)
 {
   if ( curClass.super.Name )
@@ -252,7 +256,7 @@ const uchar *get_annotation(uval_t node, uint *plen)
 }
 
 //-----------------------------------------------------------------------
-bool sm_getinfo(SMinfo *pinf)
+bool sm_getinfo(const insn_t &insn, SMinfo *pinf)
 { // call ONLY when curSeg.smNode != 0
   static netnode SMnode;
   static uint32 SMsize;
@@ -283,11 +287,11 @@ bool sm_getinfo(SMinfo *pinf)
 
   ea = pinf->ea;
   if ( ea == BADADDR )
-    ea = cmd.ea - 1;
-  ea = SMnode.supnxt(ea);
+    ea = insn.ea - 1;
+  ea = SMnode.supnext(ea);
   if ( ea == BADNODE )
     goto noinfo;
-  if ( get_item_head(ea) != cmd.ea )
+  if ( get_item_head(ea) != insn.ea )
     goto noinfo;
   if ( SMnode.supval(ea, &smr, sizeof(smr)) != sizeof(smr) )
     goto destroyed;
@@ -308,51 +312,67 @@ noinfo:
 }
 
 //-----------------------------------------------------------------------
+static const char special_sym[] =
+{
+  j_field_dlm,                    // classname (dot) ==> special point
+  j_clspath_dlm,                  // classname path (slash)
+  j_func, j_endfunc,              // function (for methods)
+  0
+};
+
+//-------------------------------------------------------------------------
+void op_NameChars(namechar_op_t op)
+{
+  switch ( op )
+  {
+    case ncop_disable:
+      for ( size_t i = 0; i < qnumber(special_sym); ++i )
+        set_cp_validity(URK_NameChars, special_sym[i], BADCP, false);
+      break;
+    case ncop_enable:
+      for ( size_t i = 0; i < qnumber(special_sym); ++i )
+        set_cp_validity(URK_NameChars, special_sym[i]);
+      break;
+    case ncop_enable_without_parens:
+      for ( size_t i = 0; i < 2; ++i )
+        set_cp_validity(URK_NameChars, special_sym[i]);
+      break;
+    default: INTERR(10267);
+  }
+}
+
 //-----------------------------------------------------------------------
-void make_NameChars(uchar on_load)
+void make_NameChars(bool on_load)
 {
   static const char special_char[] =
   {
     '$', '_',                       // MUST present (historical/special)
     j_sign, j_endsign,              // special case for <init>, <clinit> :(
   };
-  static const char special_sym[] =
-  {
-    j_field_dlm,                    // classname (dot) ==> special point
-    j_clspath_dlm,                  // classname path (slash)
-    j_func, j_endfunc,              // function (for methods)
-    0
-  };
 
-  char *p = NameChars;
+  set_cp_validity(URK_NameChars, 0, NCPS, false);
   // in names accepted ONLY english chars (temporary?)
-  char c = 'A';
-  do *p++ = c; while ( ++c <= 'Z' );
-  c = 'a';
-  do *p++ = c; while ( ++c <= 'z' );
-  c = '0';
-  do *p++ = c; while ( ++c <= '9' );
-  memcpy(p, special_char, sizeof(special_char));
-  p += sizeof(special_char);
+  set_cp_validity(URK_NameChars, 'A', 'Z'+1);
+  set_cp_validity(URK_NameChars, 'a', 'z'+1);
+  set_cp_validity(URK_NameChars, '0', '9'+1);
+  for ( size_t i = 0; i < qnumber(special_char); ++i )
+    set_cp_validity(URK_NameChars, special_char[i]);
   // fill national character's
-  p = uniremap_init(p); // can use unicode characters of current codepage
-  *p++ = '\\';  // is valid for unicode escape sequnce only (special work)
+  // p = uniremap_init(p); // can use unicode characters of current codepage
+  set_cp_validity(URK_NameChars, '\\'); // is valid for unicode escape sequnce only (special work)
   // class/method path/call chars
-  memcpy(p, special_sym, sizeof(special_sym));
-  _spcnamechar = p; // dot position
-  if ( !on_load )
-    p[2] = '\0'; // for oldbase convertation
+  op_NameChars(on_load ? ncop_enable : ncop_enable_without_parens); // for oldbase convertation
 }
 
 //----------------------------------------------------------------------
-segment_t *getMySeg(ea_t ea)
+segment_t *getMySeg(ea_t ea, segment_t *seg)
 {
-  segment_t *s = getseg(ea);
+  segment_t *s = seg != NULL ? seg : getseg(ea);
 
   if ( s == NULL )
     goto compat_err;
 
-  if ( curSeg.startEA != s->startEA )
+  if ( curSeg.start_ea != s->start_ea )
   {
     if ( sm_node > 0 )
       sm_node = 0;
@@ -360,14 +380,14 @@ segment_t *getMySeg(ea_t ea)
     {
       if ( s->type != SEG_IMP && s->type != SEG_XTRN )
         goto compat_err;
-      curSeg.startEA = s->startEA;
+      curSeg.start_ea = s->start_ea;
     }
     else
     {
       if ( ClassNode.supval(s->orgbase, &curSeg, sizeof(curSeg) ) != sizeof(curSeg) )
         DESTROYED("getMySeg");
       if ( -s->orgbase != curSeg.id.Number
-        || s->startEA != (s->type == SEG_BSS ? curSeg.DataBase : curSeg.startEA) )
+        || s->start_ea != (s->type == SEG_BSS ? curSeg.DataBase : curSeg.start_ea) )
       {
 compat_err:
         UNCOMPAT("getMySeg");
@@ -379,7 +399,8 @@ compat_err:
 
 //-----------------------------------------------------------------------
 // visible for converter only
-void trunc_name(uint num, uchar type)
+GCC_DIAG_OFF(format-nonliteral);
+void out_java_t::trunc_name(uint num, uchar type)
 {
   static const char fnam[]   = "...(Field_%u)";
   static const char metnam[] = "...(Method_%u)";
@@ -390,10 +411,12 @@ void trunc_name(uint num, uchar type)
 
   enableExt_NameChar();
   size_t s = (sizeof(metnam) - 2 + 5 + 1);
-  nowarn_qsnprintf(get_output_ptr()-s, s, add_nam[type], num);
+  size_t inplen = outbuf.length();
+  outbuf.resize(inplen - s);
+  outbuf.cat_sprnt(add_nam[type], num);
 }
+GCC_DIAG_ON(format-nonliteral);
 
-//-----------------------------------------------------------------------
 //-----------------------------------------------------------------------
 int CmpString(ushort index1, ushort index2)
 {
@@ -562,24 +585,25 @@ void xtrnSet(
       curClass.xtrnLQE = (ushort)cin;
     }
     XtrnNode.altset(xip, rfa);
-    doByte(ea, 1);
+    create_byte(ea, 1);
   }
 
   uint js = MAXNAMELEN - 1;
-  init_output_buffer(str, strsize);
+  out_java_t *pctx = (out_java_t *)create_outctx(BADADDR);
   name_chk = 0;
   if ( full ) // fmt_fullname
   {
     uni_chk = 0;
-    if ( fmtString(co->_name, js, fmt_fullname) )
+    if ( pctx->fmtString(co->_name, js, fmt_fullname) )
     {
       endcls = MAXNAMELEN;
 trnc:
-      trunc_name(xip);
+      pctx->trunc_name(xip);
+      pctx->outbuf.resize(MAXNAMELEN-1);
     }
     else
     {
-      endcls = (uint)strlen(str);
+      endcls = (uint)strlen(pctx->outbuf.c_str());
     }
     clunic = uni_chk;
   }
@@ -588,23 +612,24 @@ trnc:
     uni_chk = clunic;
     if ( endcls >= MAXNAMELEN - 2 )
     {
-      set_output_ptr(&str[MAXNAMELEN-1]);
+      pctx->outbuf.resize(MAXNAMELEN-1);
       name_chk = 0;   // no mark here
       goto trnc;
     }
-    str[endcls] = '.';
-    set_output_ptr(get_output_ptr() + (endcls + 1));
+    pctx->outbuf.resize(pctx->outbuf.length() + (endcls + 1));
+    pctx->outbuf[endcls] = '.';
     js -= (endcls + 1);
-    if ( fmtString(co->_subnam, js, fmt_name) )
+    if ( pctx->fmtString(co->_subnam, js, fmt_name) )
       goto trnc;
   }
-  term_output_buffer();
+  qstrncpy(str, pctx->outbuf.c_str(), strsize);
+  delete pctx;
   if ( rmod & 1 )
   {
-    enableExt_NameChar();
-    do_name_anyway(ea, convert_clsname(str));
+    // enableExt_NameChar();
+    force_name(ea, convert_clsname(str));
     hide_name(ea);
-    disableExt_NameChar();
+    // disableExt_NameChar();
   }
   if ( (char)uni_chk > 0 && (rmod & 2) )
     ConstantNode.charset(ea, uni_chk, UR_TAG);
@@ -616,19 +641,20 @@ trnc:
 //-----------------------------------------------------------------------
 void SetName(ushort name, ea_t ea, ushort access_mode, uval_t number, uchar rmod)
 {
-  init_output_buffer(tmpbuf, sizeof(tmpbuf));
   uni_chk = name_chk = 0;
   fmt_t fmt = number || curSeg.id.Number ? fmt_name : fmt_fullname;
-  if ( fmtString(name, sizeof(tmpbuf) - 1, fmt) )
+  out_java_t *pctx = (out_java_t *)create_outctx(BADADDR);
+  if ( pctx->fmtString(name, sizeof(tmpbuf) - 1, fmt) )
   {
     if ( !number )
-      trunc_name(curSeg.id.Number, uchar(3 + !curSeg.id.Number));
+      pctx->trunc_name(curSeg.id.Number, uchar(3 + !curSeg.id.Number));
     else if ( number <= (uval_t)curClass.FieldCnt )
-      trunc_name((uint)number, 1);
+      pctx->trunc_name((uint)number, 1);
     else
-      trunc_name((uint)number - curClass.FieldCnt, 2);
+      pctx->trunc_name((uint)number - curClass.FieldCnt, 2);
   }
-  term_output_buffer();
+  qstrncpy(tmpbuf, pctx->outbuf.c_str(), sizeof(tmpbuf));
+  delete pctx;
   convert_clsname(tmpbuf);
 
   if ( rmod & 1 )
@@ -641,16 +667,16 @@ void SetName(ushort name, ea_t ea, ushort access_mode, uval_t number, uchar rmod
         add_entry(number, ea, tmpbuf, 0);
         break;
       case 0:
-        if (rmod & 4 )
+        if ( rmod & 4 )
           del_global_name(ea);
         add_entry(ea, ea, tmpbuf, 0);
         break;
       default:
-        do_name_anyway(ea, tmpbuf);
+        force_name(ea, tmpbuf);
         break;
     }
   }
-  disableExt_NameChar();
+  // disableExt_NameChar();
   if ( (char)uni_chk > 0 && (rmod & 2) )
     ConstantNode.charset(ea, uni_chk, UR_TAG);
   uni_chk = (uchar)-1;
@@ -666,7 +692,7 @@ void set_lv_name(ushort name, ea_t ea, uchar rmod)
   if ( fmtName(name, tmpbuf, sizeof(tmpbuf), fmt_name) )
   {
     if ( rmod & 1 )
-      do_name_anyway(ea, tmpbuf);
+      force_name(ea, tmpbuf);
     hide_name(ea);
     if ( (char)uni_chk > 0 && (rmod & 2) )
       ConstantNode.charset(ea, uni_chk, UR_TAG );
@@ -679,7 +705,7 @@ void set_lv_name(ushort name, ea_t ea, uchar rmod)
 //--------------------------------------------------------------------------
 void rename_uninames(int32 mode)
 {
-  nodeidx_t id = ConstantNode.char1st(UR_TAG);
+  nodeidx_t id = ConstantNode.charfirst(UR_TAG);
   if ( id != BADNODE )
   {
     char str[MAXNAMELEN];  // for imports
@@ -704,7 +730,7 @@ void rename_uninames(int32 mode)
       adiff_t dif;
       ea_t ea = id;
       uchar type = ConstantNode.charval(ea, UR_TAG);
-      showAddr(ea);
+      show_addr(ea);
       if ( !type || type > 3 )
         goto BADIDB;
       if ( !(type & 2) && mode == -1 )
@@ -719,7 +745,7 @@ BADIDB:
           if ( !curSeg.varNode
             || (dif = ea - curSeg.DataBase) < 0
             || dif >= curSeg.DataSize
-            || isAlign(get_flags_novalue(ea)) )
+            || is_align(get_flags(ea)) )
           {
             goto BADIDB;
           }
@@ -733,14 +759,14 @@ BADIDB:
           break;
 
         case SEG_CODE:
-          if ( ea != curSeg.startEA )
+          if ( ea != curSeg.start_ea )
             goto BADIDB;
           SetName(curSeg.id.name, ea, curSeg.id.access,
                   curClass.FieldCnt + curSeg.id.Number, rmod);
           break;
 
         case SEG_IMP: // class/fields
-          dif = ea - curClass.startEA;
+          dif = ea - curClass.start_ea;
           if ( dif < 0 )
             goto BADIDB;
           if ( !dif ) // class
@@ -798,7 +824,7 @@ LCLASS:
           break;
       }
     }
-    while ( (id = ConstantNode.charnxt(id, UR_TAG)) != BADNODE );
+    while ( (id = ConstantNode.charnext(id, UR_TAG)) != BADNODE );
     hide_wait_box();
   }
 }
@@ -809,7 +835,7 @@ void xtrnRef(ea_t ea, const const_desc_t &opis)
   if ( (loadMode & MLD_EXTREF) && opis.ref_ip )
   {
     ea_t target = opis.ref_ip == 0xFFFF
-                ? curClass.startEA
+                ? curClass.start_ea
                 : curClass.xtrnEA + opis.ref_ip;
     add_dref(ea, target, dr_I);
   }
@@ -839,7 +865,7 @@ void xtrnRef_dscr(ea_t ea, const_desc_t *opis, uchar met)
 //-----------------------------------------------------------------------
 void deltry(uint bg, uint ic, uint ui, const const_desc_t &pco)
 {
-  for ( uint i = bg; (ushort)i <= curClass.xtrnCnt; i++)
+  for ( uint i = bg; (ushort)i <= curClass.xtrnCnt; i++ )
   {
     uint j = (uint)XtrnNode.altval(i, '0');
     if ( j == 0 )
@@ -866,7 +892,7 @@ segment_t *_add_seg(int caller)
 {
   static const char *const _cls[4] = { "xtrn",   "met_",    "_var",    "head" };
   static const char *const fm[4]   = { "import", "met%03u", "var%03u", "_Class" };
-  static ea_t startEA = 0;
+  static ea_t start_ea = 0;
   static ushort cursel = 1;
 
   uval_t size;
@@ -878,90 +904,93 @@ segment_t *_add_seg(int caller)
       INTERNAL("_add_seg");
 
     case 1:   // method
-      curSeg.startEA = startEA;
+      curSeg.start_ea = start_ea;
+      // fallthrough
     case -1:  // code
-      startEA = curSeg.startEA;
+      start_ea = curSeg.start_ea;
       type = SEG_CODE;
       size = curSeg.CodeSize;
       break;
 
     case 2:  // data
-      curSeg.DataBase = startEA;
+      curSeg.DataBase = start_ea;
       size = curSeg.DataSize;
       type = SEG_BSS;
       break;
 
     case 3: // class
-      curClass.startEA = startEA;
+      curClass.start_ea = start_ea;
       size = curClass.FieldCnt + 1;
       type = SEG_IMP;
       break;
 
     case 0: // header
-      curClass.xtrnEA = startEA = toEA(inf.baseaddr, 0);
+      curClass.xtrnEA = start_ea = to_ea(inf.baseaddr, 0);
       if ( !curClass.xtrnCnt )
         return NULL;
       size = curClass.xtrnCnt;
       type = SEG_XTRN;
       break;
   }
-  ea_t top = startEA + size;
+  ea_t top = start_ea + size;
   ea_t end = (top + (0xF + 1)) & ~0xF;
-  if ( top < startEA )
+  if ( top < start_ea )
     loader_failure("Our of addressing space");
 
   segment_t *S;
   if ( caller < 0 )
   {
-    S = getseg(startEA);
-    if ( S == NULL || !set_segm_end(curSeg.startEA, end, SEGMOD_KILL) )
+    S = getseg(start_ea);
+    if ( S == NULL || !set_segm_end(curSeg.start_ea, end, SEGMOD_KILL) )
       qexit(1);
-    uint32 pos = qftell(myFile);
+    qoff64_t pos = qftell(myFile);
     linput_t *li = make_linput(myFile);
-    file2base(li, pos, startEA, top, FILEREG_PATCHABLE);
+    file2base(li, pos, start_ea, top, FILEREG_PATCHABLE);
     unmake_linput(li);
     qfseek(myFile, pos + curSeg.CodeSize, SEEK_SET);
   }
   else
   {
     sel_t sel;
-    if ( startEA > 0x100000 )
+    if ( start_ea > 0x100000 )
     {
       sel = cursel++;
-      set_selector(sel, startEA>>4);
+      set_selector(sel, start_ea>>4);
     }
     else
     {
-      sel = (ushort)(startEA >> 4);
+      sel = (ushort)(start_ea >> 4);
     }
-    if ( !add_segm(sel, startEA, end, NULL, _cls[caller]) )
+    if ( !add_segm(sel, start_ea, end, NULL, _cls[caller]) )
       qexit(1);
-    S = getseg(startEA);
+    S = getseg(start_ea);
     S->orgbase = -(uval_t)curSeg.id.Number;
     S->type = type;
     if ( caller != 1 )
       S->set_hidden_segtype(true);  // no out comment of segment type
-    set_segm_name(S, fm[caller], curSeg.id.Number);
-    if ( caller <= 1 ) goto
-      end_create;  // method/header
-    for ( uval_t i = 0; startEA < top; startEA++, i++) // data & class
+    char sname[32];
+    qsnprintf(sname, sizeof(sname), fm[caller], curSeg.id.Number);
+    set_segm_name(S, sname);
+    if ( caller <= 1 )
+      goto end_create;  // method/header
+    for ( uval_t i = 0; start_ea < top; start_ea++, i++ ) // data & class
     {
-      doByte(startEA, 1);
+      create_byte(start_ea, 1);
       if ( caller == 2 ) // data
       {
         char str[MAXNAMELEN];
         qsnprintf(str, sizeof(str), "met%03u_slot%03" FMT_EA "u", curSeg.id.Number, i);
-        if ( do_name_anyway(startEA, str) )
-          make_name_auto(startEA);
+        if ( force_name(start_ea, str) )
+          make_name_auto(start_ea);
         else
-          hide_name(startEA);
+          hide_name(start_ea);
       }
     }
   }
 
-  doByte(top, end - top);  // !header && !method
+  create_byte(top, end - top);  // !header && !method
 end_create:
-  startEA = end;
+  start_ea = end;
   return S;
 }
 GCC_DIAG_ON(format-nonliteral);
@@ -977,8 +1006,8 @@ void resizeLocVars(void)
     cur = (int32)temp.altval(slot);
     if ( cur < 0 && !prev )
     {
-      do_unknown(curSeg.DataBase + slot+1, DOUNK_SIMPLE);
-      doWord(curSeg.DataBase + slot, 2);
+      del_items(curSeg.DataBase + slot+1, DELIT_SIMPLE);
+      create_word(curSeg.DataBase + slot, 2);
     }
   }
 }
@@ -990,7 +1019,7 @@ const char *CopyAttrToFile(const char *astr, uint32 size, ushort id)
     errtrunc();  // here for alloc diagnostic
 
   char fname[QMAXPATH];
-  qstrncpy(fname, database_idb, sizeof(fname));
+  qstrncpy(fname, get_path(PATH_TYPE_IDB), sizeof(fname));
   char *ptr = (char *)get_file_ext(fname);
   if ( ptr == NULL )
   {
@@ -1113,26 +1142,28 @@ full_copy:
 //-----------------------------------------------------------------------
 bool fmtName(ushort index, char *buf, size_t bufsize, fmt_t fmt)
 {
-  init_output_buffer(buf, bufsize);
-  int i = fmtString(index, bufsize-1, fmt);
-  term_output_buffer();
+  out_java_t *pctx = (out_java_t *)create_outctx(BADADDR);
+  int i = pctx->fmtString(index, bufsize-1, fmt);
+  qstrncpy(buf, pctx->outbuf.c_str(), bufsize);
+  delete pctx;
   return !i && buf[0];
 }
 
 //--------------------------------------------------------------------------
 //  Procedures for "press Enter on any name"
-static int is_locvar_name(const char *name)
+static int is_locvar_name(const insn_t &insn, const char *name)
 {
   LocVar lv;
-  uint32 idx = (uint32)cmd.Op1.addr;
+  uint32 idx = (uint32)insn.Op1.addr;
 
-  if ( cmd.Op1.type == o_mem )
+  if ( insn.Op1.type == o_mem )
   {
-    if ( cmd.Op1.ref )
+    if ( insn.Op1.ref )
       goto bad;
-  } else if ( cmd.Op1.type == o_void )
+  }
+  else if ( insn.Op1.type == o_void )
   {
-    if ( (char)cmd.Op1.ref < 0 || (int32)(idx -= (uint32)curSeg.DataBase) < 0 )
+    if ( (char)insn.Op1.ref < 0 || (int32)(idx -= (uint32)curSeg.DataBase) < 0 )
       goto bad;
   }
 
@@ -1152,45 +1183,49 @@ static inline int strstrpos(const char *s1, const char *s2)
   s2 = strstr(s1, s2);
   return s2 == NULL ? -1 : s2 - s1;
 }
-//----------------------------------------
-ea_t idaapi get_ref_addr(ea_t ea, const char *name, int pos)
+
+//-------------------------------------------------------------------------
+static bool is_get_ref_addr_visible_cp(wchar32_t cp)
 {
-  if ( (uint)strlen(name) <= (uint)pos )
-not_found:
+  return cp == j_field_dlm || cp == j_clspath_dlm || is_visible_cp(cp);
+}
+
+//--------------------------------------------------------------------------
+ea_t idaapi get_ref_addr(ea_t ea, const char *name, size_t pos)
+{
+  if ( strlen(name) <= pos || getseg(ea) == NULL )
+  {
+NOT_FOUND:
     return BADADDR;
+  }
 
   uchar clv = getMySeg(ea)->type;
   switch ( clv ) // also set curSeg
   {
     case SEG_XTRN:
       if ( !jasmin() )
-        goto not_found; // short form. Can't search by text
-      //PASS THRU
+        goto NOT_FOUND; // short form. Can't search by text
+      // no break
     default:
       break;
     case SEG_CODE:
-      if ( (uint)strstrpos(name, ash.cmnt) <= (uint)pos )
+      if ( strstrpos(name, ash.cmnt) <= pos )
         clv |= 0x80;  // flag for 'modified autocomment' (see make_locvar_cmt)
       break;
   }
 
-  enableExt_NameChar();
-  int r = pos;
-  if ( !strchr(NameChars, (uchar)name[r]) )
-  {
-    disableExt_NameChar();
-    goto not_found;
-  }
+  ssize_t r = pos;
+  if ( !is_get_ref_addr_visible_cp(uchar(name[r])) )
+    goto NOT_FOUND;
 
-  while ( r && strchr(NameChars, (uchar)name[r-1]) )
+  while ( r > 0 && is_get_ref_addr_visible_cp(uchar(name[r-1])) )
     --r;
-  int start = r;
+  ssize_t start = r;
   for ( r = pos+1; name[r]; r++ )
-    if ( !strchr(NameChars, (uchar)name[r]) )
+    if ( !is_get_ref_addr_visible_cp(uchar(name[r])) )
       break;
-  disableExt_NameChar();
   if ( name[r] == '\\' && !name[r+1] )
-    goto not_found; //\\+++ not work with prompt?
+    goto NOT_FOUND; //\\+++ not work with prompt?
   char buf[MAXSTR*2];
   memcpy(buf, &name[start], r);
   buf[r] = '\0';
@@ -1200,22 +1235,24 @@ not_found:
     case SEG_BSS:
       r = check_special_label(buf, r);
       if ( r >= 0 )
-        return curSeg.startEA + r;
+        return curSeg.start_ea + r;
       //PASS THRU
     default:
       break;
   }
-  if ( (clv&0x80) && curSeg.varNode && (start = is_locvar_name(buf)) >= 0 )
+  insn_t insn;
+  decode_insn(&insn, ea);
+  if ( (clv&0x80) && curSeg.varNode && (start = is_locvar_name(insn, buf)) >= 0 )
     return curSeg.DataBase + start;
 // append(new)
   ea_t rea = get_name_ea(BADADDR, convert_clsname(buf));
-  if ( rea == BADADDR && jasmin() && (clv&~0x80)==SEG_CODE ) // fieldnames
+  if ( rea == BADADDR && jasmin() && (clv&~0x80) == SEG_CODE ) // fieldnames
   {
     char *p = strrchr(buf, j_field_dlm);
     if ( p )
     {
       *p++ = '\0';
-      if ( get_name_ea(BADADDR, buf) == curClass.startEA )
+      if ( get_name_ea(BADADDR, buf) == curClass.start_ea )
         rea = get_name_ea(BADADDR, p);
     }
   }
@@ -1281,26 +1318,19 @@ bool is_valid_string_index(ushort index)
  *     typeparam  ::= name ':' type
 */
 //-----------------------------------------------------------------------
-static size_t _one_line(void)
-{
-  out_zero();
-  return 0;
-}
-
-//-----------------------------------------------------------------------
 inline bool is_tag(ushort u)
 {
   return u == j_class || u == j_typeref;
 }
 
 //-----------------------------------------------------------------------
-int fmtString(ushort index, ssize_t size, fmt_t mode, _PRMPT_ putproc)
+int out_java_t::fmtString(ushort index, ssize_t size, fmt_t mode, _PRMPT_ putproc)
 {
 #define SWT_STR(u)       \
   do                     \
     if ( u )             \
     {                    \
-      size = putproc();  \
+      size = (this->*putproc)();  \
       if ( size == 0 )   \
         return -1;       \
       else               \
@@ -1328,7 +1358,7 @@ BADIDB:
     DESTROYED("fmtString");
 
   if ( putproc == NULL )
-    putproc = _one_line;
+    putproc = &out_java_t::_one_line;
 
   uint32 strcnt = ((uint32)index) << 16;
   uint32 ostsz = (uint32)ConstantNode.altval(strcnt);
@@ -1380,7 +1410,7 @@ BADIDB:
     {
       if ( cs )
         goto BADIDB;  // PARANOYA
-      strcnt  = (ushort)strcnt; // length of <...:...> == offset to '('
+      strcnt = (ushort)strcnt; // length of <...:...> == offset to '('
       if ( strcnt >= dimcnt || tp[strcnt] != j_func )
         goto BADIDB;
       if ( intag )
@@ -1476,7 +1506,9 @@ start_string:
             uni_chk |= 2;
 do_unicode:
           SWT_STR(size < 6);
-          size -= out_snprintf("\\u%04X", cw);  //UNICODE-format
+          size_t inplen = outbuf.length();
+          out_printf("\\u%04X", cw);  //UNICODE-format
+          size -= outbuf.length() - inplen;
           continue;
         }
         else
@@ -1524,7 +1556,7 @@ do_unicode:
 do_escape:
         SWT_STR(size < 2);
         size -= 2;
-        OutChar('\\');
+        out_char('\\');
         goto _put_only;
       }
       if ( cs >= ' ' )
@@ -1536,7 +1568,7 @@ puts:
 _put_entry:
         --size;
 _put_only:
-        OutChar(cs);
+        out_char(cs);
         continue;
       }
 checkdig:
@@ -1544,7 +1576,9 @@ checkdig:
       {
 do_oct3:
         SWT_STR(size < 4);
-        size -= out_snprintf("\\%.3o", cs);
+        size_t inplen = outbuf.length();
+        out_printf("\\%.3o", cs);
+        size -= outbuf.length() - inplen;
         continue;
       }
       if ( cs <= 7 )
@@ -1553,7 +1587,11 @@ do_oct3:
         goto do_escape;
       }
       SWT_STR(size < 3);
-      size -= out_snprintf("\\%o", cs);
+      {
+        size_t inplen = outbuf.length();
+        out_printf("\\%o", cs);
+        size -= outbuf.length() - inplen;
+      }
       continue;
     } // mode <= fmt_string
     DEB_ASSERT(((tp[-1] >= CHP_MAX || tp[-1] <= CHP_MIN) && mode > fmt_string), "f:chr");
@@ -1571,7 +1609,7 @@ oem_mapped:
         //PASS THRU
         CASSERT(j_field_dlm == '.');
       case j_field_dlm:
-        DEB_ASSERT((!(intag&1) && mode!=fmt_fullname && mode!=fmt_classname), "f:/");
+        DEB_ASSERT((!(intag&1) && mode != fmt_fullname && mode != fmt_classname), "f:/");
         goto puts;
 
       case j_tag:
@@ -1589,7 +1627,7 @@ do_extends:
 do_table:
         SWT_STR(size < sfx[cs].size);
         size -= sfx[cs].size;
-        OutLine(sfx[cs].str);
+        out_line(sfx[cs].str);
         nextp = 0;
       case j_throw:
         DEB_ASSERT((!ostsz || !is_tag(*tp) || (intag&1)), "f:special");
@@ -1606,7 +1644,7 @@ do_table:
         DEB_ASSERT((intag <= 2 || !ostsz || !is_tag(*tp)), "f:wild+-");
         SWT_STR(size <= 0);
         --size;
-        OutChar('?');
+        out_char('?');
         cs = cs == j_wild_s;  // s: super, e: extends
         goto do_table;
 
@@ -1685,7 +1723,7 @@ next_list:
       nextp = 0;
       SWT_STR(size < 2);
       size -= 2;
-      OutLine(", ");
+      out_line(", ");
       if ( tagmode )
         continue;
     }
@@ -1733,7 +1771,7 @@ next_list:
 
       SWT_STR(size < (short)tp_decl[i].size);
       size -= tp_decl[i].size;
-      OutLine(tp_decl[i].str);
+      out_line(tp_decl[i].str);
     }
 endtag:
     nextp = 1;
@@ -1744,7 +1782,7 @@ endtag:
       {
         SWT_STR(size < 2);
         size -= 2;
-        OutLine("[]");
+        out_line("[]");
         --dimcnt;
       }
     }
@@ -1762,9 +1800,8 @@ endtag:
   if ( mode <= fmt_retdscr )
   {
     SWT_STR(size <= 0);
-    OutChar(mode <= fmt_quoted ? quotation : ' ');
+    out_char(mode <= fmt_quoted ? quotation : ' ');
   }
-  out_zero();
 done:
   return strcnt;
 #undef SWT_STR
@@ -1828,7 +1865,7 @@ uchar LoadUtf8(ushort index, const_desc_t *co)
         {
           if ( !size
             || (c & 0xF0) != 0xE0
-            || ((c = read1()) & 0xC0) != 0x80)
+            || ((c = read1()) & 0xC0) != 0x80 )
           {
 errchar:
               if ( is_sde )
@@ -1922,9 +1959,11 @@ void Parser(ushort index, const_desc_t *co)
 
 #define _op_isTAG_   (_op_CLSBEG_ | _op_NAME_ | _op_TYPBEG_)
 
-  uint Flags  = 0, size = co->_Ssize;
-  uint32 posit  = 0, possgn = 0;
-  ushort *po    = tsPtr; // ATT: call ONLY after LoadUtf8, size!=0
+  uint Flags = 0;
+  uint size = co->_Ssize;
+  uint32 posit = 0;
+  uint32 possgn = 0;
+  ushort *po = tsPtr; // ATT: call ONLY after LoadUtf8, size!=0
   uchar sgnlev = 0, prim = 0, *pprim = NULL;
   uchar cs;  // for prev
 
@@ -1940,7 +1979,7 @@ void Parser(ushort index, const_desc_t *co)
           switch ( po[posit] )
           {
             case j_tag:
-              if ( size < 7)
+              if ( size < 7 )
                 break; // Lx;>Lx; or Lx;>( )V => only_string
               Flags |= _OP_FULLNM | _OP_NOFNM | _OP_NODSCR
                      | _op_PRIMSIG_ | _op_INPRSIG_;
@@ -1953,7 +1992,7 @@ void Parser(ushort index, const_desc_t *co)
               if ( !size ) // <init>/<clinit>
               {
                 Flags |= _OP_NODSCR | _OP_NOSIGN;
-                goto set_flags;
+                goto SET_FLAGS;
               }
               //PASS THRU
             default:
@@ -2019,7 +2058,7 @@ accept_tag:
       case j_endfunc: // always can be present in in name
         if ( sgnlev )
           goto only_string;
-        if ( (Flags & (_op_PARAM_ | _op_ARRAY_ | _op_isTAG_)) != _op_PARAM_)
+        if ( (Flags & (_op_PARAM_ | _op_ARRAY_ | _op_isTAG_)) != _op_PARAM_ )
           goto only_string;
         Flags ^= (_op_PARAM_ | _op_PAREND_);
         continue;
@@ -2088,7 +2127,7 @@ end_signW:
 
         if ( sgnlev == 1 && (Flags & _op_INPRSIG_) ) // parse <...:...>
         {
-          if ( size < 4)
+          if ( size < 4 )
             goto only_string;  // >Lx; or >( )V
           switch ( po[1] )
           {
@@ -2244,7 +2283,7 @@ only_string:
   }
   if ( (ushort)Flags )
   {
-set_flags:  // <init>/<cinit>/V nor reserved :)
+SET_FLAGS:  // <init>/<cinit>/V nor reserved :)
     uint32 ind = ((uint32)index) << 16;
     co->_Sflags |= (ushort)Flags;
     ConstantNode.altset(ind, co->_Sopstr);

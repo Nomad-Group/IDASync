@@ -11,10 +11,10 @@
 #include "i860.hpp"
 
 //------------------------------------------------------------------------
-static void doImmdValue(void)
+static void set_immd_bit(const insn_t &insn)
 {
-  doImmd(cmd.ea);
-  switch ( cmd.itype )
+  set_immd(insn.ea);
+  switch ( insn.itype )
   {
     case I860_and:
     case I860_andh:
@@ -22,13 +22,13 @@ static void doImmdValue(void)
     case I860_andnoth:
     case I860_xor:
     case I860_xorh:
-      op_num(cmd.ea,1);
+      op_num(insn.ea, 1);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-static bool TouchArg(op_t &x,int isload)
+static bool handle_operand(const insn_t &insn, const op_t &x, bool isload)
 {
   dref_t xreftype;
   uchar outf;
@@ -47,27 +47,25 @@ static bool TouchArg(op_t &x,int isload)
     xreftype = isload ? dr_R : dr_W;
     outf = OOF_SIGNED|OOF_ADDR;
 makeImm:
-    doImmdValue();
-    if ( op_adds_xrefs(uFlag, x.n) )
-      ua_add_off_drefs2(x, xreftype, outf);
+    set_immd_bit(insn);
+    if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
+      insn.add_off_drefs(x, xreftype, outf);
     break;
   case o_mem:
-    ua_dodata2(x.offb, x.addr, x.dtyp);
-    if ( !isload )
-      doVar(x.addr);
-    ua_add_dref(x.offb,x.addr,isload ? dr_R : dr_W);
+    insn.create_op_data(x.addr, x);
+    insn.add_dref(x.addr, x.offb, isload ? dr_R : dr_W);
     break;
   case o_near:
     {
-      int iscall = InstrIsSet(cmd.itype,CF_CALL);
-      ua_add_cref(x.offb,x.addr,iscall ? fl_CN : fl_JN);
+      int iscall = has_insn_feature(insn.itype,CF_CALL);
+      insn.add_cref(x.addr, x.offb, iscall ? fl_CN : fl_JN);
       if ( iscall && !func_does_return(x.addr) )
         return false;
     }
     break;
   default:
 badTouch:
-    warning("%a: %s,%d: bad optype %d", cmd.ea, cmd.get_canon_mnem(), x.n, x.type);
+    warning("%a: %s,%d: bad optype %d", insn.ea, insn.get_canon_mnem(), x.n, x.type);
     break;
   }
   return true;
@@ -96,13 +94,14 @@ static bool isDual(uint32 code)
 //  }
 //  return 0;
 //}
-//
+
 //----------------------------------------------------------------------
 static int isDelayedStop(uint32 code)
 {
                         // br bri
   int opcode = int(code >> 26);
-  switch ( opcode ) {
+  switch ( opcode )
+  {
     case 0x10:          // bri
     case 0x1A:          // br
       return 1;
@@ -111,44 +110,55 @@ static int isDelayedStop(uint32 code)
 }
 
 //----------------------------------------------------------------------
-static bool canFlow(void)
+static bool canFlow(const insn_t &insn)
 {
-  if ( ! isFlow(uFlag) ) return 1;             // no previous instructions
-  ea_t ea = cmd.ea - 4;
-  flags_t F = get_flags_novalue(ea);
-  if ( isFlow(F) && isCode(F) )
+  if ( !is_flow(get_flags(insn.ea)) )
+    return 1;             // no previous instructions
+  ea_t ea = insn.ea - 4;
+  flags_t F = get_flags(ea);
+  if ( is_flow(F) && is_code(F) )
   {
-    if ( isDelayedStop(get_long(ea)) )         // now or later
+    if ( isDelayedStop(get_dword(ea)) )         // now or later
     {
       ea -= 4;
-      if ( !isCode(get_flags_novalue(ea)) || !isDual(get_long(ea)) ) return 0;
+      if ( !is_code(get_flags(ea)) || !isDual(get_dword(ea)) )
+        return 0;
       return 1;
     }
-    if ( isFlow(F) )
+    if ( is_flow(F) )
     {
       ea -= 4;
-      return !isCode(get_flags_novalue(ea)) || !isDelayedStop(get_long(ea));
+      return !is_code(get_flags(ea)) || !isDelayedStop(get_dword(ea));
     }
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-int idaapi i860_emu(void)
+
+int idaapi i860_emu(const insn_t &insn)
 {
-  bool funcret = true;
+  bool flow = true;
 
-  uint32 Feature = cmd.get_canon_feature();
+  uint32 Feature = insn.get_canon_feature();
 
-  if ( Feature & CF_USE1 ) if ( !TouchArg(cmd.Op1,1) ) funcret = false;
-  if ( Feature & CF_USE2 ) if ( !TouchArg(cmd.Op2,1) ) funcret = false;
-  if ( Feature & CF_USE3 ) if ( !TouchArg(cmd.Op3,1) ) funcret = false;
-  if ( Feature & CF_JUMP ) QueueSet(Q_jumps,cmd.ea);
+  if ( Feature & CF_USE1 && !handle_operand(insn, insn.Op1, true) )
+    flow = false;
+  if ( Feature & CF_USE2 && !handle_operand(insn, insn.Op2, true) )
+    flow = false;
+  if ( Feature & CF_USE3 && !handle_operand(insn, insn.Op3, true) )
+    flow = false;
+  if ( Feature & CF_JUMP )
+    remember_problem(PR_JUMP, insn.ea);
 
-  if ( Feature & CF_CHG1 ) if ( !TouchArg(cmd.Op1,0) ) funcret = false;
-  if ( Feature & CF_CHG2 ) if ( !TouchArg(cmd.Op2,0) ) funcret = false;
-  if ( Feature & CF_CHG3 ) if ( !TouchArg(cmd.Op3,0) ) funcret = false;
+  if ( Feature & CF_CHG1 && !handle_operand(insn, insn.Op1, false) )
+    flow = false;
+  if ( Feature & CF_CHG2 && !handle_operand(insn, insn.Op2, false) )
+    flow = false;
+  if ( Feature & CF_CHG3 && !handle_operand(insn, insn.Op3, false) )
+    flow = false;
 
-  if ( funcret && canFlow() ) ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+  if ( flow && canFlow(insn) )
+    add_cref(insn.ea, insn.ea + insn.size, fl_F);
   return 1;
 }

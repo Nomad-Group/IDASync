@@ -124,7 +124,6 @@
 #endif
 
 #ifdef __LINUX__
- //#define _BSD_I386__TYPES_H_
 #define _DARWIN_C_SOURCE
 #endif
 
@@ -140,6 +139,7 @@
 #include <mach-o/arm64/reloc.h>
 #include <mach-o/x86_64/reloc.h>
 #include <mach-o/nlist.h>
+#include <mach-o/stab.h>
 
 // these definitions are processor specific but are redefined in header files
 // we undefine and never use them
@@ -193,13 +193,16 @@ inline uint64_t swap64(uint64_t x)
 #define LC_ROUTINES_VALUE LC_ROUTINES_64
 #define LC_ROUTINES_NAME "LC_ROUTINES_64"
 
-#define MACHO_NODE "$ macho"    // supval(0) - mach_header
-#define MACHO_ALT_IMAGEBASE nodeidx_t(-1)
-#define MACHO_ALT_UUID      nodeidx_t(-2)
+#include "macho_node.h"
+
 #define local static
 #define MAX_DEPTH 1024
 
-//copy memory with range checking and auto sizing
+// since this file may be used in 32-bit build to process 64-bit files (EFD),
+// we use uint64 instead of ea_t and so need a corresponding BADADDR define
+#define BADADDR64 uint64(-1)
+
+// copy memory with range checking and auto sizing
 template<class T> bool safecopy(const char *&begin, const char *end, T *dest)
 {
   if ( end <= begin || (end - begin) < sizeof(T) )
@@ -213,7 +216,7 @@ template<class T> bool safecopy(const char *&begin, const char *end, T *dest)
   return true;
 }
 
-//advance the pointer with range and overflow checking
+// advance the pointer with range and overflow checking
 inline bool safeskip(const char *&begin, const char *end, size_t amount)
 {
   if ( end <= begin || (end - begin) < amount )
@@ -250,16 +253,16 @@ struct macho_lc_visitor_t
   //  0: call specific callback
   //  1: stop enumeration
   //  2: don't call specific callback and continue
-  virtual int visit_any_load_command(const struct load_command *,  const char *, const char *) { return 0; };
+  virtual int visit_any_load_command(const struct load_command *, const char *, const char *) { return 0; }
 
   // unknown load command
   // return nonzero to stop enumeration
   // NB: lc is swapped
-  virtual int visit_unknown_load_command(const struct load_command *,  const char *, const char *) { return 0; };
+  virtual int visit_unknown_load_command(const struct load_command *, const char *, const char *) { return 0; }
 
   // the following functions get cmd already in native byte order (at least headers)
   // begin and end are pointers to raw, unswapped data
-  // virtual int visit_XX  (const struct XX_command *cmd, char *begin, char *end)    { return 0; };
+  // virtual int visit_XX  (const struct XX_command *cmd, char *begin, char *end) { return 0; }
 
   // LC_SYMTAB
   VISIT_COMMAND(symtab);
@@ -308,9 +311,11 @@ struct macho_lc_visitor_t
   VISIT_COMMAND(linkedit_data);
   // LC_ENCRYPTION_INFO
   VISIT_COMMAND(encryption_info);
+  // LC_ENCRYPTION_INFO64
+  virtual int visit_encryption_info_64(const struct encryption_info_command_64 *, const char *, const char *) { return 0; }
   // LC_DYLD_INFO, LC_DYLD_INFO_ONLY
   VISIT_COMMAND(dyld_info);
-  // LC_VERSION_MIN_MACOSX, LC_VERSION_MIN_IPHONEOS
+  // LC_VERSION_MIN_MACOSX, LC_VERSION_MIN_IPHONEOS, LC_VERSION_MIN_WATCHOS
   VISIT_COMMAND(version_min);
   // LC_SOURCE_VERSION
   VISIT_COMMAND(source_version);
@@ -323,6 +328,8 @@ struct macho_lc_visitor_t
   // even though they're not strictly load commands, we also parse sections for convenience
   virtual int visit_section(const struct section *,    const char *, const char *) { return 0; }
   virtual int visit_section(const struct section_64 *, const char *, const char *) { return 0; }
+
+  virtual ~macho_lc_visitor_t() {};
 };
 
 struct macho_reloc_visitor_t
@@ -334,14 +341,14 @@ struct macho_reloc_visitor_t
     mach_reloc_local = -1,
   };
   // callback for visit_relocs()
-  virtual void visit_relocs(ea_t baseea, const relocvec_t &relocs, int section_no) = 0;
+  virtual void visit_relocs(uint64 baseea, const relocvec_t &relocs, int section_no) = 0;
 };
 
 struct dyld_info_visitor_t
 {
   // visit a rebase location
   // type: type of rebasing (REBASE_TYPE_XXX)
-  virtual int visit_rebase(uint64_t /*address*/, uchar /*type*/) { return 0; }
+  virtual void visit_rebase(uint64_t /*address*/, uchar /*type*/) {}
 
   enum bind_kind_t
   {
@@ -356,18 +363,35 @@ struct dyld_info_visitor_t
   // flags: BIND_SYMBOL_FLAGS_xxx
   // addend: value added to symbol's address
   // name: symbol name
-  virtual int visit_bind(bind_kind_t /*bind_kind*/, uint64_t /*address*/, uchar /*type*/, uchar /*flags*/,
-    int64_t /*libOrdinal*/, int64_t /*addend*/, const char * /*name*/) { return 0; }
+  virtual int visit_bind(
+        bind_kind_t /*bind_kind*/,
+        uint64_t /*address*/,
+        char /*type*/,
+        uchar /*flags*/,
+        int64_t /*libOrdinal*/,
+        int64_t /*addend*/,
+        const char * /*name*/)
+  {
+    return 0;
+  }
 
   // visit an exported name
   // flags: EXPORT_SYMBOL_FLAGS_XXX
-  virtual int visit_export(uint64_t /*address*/, uint32 /*flags*/, const char * /*name*/) { return 0; }
+  virtual int visit_export(
+        uint64_t /*address*/,
+        uint32 /*flags*/,
+        const char * /*name*/)
+  {
+    return 0;
+  }
 };
 
 struct function_starts_visitor_t
 {
   // visit a function start
   virtual int visit_start(uint64_t /*address*/) { return 0; }
+  // callback for when info could not be found/loaded
+  virtual void handle_error();
 };
 
 struct shared_region_visitor_t
@@ -383,6 +407,22 @@ struct shared_region_visitor_t
   virtual int visit_region(region_kind_t /* kind */, uint64_t /*address*/) { return 0; }
 };
 
+// from mach_loader.c
+/*
+* The first APPLE_UNPROTECTED_HEADER_SIZE bytes (from offset 0 of
+* this part of a Universal binary) are not protected...
+* The rest needs to be "transformed".
+*/
+#define APPLE_UNPROTECTED_HEADER_SIZE  (3 * PAGE_SIZE)
+
+#define APPLE_PROTECTED_MAGIC_AES      0xc2286295
+#define APPLE_PROTECTED_MAGIC_BLOWFISH 0x2e69cf40
+
+bool is_protected(const segment_command &sg);
+bool is_protected(const segment_command_64 &sg);
+
+class dyld_cache_t;
+//-V:macho_file_t:730 not all members of a class are initialized inside the constructor
 class macho_file_t
 {
   // input file reference
@@ -427,18 +467,25 @@ class macho_file_t
   // are mach_sections and mach_segcmds valid?
   bool parsed_section_info;
   // expected base address (vmaddr of the segment that includes the mach header)
-  ea_t base_addr;
+  uint64 base_addr;
+  // hints about this macho file
+  uint32 hints;
+#define MACHO_HINT_MEM_IMAGE        0x0001 // macho file represents an image in memory
+#define MACHO_HINT_SHARED_CACHE_LIB 0x0002 // macho file is a lib from dyld_shared_cache
 
   //load array of relocs from file with range checking and endianness swapping
-  bool load_relocs(uint32 reloff, uint32 nreloc, relocvec_t &relocs, const char *descr);
+  bool load_relocs(uint32 reloff, uint32 nreloc, relocvec_t *relocs, const char *descr);
 
   bool parse_fat_header();
   bool parse_load_commands(bool silent=false);
   void parse_section_info();
 
-  uint64_t segStartAddress(int segIndex);
+  bool getSegInfo(uint64_t *segStartAddr, uint64_t *segSize, int segIndex);
   bool visit_rebase_opcodes(const bytevec_t &data, dyld_info_visitor_t &v);
-  bool visit_bind_opcodes(dyld_info_visitor_t::bind_kind_t bind_kind, const bytevec_t &data, dyld_info_visitor_t &v);
+  bool visit_bind_opcodes(
+        dyld_info_visitor_t::bind_kind_t bind_kind,
+        const bytevec_t &data,
+        dyld_info_visitor_t &v);
   bool processExportNode(
         const uchar *start,
         const uchar *p,
@@ -450,12 +497,19 @@ class macho_file_t
         int level=0);
   bool visit_export_info(const bytevec_t &data, dyld_info_visitor_t &v);
 
+  uint64 find_exported_symbol_dyld(
+        const char *symname,
+        bool verbose,
+        const dyld_cache_t *dcache = NULL);
+
+  friend class dyld_cache_t;
 
 public:
-  macho_file_t(linput_t *_li, size_t _start_offset = 0)
+  macho_file_t(linput_t *_li, size_t _start_offset = 0, uint32 _hints = 0)
     : li(_li), should_close_linput(false), start_offset(_start_offset),
-      mach_offset(-1), mach_size(0),  parsed_section_info(false),
-      base_addr(BADADDR) {}
+      mach_offset(-1), mach_size(0), mf(false), m64(false),
+      parsed_section_info(false), base_addr(BADADDR), hints(_hints) {}
+
   ~macho_file_t(void)
   {
     if ( should_close_linput )
@@ -521,9 +575,9 @@ public:
   bool visit_load_commands(macho_lc_visitor_t &v);
 
   // get segments and sections info
-  const segcmdvec_t& get_segcmds();
-  const secvec_t&    get_sections();
-  size_t             get_seg2section(size_t segidx) const { return seg2section[segidx]; }
+  const segcmdvec_t &get_segcmds();
+  const secvec_t &get_sections();
+  size_t get_seg2section(size_t segidx) const { return seg2section[segidx]; }
 
   // get segment by index
   bool get_segment(size_t segIndex, segment_command_64 *pseg);
@@ -535,43 +589,57 @@ public:
   // get section by segment name and section name
   bool get_section(const char *segname, const char *sectname, section_64 *psect = NULL);
   // get section contents by segment name and section name
-  bool get_section(const char *segname, const char *sectname, bytevec_t &data, bool in_mem = false);
+  bool get_section(const char *segname, const char *sectname, bytevec_t *data);
 
   // get list of dylibs (LC_LOAD_DYLIB)
-  const dyliblist_t& get_dylib_list();
+  // kind: which kind of dylibs to enumerate (LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB, LC_REEXPORT_DYLIB, LC_LOAD_UPWARD_DYLIB or LC_LAZY_LOAD_DYLIB)
+  // 0 = get all of them
+  const dyliblist_t get_dylib_list(int kind = 0);
 
   // get dylib module table
-  const mod_table_t& get_module_table();
+  const mod_table_t &get_module_table();
 
   // get dylib table of contents
-  const tocvec_t& get_toc();
+  const tocvec_t &get_toc();
 
   // get reference table
-  const refvec_t& get_ref_table();
+  const refvec_t &get_ref_table();
 
   // get thread state (LC_THREAD/LC_UNIXTHREAD)
   void get_thread_state(const char *&begin, const char *&end);
 
   // get entrypoint (either from LC_MAIN, or from the thread state
-  ea_t get_entry_address();
+  uint64 get_entry_address();
 
   // check if file is encrypted
-  bool is_encrypted();
+  // returns: 0-no, 1-apple protected, 2-iOS encrypted
+  int is_encrypted();
 
   // load a chunk of data from the linkedit section
   // size: number of bytes to load
   // it is updated to the actual number of bytes loaded
-  bool load_linkedit_data(uint32 offset, size_t *size, void *buffer, bool in_mem = false);
+  bool load_linkedit_data(uint32 offset, size_t *size, void *buffer);
+
+  // get symbol table load command
+  bool get_symtab_command(struct symtab_command *st);
 
   // load symbol table and string table
-  void get_symbol_table_info(nlistvec_t &symbols, qstring &strings, bool in_mem = false);
+  void get_symbol_table_info(nlistvec_t *symbols, qstring *strings);
+  void get_symbol_table(const struct symtab_command &st, nlistvec_t *symbols);
+  void get_string_table(const struct symtab_command &st, qstring *strings);
+
+  // get 16-bit uuid for this file
+  bool get_uuid(uint8 uuid[16]);
+
+  // compare this macho file's uuid against the given bytes
+  bool match_uuid(const bytevec_t &bytes);
 
   // gets the dysymtab_command from load commands
   // return false if not found
   bool get_dyst(struct dysymtab_command *dyst);
 
   // load indirect symbols table
-  void get_indirect_symbol_table_info(qvector<uint32> &indirect_symbols);
+  void get_indirect_symbol_table_info(qvector<uint32> *indirect_symbols);
 
   // enumerate relocations and call visitor on each
   void visit_relocs(macho_reloc_visitor_t &v);
@@ -586,113 +654,36 @@ public:
   void visit_shared_regions(shared_region_visitor_t &v);
 
   // get preferrable base address
-  ea_t get_base() { return base_addr; }
+  uint64 get_base()
+  {
+    if ( !parsed_section_info )
+      parse_section_info();
+    return base_addr;
+  }
+
+  // get the address of an exported symbol 'symname'
+  // will first try LC_DYLD_INFO_ONLY (if present), otherwise LC_SYMTAB
+  // returns BADADDR64 on error/not found
+  uint64 find_exported_symbol(
+        const char *symname,
+        bool verbose=false,
+        const dyld_cache_t *dcache=NULL);
 
   // return dylib ID, if present
   bool get_id_dylib(qstring *id);
 
   // get the linput pointer
   linput_t *get_linput(void) const { return li; }
+
+  // test hint flags
+  bool is_mem_image()        const { return (hints & MACHO_HINT_MEM_IMAGE) != 0; }
+  bool is_shared_cache_lib() const { return (hints & MACHO_HINT_SHARED_CACHE_LIB) != 0; }
+
+  // is the address valid?
+  bool is_valid_addr(uint64 addr) const;
+  // does the address have an initialized byte?
+  bool is_loaded_addr(uint64 addr) const;
 };
-
-//--------------------------------------------------------------------------
-#define PTD_CLEAN        0
-#define PTD_PARSABLE     1
-#define PTD_DEFREP       2
-#define PTD_DEFREP_NOFWD 3
-
-//--------------------------------------------------------------------------
-enum objc2_type_value_t
-{
-  OBJC2_TYPE_VOID = 0,
-  OBJC2_TYPE_CHAR,
-  OBJC2_TYPE_SHORT,
-  OBJC2_TYPE_INT,
-  OBJC2_TYPE_LONG,
-  OBJC2_TYPE_LONGLONG,
-  OBJC2_TYPE_FLOAT,
-  OBJC2_TYPE_DOUBLE,
-  OBJC2_TYPE_BOOL,
-  OBJC2_TYPE_CHARPTR,
-  OBJC2_TYPE_ID,
-  OBJC2_TYPE_CLASS,
-  OBJC2_TYPE_SEL,
-  OBJC2_TYPE_ARRAY,
-  OBJC2_TYPE_STRUCT,
-  OBJC2_TYPE_UNION,
-  OBJC2_TYPE_BITFIELD,
-  OBJC2_TYPE_UNK,
-};
-
-//--------------------------------------------------------------------------
-struct objc2_ivar_t
-{
-  qstring decl;  // full declaration (type+name)
-  uint32 size;   // in bits
-  uint32 align;  // align shift value
-  uint32 offset; // offset, as specified by the value of _OBJC_IVAR_$_ variable
-  bool bad;
-  bool bad_off;
-  objc2_ivar_t(void) : size(0), align(0), offset(0), bad(false), bad_off(false) {}
-};
-typedef qvector<objc2_ivar_t> objc2_ivars_t;
-
-//--------------------------------------------------------------------------
-struct objc2_type_t
-{
-  qstring name;
-  qstring prototype;
-  objc2_type_value_t type;
-  qstring array_suffix;
-  int flags; // objc2_type_flags_t
-  int size; // For bitfields, bit count; for arrays, item count
-  int ptrcnt;
-  bool had_name;
-  bool empty_struct;  // struct with no fields
-                      // don't add it to types unless it's used as a member
-  // @"class",     @,  struct foo
-  qstring typestr; // Clean representation.
-  // struct class, id, struct foo
-  qstring parser_typestr; // Parsable representation.
-  // struct class, id, struct foo; struct foo { int bar; }
-  qstring define_typestr; // Definition representation.
-  // struct class, id, struct foo { int bar; }
-  qstring define_nofwd_typestr; // Definition representation without forward reference.
-
-  // for OBJC2_TYPE_ID, class name
-  qstring classname;
-
-  void append_typestr(
-        const qstring &_typestr,
-        const qstring &_parser_typestr,
-        const qstring &_define_typestr,
-        const qstring &_define_nofwd_typestr)
-  {
-    typestr += _typestr;
-    parser_typestr += _parser_typestr;
-    define_typestr += _define_typestr;
-    define_nofwd_typestr += _define_nofwd_typestr;
-  }
-
-  void append_typestr(
-        const qstring &_typestr,
-        const qstring &_parser_typestr,
-        const qstring &_define_typestr)
-  {
-    append_typestr(_typestr, _parser_typestr, _define_typestr, _define_typestr);
-  }
-
-  void append_typestr(const qstring &_typestr, const qstring &_parser_typestr)
-  {
-    append_typestr(_typestr, _parser_typestr, _parser_typestr);
-  }
-
-  void append_typestr(const qstring &_typestr)
-  {
-    append_typestr(_typestr, _typestr);
-  }
-};
-
 
 struct dyld_cache_header
 {
@@ -709,9 +700,17 @@ struct dyld_cache_header
     uint64_t    localSymbolsOffset;     // file offset of where local symbols are stored
     uint64_t    localSymbolsSize;       // size of local symbols information
     uint8_t     uuid[16];               // unique value for each shared cache file
+    uint64_t    cacheType;              // 1 for development, 0 for optimized
+    uint32_t    islandsOffset;
+    uint32_t    islandsCount;
+    uint32_t    field_78;
+    uint32_t    field_7C;
+    uint64_t    field_80;
+    uint64_t    field_88;
 };
 
-struct dyld_cache_mapping_info {
+struct dyld_cache_mapping_info
+{
     uint64_t    address;
     uint64_t    size;
     uint64_t    fileOffset;
@@ -740,6 +739,24 @@ struct dyld_cache_slide_info
     // entrybitmap entries[entries_count];
 };
 
+struct dyld_cache_slide_info2
+{
+    uint32_t    version;    // currently 2
+    uint32_t    page_size;  // currently 4096 (may also be 16384)
+    uint32_t    page_starts_offset;
+    uint32_t    page_starts_count;
+    uint32_t    page_extras_offset;
+    uint32_t    page_extras_count;
+    uint64_t    delta_mask; // which (contiguous) set of bits contains the delta to the next rebase location
+    uint64_t    value_add;
+    //uint16_t    page_starts[page_starts_count];
+    //uint16_t    page_extras[page_extras_count];
+};
+#define DYLD_CACHE_SLIDE_PAGE_ATTRS           0xC000  // high bits of uint16_t are flags
+#define DYLD_CACHE_SLIDE_PAGE_ATTR_EXTRA      0x8000  // index is into extras array (not starts array)
+#define DYLD_CACHE_SLIDE_PAGE_ATTR_NO_REBASE  0x4000  // page has no rebasing
+#define DYLD_CACHE_SLIDE_PAGE_ATTR_END        0x8000  // last chain entry for page
+
 struct dyld_cache_local_symbols_info
 {
     uint32_t    nlistOffset;        // offset into this chunk of nlist entries
@@ -757,6 +774,28 @@ struct dyld_cache_local_symbols_entry
     uint32_t    nlistCount;         // number of local symbols for this dylib
 };
 
+//--------------------------------------------------------------------------
+// callback for visit_slid_pointers
+struct dyld_cache_slide_visitor_t
+{
+  // dyld slide should be applied to pointer at address 'addr'
+  //
+  // value_mask: mask to be applied to the pointer value. it is only present
+  // for slide info v2. for v1 it will be set to BADADDR64.
+  //
+  // value_add: to be added to the pointer value before sliding. it is only used for
+  // 32-bit caches with slide info v2. otherwise it will be set to 0.
+  //
+  // return: 0- ok, 1- stop iterating
+  virtual int visit_pointer(uint64 /*addr*/, uint64 /*value_mask*/, uint64 /*value_add*/)  { return 0; }
+
+  // read the value of the pointer at address 'addr'
+  virtual uint64 get_pointer_value(uint64 /*addr*/) { return BADADDR64; }
+
+  DEFINE_VIRTUAL_DTOR(dyld_cache_slide_visitor_t);
+};
+
+//-V:dyld_cache_t:730 not all members of a class are initialized inside the constructor: header
 class dyld_cache_t
 {
 private:
@@ -770,25 +809,128 @@ private:
   qvector <dyld_cache_image_info> image_infos;
   // image names
   qvector <qstring> image_names;
+  // branch islands
+  qvector <uint64> island_addrs;
+  // slide info version
+  uint32 slide_version;
+  // slide info v1: TOC
+  qvector<uint16> slide_toc;
+  // slide info v1: entry size (should be 128: 1 bit per 4 bytes per page)
+  uint32 slide_entries_size;
+  // slide info v1: bitmap TOC
+  bytevec_t slide_entries;
+  // slide info v2: page starts
+  qvector<uint16> slide_page_starts;
+  // slide info v2: page extras
+  qvector<uint16> slide_page_extras;
+  // slide info v2: slide page size
+  uint32 slide_page_size;
+  // slide info v2: delta mask
+  uint64 slide_delta_mask;
+  // slide info v2: adjust pointer value
+  uint64 slide_value_add;
+
+  nlistvec_t localst_symbols;
+  qstring localst_strings;
 
   // do we need to swap endianness?
   bool mf;
   // is file 64-bit?
   bool m64;
 
-public:
-  dyld_cache_t(linput_t *_li): li(_li) {}
+  void parse_local_symbols();
+  uint64 find_exported_symbol_dyld(
+        const char *dylib,
+        const char *symname,
+        bool verbose) const;
 
+  bool parse_slid_chain(dyld_cache_slide_visitor_t *v, uint64 start) const;
+
+public:
+  dyld_cache_t(linput_t *_li)
+    : li(_li),
+      slide_version(0), slide_entries_size(0), slide_page_size(0), slide_delta_mask(0), slide_value_add(0),
+      mf(false), m64(false) {}
+
+  bool is64() const { return m64; }
+  bool ismf() const { return mf; }
+  bool has_slide_info() const { return !slide_toc.empty() || !slide_page_starts.empty(); }
+
+#define PHF_MAPPINGS 0x01
+#define PHF_IMAGES   0x02
+#define PHF_SYMBOLS  0x04
+#define PHF_ISLANDS  0x08
+#define PHF_SLIDE    0x10
+#define PHF_ALL      0xFF
   // check if file begins with a dyld cache header
   // must be called first
-  bool parse_header();
-  const char *get_arch();
-  const qstring& get_image_name(int n) const { return image_names[n]; }
-  const dyld_cache_mapping_info& get_mapping_info(int n) const { return mappings[n]; }
-  const dyld_cache_image_info& get_image_info(int n) const { return image_infos[n]; }
+  bool parse_header(uint32 flags = PHF_ALL);
+  const char *get_arch() const;
+  const qstring &get_image_name(int n) const { return image_names[n]; }
+  const dyld_cache_mapping_info &get_mapping_info(int n) const { return mappings[n]; }
+  const dyld_cache_image_info &get_image_info(int n) const { return image_infos[n]; }
+  uint64 get_island_addr(int n) const { return island_addrs[n]; }
+  // return an linput which can be used for parsing a single Mach-O from the cache
+  // call close_linput() to close and free it
+  linput_t *create_single_macho_input(size_t imgindex) const;
+  // get an image's index in the list of images by full path
+  // returns -1 if not found
+  ssize_t get_image_index(const qstring &name) const
+  {
+    const qvector <qstring>::const_iterator p = image_names.find(name);
+    if ( p != image_names.end() )
+      return p - image_names.begin();
+    return -1;
+  };
 
+  bool visit_slid_pointers(dyld_cache_slide_visitor_t *v);
   int get_numfiles() const { return image_infos.size(); }
   int get_nummappings() const { return mappings.size(); }
+  int get_numislands() const { return island_addrs.size(); }
+  linput_t *create_single_island_input(size_t index) const;
+  // load local symbol table and string table
+  void get_symbol_table_info(nlistvec_t *symbols, qstring *strings) const
+  {
+    *symbols = localst_symbols;
+    *strings = localst_strings;
+  }
+
+  // get the address of a symbol 'symname'  exported by dylib 'dylib'
+  // returns BADADDR64 on error/not found
+  uint64 find_exported_symbol(
+        const char *dylib,
+        const char *symname,
+        bool verbose=false) const;
+
+  uint64 read_addr_at_va(uint64 addr) const;
+
+  uint64 get_clean_slid_value(uint64 v) const
+  {
+    return (v & ~slide_delta_mask) + slide_value_add;
+  }
+
+  uint32 get_slide_info_version() const { return slide_version; }
+};
+
+struct string_table_waitbox_t
+{
+  bool displayed;
+  string_table_waitbox_t(const macho_file_t &mfile) : displayed(false)
+  {
+    // all dyld_shared_cache libs in memory share a common string table.
+    // since this table can be huge, be sure to show a wait dialog when parsing it.
+    if ( mfile.is_shared_cache_lib() && mfile.is_mem_image() )
+    {
+      show_wait_box("Loading String Table");
+      displayed = true;
+    }
+  }
+  ~string_table_waitbox_t()
+  {
+    if ( displayed )
+      hide_wait_box();
+  }
+  bool cancelled() { return user_cancelled(); }
 };
 
 #endif // MACHO_COMMON_H

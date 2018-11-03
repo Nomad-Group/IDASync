@@ -8,10 +8,10 @@
  */
 
 #include "pic.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <frame.hpp>
 
-static int flow;
+static bool flow;
 
 //------------------------------------------------------------------------
 static bool is_banked_reg(ea_t addr, int value)
@@ -27,15 +27,15 @@ static bool is_banked_reg(ea_t addr, int value)
 
 //------------------------------------------------------------------------
 // is pcl register?
-static bool is_pcl(void)
+static bool is_pcl(const insn_t &insn)
 {
-  if ( cmd.Op1.type == o_mem )
+  if ( insn.Op1.type == o_mem )
   {
     switch ( ptype )
     {
       case PIC12:
-      case PIC14: return is_banked_reg(cmd.Op1.addr, 0x2);
-      case PIC16: return cmd.Op1.addr == PIC16_PCL;
+      case PIC14: return is_banked_reg(insn.Op1.addr, 0x2);
+      case PIC16: return insn.Op1.addr == PIC16_PCL;
     }
   }
   return false;
@@ -43,15 +43,15 @@ static bool is_pcl(void)
 
 //------------------------------------------------------------------------
 // is bank (status or bsr (PIC18Cxx)) register?
-bool is_bank(void)
+bool is_bank(const insn_t &insn)
 {
-  if ( cmd.Op1.type == o_mem )
+  if ( insn.Op1.type == o_mem )
   {
     switch ( ptype )
     {
       case PIC12:
-      case PIC14: return is_banked_reg(cmd.Op1.addr, 0x3);
-      case PIC16: return cmd.Op1.addr == PIC16_BANK;
+      case PIC14: return is_banked_reg(insn.Op1.addr, 0x3);
+      case PIC16: return insn.Op1.addr == PIC16_BANK;
     }
   }
   return false;
@@ -59,36 +59,37 @@ bool is_bank(void)
 
 //------------------------------------------------------------------------
 // is pclath register?
-static bool is_pclath(void)
+static bool is_pclath(const insn_t &insn)
 {
-  if ( cmd.Op1.type == o_mem )
+  if ( insn.Op1.type == o_mem )
   {
     switch ( ptype )
     {
       case PIC12: return false;
-      case PIC14: return is_banked_reg(cmd.Op1.addr, 0xA);
-      case PIC16: return cmd.Op1.addr == PIC16_PCLATH;
+      case PIC14: return is_banked_reg(insn.Op1.addr, 0xA);
+      case PIC16: return insn.Op1.addr == PIC16_PCLATH;
     }
   }
   return false;
 }
 
 //------------------------------------------------------------------------
-static void process_immediate_number(int n)
+static void process_immediate_number(const insn_t &insn, int n)
 {
-  doImmd(cmd.ea);
-  if ( isDefArg(uFlag,n) ) return;
-  switch ( cmd.itype )
+  set_immd(insn.ea);
+  if ( is_defarg(get_flags(insn.ea), n) )
+    return;
+  switch ( insn.itype )
   {
     case PIC_iorlw:
     case PIC_andlw:
     case PIC_xorlw:
-      op_num(cmd.ea, n);
+      op_num(insn.ea, n);
       break;
     case PIC_lfsr2:
       // FSRs are used to address the data memory
       if ( dataseg != BADADDR )
-        op_offset(cmd.ea, n, REF_OFF16, BADADDR, dataseg);
+        op_offset(insn.ea, n, REF_OFF16, BADADDR, dataseg);
       break;
   }
 }
@@ -96,143 +97,147 @@ static void process_immediate_number(int n)
 //----------------------------------------------------------------------
 static void destroy_if_unnamed_array(ea_t ea)
 {
-  flags_t lF = get_flags_novalue(ea);
-  if ( isTail(lF) && segtype(ea) == SEG_IMEM )
+  flags_t lF = get_flags(ea);
+  if ( is_tail(lF) && segtype(ea) == SEG_IMEM )
   {
     ea_t head = prev_not_tail(ea);
-    if ( !has_user_name(get_flags_novalue(head)) )
+    if ( !has_user_name(get_flags(head)) )
     {
-      do_unknown(head, DOUNK_SIMPLE);
-      doByte(head, ea-head);
-      ea_t end = nextthat(ea, inf.maxEA, f_isHead, NULL);
-      if ( end == BADADDR ) end = getseg(ea)->endEA;
-      doByte(ea+1, end-ea-1);
+      del_items(head, DELIT_SIMPLE);
+      create_byte(head, ea-head);
+      ea_t end = next_that(ea, inf.max_ea, f_is_head);
+      if ( end == BADADDR )
+        end = getseg(ea)->end_ea;
+      create_byte(ea+1, end-ea-1);
     }
   }
 }
 
 //----------------------------------------------------------------------
 // propagate the bank/pclath register value to the destination
-static void propagate_sreg(ea_t ea, int reg)
+static void propagate_sreg(const insn_t &insn, ea_t ea, int reg)
 {
-  if ( isLoaded(ea) )
+  if ( is_loaded(ea) )
   {
-    sel_t v = get_segreg(cmd.ea, reg);
-    split_srarea(ea, reg, v, SR_auto);
+    sel_t v = get_sreg(insn.ea, reg);
+    split_sreg_range(ea, reg, v, SR_auto);
   }
 }
 
 //----------------------------------------------------------------------
-static void process_operand(op_t &x,int ,int isload)
+static void handle_operand(const insn_t &insn, const op_t &x,int, bool isload)
 {
-  if ( cmd.Op2.type == o_reg && cmd.Op2.reg == F || cmd.itype == PIC_swapf ) isload = 0;
+  if ( insn.Op2.type == o_reg && insn.Op2.reg == F || insn.itype == PIC_swapf )
+    isload = 0;
   switch ( x.type )
   {
     case o_reg:
       return;
     case o_imm:
-      if ( !isload ) error("interr: emu");
-      process_immediate_number(x.n);
-      if ( op_adds_xrefs(uFlag, x.n) )
-        ua_add_off_drefs2(x, dr_O, calc_outf(x));
+      if ( !isload )
+        error("interr: emu");
+      process_immediate_number(insn, x.n);
+      if ( op_adds_xrefs(get_flags(insn.ea), x.n) )
+        insn.add_off_drefs(x, dr_O, calc_outf(x));
       break;
     case o_near:
       {
         cref_t ftype = fl_JN;
-        ea_t ea = calc_code_mem(x.addr);
-        if ( InstrIsSet(cmd.itype, CF_CALL) )
+        ea_t ea = calc_code_mem(insn, x.addr);
+        if ( has_insn_feature(insn.itype, CF_CALL) )
         {
           if ( !func_does_return(ea) )
             flow = false;
           ftype = fl_CN;
         }
-        ua_add_cref(x.offb, ea, ftype);
-        propagate_sreg(ea, BANK);
-        propagate_sreg(ea, PCLATH);
+        insn.add_cref(ea, x.offb, ftype);
+        propagate_sreg(insn, ea, BANK);
+        propagate_sreg(insn, ea, PCLATH);
       }
       break;
     case o_mem:
       {
         ea_t ea = calc_data_mem(x.addr);
         destroy_if_unnamed_array(ea);
-        ua_add_dref(x.offb, ea, isload ? dr_R : dr_W);
-        ua_dodata2(x.offb, ea, x.dtyp);
-        if ( !isload )
-          doVar(ea);
-        if ( may_create_stkvars())
+        insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+        insn.create_op_data(ea, x);
+        if ( may_create_stkvars() )
         {
           if ( x.addr == PIC16_INDF2 )
           {
-            func_t *pfn = get_func(cmd.ea);
+            func_t *pfn = get_func(insn.ea);
             if ( pfn != NULL && (pfn->flags & FUNC_FRAME) != 0 )
             {
-              ua_stkvar2(cmd.Op1, 0, STKVAR_VALID_SIZE);
+              insn.create_stkvar(insn.Op1, 0, STKVAR_VALID_SIZE);
             }
           }
           else if ( x.addr == PIC16_PLUSW2 )
           {
-            insn_t saved = cmd;
-            if ( decode_prev_insn(cmd.ea) != BADADDR && cmd.itype == PIC_movlw )
+            insn_t l = insn;
+            if ( decode_prev_insn(&l, l.ea) != BADADDR
+              && l.itype == PIC_movlw )
             {
-              func_t *pfn = get_func(cmd.ea);
+              func_t *pfn = get_func(l.ea);
               if ( pfn != NULL && (pfn->flags & FUNC_FRAME) != 0 )
               {
-                if ( ua_stkvar2(cmd.Op1, cmd.Op1.value, STKVAR_VALID_SIZE) )
-                  op_stkvar(cmd.ea, cmd.Op1.n);
+                if ( l.create_stkvar(l.Op1, l.Op1.value, STKVAR_VALID_SIZE) )
+                  op_stkvar(l.ea, l.Op1.n);
               }
             }
-            cmd = saved;
           }
         }
       }
       break;
     default:
-      warning("interr: emu2 %a", cmd.ea);
+      warning("interr: emu2 %a", insn.ea);
   }
 }
 
 //----------------------------------------------------------------------
 // change value of virtual register "BANK" and switch to another bank
-static void split(int reg, sel_t v)
+static void split(const insn_t &insn, int reg, sel_t v)
 {
   if ( reg == -1 )
   {
     flow = 0;
     if ( v != BADSEL )
     {
-      sel_t pclath = get_segreg(cmd.ea, PCLATH) & 0x1F;
-      ea_t ea = calc_code_mem(uchar(v) | (pclath<<8));
-      ua_add_cref(0, ea, fl_JN);
-      propagate_sreg(ea, BANK);
-      propagate_sreg(ea, PCLATH);
+      sel_t pclath = get_sreg(insn.ea, PCLATH) & 0x1F;
+      ea_t ea = calc_code_mem(insn, uchar(v) | (pclath<<8));
+      add_cref(insn.ea, ea, fl_JN);
+      propagate_sreg(insn, ea, BANK);
+      propagate_sreg(insn, ea, PCLATH);
     }
   }
   else
   {
-    if ( v == BADSEL ) v = 0;     // assume bank0 if bank is unknown
+    if ( v == BADSEL )
+      v = 0;     // assume bank0 if bank is unknown
     if ( reg == BANK )
     {
-      if ( ptype != PIC16 ) v &= 3;
-      else v &= 0xF;
+      if ( ptype != PIC16 )
+        v &= 3;
+      else
+        v &= 0xF;
     }
-    split_srarea(get_item_end(cmd.ea), reg, v, SR_auto);
+    split_sreg_range(get_item_end(insn.ea), reg, v, SR_auto);
   }
 }
 
 //----------------------------------------------------------------------
 //   tris PORTn  (or movwf TRISn)
-static bool is_load_tris_reg(void)
+static bool is_load_tris_reg(const insn_t &insn)
 {
   ea_t addr;
   const char *key;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case PIC_tris:
-      addr = cmd.Op1.value;
+      addr = insn.Op1.value;
       key = "port";
       break;
     case PIC_movwf:
-      addr = cmd.Op1.addr;
+      addr = insn.Op1.addr;
       key = "tris";
       break;
     default:
@@ -240,28 +245,37 @@ static bool is_load_tris_reg(void)
   }
   qstring name;
   addr = calc_data_mem(addr);
-  if ( get_true_name(&name, addr) <= 0 )
+  if ( get_name(&name, addr) <= 0 )
     return false;
   return strnicmp(name.begin(), key, 4) == 0;
 }
 
-//----------------------------------------------------------------------
-int idaapi emu(void)
+//------------------------------------------------------------------
+inline void set_plain_offset(ea_t insn_ea, int n, ea_t base)
 {
-  uint32 Feature = cmd.get_canon_feature();
-  int flag1 = is_forced_operand(cmd.ea, 0);
-  int flag2 = is_forced_operand(cmd.ea, 1);
-  int flag3 = is_forced_operand(cmd.ea, 2);
+  if ( base == BADADDR )
+    base = calc_offset_base(insn_ea, n);
+  if ( base != BADADDR )
+    op_plain_offset(insn_ea, n, base);
+}
+
+//----------------------------------------------------------------------
+int idaapi emu(const insn_t &insn)
+{
+  uint32 Feature = insn.get_canon_feature();
+  int flag1 = is_forced_operand(insn.ea, 0);
+  int flag2 = is_forced_operand(insn.ea, 1);
+  int flag3 = is_forced_operand(insn.ea, 2);
 
   flow = (Feature & CF_STOP) == 0;
 
-  if ( Feature & CF_USE1 ) process_operand(cmd.Op1, flag1, 1);
-  if ( Feature & CF_USE2 ) process_operand(cmd.Op2, flag2, 1);
-  if ( Feature & CF_USE3 ) process_operand(cmd.Op3, flag3, 1);
+  if ( Feature & CF_USE1 ) handle_operand(insn, insn.Op1, flag1, true);
+  if ( Feature & CF_USE2 ) handle_operand(insn, insn.Op2, flag2, true);
+  if ( Feature & CF_USE3 ) handle_operand(insn, insn.Op3, flag3, true);
 
-  if ( Feature & CF_CHG1 ) process_operand(cmd.Op1, flag1, 0);
-  if ( Feature & CF_CHG2 ) process_operand(cmd.Op2, flag2, 0);
-  if ( Feature & CF_CHG3 ) process_operand(cmd.Op3, flag3, 0);
+  if ( Feature & CF_CHG1 ) handle_operand(insn, insn.Op1, flag1, false);
+  if ( Feature & CF_CHG2 ) handle_operand(insn, insn.Op2, flag2, false);
+  if ( Feature & CF_CHG3 ) handle_operand(insn, insn.Op3, flag3, false);
 
 //
 //      Check for:
@@ -276,55 +290,58 @@ int idaapi emu(void)
     {
       case 0:
         reg = BANK;
-        if ( !is_bank() ) continue;
+        if ( !is_bank(insn) )
+          continue;
         break;
       case 1:
         reg = PCLATH;
-        if ( !is_pclath() ) continue;
+        if ( !is_pclath(insn) )
+          continue;
         break;
       case 2:
         reg = -1;
-        if ( !is_pcl() ) continue;
+        if ( !is_pcl(insn) )
+          continue;
         break;
     }
-    sel_t v = (reg == -1) ? cmd.ip : get_segreg(cmd.ea, reg);
-    if ( cmd.Op2.type == o_reg && cmd.Op2.reg == F )
+    sel_t v = (reg == -1) ? insn.ip : get_sreg(insn.ea, reg);
+    if ( insn.Op2.type == o_reg && insn.Op2.reg == F )
     {
-//      split(reg, v);
+//      split(insn, reg, v);
     }
     else
     {
-      switch ( cmd.itype )
+      switch ( insn.itype )
       {
         case PIC_bcf:
         case PIC_bcf3:
         case PIC_bsf:
         case PIC_bsf3:
-          if ( ((ptype == PIC12) && (cmd.Op2.value == 5) )  // bank selector (PA0)
-           || ((ptype == PIC14) && (
-               (reg == BANK && (cmd.Op2.value == 5 || cmd.Op2.value == 6)) // bank selector (RP1:RP0)
-           || (reg == PCLATH && (cmd.Op2.value == 3 || cmd.Op2.value == 4))))
-           || ((ptype == PIC16) && (sval_t(cmd.Op2.value) >= 0 && cmd.Op2.value <= 3)))
+          if ( (ptype == PIC12 && insn.Op2.value == 5)  // bank selector (PA0)
+            || (ptype == PIC14
+             && ((reg == BANK && (insn.Op2.value == 5 || insn.Op2.value == 6)) // bank selector (RP1:RP0)
+              || (reg == PCLATH && (insn.Op2.value == 3 || insn.Op2.value == 4))))
+            || (ptype == PIC16 && sval_t(insn.Op2.value) >= 0 && insn.Op2.value <= 3) )
           {
             if ( v == BADSEL )
               v = 0;
             int shift = 0;
             if ( (ptype == PIC14 || ptype == PIC12) && reg == BANK ) // we use bank selector bits as the bank value
               shift = 5;
-            if ( cmd.itype == PIC_bcf )
-              v = v & ~(1 << (cmd.Op2.value-shift));
+            if ( insn.itype == PIC_bcf )
+              v = v & ~(sel_t(1) << (insn.Op2.value-shift));
             else
-              v = v | sel_t(1 << (cmd.Op2.value-shift));
-            split(reg, v);
+              v = v | (sel_t(1) << (insn.Op2.value-shift));
+            split(insn, reg, v);
           }
           break;
         case PIC_clrf:
         case PIC_clrf2:
-          split(reg, 0);
+          split(insn, reg, 0);
           break;
         case PIC_swapf:
         case PIC_swapf3:
-          split(reg, ((v>>4) & 15) | ((v & 15) << 4));
+          split(insn, reg, ((v>>4) & 15) | ((v & 15) << 4));
           break;
         case PIC_movwf:
         case PIC_movwf2:
@@ -334,30 +351,30 @@ int idaapi emu(void)
         case PIC_sublw:
         case PIC_xorlw:
           {
-            insn_t saved = cmd;
-            if ( decode_prev_insn(cmd.ea) != BADADDR
-              && ( cmd.itype == PIC_movlw ) )
+            insn_t l = insn;
+            if ( decode_prev_insn(&l, l.ea) != BADADDR
+              && l.itype == PIC_movlw )
             {
-              switch ( saved.itype )
+              switch ( insn.itype )
               {
                 case PIC_movwf:
                 case PIC_movwf2:
-                  v = cmd.Op1.value;
+                  v = l.Op1.value;
                   break;
                 case PIC_addlw:
-                  v += cmd.Op1.value;
+                  v += l.Op1.value;
                   break;
                 case PIC_andlw:
-                  v &= cmd.Op1.value;
+                  v &= l.Op1.value;
                   break;
                 case PIC_iorlw:
-                  v |= cmd.Op1.value;
+                  v |= l.Op1.value;
                   break;
                 case PIC_sublw:
-                  v -= cmd.Op1.value;
+                  v -= l.Op1.value;
                   break;
                 case PIC_xorlw:
-                  v ^= cmd.Op1.value;
+                  v ^= l.Op1.value;
                   break;
               }
             }
@@ -365,24 +382,24 @@ int idaapi emu(void)
             {
               v = BADSEL;
             }
-            cmd = saved;
           }
-          split(reg, v);
+          split(insn, reg, v);
           break;
         case PIC_movlw:
-          split(reg, cmd.Op2.value);
+          split(insn, reg, insn.Op2.value);
           break;
       }
     }
   }
 
-// Such as , IDA doesn't seem to convert the following:
+// Such as, IDA doesn't seem to convert the following:
 // tris 6
 // into
 // tris PORTB ( or whatever )
 
-  if ( cmd.itype == PIC_tris && !isDefArg0(uFlag) )
-    set_offset(cmd.ea, 0, dataseg);
+  flags_t flags = get_flags(insn.ea);
+  if ( insn.itype == PIC_tris && !is_defarg0(flags) )
+    set_plain_offset(insn.ea, 0, dataseg);
 
 //   movlw value
 // followed by a
@@ -390,17 +407,16 @@ int idaapi emu(void)
 // should convert value into an offset , because FSR is used as a pointer to
 // the INDF (indirect addressing file)
 
-  if ( cmd.itype == PIC_movwf
-    && cmd.Op1.type == o_mem
-    && is_banked_reg(cmd.Op1.addr, 0x4) )    // FSR
+  if ( insn.itype == PIC_movwf
+    && insn.Op1.type == o_mem
+    && is_banked_reg(insn.Op1.addr, 0x4) )    // FSR
   {
-    insn_t saved = cmd;
-    if ( decode_prev_insn(cmd.ea) != BADADDR
-      && cmd.itype == PIC_movlw )
+    insn_t l = insn;
+    if ( decode_prev_insn(&l, l.ea) != BADADDR
+      && l.itype == PIC_movlw )
     {
-      set_offset(cmd.ea, 0, dataseg);
+      set_plain_offset(l.ea, 0, dataseg);
     }
-    cmd = saved;
   }
 
 // Also - it seems to make sense to me that a
@@ -410,27 +426,33 @@ int idaapi emu(void)
 // should convert value into a binary , because the bits indicate whether a
 // port is defined for input or output.
 
-  if ( is_load_tris_reg() )
+  if ( is_load_tris_reg(insn) )
   {
-    insn_t saved = cmd;
-    if ( decode_prev_insn(cmd.ea) != BADADDR
-      && cmd.itype == PIC_movlw )
+    insn_t l;
+    if ( decode_prev_insn(&l, insn.ea) != BADADDR
+      && l.itype == PIC_movlw )
     {
-      op_bin(cmd.ea, 0);
+      op_bin(l.ea, 0);
     }
-    cmd = saved;
   }
 
 // Move litteral to BSR
 
-  if ( cmd.itype == PIC_movlb1 ) split(BANK, cmd.Op1.value);
+  if ( insn.itype == PIC_movlb1 )
+    split(insn, BANK, insn.Op1.value);
 
 //
 //      Determine if the next instruction should be executed
 //
-  if ( !flow ) flow = conditional_insn();
-  if ( segtype(cmd.ea) == SEG_XTRN ) flow = 0;
-  if ( flow ) ua_add_cref(0,cmd.ea+cmd.size,fl_F);
+  if ( !flow )
+  {
+    flags = get_flags(insn.ea);
+    flow = conditional_insn(insn, flags);
+  }
+  if ( segtype(insn.ea) == SEG_XTRN )
+    flow = false;
+  if ( flow )
+    add_cref(insn.ea, insn.ea+insn.size, fl_F);
 
   return 1;
 }
@@ -442,15 +464,14 @@ bool idaapi create_func_frame(func_t *pfn)
   {
     if ( pfn->frame == BADNODE )
     {
-      ea_t ea = pfn->startEA;
-      if ( ea + 12 < pfn->endEA) // minimum 4 + 4 + 2 + 2 bytes needed
+      ea_t ea = pfn->start_ea;
+      if ( ea + 12 < pfn->end_ea ) // minimum 4 + 4 + 2 + 2 bytes needed
       {
         insn_t insn[4];
-        for (int i=0; i<4; i++)
+        for ( int i=0; i < 4; i++ )
         {
-          decode_insn(ea);
-          insn[i] = cmd;
-          ea += cmd.size;
+          int len = decode_insn(&insn[i], ea);
+          ea += len > 0 ? len : 0;
         }
         if ( insn[0].itype == PIC_movff2 // movff FSR2L,POSTINC1
           && insn[0].Op1.addr == PIC16_FSR2L && insn[0].Op2.addr == PIC16_POSTINC1
@@ -458,7 +479,7 @@ bool idaapi create_func_frame(func_t *pfn)
           && insn[1].Op1.addr == PIC16_FSR1L && insn[1].Op2.addr == PIC16_FSR2L
           && insn[2].itype == PIC_movlw  // movlw <size>
           && insn[3].itype == PIC_addwf3 // addwf FSR1L,f
-          && insn[3].Op1.addr == PIC16_FSR1L && insn[3].Op2.reg == F)
+          && insn[3].Op1.addr == PIC16_FSR1L && insn[3].Op2.reg == F )
         {
           pfn->flags |= FUNC_FRAME;
           return add_frame(pfn, insn[2].Op1.value, 0, 0);
@@ -470,13 +491,13 @@ bool idaapi create_func_frame(func_t *pfn)
 }
 
 //----------------------------------------------------------------------
-int idaapi is_sp_based(const op_t &)
+int idaapi is_sp_based(const insn_t &, const op_t &)
 {
   return OP_SP_ADD | OP_FP_BASED;
 }
 
 //----------------------------------------------------------------------
-int idaapi PIC_get_frame_retsize(func_t *)
+int idaapi PIC_get_frame_retsize(const func_t *)
 {
   return 0;
 }

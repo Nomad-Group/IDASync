@@ -4,6 +4,7 @@
 #else
 #include "tcpip.h"      // otherwise can not compile win32_remote.bpr
 #endif
+#include <limits.h>
 #include <typeinf.hpp>
 #include "server.h"
 
@@ -26,7 +27,7 @@ ssize_t dvmsg(int code, rpc_engine_t *rpc, const char *format, va_list va)
 {
   if ( code == 0 )
     code = RPC_MSG;
-  else if ( code >  0 )
+  else if ( code > 0 )
     code = RPC_WARNING;
   else
     code = RPC_ERROR;
@@ -38,20 +39,8 @@ ssize_t dvmsg(int code, rpc_engine_t *rpc, const char *format, va_list va)
   append_str(req, buf);
 
   qfree(rpc->process_request(req));
-  if ( code < 0 )
-  {
+  if ( code < 0 ) // RPC_ERROR
     exit(1);
-    /*
-    inline void serror(const char *format, ...)
-    {
-      va_list va;
-      va_start(va, format);
-      rpc_svmsg(-1, format, va);
-      va_end(va);
-      exit(1);
-    }
-    */
-  }
   return strlen(buf);
 }
 
@@ -140,6 +129,30 @@ int rpc_server_t::find_free_channel() const
 }
 
 //--------------------------------------------------------------------------
+#ifdef VERBOSE_ENABLED
+static const char *bptcode2str(uint code)
+{
+  static const char *const strs[] =
+  {
+    "BPT_OK",
+    "BPT_INTERNAL_ERR",
+    "BPT_BAD_TYPE",
+    "BPT_BAD_ALIGN",
+    "BPT_BAD_ADDR",
+    "BPT_BAD_LEN",
+    "BPT_TOO_MANY",
+    "BPT_READ_ERROR",
+    "BPT_WRITE_ERROR",
+    "BPT_SKIP",
+    "BPT_PAGE_OK",
+  };
+  if ( code >= qnumber(strs) )
+    return "?";
+  return strs[code];
+}
+#endif
+
+//--------------------------------------------------------------------------
 int rpc_server_t::rpc_update_bpts(
         const uchar *ptr,
         const uchar *end,
@@ -148,6 +161,14 @@ int rpc_server_t::rpc_update_bpts(
   update_bpt_vec_t bpts;
   int nadd = extract_long(&ptr, end);
   int ndel = extract_long(&ptr, end);
+
+  if ( nadd < 0 || ndel < 0 || INT_MAX - ndel < nadd )
+  {
+    append_dd(req, 0);
+    verb(("update_bpts(nadd=%d, ndel=%d) => 0 (incorrect values)\n", nadd, ndel));
+    return 0;
+  }
+
   bpts.resize(nadd+ndel);
   ea_t ea = 0;
   update_bpt_vec_t::iterator b;
@@ -166,7 +187,7 @@ int rpc_server_t::rpc_update_bpts(
   {
     b->ea = ea + extract_ea64(&ptr, end); ea = b->ea;
     uchar len = extract_byte(&ptr, end);
-    if ( len > 0)
+    if ( len > 0 )
     {
       b->orgbytes.resize(len);
       extract_memory(&ptr, end, b->orgbytes.begin(), len);
@@ -174,15 +195,19 @@ int rpc_server_t::rpc_update_bpts(
     b->type = extract_long(&ptr, end);
   }
 
+#ifdef VERBOSE_ENABLED
   for ( b=bpts.begin()+nadd; b != bend; ++b )
     verb(("del_bpt(ea=%a, type=%d orgbytes.size=%" FMT_Z " size=%d)\n",
           b->ea, b->type, b->orgbytes.size(), b->type != BPT_SOFT ? b->size : 0));
+#endif
 
   int ret = dbg_mod->dbg_update_bpts(bpts.begin(), nadd, ndel);
 
   bend = bpts.begin() + nadd;
+#ifdef VERBOSE_ENABLED
   for ( b=bpts.begin(); b != bend; ++b )
-    verb(("add_bpt(ea=%a type=%d len=%d) => code %d\n", b->ea, b->type, b->size, b->code));
+    verb(("add_bpt(ea=%a type=%d len=%d) => %s\n", b->ea, b->type, b->size, bptcode2str(b->code)));
+#endif
 
   append_dd(req, ret);
   for ( b=bpts.begin(); b != bend; ++b )
@@ -199,7 +224,7 @@ int rpc_server_t::rpc_update_bpts(
   for ( ; b != bend; ++b )
   {
     append_db(req, b->code);
-    verb(("del_bpt(ea=%a) => code %d\n", b->ea, b->code));
+    verb(("del_bpt(ea=%a) => %s\n", b->ea, bptcode2str(b->code)));
   }
 
   return ret;
@@ -227,7 +252,7 @@ int rpc_server_t::rpc_update_lowcnds(
       if ( lc->type != BPT_SOFT )
         lc->size = extract_long(&ptr, end);
       int norg = extract_byte(&ptr, end);
-      if ( norg > 0)
+      if ( norg > 0 )
       {
         lc->orgbytes.resize(norg);
         extract_memory(&ptr, end, lc->orgbytes.begin(), norg);
@@ -295,9 +320,10 @@ int rpc_server_t::rpc_attach_process(
 {
   pid_t pid = extract_long(&ptr, end);
   int event_id = extract_long(&ptr, end);
+  int flags = extract_long(&ptr, end);
   bool result = check_broken_connection(pid);
   if ( !result )
-    result = dbg_mod->dbg_attach_process(pid, event_id) > 0;
+    result = dbg_mod->dbg_attach_process(pid, event_id, flags) > 0;
   verb(("attach_process(pid=%d, evid=%d) => %d\n", pid, event_id, result));
   return result;
 }
@@ -340,7 +366,8 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
           if ( debug_debugger )
             verbose = true;
 
-          int result = dbg_mod->dbg_init(debug_debugger);
+          dbg_mod->dbg_set_debugging(debug_debugger);
+          int result = dbg_mod->dbg_init();
           verb(("init(debug_debugger=%d) => %d\n", debug_debugger, result));
           append_dd(req, result);
         }
@@ -354,18 +381,14 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
         // verb(("term()\n"));
         break;
 
-      case RPC_GET_PROCESS_INFO:
+      case RPC_GET_PROCESSES:
         {
-          process_info_t procinf;
-          int n = extract_long(&ptr, end);
-          char *input = NULL;
-          if ( n == 0 )
-            input = extract_str(&ptr, end);
-          bool result = dbg_mod->dbg_process_get_info(n, input, &procinf) > 0;
+          procinfo_vec_t procs;
+          bool result = dbg_mod->dbg_get_processes(&procs) > 0;
           append_dd(req, result);
           if ( result )
-            append_process_info(req, &procinf);
-          verb(("get_process_info(n=%d) => %d\n", n, result));
+            append_process_info_vec(req, &procs);
+          verb(("get_processes() => %d\n", result));
         }
         break;
 
@@ -386,12 +409,13 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
           char *input= extract_str(&ptr, end);
           uint32 crc32= extract_long(&ptr, end);
           int result = dbg_mod->dbg_start_process(path, args, sdir, flags, input, crc32);
-          verb(("start_process(path=%s args=%s flags=%s%s\n"
+          verb(("start_process(path=%s args=%s flags=%s%s%s\n"
             "              sdir=%s\n"
             "              input=%s crc32=%x) => %d\n",
             path, args,
             flags & DBG_PROC_IS_DLL ? " is_dll" : "",
             flags & DBG_PROC_IS_GUI ? " under_gui" : "",
+            flags & DBG_HIDE_WINDOW ? " hide_window" : "",
             sdir,
             input, crc32,
             result));
@@ -495,10 +519,16 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
           thid_t tid  = extract_long(&ptr, end);
           int clsmask = extract_long(&ptr, end);
           int nregs   = extract_long(&ptr, end);
+          if ( nregs <= 0 || nregs > dbg_mod->nregs )
+          {
+            append_dd(req, 0);
+            verb(("read_regs(tid=%d, mask=%x, nregs=%d) => 0 (incorrect nregs, should be in range 0..%d)\n", tid, clsmask, nregs, dbg_mod->nregs));
+            break;
+          }
           bytevec_t regmap;
           regmap.resize((nregs+7)/8);
           extract_memory(&ptr, end, regmap.begin(), regmap.size());
-          regval_t *values = OPERATOR_NEW(regval_t, nregs);
+          regval_t *values = OPERATOR_NEW(regval_t, dbg_mod->nregs);
           int result = dbg_mod->dbg_read_registers(tid, clsmask, values);
           verb(("read_regs(tid=%d, mask=%x) => %d\n", tid, clsmask, result));
           append_dd(req, result);
@@ -525,7 +555,7 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
           thid_t tid = extract_long(&ptr, end);
           int sreg_value = extract_long(&ptr, end);
           ea_t ea;
-          int result = dbg_mod->dbg_thread_get_sreg_base(tid, sreg_value, &ea);
+          int result = dbg_mod->dbg_thread_get_sreg_base(&ea, tid, sreg_value);
           verb(("get_thread_sreg_base(tid=%d, %d) => %a\n", tid, sreg_value, result ? ea : BADADDR));
           append_dd(req, result);
           if ( result )
@@ -556,6 +586,46 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
             for ( int i=0; i < qty; i++ )
               append_memory_info(req, &areas[i]);
           }
+        }
+        break;
+
+      case RPC_GET_SCATTERED_IMAGE:
+        {
+          ea_t base = extract_ea64(&ptr, end);
+          scattered_image_t si;
+          int result = dbg_mod->dbg_get_scattered_image(si, base);
+          int qty = si.size();
+          verb(("get_scattered_image(base=%a) => %d (qty=%d)\n", base, result, qty));
+          append_dd(req, result+2);
+          if ( result > 0 )
+          {
+            append_dd(req, qty);
+            for ( int i=0; i < qty; i++ )
+              append_scattered_segm(req, &si[i]);
+          }
+        }
+        break;
+
+      case RPC_GET_IMAGE_UUID:
+        {
+          ea_t base = extract_ea64(&ptr, end);
+          bytevec_t uuid;
+          bool result = dbg_mod->dbg_get_image_uuid(&uuid, base);
+          int qty = uuid.size();
+          verb(("get_image_uuid(base=%a) => %d (qty=%d)\n", base, result, qty));
+          append_dd(req, result);
+          if ( result )
+            append_buf(req, uuid.begin(), qty);
+        }
+        break;
+
+      case RPC_GET_SEGM_START:
+        {
+          ea_t base = extract_ea64(&ptr, end);
+          const char *segname = extract_str(&ptr, end);
+          ea_t result = dbg_mod->dbg_get_segm_start(base, segname);
+          verb(("get_segm_start(base=%a, segname=%s) => %a\n", base, segname, result));
+          append_ea64(req, result);
         }
         break;
 
@@ -599,7 +669,7 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
           bpttype_t type = extract_long(&ptr, end);
           ea_t ea        = extract_ea64(&ptr, end);
           int len        = extract_long(&ptr, end) - 1;
-          int result  = dbg_mod->dbg_is_ok_bpt(type, ea, len);
+          int result = dbg_mod->dbg_is_ok_bpt(type, ea, len);
           verb(("isok_bpt(type=%d ea=%a len=%d) => %d\n", type, ea, len, result));
           append_dd(req, result);
         }
@@ -634,7 +704,7 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
         {
           char *file = extract_str(&ptr, end);
           bool readonly = extract_long(&ptr, end) != 0;
-          int32 fsize = 0;
+          int64 fsize = 0;
           int fn = find_free_channel();
           if ( fn != -1 )
           {
@@ -644,10 +714,10 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
             else if ( readonly )
               fsize = qfsize(channels[fn]);
           }
-          verb(("open_file('%s', %d) => %d %d\n", file, readonly, fn, fsize));
+          verb(("open_file('%s', %d) => %d %" FMT_64 "d\n", file, readonly, fn, fsize));
           append_dd(req, fn);
           if ( fn != -1 )
-            append_dd(req, fsize);
+            append_dq(req, fsize);
           else
             append_dd(req, qerrcode());
         }
@@ -673,7 +743,7 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
         {
           char *buf  = NULL;
           int fn     = extract_long(&ptr, end);
-          int32 off  = extract_long(&ptr, end);
+          int64 off  = extract_uint64(&ptr, end);
           int32 size = extract_long(&ptr, end);
           int32 s2 = 0;
           if ( size > 0 )
@@ -688,15 +758,15 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
           if ( s2 > 0 )
             append_memory(req, buf, s2);
           delete[] buf;
-          verb(("read_file(%d, 0x%X, %d) => %d\n", fn, off, size, s2));
+          verb(("read_file(%d, 0x%" FMT_64 "X, %d) => %d\n", fn, off, size, s2));
         }
         break;
 
       case RPC_WRITE_FILE:
         {
-          char *buf  = NULL;
-          int fn      = extract_long(&ptr, end);
-          uint32 off  = extract_long(&ptr, end);
+          char *buf = NULL;
+          int fn = extract_long(&ptr, end);
+          uint64 off = extract_uint64(&ptr, end);
           uint32 size = extract_long(&ptr, end);
           if ( size > 0 )
           {
@@ -709,7 +779,7 @@ bytevec_t rpc_server_t::perform_request(const rpc_packet_t *rp)
           if ( size != s2 )
             append_dd(req, qerrcode());
           delete [] buf;
-          verb(("write_file(%d, 0x%X, %u) => %u\n", fn, off, size, s2));
+          verb(("write_file(%d, 0x%" FMT_64 "X, %u) => %u\n", fn, off, size, s2));
         }
         break;
 
@@ -956,6 +1026,30 @@ bool rpc_server_t::get_broken_connection(void)
 void rpc_server_t::set_broken_connection(void)
 {
   get_debugger_instance()->broken_connection = true;
+}
+
+//-------------------------------------------------------------------------
+int rpc_server_t::kill_process(void)
+{
+  const int NSEC = 5;
+  dbg_mod->dbg_exit_process();
+
+  // now, wait up to NSEC seconds until the process is gone
+  qtime64_t wait_start = qtime64();
+  qtime64_t wait_threshold = make_qtime64(
+          get_secs(wait_start) + NSEC,
+          get_usecs(wait_start));
+  while ( qtime64() < wait_threshold )
+  {
+    gdecode_t result = dbg_mod->dbg_get_debug_event(&ev, 100);
+    if ( result >= GDE_ONE_EVENT )
+    {
+      dbg_mod->dbg_continue_after_event(&ev);
+      if ( ev.eid == PROCESS_EXIT )
+        return 0;
+    }
+  }
+  return NSEC;
 }
 
 //--------------------------------------------------------------------------

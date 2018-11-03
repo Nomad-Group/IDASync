@@ -10,9 +10,11 @@
 
 struct coff_sym_t // here for efd(di) and ldr/dbg
 {
-  union {
+  union
+  {
     char _n_name[SYMNMLEN];     /* old COFF version */
-    struct {
+    struct
+    {
       int32 _n_zeroes;          /* new == 0 */
       int32 _n_offset;          /* offset into string table */
     } _n_n;
@@ -25,14 +27,16 @@ struct coff_sym_t // here for efd(di) and ldr/dbg
   uchar n_numaux;               /* number of aux. entries */
 };
 
-struct coff_sym64_t 
+struct coff_sym64_t
 {
   uint64  n_value64;  /* value of symbol */
   uint32  n_offset64; /* offset into string table */
   uint16  n_scnum;    /* section number */
-  union {
-    unsigned short  _n_type;  /* type and derived type */
-    struct {
+  union
+  {
+    unsigned short _n_type;   /* type and derived type */
+    struct
+    {
       unsigned char _n_lang;  /* source language id */
       unsigned char _n_cpu; /* cputype id   */
     } _n_lc;
@@ -45,9 +49,11 @@ struct coff_sym64_t
 
 struct ida_sym_t // internal, translated form
 {
-  union {
+  union
+  {
     char _n_name[SYMNMLEN];     /* old for short name (<=8) */
-    struct {
+    struct
+    {
       int32 _n_zeroes;          /* for long name == 0 */
       int32 _n_offset;          /* offset into string table */
     } _n_n;
@@ -159,32 +165,42 @@ DECLARE_TYPE_AS_MOVABLE(ida_sym_t);
  *
  *************************************************************************/
 
-typedef union auxent {
-  struct {
+typedef union auxent
+{
+  struct
+  {
     int32 x_tagndx;             /* str, un, or enum tag indx */
 #define x_exptr x_tagndx        /* exception table offset */
-    union {
-      struct {
+    union
+    {
+      struct
+      {
         uint16 x_lnno;          /* declaration line number */
         uint16 x_size;          /* str, union, array size */
       } x_lnsz;
       int32 x_fsize;            /* size of function */
     } x_misc;
-    union {
-      struct {                  /* if ISFCN, tag, or .bb */
+    union
+    {
+      struct
+      {                  /* if ISFCN, tag, or .bb */
         int32 x_lnnoptr;        /* ptr to fcn line # */
         int32 x_endndx;         /* entry ndx past block end */
       } x_fcn;
-      struct {                  /* if ISARY, up to 4 dimen. */
-        uint16  x_dimen[DIMNUM];
+      struct
+      {                  /* if ISARY, up to 4 dimen. */
+        uint16 x_dimen[DIMNUM];
       } x_ary;
     } x_fcnary;
     uint16 x_tvndx;             /* tv index */
   } x_sym;
 
-  struct {
-    struct {
-      struct {
+  struct
+  {
+    struct
+    {
+      struct
+      {
         int x_lnno;
       } x_lnsz;
     } x_misc;
@@ -192,19 +208,22 @@ typedef union auxent {
     char x_auxtype;
   } x_sym64;
 
-  union {
+  union
+  {
     char x_fname[FILNMLEN];
-    struct {
+    struct
+    {
       uint32 x_zeroes;
       uint32 x_offset;
     } _x;
   } x_file;
 
-  struct {
-    int32   x_scnlen;           /* section length */
+  struct
+  {
+    int32  x_scnlen;            /* section length */
     uint16 x_nreloc;            /* number of relocation entries */
     uint16 x_nlinno;            /* number of line numbers */
-    uint32  x_chksum;           /* checksumm for comdat's */
+    uint32 x_chksum;            /* checksumm for comdat's */
     uint16 x_asscnt;            /* section number to associate with */
     uchar  x_select;            /* comdat selection type */
 #define SSEL_NODUPL   1 // no duplicate
@@ -218,7 +237,8 @@ typedef union auxent {
     uint16 x_asscnt_hi;         /* for COFF+ only - hi part of x_asscnt */
   } x_scn; // always <= sizeof(SYMENT) :)
 
-  struct {
+  struct
+  {
     int32 x_tvfill;             /* tv fill value */
     uint16 x_tvlen;             /* length of .tv */
     uint16 x_tvran[2];          /* tv range */
@@ -227,7 +247,8 @@ typedef union auxent {
   /******************************************
    * RS/6000-specific auxent - last auxent for every external symbol
    ******************************************/
-  struct {
+  struct
+  {
     int32 x_scnlen;             /* csect length */
     int32 x_parmhash;           /* parm type hash index */
     uint16 x_snhash;            /* sect num with parm hash */
@@ -266,7 +287,8 @@ typedef union auxent {
   } x_csect;                    /* csect definition information */\
 
 /* XCOFF64 _csect */
-  struct {
+  struct
+  {
     uint32 x_scnlen_lo;
     int32  x_parmhash;
     uint16 x_snhash;
@@ -282,12 +304,14 @@ typedef union auxent {
   /******************************************
    *  I960-specific *2nd* aux. entry formats
    ******************************************/
-  struct {
+  struct
+  {
 #define x_stdindx x_stindx      /* This is a very old typo that keeps getting propagated. */
     int32 x_stindx;             /* sys. table entry */
   } x_sc;                       /* system call entry */
 
-  struct {
+  struct
+  {
     uint32 x_balntry;           /* BAL entry point */
   } x_bal;                      /* BAL-callable function */
 
@@ -499,30 +523,26 @@ struct ecoff_sym
   uchar st(bool mf)
   {
     return mf
-        ? ((s_bits1 & SYM_BITS1_ST_BIG   ) >> SYM_BITS1_ST_SH_BIG)
-        : ((s_bits1 & SYM_BITS1_ST_LITTLE) >> SYM_BITS1_ST_SH_LITTLE);
+         ? ((s_bits1 & SYM_BITS1_ST_BIG   ) >> SYM_BITS1_ST_SH_BIG)
+         : ((s_bits1 & SYM_BITS1_ST_LITTLE) >> SYM_BITS1_ST_SH_LITTLE);
   }
   uchar sc(bool mf)
   {
     return mf
-    ?   (
-        ((s_bits1 & SYM_BITS1_SC_BIG   ) << SYM_BITS1_SC_SH_LEFT_BIG)
-      | ((s_bits2 & SYM_BITS2_SC_BIG   ) >> SYM_BITS2_SC_SH_BIG))
-    :   (
-        ((s_bits1 & SYM_BITS1_SC_LITTLE) >> SYM_BITS1_SC_SH_LITTLE)
-      | ((s_bits2 & SYM_BITS2_SC_LITTLE) << SYM_BITS2_SC_SH_LEFT_LITTLE));
+         ? (((s_bits1 & SYM_BITS1_SC_BIG   ) << SYM_BITS1_SC_SH_LEFT_BIG)
+          | ((s_bits2 & SYM_BITS2_SC_BIG   ) >> SYM_BITS2_SC_SH_BIG))
+         : (((s_bits1 & SYM_BITS1_SC_LITTLE) >> SYM_BITS1_SC_SH_LITTLE)
+          | ((s_bits2 & SYM_BITS2_SC_LITTLE) << SYM_BITS2_SC_SH_LEFT_LITTLE));
   }
   uint32 index(bool mf)
   {
     return mf
-    ?   (
-        ((s_bits2 & SYM_BITS2_INDEX_BIG) << SYM_BITS2_INDEX_SH_LEFT_BIG)
-      | (s_bits3 << SYM_BITS3_INDEX_SH_LEFT_BIG)
-      | (s_bits4 << SYM_BITS4_INDEX_SH_LEFT_BIG))
-    :   (
-        ((s_bits2 & SYM_BITS2_INDEX_LITTLE) >> SYM_BITS2_INDEX_SH_LITTLE)
-      | (s_bits3 << SYM_BITS3_INDEX_SH_LEFT_LITTLE)
-      | (s_bits4 << SYM_BITS4_INDEX_SH_LEFT_LITTLE));
+         ? (((s_bits2 & SYM_BITS2_INDEX_BIG) << SYM_BITS2_INDEX_SH_LEFT_BIG)
+          | (s_bits3 << SYM_BITS3_INDEX_SH_LEFT_BIG)
+          | (s_bits4 << SYM_BITS4_INDEX_SH_LEFT_BIG))
+         : (((s_bits2 & SYM_BITS2_INDEX_LITTLE) >> SYM_BITS2_INDEX_SH_LITTLE)
+          | (s_bits3 << SYM_BITS3_INDEX_SH_LEFT_LITTLE)
+          | (s_bits4 << SYM_BITS4_INDEX_SH_LEFT_LITTLE));
   }
 };
 
@@ -558,18 +578,18 @@ struct ecoff_rndx
   uint16 rfd(bool mf)
   {
     return mf
-      ? (r_bits[0] << 4) | ((r_bits[1] & 0xF0) >> 4)
-      : (r_bits[0] << 0) | ((r_bits[1] & 0x0F) << 8);
+         ? (r_bits[0] << 4) | ((r_bits[1] & 0xF0) >> 4)
+         : (r_bits[0] << 0) | ((r_bits[1] & 0x0F) << 8);
   }
   uint32 index(bool mf)
   {
     return mf
-      ?  ((r_bits[1] & 0x0F) << 16)
-        | (r_bits[2] << 8)
-        | (r_bits[3] << 0)
-      :  ((r_bits[1] & 0xF0) >> 4)
-        | (r_bits[2] << 4)
-        | (r_bits[3] << 12);
+         ? ((r_bits[1] & 0x0F) << 16)
+         | (r_bits[2] << 8)
+         | (r_bits[3] << 0)
+         : ((r_bits[1] & 0xF0) >> 4)
+         | (r_bits[2] << 4)
+         | (r_bits[3] << 12);
   }
 };
 
@@ -626,14 +646,12 @@ struct ecoff_opt
   uint32 value(bool mf)
   {
     return mf
-      ? (
-          (uint32(o_bits2) << 16)
-        | (uint32(o_bits3) <<  8)
-        | (uint32(o_bits4) <<  0))
-      : (
-          (uint32(o_bits2) <<  0)
-        | (uint32(o_bits3) <<  8)
-        | (uint32(o_bits4) << 16));
+         ? ((uint32(o_bits2) << 16)
+          | (uint32(o_bits3) <<  8)
+          | (uint32(o_bits4) <<  0))
+         : ((uint32(o_bits2) <<  0)
+          | (uint32(o_bits3) <<  8)
+          | (uint32(o_bits4) << 16));
   }
 };
 
@@ -735,30 +753,26 @@ struct mips_ecoff_sym
   uchar st(bool mf)
   {
     return mf
-        ? ((s_bits1 & SYM_BITS1_ST_BIG   ) >> SYM_BITS1_ST_SH_BIG)
-        : ((s_bits1 & SYM_BITS1_ST_LITTLE) >> SYM_BITS1_ST_SH_LITTLE);
+         ? ((s_bits1 & SYM_BITS1_ST_BIG   ) >> SYM_BITS1_ST_SH_BIG)
+         : ((s_bits1 & SYM_BITS1_ST_LITTLE) >> SYM_BITS1_ST_SH_LITTLE);
   }
   uchar sc(bool mf)
   {
     return mf
-    ?   (
-        ((s_bits1 & SYM_BITS1_SC_BIG   ) << SYM_BITS1_SC_SH_LEFT_BIG)
-      | ((s_bits2 & SYM_BITS2_SC_BIG   ) >> SYM_BITS2_SC_SH_BIG))
-    :   (
-        ((s_bits1 & SYM_BITS1_SC_LITTLE) >> SYM_BITS1_SC_SH_LITTLE)
-      | ((s_bits2 & SYM_BITS2_SC_LITTLE) << SYM_BITS2_SC_SH_LEFT_LITTLE));
+         ? (((s_bits1 & SYM_BITS1_SC_BIG   ) << SYM_BITS1_SC_SH_LEFT_BIG)
+          | ((s_bits2 & SYM_BITS2_SC_BIG   ) >> SYM_BITS2_SC_SH_BIG))
+         : (((s_bits1 & SYM_BITS1_SC_LITTLE) >> SYM_BITS1_SC_SH_LITTLE)
+          | ((s_bits2 & SYM_BITS2_SC_LITTLE) << SYM_BITS2_SC_SH_LEFT_LITTLE));
   }
   uint32 index(bool mf)
   {
     return mf
-    ?   (
-        ((s_bits2 & SYM_BITS2_INDEX_BIG) << SYM_BITS2_INDEX_SH_LEFT_BIG)
-      | (s_bits3 << SYM_BITS3_INDEX_SH_LEFT_BIG)
-      | (s_bits4 << SYM_BITS4_INDEX_SH_LEFT_BIG))
-    :   (
-        ((s_bits2 & SYM_BITS2_INDEX_LITTLE) >> SYM_BITS2_INDEX_SH_LITTLE)
-      | (s_bits3 << SYM_BITS3_INDEX_SH_LEFT_LITTLE)
-      | (s_bits4 << SYM_BITS4_INDEX_SH_LEFT_LITTLE));
+         ? (((s_bits2 & SYM_BITS2_INDEX_BIG) << SYM_BITS2_INDEX_SH_LEFT_BIG)
+          | (s_bits3 << SYM_BITS3_INDEX_SH_LEFT_BIG)
+          | (s_bits4 << SYM_BITS4_INDEX_SH_LEFT_BIG))
+         : (((s_bits2 & SYM_BITS2_INDEX_LITTLE) >> SYM_BITS2_INDEX_SH_LITTLE)
+          | (s_bits3 << SYM_BITS3_INDEX_SH_LEFT_LITTLE)
+          | (s_bits4 << SYM_BITS4_INDEX_SH_LEFT_LITTLE));
   }
 };
 
@@ -807,7 +821,7 @@ struct ida_scnhdr_t;
 //----------------------------------------------------------------------
 class ida_syms_t
 {
-  qstring stable; // standard COFF string table (includes size in first 4 bytes)
+  qstring str_table; // standard COFF string table (includes size in first 4 bytes)
   qstring dtable; // XCOFF debug table (does not include size)
 
   void from_coff960(const i960_sym_t    *pc, uint nsyms, bool coff_hdr_mf);
@@ -817,8 +831,8 @@ class ida_syms_t
 public:
   qvector<ida_sym_t> symtab;
 
-  bool stable_from_file(linput_t *li, bool coff_hdr_mf);
-  bool stable_from_mem(const void *buf, size_t bufsize, bool coff_hdr_mf);
+  bool str_table_from_file(linput_t *li, bool coff_hdr_mf);
+  bool str_table_from_mem(const void *buf, size_t bufsize, bool coff_hdr_mf);
   bool load_from_file(
         linput_t *li,
         ida_filhdr_t const &fh,
@@ -827,15 +841,15 @@ public:
 #if !defined(COMPILE_DBG_LOADER)
   void load_xcoff_debug_table(linput_t *li, const qvector<ida_scnhdr_t> &sechdrs, ida_filhdr_t const &fh);
 #endif
-  
+
   void qclear()
   {
-    stable.qclear();
+    str_table.qclear();
     dtable.qclear();
     symtab.qclear();
   }
 
-  void copy_from_stable(char *buf, size_t bufsz, uint32 off, bool use_dtable = false) const;
+  void copy_from_str_table(char *buf, size_t bufsz, uint32 off, bool use_dtable = false) const;
   const char *get_segment_name(const char *name, size_t fixlen, char *buffer, size_t bufsize, uint32 f_magic) const;
   bool getaux(uint symidx, AUXENT &aux, uint &n_aux) const;
   char *getname(uint symidx, char *buf, size_t bufsize) const;

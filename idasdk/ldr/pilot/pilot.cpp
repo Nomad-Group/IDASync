@@ -52,21 +52,11 @@ BADDATA:
   packed += 4;
   packlen -= 4;
   ea_t offset = relocbase;
-  fixup_data_t reloc;
+  fixup_data_t fd(FIXUP_OFF32);
   if ( code )
-  {
-    segment_t* seg = getseg(targetbase);
-    reloc.sel = ushort(seg != NULL ? seg->sel : BADSEL);
-    reloc.type = FIXUP_OFF32;
-  }
-  else
-  {
-    reloc.type = FIXUP_OFF32|FIXUP_REL;
-    reloc.sel = (ushort)BADSEL;
-  }
-  reloc.displacement = 0;
+    fd.set_sel(getseg(targetbase));
   //msg("%d relocations\n", nrelocs);
-  for ( uint i=0; i<nrelocs; i++ )
+  for ( uint i=0; i < nrelocs; i++ )
   {
     if ( packlen < 1 )
       goto BADDATA;
@@ -94,27 +84,27 @@ BADDATA:
       if ( packlen < 4 )
         goto BADDATA;
       //direct signed 31-bit offset
-      offset = relocbase+(((int32)swap32(*(int32*)packed)<<2)>>1);
+      offset = relocbase+(int32(swap32(*(int32*)packed)<<2)>>1);
       packed += 4;
       packlen -= 4;
     }
-    if ( !isLoaded(offset)) put_byte(offset, 0 );
-    if ( !isLoaded(offset+1)) put_byte(offset+1, 0 );
-    if ( !isLoaded(offset+2)) put_byte(offset+2, 0 );
-    if ( !isLoaded(offset+3)) put_byte(offset+3, 0 );
-    reloc.off = get_long(offset);
+    for ( int j=0; j < 4; j++ )
+      if ( !is_loaded(offset+j) )
+        put_byte(offset+j, 0);
+    fd.off = get_dword(offset);
     if ( code )
     {
-      set_fixup(offset, &reloc);
-      auto_make_proc(targetbase+reloc.off);
-      if ( get_word(offset-2)==0x4EF9 ) //jump opcode?
+      fd.set(offset);
+      auto_make_proc(targetbase+fd.off);
+      if ( get_word(offset-2) == 0x4EF9 ) //jump opcode?
         auto_make_proc(offset-2);
     }
     else
     {
-      set_fixup_ex(offset, &reloc, targetbase);
+      fd.set_base(targetbase);
+      fd.set(offset);
     }
-//  msg("Relocation %d at %08X: %08X -> %08X\n", i, offset-relocbase, reloc.off, targetbase+reloc.off);
+//  msg("Relocation %d at %08X: %08X -> %08X\n", i, offset-relocbase, fd.off, targetbase+fd.off);
   }
   return packed;
 }
@@ -122,7 +112,7 @@ BADDATA:
 //------------------------------------------------------------------------
 //unpack rle data from the buffer packed at file position fpos to ea cea
 //return new position in the buffer and update cea
-static uchar *unpack_rle(uchar *packed, size_t &packlen, ea_t& cea, int32 fpos)
+static uchar *unpack_rle(uchar *packed, size_t &packlen, ea_t &cea, qoff64_t fpos)
 {
   const uchar *packed_sav = packed;
   while ( 1 )
@@ -144,7 +134,7 @@ BADDATA:
       cnt = (cnt & 0x7F) + 1;
       if ( packlen < cnt )
         goto BADDATA;
-      mem2base(packed, cea, cea+cnt, fpos+uint32(packed-packed_sav));
+      mem2base(packed, cea, cea+cnt, fpos+(packed-packed_sav));
       packed += cnt;
       packlen -= cnt;
       cea += cnt;
@@ -237,11 +227,12 @@ BADDATA:
 //------------------------------------------------------------------------
 static size_t unpack_data0000(
         linput_t *li,
-        int32 fpos,
+        qoff64_t fpos,
         size_t size,
         ea_t ea,
-        const code0000_t& code0000,
-        ea_t code1ea, ea_t& a5)
+        const code0000_t &code0000,
+        ea_t code1ea,
+        ea_t &a5)
 {
   if ( size < 4 )
   {
@@ -262,7 +253,7 @@ BADDATA:
 
   a5 = ea+code0000.nBytesBelowA5;
   ea_t cea;
-  for ( int i=0; i<3; i++ )
+  for ( int i=0; i < 3; i++ )
   {
     if ( size < 4 )
       goto BADDATA;
@@ -280,7 +271,7 @@ BADDATA:
     }
     if ( size > 0 )
     {
-      packed = unpack_rle(packed, size, cea, fpos+uint32(packed-packed_buf.begin()));
+      packed = unpack_rle(packed, size, cea, fpos+(packed-packed_buf.begin()));
       if ( packed == NULL )
         return 0;
     }
@@ -294,11 +285,11 @@ BADDATA:
     enable_flags(ea+usize, ea+usize+1, STT_CUR);
     usize++;
   }
-  doByte(a5,1);
+  create_byte(a5,1);
   if ( a5 != ea )
     add_pgm_cmt("A5 register does not point to the start of the data segment\n"
                 "The file should not be recompiled using Pila\n");
-  set_name(a5,"A5BASE",SN_AUTO);
+  set_name(a5,"A5BASE",SN_NOCHECK|SN_AUTO);
   set_cmt(a5,"A5 points here",0);
   //TODO: find undefined bytes and set them to zero
   //this is done by Palm OS loader and some programs depend on it
@@ -342,7 +333,7 @@ BADDATA:
 // 3) A4 -> code0001
 // 4) A5 -> A4
 
-static size_t unpack_data0001(linput_t *li, int32 fpos, size_t size, ea_t ea, ea_t a5, ea_t code1ea, ea_t &a4)
+static size_t unpack_data0001(linput_t *li, qoff64_t fpos, size_t size, ea_t ea, ea_t a5, ea_t code1ea, ea_t &a4)
 {
   if ( size < 3 * sizeof(uint32) )
   {
@@ -365,18 +356,20 @@ BADDATA:
   packed += sizeof(int32);
   size -= sizeof(uint32);
   size_t usize = above - below; // unpacked size
-  if ( below & 1 ) usize++;
+  if ( below & 1 )
+    usize++;
 
   ea_t cea = ea;
   a4 = ea-below;
-  if ( below & 1 ) a4++;
+  if ( below & 1 )
+    a4++;
   enable_flags(ea, ea+usize, STT_CUR);
-  doByte(a4,1);
-  set_name(a4,"A4BASE",SN_AUTO);
+  create_byte(a4,1);
+  set_name(a4,"A4BASE",SN_NOCHECK|SN_AUTO);
   set_cmt(a4,"A4 points here",0);
 
   //unpack below a4
-  packed = unpack_rle(packed, size, cea, fpos+uint32(packed-packed_buf.begin()));
+  packed = unpack_rle(packed, size, cea, fpos+(packed-packed_buf.begin()));
   if ( packed == NULL )
     return 0;
 
@@ -386,7 +379,7 @@ BADDATA:
   cea = a4 + swap32(*(int32*)packed);
   packed += sizeof(int32);
   size -= sizeof(uint32);
-  packed = unpack_rle(packed, size, cea, fpos+uint32(packed-packed_buf.begin()));
+  packed = unpack_rle(packed, size, cea, fpos+(packed-packed_buf.begin()));
   if ( packed == NULL )
     return 0;
 
@@ -396,7 +389,7 @@ BADDATA:
   cea = a4 + swap32(*(int32*)packed);
   packed += sizeof(int32);
   size -= sizeof(uint32);
-  packed = unpack_rle(packed, size, cea, fpos+uint32(packed-packed_buf.begin()));
+  packed = unpack_rle(packed, size, cea, fpos+(packed-packed_buf.begin()));
   if ( packed == NULL )
     return 0;
 
@@ -463,27 +456,27 @@ void fix_jumptables(ea_t ea1, ea_t /*ea2*/, sel_t sel, ea_t a5, ea_t a4)
   };*/
 
   short jtsoffset = get_word(ea1);
-  int32 jtloffset = get_long(ea1+4);
-  if ( jtsoffset!=jtloffset )
+  int32 jtloffset = get_dword(ea1+4);
+  if ( jtsoffset != jtloffset )
   {
     //msg("Doesn't look like a CodeWarrior code segment\n");
     return;
   }
   //find the jumptable
   ea_t jt_start;
-  if ( a4!=BADADDR && get_word(a4+jtloffset)==0x4EF9 ) //jmp opcode
+  if ( a4 != BADADDR && get_word(a4+jtloffset) == 0x4EF9 ) //jmp opcode
   {
     jt_start = a4+jtloffset;
-    doWord(ea1,2);
-    doDwrd(ea1+4,4);
+    create_word(ea1,2);
+    create_dword(ea1+4,4);
     op_offset(ea1, 0, REF_OFF16, BADADDR, a4);
     op_offset(ea1+4, 0, REF_OFF32, BADADDR, a4);
   }
-  else if ( get_word(a5+jtloffset)==0x4EF9 ) //jmp opcode
+  else if ( get_word(a5+jtloffset) == 0x4EF9 ) //jmp opcode
   {
     jt_start = a5+jtloffset;
-    doWord(ea1,2);
-    doDwrd(ea1+4,4);
+    create_word(ea1,2);
+    create_dword(ea1+4,4);
     op_offset(ea1, 0, REF_OFF16, BADADDR, a5);
     op_offset(ea1+4, 0, REF_OFF32, BADADDR, a5);
   }
@@ -493,49 +486,47 @@ void fix_jumptables(ea_t ea1, ea_t /*ea2*/, sel_t sel, ea_t a5, ea_t a4)
     return;
   }
 
-  doWord(ea1+2,2);
-  doDwrd(ea1+8,4);
+  create_word(ea1+2,2);
+  create_dword(ea1+8,4);
   op_offset(ea1+8, 0, REF_OFF32, BADADDR, ea1);
   set_cmt(ea1, "Short jump table offset", 0);
   set_cmt(ea1+2, "Number of jump table entries", 0);
   set_cmt(ea1+4, "Long jump table offset", 0);
   set_cmt(ea1+8, "Offset to xref data", 0);
 
-  fixup_data_t reloc;
-  reloc.sel = (ushort)sel;
-  reloc.type = FIXUP_OFF32;
-  reloc.displacement = 0;
+  fixup_data_t fd(FIXUP_OFF32);
+  fd.sel = sel;
   ea_t jt_addr=jt_start;
   short   jtentries = get_word(ea1+2);
   while ( jtentries-- )
   {
-    reloc.off = get_long(jt_addr+2);
-    set_fixup(jt_addr+2, &reloc);
+    fd.off = get_dword(jt_addr+2);
+    fd.set(jt_addr+2);
     //a little heuristic: does the jump point to code?
-    if ( get_word(ea1+reloc.off)==0x4E56   //link a6,x
-      || get_word(ea1+reloc.off)==0x06AF ) //addi.l x, 4(sp)
+    if ( get_word(ea1+fd.off) == 0x4E56   //link a6,x
+      || get_word(ea1+fd.off) == 0x06AF ) //addi.l x, 4(sp)
     {
-      auto_make_proc(ea1+reloc.off);
+      auto_make_proc(ea1+fd.off);
       auto_make_proc(jt_addr);
     }
     jt_addr+=6;
   }
   //TODO: hide the table?
-  //add_hidden_area(jt_start, jt_addr, "Jumptable for segment NNN", "", "", 0);
+  //add_hidden_range(jt_start, jt_addr, "Jumptable for segment NNN", "", "", 0);
 }
 
 //------------------------------------------------------------------------
 void doCodeOffset(ea_t ea, ea_t base)
 {
-  doDwrd(ea,4);
-  uint32 off = get_long(ea);
+  create_dword(ea,4);
+  uint32 off = get_dword(ea);
   op_offset(ea, 0, REF_OFF32, BADADDR, base, off&1);
   ea_t target = base+off;
   if ( off&1 )//last bit set: offset to thumb code
   {
     target &= (~1); //remove last bit
     //set_sreg_at_next_code(target,BADADDR,str2reg("T"),1);
-    split_srarea(target,str2reg("T"),1,SR_auto,true);
+    split_sreg_range(target,str2reg("T"),1,SR_auto,true);
   }
   auto_make_proc(target);
 }
@@ -561,7 +552,7 @@ void fixArmCW(ea_t start_ea, ea_t end_ea)
     68
   } PnoHeaderType;
   */
-  const char* const comments[] =
+  const char *const comments[] =
   {
     "offset to ARMletMain routine",
     "special PNO signature value",
@@ -577,10 +568,10 @@ void fixArmCW(ea_t start_ea, ea_t end_ea)
 
   if ( end_ea-start_ea < 0x68 )
     return;
-  for ( int i=0x20; i<0x48; i+=4 )
+  for ( int i=0x20; i < 0x48; i+=4 )
   {
-    doDwrd(start_ea+i,4);
-    if ( i==0x24 )
+    create_dword(start_ea+i,4);
+    if ( i == 0x24 )
       op_chr(start_ea+i, 0);
     else
       op_offset(start_ea+i, 0, REF_OFF32, BADADDR, start_ea);
@@ -591,22 +582,22 @@ void fixArmCW(ea_t start_ea, ea_t end_ea)
   doCodeOffset(start_ea+0x20,start_ea);
 
   //do relocs
-  ea_t cur = start_ea+get_long(start_ea+0x38);
-  ea_t end = start_ea+get_long(start_ea+0x3C);
-  for (;cur<end;cur+=4)
+  ea_t cur = start_ea+get_dword(start_ea+0x38);
+  ea_t end = start_ea+get_dword(start_ea+0x3C);
+  for ( ; cur < end; cur+=4 )
   {
-    doDwrd(cur,4);
+    create_dword(cur,4);
     op_offset(cur, 0, REF_OFF32, BADADDR, start_ea);
-    doCodeOffset(start_ea+get_long(cur), start_ea);
+    doCodeOffset(start_ea+get_dword(cur), start_ea);
   }
-  cur = start_ea+get_long(start_ea+0x40);
-  end = start_ea+get_long(start_ea+0x44);
-  for (;cur<end;cur+=4)
+  cur = start_ea+get_dword(start_ea+0x40);
+  end = start_ea+get_dword(start_ea+0x44);
+  for ( ; cur < end; cur+=4 )
   {
-    doDwrd(cur,4);
+    create_dword(cur,4);
     op_offset(cur, 0, REF_OFF32, BADADDR, start_ea);
-    ea_t o = start_ea+get_long(cur);
-    doDwrd(o,4);
+    ea_t o = start_ea+get_dword(cur);
+    create_dword(o,4);
     op_offset(o, 0, REF_OFF32, BADADDR, start_ea);
   }
 }
@@ -618,10 +609,10 @@ bool isCWseg(linput_t *li, uint32 offset)
   qlseek(li, offset + 0x24);
   uchar sig[4];
   qlread(li, sig, 4);
-  return sig[0]=='r'
-      && sig[1]=='w'
-      && sig[2]=='d'
-      && sig[3]=='c';
+  return sig[0] == 'r'
+      && sig[1] == 'w'
+      && sig[2] == 'd'
+      && sig[3] == 'c';
 }
 
 //------------------------------------------------------------------------
@@ -632,8 +623,7 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
   bool manualMode = (neflags & NEF_MAN) != 0; //don't do any extra processing if set
   sel_t dgroup = BADSEL;
 
-  if ( ph.id != (armCode ? PLFM_ARM : PLFM_68K) )
-    set_processor_type(armCode ? "ARM" : "68K", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type(armCode ? "ARM" : "68K", SETPROC_LOADER);
   set_target_assembler(armCode ? 0 : 2); // Generic ARM assembler/PalmPilot assembler Pila
   DatabaseHdrType h;
   lread(li,&h,sizeof(h));
@@ -675,7 +665,7 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
     if ( !armCode && (re[i].fcType == PILOT_RSC_ARMC || re[i].fcType == PILOT_RSC_ARMCL) )
       continue;
 
-    uint32 size;
+    uint64 size;
     if ( i == (h.numRecords-1) )
       size = qlsize(li);
     else
@@ -683,7 +673,7 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
     if ( size < re[i].ulOffset )
       loader_failure("Invalid file structure");
     size -= re[i].ulOffset;
-    ea_t ea1 = (inf.maxEA + 0xF) & ~0xF;
+    ea_t ea1 = (inf.max_ea + 0xF) & ~0xF;
     ea_t ea2 = ea1 + size;
 
     char segname[10];
@@ -724,21 +714,21 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
         loader_failure();
 
       //set DS for the segment to itself
-      set_default_segreg_value(get_segm_by_sel(sel), str2reg("DS"), sel);
+      set_default_sreg_value(get_segm_by_sel(sel), str2reg("DS"), sel);
       if ( bCodeWarrior )
         fixArmCW(start_ea, ea2);
       continue;
     }
 
-    if ( re[i].fcType == PILOT_RSC_CODE)
+    if ( re[i].fcType == PILOT_RSC_CODE )
     {
-      if ( re[i].id == 0 && !manualMode)
+      if ( re[i].id == 0 && !manualMode )
         continue;  // skip code0000 resource
       sclass = CLASS_CODE;
       if ( re[i].id == 1 )
       {
         inf.start_cs = i + 1;
-        inf.startIP  = 0;
+        inf.start_ip = 0;
         code1ea = ea1;
       }
     }
@@ -748,7 +738,7 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
       if ( re[i].id == 0 )
       {
         inf.start_cs = i + 1;
-        inf.startIP  = 0;
+        inf.start_ip = 0;
         code1ea = ea1;
       }
     }
@@ -776,8 +766,8 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
 
     {
       segment_t s;
-      s.startEA = ea1;
-      s.endEA = ea2;
+      s.start_ea = ea1;
+      s.end_ea = ea2;
       s.sel = i+1;
       s.bitness = 1;    // 32bit
       set_selector(i+1, ea1 >> 4);
@@ -789,7 +779,7 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
   if ( !manualMode && !armCode )
   {
     //check if first dword is 1; if so, skip it
-    if ( get_long(code1ea) == 1 )
+    if ( get_dword(code1ea) == 1 )
     {
       //codewarrior startup
       static const uchar pattern[] =
@@ -803,8 +793,8 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
       {
         plan_to_apply_idasgn("cwpalm.sig");
       }
-      doDwrd(code1ea, 4);
-      inf.startIP = 4;
+      create_dword(code1ea, 4);
+      inf.start_ip = 4;
     }
     //is main code segment GLib?
     if ( inf.start_cs > 0
@@ -814,8 +804,8 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
     {
       //GLib's a4 points at the start of data segment
       a4 = datastart;
-      doByte(a4, 1);
-      set_name(a4, "A4BASE", SN_AUTO);
+      create_byte(a4, 1);
+      set_name(a4, "A4BASE", SN_NOCHECK|SN_AUTO);
       set_cmt(a4, "A4 points here", 0);
     }
     //check for CodeWarrior's jumptables in additional code segments and fix them up
@@ -825,7 +815,7 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
       {
         segment_t *seg = get_segm_by_sel(i+1);
         if ( seg != NULL )
-          fix_jumptables(seg->startEA, seg->endEA, i+1, a5, a4);
+          fix_jumptables(seg->start_ea, seg->end_ea, i+1, a5, a4);
       }
     }
     //TODO: handle prc-tools and multilink's 'rloc' segments
@@ -834,35 +824,64 @@ void idaapi load_file(linput_t *li, ushort neflags, const char * fileformatname)
   if ( dgroup != BADSEL )
     set_default_dataseg(dgroup);  // input: selector
   describe_all(h);
-  dosysfile(1, "pilot.idc");
+  exec_system_script("pilot.idc");
 }
 
 //--------------------------------------------------------------------------
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+// it is impossible to use ph.id,
+// the processor module is not loaded yet
+inline bool is_arm_specified(void)
 {
-  if ( n > 1 )
-    return 0;
+  return strnieq(inf.procname, "ARM", 3);
+}
+
+inline bool is_68k_specified(void)
+{
+  return strnieq(inf.procname, "68K", 3)
+      || strnieq(inf.procname, "68000", 5)
+      || strnieq(inf.procname, "68010", 5)
+      || strnieq(inf.procname, "68020", 5)
+      || strnieq(inf.procname, "68030", 5)
+      || strnieq(inf.procname, "68040", 5)
+      || strnieq(inf.procname, "68330", 5)
+      || strnieq(inf.procname, "68882", 5)
+      || strnieq(inf.procname, "68851", 5)
+      || strnieq(inf.procname, "ColdFire", 8);
+}
+
+//--------------------------------------------------------------------------
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
+{
+  static int n = 0;
   int k = is_prc_file(li);
   if ( k == 0 )
     return 0;
+  int ftype = 0;
   if ( n == 1 )
   {
-    if ( k == 2 ) //has ARM segments?
+    if ( k == 2 ) // has ARM segments?
     {
-      qstrncpy(fileformatname, PRC_ARM, MAX_FILE_FORMAT_NAME);
-      if ( ph.id == PLFM_ARM )
-        return f_PRC|ACCEPT_FIRST;
-      else
-        return f_PRC;
+      *fileformatname = PRC_ARM;
+      *processor      = "ARM";
+      ftype = f_PRC;
+      if ( is_arm_specified() )
+        ftype |= ACCEPT_FIRST;
     }
-    else
-      return 0;
   }
-  qstrncpy(fileformatname, PRC_68K, MAX_FILE_FORMAT_NAME);
-  if ( ph.id == PLFM_68K )
-    return f_PRC|ACCEPT_FIRST;
   else
-    return f_PRC;
+  {
+    n++;
+    *fileformatname = PRC_68K;
+    *processor      = "68K";
+    ftype = f_PRC|ACCEPT_CONTINUE;
+    if ( is_68k_specified() )
+      ftype |= ACCEPT_FIRST;
+  }
+  return ftype;
 }
 
 //--------------------------------------------------------------------------
@@ -886,5 +905,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

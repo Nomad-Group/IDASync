@@ -1,30 +1,48 @@
 
 #include "st9.hpp"
 
+//----------------------------------------------------------------------
+class out_st9_t : public outctx_t
+{
+  out_st9_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  const char *get_general_register_description(const ushort reg) const;
+  void out_reg(ushort reg);
+  void out_reg(const op_t &op);
+  void out_imm(const op_t &op, bool no_shift = false);
+  void out_addr(const op_t &op, bool find_label = true);
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+};
+CASSERT(sizeof(out_st9_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_st9_t)
+
 //--------------------------------------------------------------------------
 // Get description for a given general register.
 // Description may change according to the current number of the registers page.
-static const char *get_general_register_description(const ushort reg)
+const char *out_st9_t::get_general_register_description(const ushort reg) const
 {
   if ( reg < rR240 || reg > rR255 )
     return NULL;
 
-  switch ( get_segreg(cmd.ea, rRP) )
+  switch ( get_sreg(insn.ea, rRP) )
   {
     // page: N/A
     case BADSEL:
       switch ( reg )
       {
-        case rR230:     return "Central Interrupt Control Register";
-        case rR231:     return "Flag Register";
-        case rR232:     return "Pointer 0 Register";
-        case rR233:     return "Pointer 1 Register";
-        case rR234:     return "Page Pointer Register";
-        case rR235:     return "Mode Register";
-        case rR236:     return "User Stack Pointer High Register";
-        case rR237:     return "User Stack Pointer Low Register";
-        case rR238:     return "System Stack Pointer High Register";
-        case rR239:     return "System Stack Pointer Low Register";
+        case rR230: return "Central Interrupt Control Register";
+        case rR231: return "Flag Register";
+        case rR232: return "Pointer 0 Register";
+        case rR233: return "Pointer 1 Register";
+        case rR234: return "Page Pointer Register";
+        case rR235: return "Mode Register";
+        case rR236: return "User Stack Pointer High Register";
+        case rR237: return "User Stack Pointer Low Register";
+        case rR238: return "System Stack Pointer High Register";
+        case rR239: return "System Stack Pointer Low Register";
       }
       break;
 
@@ -32,20 +50,20 @@ static const char *get_general_register_description(const ushort reg)
     case 0:
       switch ( reg )
       {
-        case rR241:     return "Minor Register";
-        case rR242:     return "External Interrupt Trigger Register";
-        case rR243:     return "External Interrupt Pending Register";
-        case rR244:     return "External Interrupt Mask-bit Register";
-        case rR245:     return "External Interrupt Priority Level Register";
-        case rR246:     return "External Interrupt Vector Register";
-        case rR247:     return "Nested Interrupt Control";
-        case rR248:     return "Watchdog Timer High Register";
-        case rR249:     return "Watchdog Timer Low Register";
-        case rR250:     return "Watchdog Timer Prescaler Register";
-        case rR251:     return "Watchdog Timer Control Register";
-        case rR252:     return "Wait Control Register";
-        case rR253:     return "SPI Data Register";
-        case rR254:     return "SPI Control Register";
+        case rR241: return "Minor Register";
+        case rR242: return "External Interrupt Trigger Register";
+        case rR243: return "External Interrupt Pending Register";
+        case rR244: return "External Interrupt Mask-bit Register";
+        case rR245: return "External Interrupt Priority Level Register";
+        case rR246: return "External Interrupt Vector Register";
+        case rR247: return "Nested Interrupt Control";
+        case rR248: return "Watchdog Timer High Register";
+        case rR249: return "Watchdog Timer Low Register";
+        case rR250: return "Watchdog Timer Prescaler Register";
+        case rR251: return "Watchdog Timer Control Register";
+        case rR252: return "Wait Control Register";
+        case rR253: return "SPI Data Register";
+        case rR254: return "SPI Control Register";
       }
       break;
 
@@ -53,15 +71,15 @@ static const char *get_general_register_description(const ushort reg)
     case 2:
       switch ( reg )
       {
-        case rR240:     return "Port 0 Configuration Register 0";
-        case rR241:     return "Port 0 Configuration Register 1";
-        case rR242:     return "Port 0 Configuration Register 2";
-        case rR244:     return "Port 1 Configuration Register 0";
-        case rR245:     return "Port 1 Configuration Register 1";
-        case rR246:     return "Port 1 Configuration Register 2";
-        case rR248:     return "Port 2 Configuration Register 0";
-        case rR249:     return "Port 2 Configuration Register 1";
-        case rR250:     return "Port 2 Configuration Register 2";
+        case rR240: return "Port 0 Configuration Register 0";
+        case rR241: return "Port 0 Configuration Register 1";
+        case rR242: return "Port 0 Configuration Register 2";
+        case rR244: return "Port 1 Configuration Register 0";
+        case rR245: return "Port 1 Configuration Register 1";
+        case rR246: return "Port 1 Configuration Register 2";
+        case rR248: return "Port 2 Configuration Register 0";
+        case rR249: return "Port 2 Configuration Register 1";
+        case rR250: return "Port 2 Configuration Register 2";
       }
       break;
 
@@ -69,20 +87,20 @@ static const char *get_general_register_description(const ushort reg)
     case 3:
       switch ( reg )
       {
-        case rR240:     return "Port 4 Configuration Register 0";
-        case rR241:     return "Port 4 Configuration Register 1";
-        case rR242:     return "Port 4 Configuration Register 2";
-        case rR244:     return "Port 5 Configuration Register 0";
-        case rR245:     return "Port 5 Configuration Register 1";
-        case rR246:     return "Port 5 Configuration Register 2";
-        case rR248:     return "Port 6 Configuration Register 0";
-        case rR249:     return "Port 6 Configuration Register 1";
-        case rR250:     return "Port 6 Configuration Register 2";
-        case rR251:     return "Port 6 Data Register";
-        case rR252:     return "Port 7 Configuration Register 0";
-        case rR253:     return "Port 7 Configuration Register 1";
-        case rR254:     return "Port 7 Configuration Register 2";
-        case rR255:     return "Port 7 Data Register";
+        case rR240: return "Port 4 Configuration Register 0";
+        case rR241: return "Port 4 Configuration Register 1";
+        case rR242: return "Port 4 Configuration Register 2";
+        case rR244: return "Port 5 Configuration Register 0";
+        case rR245: return "Port 5 Configuration Register 1";
+        case rR246: return "Port 5 Configuration Register 2";
+        case rR248: return "Port 6 Configuration Register 0";
+        case rR249: return "Port 6 Configuration Register 1";
+        case rR250: return "Port 6 Configuration Register 2";
+        case rR251: return "Port 6 Data Register";
+        case rR252: return "Port 7 Configuration Register 0";
+        case rR253: return "Port 7 Configuration Register 1";
+        case rR254: return "Port 7 Configuration Register 2";
+        case rR255: return "Port 7 Data Register";
       }
       break;
 
@@ -92,22 +110,22 @@ static const char *get_general_register_description(const ushort reg)
     case 12:
       switch ( reg )
       {
-        case rR240:     return "Capture Load Register 0 High";
-        case rR241:     return "Capture Load Register 0 Low";
-        case rR242:     return "Capture Load Register 1 High";
-        case rR243:     return "Capture Load Register 1 Low";
-        case rR244:     return "Compare 0 Register High";
-        case rR245:     return "Compare 0 Register Low";
-        case rR246:     return "Compare 1 Register High";
-        case rR247:     return "Compare 1 Register Low";
-        case rR248:     return "Timer Control Register";
-        case rR249:     return "Timer Mode Register";
-        case rR250:     return "External Input Control Register";
-        case rR251:     return "Prescaler Register";
-        case rR252:     return "Output A Control Register";
-        case rR253:     return "Output B Control Register";
-        case rR254:     return "Flags Register";
-        case rR255:     return "Interrupt/DMA Mask Register";
+        case rR240: return "Capture Load Register 0 High";
+        case rR241: return "Capture Load Register 0 Low";
+        case rR242: return "Capture Load Register 1 High";
+        case rR243: return "Capture Load Register 1 Low";
+        case rR244: return "Compare 0 Register High";
+        case rR245: return "Compare 0 Register Low";
+        case rR246: return "Compare 1 Register High";
+        case rR247: return "Compare 1 Register Low";
+        case rR248: return "Timer Control Register";
+        case rR249: return "Timer Mode Register";
+        case rR250: return "External Input Control Register";
+        case rR251: return "Prescaler Register";
+        case rR252: return "Output A Control Register";
+        case rR253: return "Output B Control Register";
+        case rR254: return "Flags Register";
+        case rR255: return "Interrupt/DMA Mask Register";
       }
       break;
 
@@ -116,14 +134,14 @@ static const char *get_general_register_description(const ushort reg)
       switch ( reg )
       {
         case rR240:
-        case rR244:     return "DMA Counter Pointer Register";
+        case rR244: return "DMA Counter Pointer Register";
         case rR241:
-        case rR245:     return "DMA Address Pointer Register";
+        case rR245: return "DMA Address Pointer Register";
         case rR242:
-        case rR246:     return "Interrupt Vector Register";
+        case rR246: return "Interrupt Vector Register";
         case rR243:
-        case rR247:     return "Interrupt/DMA Control Register";
-        case rR248:     return "I/O Connection Register";
+        case rR247: return "Interrupt/DMA Control Register";
+        case rR248: return "I/O Connection Register";
       }
       break;
 
@@ -131,10 +149,10 @@ static const char *get_general_register_description(const ushort reg)
     case 11:
       switch ( reg )
       {
-        case rR240:     return "Counter High Byte Register";
-        case rR241:     return "Counter Low Byte Register";
-        case rR242:     return "Standard Timer Prescaler Register";
-        case rR243:     return "Standard Timer Control Register";
+        case rR240: return "Counter High Byte Register";
+        case rR241: return "Counter Low Byte Register";
+        case rR242: return "Standard Timer Prescaler Register";
+        case rR243: return "Standard Timer Control Register";
       }
       break;
 
@@ -142,10 +160,10 @@ static const char *get_general_register_description(const ushort reg)
     case 13:
       switch ( reg )
       {
-        case rR244:     return "DMA Counter Pointer Register";
-        case rR245:     return "DMA Address Pointer Register";
-        case rR246:     return "Interrupt Vector Register";
-        case rR247:     return "Interrupt/DMA Control Register";
+        case rR244: return "DMA Counter Pointer Register";
+        case rR245: return "DMA Address Pointer Register";
+        case rR246: return "Interrupt Vector Register";
+        case rR247: return "Interrupt/DMA Control Register";
       }
       break;
 
@@ -153,15 +171,15 @@ static const char *get_general_register_description(const ushort reg)
     case 21:
       switch ( reg )
       {
-        case rR240:     return "Data Page Register 0";
-        case rR241:     return "Data Page Register 1";
-        case rR242:     return "Data Page Register 2";
-        case rR243:     return "Data Page Register 3";
-        case rR244:     return "Code Segment Register";
-        case rR248:     return "Interrupt Segment Register";
-        case rR249:     return "DMA Segment Register";
-        case rR245:     return "External Memory Register 1";
-        case rR246:     return "External Memory Register 2";
+        case rR240: return "Data Page Register 0";
+        case rR241: return "Data Page Register 1";
+        case rR242: return "Data Page Register 2";
+        case rR243: return "Data Page Register 3";
+        case rR244: return "Code Segment Register";
+        case rR248: return "Interrupt Segment Register";
+        case rR249: return "DMA Segment Register";
+        case rR245: return "External Memory Register 1";
+        case rR246: return "External Memory Register 2";
       }
       break;
 
@@ -170,22 +188,22 @@ static const char *get_general_register_description(const ushort reg)
     case 25:
       switch ( reg )
       {
-        case rR240:     return "Receiver DMA Transaction Counter Pointer";
-        case rR241:     return "Receiver DMA Source Address Pointer";
-        case rR242:     return "Transmitter DMA Transaction Counter Pointer";
-        case rR243:     return "Transmitter DMA Source Address Pointer";
-        case rR244:     return "Interrupt Vector Register";
-        case rR245:     return "Address/Data Compare Register";
-        case rR246:     return "Interrupt Mask Register";
-        case rR247:     return "Interrupt Status Register";
-        case rR248:     return "Receive/Transmitter Buffer Register";
-        case rR249:     return "Interrupt/DMA Priority Register";
-        case rR250:     return "Character Configuration Register";
-        case rR251:     return "Clock Configuration Register";
-        case rR252:     return "Baud Rate Generator High Register";
-        case rR253:     return "Baud Rate Generator Low Register";
-        case rR254:     return "Synchronous Input Control";
-        case rR255:     return "Synchronous Output Control";
+        case rR240: return "Receiver DMA Transaction Counter Pointer";
+        case rR241: return "Receiver DMA Source Address Pointer";
+        case rR242: return "Transmitter DMA Transaction Counter Pointer";
+        case rR243: return "Transmitter DMA Source Address Pointer";
+        case rR244: return "Interrupt Vector Register";
+        case rR245: return "Address/Data Compare Register";
+        case rR246: return "Interrupt Mask Register";
+        case rR247: return "Interrupt Status Register";
+        case rR248: return "Receive/Transmitter Buffer Register";
+        case rR249: return "Interrupt/DMA Priority Register";
+        case rR250: return "Character Configuration Register";
+        case rR251: return "Clock Configuration Register";
+        case rR252: return "Baud Rate Generator High Register";
+        case rR253: return "Baud Rate Generator Low Register";
+        case rR254: return "Synchronous Input Control";
+        case rR255: return "Synchronous Output Control";
       }
       break;
 
@@ -193,14 +211,14 @@ static const char *get_general_register_description(const ushort reg)
     case 43:
       switch ( reg )
       {
-        case rR248:     return "Port 8 Configuration Register 0";
-        case rR249:     return "Port 8 Configuration Register 1";
-        case rR250:     return "Port 8 Configuration Register 2";
-        case rR251:     return "Port 8 Data Register";
-        case rR252:     return "Port 9 Configuration Register 0";
-        case rR253:     return "Port 9 Configuration Register 1";
-        case rR254:     return "Port 9 Configuration Register 2";
-        case rR255:     return "Port 9 Data Register";
+        case rR248: return "Port 8 Configuration Register 0";
+        case rR249: return "Port 8 Configuration Register 1";
+        case rR250: return "Port 8 Configuration Register 2";
+        case rR251: return "Port 8 Data Register";
+        case rR252: return "Port 9 Configuration Register 0";
+        case rR253: return "Port 9 Configuration Register 1";
+        case rR254: return "Port 9 Configuration Register 2";
+        case rR255: return "Port 9 Data Register";
       }
       break;
 
@@ -208,9 +226,9 @@ static const char *get_general_register_description(const ushort reg)
     case 55:
       switch ( reg )
       {
-        case rR240:     return "Clock Control Register";
-        case rR242:     return "Clock Flag Register";
-        case rR246:     return "PLL Configuration Register";
+        case rR240: return "Clock Control Register";
+        case rR242: return "Clock Flag Register";
+        case rR246: return "PLL Configuration Register";
       }
       break;
 
@@ -218,22 +236,22 @@ static const char *get_general_register_description(const ushort reg)
     case 63:
       switch ( reg )
       {
-        case rR240:     return "Channel 0 Data Register";
-        case rR241:     return "Channel 1 Data Register";
-        case rR242:     return "Channel 2 Data Register";
-        case rR243:     return "Channel 3 Data Register";
-        case rR244:     return "Channel 4 Data Register";
-        case rR245:     return "Channel 5 Data Register";
-        case rR246:     return "Channel 6 Data Register";
-        case rR247:     return "Channel 7 Data Register";
-        case rR248:     return "Channel 6 Lower Threshold Register";
-        case rR249:     return "Channel 6 Lower Threshold Register";
-        case rR250:     return "Channel 7 Upper Threshold Register";
-        case rR251:     return "Channel 7 Upper Threshold Register";
-        case rR252:     return "Compare Result Register";
-        case rR253:     return "Control Logic Register";
-        case rR254:     return "Interrupt Control Register";
-        case rR255:     return "Interrupt Vector Register";
+        case rR240: return "Channel 0 Data Register";
+        case rR241: return "Channel 1 Data Register";
+        case rR242: return "Channel 2 Data Register";
+        case rR243: return "Channel 3 Data Register";
+        case rR244: return "Channel 4 Data Register";
+        case rR245: return "Channel 5 Data Register";
+        case rR246: return "Channel 6 Data Register";
+        case rR247: return "Channel 7 Data Register";
+        case rR248: return "Channel 6 Lower Threshold Register";
+        case rR249: return "Channel 6 Lower Threshold Register";
+        case rR250: return "Channel 7 Upper Threshold Register";
+        case rR251: return "Channel 7 Upper Threshold Register";
+        case rR252: return "Compare Result Register";
+        case rR253: return "Control Logic Register";
+        case rR254: return "Interrupt Control Register";
+        case rR255: return "Interrupt Vector Register";
       }
       break;
   }
@@ -244,66 +262,67 @@ static const char *gr_cmt = NULL;
 
 //--------------------------------------------------------------------------
 // Output a register
-static void out_reg(ushort reg)
+void out_st9_t::out_reg(ushort reg)
 {
-  out_register(ph.regNames[reg]);
-  const char *cmt = get_general_register_description(reg);
-  if ( cmt != NULL && !has_cmt(uFlag) )
-    gr_cmt = cmt;
+  out_register(ph.reg_names[reg]);
+  if ( !has_cmt(F) )
+  {
+    const char *cmt = get_general_register_description(reg);
+    if ( cmt != NULL )
+      gr_cmt = cmt;
+  }
 }
 
 //--------------------------------------------------------------------------
 // Output an operand as a register
-static void out_reg(const op_t &op)
+void out_st9_t::out_reg(const op_t &op)
 {
   out_reg(op.reg);
 }
 
 //--------------------------------------------------------------------------
 // Output an operand as an immediate value
-static void out_imm(op_t &op, bool no_shift = false)
+void out_st9_t::out_imm(const op_t &op, bool no_shift)
 {
   if ( !is_imm_no_shift(op) && !no_shift )
     out_symbol('#');
-  OutValue(op, OOFW_IMM);
+  out_value(op, OOFW_IMM);
 }
 
 //--------------------------------------------------------------------------
 // Output an operand as an address
-inline void out_addr(const op_t &op, bool find_label = true)
+void out_st9_t::out_addr(const op_t &op, bool find_label)
 {
-  if ( !find_label || !out_name_expr(op, toEA(cmd.cs, op.addr), op.addr) )
-    OutValue(op, OOF_ADDR | OOFS_NOSIGN);
+  if ( !find_label || !out_name_expr(op, to_ea(insn.cs, op.addr), op.addr) )
+    out_value(op, OOF_ADDR | OOFS_NOSIGN);
 }
 
 //--------------------------------------------------------------------------
 // Generate disassembly header
-void idaapi header(void)
+void idaapi st9_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX);
 }
 
 //--------------------------------------------------------------------------
 // Generate disassembly footer
-void idaapi footer(void)
+void idaapi st9_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   if ( ash.end != NULL )
   {
-    MakeNull();
-    char *p = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
-      APPCHAR(p, end, ' ');
-      APPEND(p, end, name.begin());
+      ctx.out_char(' ');
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }
 
@@ -312,7 +331,7 @@ void idaapi footer(void)
 
 //--------------------------------------------------------------------------
 // Output an operand
-bool idaapi outop(op_t &op)
+bool out_st9_t::out_operand(const op_t &op)
 {
   switch ( op.type )
   {
@@ -331,7 +350,7 @@ bool idaapi outop(op_t &op)
         const ioport_t *port = find_sym(op.value);
         // this immediate is represented in the .cfg file
         if ( port != NULL ) // otherwise, simply print the value
-          out_line(port->name, COLOR_IMPNAME);
+          out_line(port->name.c_str(), COLOR_IMPNAME);
         else // otherwise, simply print the value
           out_imm(op);
       }
@@ -405,92 +424,87 @@ bool idaapi outop(op_t &op)
 }
 
 //--------------------------------------------------------------------------
-// Output an instruction
-void idaapi out(void)
+void out_st9_t::out_proc_mnem(void)
 {
-  // print insn mnemonic
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
   char postfix[5];
   postfix[0] = '\0';
 
-  if ( is_jmp_cc(cmd.itype) )
-    qstrncpy(postfix, ConditionCodes[cmd.auxpref], sizeof(postfix));
+  if ( is_jmp_cc(insn.itype) )
+    qstrncpy(postfix, ConditionCodes[insn.auxpref], sizeof(postfix));
 
-  OutMnem(8, postfix);
+  out_mnem(8, postfix);
+}
+
+//--------------------------------------------------------------------------
+// Output an instruction
+void out_st9_t::out_insn(void)
+{
+  out_mnemonic();
 
   //
   // print insn operands
   //
 
-  out_one_operand(0);        // output the first operand
+  out_one_operand(0); // output the first operand
 
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
   }
 
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(2);
   }
 
   // output a character representation of the immediate values
   // embedded in the instruction as comments
-  if ( isVoid(cmd.ea,uFlag,0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea,uFlag,1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea,uFlag,2) ) OutImmChar(cmd.Op3);
+  out_immchar_cmts();
 
   if ( gr_cmt != NULL )
   {
-    OutChar(' ');
+    out_char(' ');
     out_line(ash.cmnt, COLOR_AUTOCMT);
-    OutChar(' ');
+    out_char(' ');
     out_line(gr_cmt, COLOR_AUTOCMT);
     if ( ash.cmnt2 != NULL )
     {
-      OutChar(' ');
+      out_char(' ');
       out_line(ash.cmnt2, COLOR_AUTOCMT);
     }
     gr_cmt = NULL;
   }
-
-  term_output_buffer();                   // terminate the output string
-  gl_comm = 1;                            // ask to attach a possible user-
-                                          // defined comment to it
-  MakeLine(buf);                          // pass the generated line to the
-                                          // kernel
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
 // Generate a segment header
-void idaapi gen_segm_header(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi st9_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  segment_t *Sarea = getseg(ea);
+  qstring sname;
+  get_visible_segm_name(&sname, Sarea);
 
-  char sname[MAXNAMELEN];
-  get_segm_name(Sarea, sname, sizeof(sname));
-
-  char *segname = sname;
+  const char *segname = sname.c_str();
   if ( *segname == '_' )
     segname++;
 
   if ( ash.uflag & UAS_ASW )
-    printf_line(inf.indent, COLSTR("SEGMENT %s", SCOLOR_ASMDIR), segname);
+    ctx.gen_printf(inf.indent, COLSTR("SEGMENT %s", SCOLOR_ASMDIR), segname);
   else
-    printf_line(inf.indent, COLSTR(".section .%s", SCOLOR_ASMDIR), segname);
+    ctx.gen_printf(inf.indent, COLSTR(".section .%s", SCOLOR_ASMDIR), segname);
 
-  ea_t orgbase = ea - get_segm_para(Sarea);
+  ea_t orgbase = ctx.insn_ea - get_segm_para(Sarea);
 
   if ( orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }

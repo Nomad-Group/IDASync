@@ -24,20 +24,22 @@ static int create_seg(
   if ( start != BADADDR && end < start )
     return 0;
   segment_t s;
-  s.sel    = setup_selector(base);
-  s.startEA= start;
-  s.endEA  = end;
-  s.align  = saRelByte;
-  s.comb   = (sclass != NULL && strcmp(sclass,"STACK") == 0) ? scStack : scPub;
+  s.sel     = setup_selector(base);
+  s.start_ea = start;
+  s.end_ea   = end;
+  s.align   = saRelByte;
+  s.comb    = (sclass != NULL && strcmp(sclass,"STACK") == 0) ? scStack : scPub;
   s.bitness = 0;
   return add_segm_ex(&s,name,sclass,ADDSEG_NOSREG);
 }
 
 //--------------------------------------------------------------------------
-int idaapi accept_file(linput_t *li,char fileformatname[MAX_FILE_FORMAT_NAME],int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
-  if ( n )
-    return 0;
   union
   {
     GEOSheader h1;
@@ -45,29 +47,29 @@ int idaapi accept_file(linput_t *li,char fileformatname[MAX_FILE_FORMAT_NAME],in
   } h;
   qlseek(li, 0);
   if ( qlread(li, &h, sizeof(h)) != sizeof(h) )
-    return false;
+    return 0;
 
-  int32 apppos;
+  qoff64_t apppos;
   int version;
-  if ( h.h1.ID == GEOS_ID  && h.h1.fclass == 0 )
+  if ( h.h1.ID == GEOS_ID && h.h1.fclass == 0 )
   {
     apppos = 0xC8;
     version = 1;
   }
-  else if ( h.h2.ID == GEOS2_ID  && h.h2.fclass == 1 )
+  else if ( h.h2.ID == GEOS2_ID && h.h2.fclass == 1 )
   {
     apppos = sizeof(GEOS2header);
     version = 2;
   }
   else
   {
-    return false;
+    return 0;
   }
 
   GEOSappheader ah;
   qlseek(li, apppos, SEEK_SET);
   if ( qlread(li, &ah, sizeof(ah)) != sizeof(ah) )
-    return false;
+    return 0;
   const char *stype;
   switch ( ah.type )
   {
@@ -76,8 +78,9 @@ int idaapi accept_file(linput_t *li,char fileformatname[MAX_FILE_FORMAT_NAME],in
     case 3:  stype = "Driver";      break;
     default: stype = "Unknown type";break;
   }
-  qsnprintf(fileformatname, MAX_FILE_FORMAT_NAME, "GEOS%d %s", version, stype);
-  return true;
+  fileformatname->sprnt("GEOS%d %s", version, stype);
+  *processor = "metapc";
+  return 1;
 }
 
 //--------------------------------------------------------------------------
@@ -109,7 +112,7 @@ static tid_t get_class_struct_flags_enum()
   enum_t id = get_enum(enum_name);
   if ( id != BADNODE )
     return id;
-  id = add_enum(-1, enum_name, hexflag());
+  id = add_enum(-1, enum_name, hex_flag());
   set_enum_bf(id, true);
   add_enum_member(id, "CLASSF_HAS_DEFAULT",     (1<<0), (1<<0));
   add_enum_member(id, "CLASSF_MASTER_CLASS",    (1<<1), (1<<1));
@@ -132,11 +135,11 @@ static void declare_parameter_types(ea_t ea, int count)
     sptr = get_struc(add_struc(-1, class_name));
     if ( sptr == NULL )
       return;
-    add_struc_member(sptr, "methodParameterDef",   -1, wordflag(), NULL,  2);
-    add_struc_member(sptr, "handlerTypeDef",   -1, byteflag(), NULL,  1);
+    add_struc_member(sptr, "methodParameterDef", -1, word_flag(), NULL, 2);
+    add_struc_member(sptr, "handlerTypeDef",     -1, byte_flag(), NULL, 1);
   }
   size_t size = get_struc_size(sptr);
-  doStruct(ea, size*count, sptr->id);
+  create_struct(ea, size*count, sptr->id);
 }
 #endif
 
@@ -155,19 +158,19 @@ static void declare_class(ea_t ea, const char *entryname)
     mt.ri.target = BADADDR;
     mt.ri.base = 0;
     mt.ri.tdelta = 0;
-    add_struc_member(sptr, "superClass",   BADADDR, offflag()|dwrdflag(), &mt,  4);
-    add_struc_member(sptr, "masterOffset", BADADDR, wordflag(), NULL, 2);
-    add_struc_member(sptr, "methodCount",  BADADDR, decflag()|wordflag(), NULL, 2);
-    add_struc_member(sptr, "instanceSize", BADADDR, decflag()|wordflag(), NULL, 2);
-    add_struc_member(sptr, "vdRelocTable", BADADDR, wordflag(), NULL, 2);
-    add_struc_member(sptr, "relocTable",   BADADDR, wordflag(), NULL, 2);
+    add_struc_member(sptr, "superClass",   BADADDR, off_flag()|dword_flag(), &mt, 4);
+    add_struc_member(sptr, "masterOffset", BADADDR, word_flag(), NULL, 2);
+    add_struc_member(sptr, "methodCount",  BADADDR, dec_flag()|word_flag(), NULL, 2);
+    add_struc_member(sptr, "instanceSize", BADADDR, dec_flag()|word_flag(), NULL, 2);
+    add_struc_member(sptr, "vdRelocTable", BADADDR, word_flag(), NULL, 2);
+    add_struc_member(sptr, "relocTable",   BADADDR, word_flag(), NULL, 2);
     mt.ec.tid = get_class_struct_flags_enum();
     mt.ec.serial = 0;
-    add_struc_member(sptr, "flags",        BADADDR, enumflag()|byteflag(), &mt, 1);
-    add_struc_member(sptr, "masterMethods",BADADDR, byteflag(), NULL, 1);
+    add_struc_member(sptr, "flags",        BADADDR, enum_flag()|byte_flag(), &mt, 1);
+    add_struc_member(sptr, "masterMethods",BADADDR, byte_flag(), NULL, 1);
   }
   asize_t size = get_struc_size(sptr);
-  doStruct(ea, size, sptr->id);
+  create_struct(ea, size, sptr->id);
 
   segment_t *s = getseg(ea);
   if ( s == NULL )
@@ -175,24 +178,24 @@ static void declare_class(ea_t ea, const char *entryname)
   int count = get_word(ea+6);
 //  bool c_handlers = get_byte(ea+14) & (1<<6);
   ea += size;
-  if ( ea+2*count >= s->endEA )
+  if ( ea+2*count >= s->end_ea )
     return;
   ea_t messages = ea;
-  doWord(ea, count*2);
+  create_word(ea, count*2);
   op_dec(ea, 0);
   ea += 2*count;
-  if ( ea+4*count > s->endEA )
+  if ( ea+4*count > s->end_ea )
     return;
-  doDwrd(ea, count*4);
-  set_offset(ea, 0, 0);
+  create_dword(ea, count*4);
+  op_plain_offset(ea, 0, 0);
   for ( int i=0; i < count; i++ )
   {
     ea_t idx = ea + 4*i;
-    ea_t pea = toEA(get_word(idx+2), get_word(idx));
+    ea_t pea = to_ea(get_word(idx+2), get_word(idx));
     auto_make_proc(pea);
     char name[MAXSTR];
     qsnprintf(name, sizeof(name), "%s_%u", entryname, get_word(messages+2*i));
-    add_entry(pea, pea, name, true);
+    add_entry(pea, pea, name, true, AEF_IDBENC);
   }
 // commented out because it doesn't work properly
 // see geoplan.geo, entry number 1 for example
@@ -222,13 +225,13 @@ static void describe_app(const GEOSappheader &ah, const uint32 *segea)
   if ( ah.attr & GA_ENTRY_POINTS_IN_C         ) APPEND(ptr, end, " GA_ENTRY_POINTS_IN_C");
   add_pgm_cmt("%s", buf);
 
-  if ( ah.attr & GA_PROCESS)
+  if ( ah.attr & GA_PROCESS )
   {
     ea_t entry = get_segea(ah, segea, ah.classptr_seg) + ah.classptr_ofs;
-    set_name(entry, "ProcessClass", SN_NOWARN);
+    set_name(entry, "ProcessClass", SN_NOCHECK|SN_NOWARN);
     declare_class(entry, "ProcessClass");
 //    inf.start_cs = get_segea(ah,segea,ah.classptr_seg) >> 4;
-//    inf.startIP  = ah.classptr_ofs;
+//    inf.start_ip  = ah.classptr_ofs;
          entry = get_segea(ah, segea, ah.tokenres_seg) + ah.tokenres_item;
     set_name(entry, "ApplicationObject");
     add_pgm_cmt("ProcessClass: %d:%04X", ah.classptr_seg, ah.classptr_ofs);
@@ -237,7 +240,7 @@ static void describe_app(const GEOSappheader &ah, const uint32 *segea)
   if ( ah.attr & GA_LIBRARY && ah.initseg != 0 )
   {
     inf.start_cs = get_segea(ah, segea, ah.initseg) >> 4;
-    inf.startIP  = ah.initofs;
+    inf.start_ip = ah.initofs;
     add_pgm_cmt("Library init: %d:%04X", ah.initseg, ah.initofs);
   }
   if ( ah.attr & GA_DRIVER && ah.startseg != 0 )
@@ -245,7 +248,7 @@ static void describe_app(const GEOSappheader &ah, const uint32 *segea)
     ea_t entry = get_segea(ah, segea, ah.startseg) + ah.startofs;
     set_name(entry, "DriverTable");
 //    inf.start_cs = get_segea(ah, segea, ah.startseg) >> 4;
-//    inf.startIP  = ah.startofs;
+//    inf.start_ip  = ah.startofs;
     add_pgm_cmt("Driver Table: %d:%04X", ah.startseg, ah.startofs);
 //      add_jmplist(ah.startseg,ah.startofs,4,4);
                                   // Add entry point as "jmplist"
@@ -264,16 +267,16 @@ static void create_fixup(ea_t ea, fixup_data_t &fd, ea_t target)
   segment_t *s = getseg(target);
   if ( s != NULL )
   {
-    fd.sel = (ushort)s->sel;
+    fd.sel = s->sel;
     fd.off = target - get_segm_base(s);
   }
   else
   {
-    fd.sel = ushort(target>>4);
+    fd.sel = sel_t(target >> 4);
     fd.off = target & 0xF;
   }
   fd.displacement = 0;
-  set_fixup(ea, &fd);
+  fd.set(ea);
   if ( fd.get_type() == FIXUP_PTR16 )
   {
     put_word(ea, fd.off);
@@ -300,7 +303,7 @@ static void apply_relocations(
         const uint32 *segea)
 {
   // apply relocation information
-  for ( int i=0; i < ah.numseg; i++)
+  for ( int i=0; i < ah.numseg; i++ )
   {
     if ( segfix[i] == 0 )
       continue;
@@ -321,21 +324,20 @@ static void apply_relocations(
         ask_for_feedback("Unknown fixup type %02X", ftype);
       netnode libnode = BADNODE;
       if ( ftype == 0x10 )
-        libnode = get_node(ah,modnode,fix[j].type>>8);
+        libnode = get_node(ah, modnode, fix[j].type>>8);
       uint16 w1 = get_word(ea);
       ea_t target = BADADDR;
-      fixup_data_t fd;
-      fd.type = FIXUP_SEG16;
+      fixup_data_t fd(FIXUP_SEG16);
       switch ( fix[j].type & 0x0F )
       {
         case 0x0: case 0x4:
-          fd.type = FIXUP_PTR16;
+          fd.set_type_and_flags(FIXUP_PTR16);
           if ( ftype == 0x20 )  // program
             target = get_segea(ah, segea, w1) + get_word(ea+2);
           else                  // library
           {
-            target = libnode.altval(w1+1);
-            fd.type |= FIXUP_EXTDEF;
+            target = node2ea(libnode.altval(w1+1));
+            fd.set_extdef();
           }
           break;
         case 0x1:               // off
@@ -348,16 +350,16 @@ static void apply_relocations(
           if ( oldsel != BADSEL )
           {
 LIB_PTR:
-            target = libnode.altval(oldoff+1);
+            target = node2ea(libnode.altval(oldoff+1));
             if ( oldea == ea+2 )
             {
-              fd.type = FIXUP_PTR16|FIXUP_EXTDEF;
+              fd.set_type_and_flags(FIXUP_PTR16, FIXUPF_EXTDEF);
             }
             else
             {
-              fd.type = FIXUP_SEG16|FIXUP_EXTDEF;
+              fd.set_type_and_flags(FIXUP_SEG16, FIXUPF_EXTDEF);
               create_fixup(oldea, fd, target);
-              fd.type = FIXUP_OFF16|FIXUP_EXTDEF;
+              fd.set_type_and_flags(FIXUP_OFF16, FIXUPF_EXTDEF);
             }
             oldsel = BADSEL;
             oldoff = BADSEL;
@@ -401,7 +403,7 @@ static void find_imports_in_relocations(
         const int32 *segpos,
         const uint16 *segfix)
 {
-  for ( int i=0; i < ah.numseg; i++)
+  for ( int i=0; i < ah.numseg; i++ )
   {
     if ( segfix[i] == 0 )
       continue;
@@ -484,7 +486,7 @@ static void create_extern_segments(
         const GEOSliblist *lib,
         const netnode *modnode)
 {
-  inf.specsegs = 1;
+  inf.specsegs = inf.is_64bit() ? 8 : 4;
   for ( int i=0; i < ah.numlib; i++ )
   {
     char libname[8+1];
@@ -493,22 +495,23 @@ static void create_extern_segments(
     netnode n = modnode[i];
     uval_t x;
     int nimps = 0;
-    for ( x=n.alt1st(); x != BADNODE; x=n.altnxt(x) )
+    for ( x=n.altfirst(); x != BADNODE; x=n.altnext(x) )
       nimps++;
     if ( nimps == 0 )
       continue;
 
-    ea_t ea = freechunk(inf.maxEA, nimps*4, -15);
+    ea_t ea = free_chunk(inf.max_ea, nimps*4, -15);
     ea_t end = ea + nimps*4;
     create_seg(ea>>4, ea, end, libname, "XTRN");
-    for ( x=n.alt1st(); x != BADNODE; x=n.altnxt(x),ea+=4 )
+    for ( x=n.altfirst(); x != BADNODE; x=n.altnext(x),ea+=4 )
     {
       char buf[MAXSTR];
       qsnprintf(buf, sizeof(buf), "%s_%u", libname, uint16(x)-1);
-      put_long(ea, 0xCB);
+      put_dword(ea, 0xCB);
       create_insn(ea);
-      do_name_anyway(ea, buf);
-      n.altset(x, ea);
+      force_name(ea, buf, SN_IDBENC);
+      nodeidx_t ndx = ea2node(ea);
+      n.altset(x, ndx);
     }
     import_module(libname, NULL /*windir*/, n, NULL, "geos");
   }
@@ -527,20 +530,21 @@ static void create_exports(
   for ( i=0; i < ah.numexp; i++ )
   {
     ea_t ea = get_segea(ah, segea, explist[i].seg) + explist[i].ofs;
-    add_long_cmt(ea, 1, "Exported entry %d", i);
-    n.altset(i+1, ea);
+    add_extra_cmt(ea, true, "Exported entry %d", i);
+    nodeidx_t ndx = ea2node(ea);
+    n.altset(i+1, ndx);
   }
   import_module(modname, NULL /*windir*/, n, NULL, "geos");
   for ( i=0; i < ah.numexp; i++ )
   {
     ea_t ea = get_segea(ah, segea, explist[i].seg) + explist[i].ofs;
     qstring name;
-    if ( has_user_name(get_flags_novalue(ea)) )
-      get_true_name(&name, ea);
+    if ( has_user_name(get_flags(ea)) )
+      get_name(&name, ea);
     else
       name.sprnt("%s_%d", modname, i);
     bool makecode = segtype(ea) == SEG_CODE;
-    add_entry(i, ea, name.begin(), makecode);
+    add_entry(i, ea, name.begin(), makecode, AEF_IDBENC);
     if ( !makecode )
       declare_class(ea, name.begin());
   }
@@ -605,7 +609,7 @@ void load_application(linput_t *li, int32 fpos, int32 fdelta)
   validate_array_count(li, &ah.numseg, 14, "Number of segments");
   if ( ah.numseg != 0 )
   {
-    if ( ah.numseg*14 < ah.numseg )
+    if ( !is_mul_ok<ushort>(ah.numseg, 14) )
 NOMEM:
       nomem("geos_segments");
     segd = qalloc(ah.numseg*14);
@@ -617,8 +621,8 @@ NOMEM:
     segfix = (uint16 *)(segpos + ah.numseg);
     segflg = (uint16 *)(segfix + ah.numseg);
     segea  = (uint32 *)(segflg + ah.numseg);
-    ea_t ea = toEA(inf.baseaddr, 0);
-    for ( int i=0; i < ah.numseg; i++)
+    ea_t ea = to_ea(inf.baseaddr, 0);
+    for ( int i=0; i < ah.numseg; i++ )
     {
       uint16 f = segflg[i];
       segpos[i] += fdelta;
@@ -637,7 +641,7 @@ NOMEM:
         found_data_segment = true;
         bss_size = ah.stacksize;
       }
-      ea = freechunk(ea, bss_size + seglen[i], -15);
+      ea = free_chunk(ea, bss_size + seglen[i], -15);
       ea_t endea = ea + seglen[i] + bss_size;
       if ( (f & HF_ZERO_INIT) == 0 )
         file2base(li, segpos[i], ea, endea - bss_size, FILEREG_PATCHABLE);
@@ -665,7 +669,7 @@ NOMEM:
       if ( f & HF_DEBUG           ) APPEND(ptr, end, " DEBUG");
       if ( f & HF_DISCARDED       ) APPEND(ptr, end, " DISCARDED");
       if ( f & HF_SWAPPED         ) APPEND(ptr, end, " SWAPPED");
-      add_long_cmt(ea, 1, "%s", buf);
+      add_extra_cmt(ea, true, "%s", buf);
 
       segea[i] = (uint32)ea;
       ea = endea;
@@ -732,6 +736,8 @@ static void show_geos2(GEOS2header &h)
 //--------------------------------------------------------------------------
 void idaapi load_file(linput_t *li, uint16 /*neflag*/, const char * /*fileformatname*/)
 {
+  set_processor_type("metapc", SETPROC_LOADER);
+
   union
   {
     GEOSheader h1;
@@ -762,7 +768,7 @@ void idaapi load_file(linput_t *li, uint16 /*neflag*/, const char * /*fileformat
     show_geos2(h.h2);
 
   inf.cc.cm |= C_PC_LARGE;
-  add_til2("geos", ADDTIL_DEFAULT);
+  add_til("geos", ADDTIL_DEFAULT);
 }
 
 //--------------------------------------------------------------------------
@@ -786,5 +792,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

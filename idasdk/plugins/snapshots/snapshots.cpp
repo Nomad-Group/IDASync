@@ -9,8 +9,7 @@
 #include <algorithm>
 
 //--------------------------------------------------------------------------
-#define DECLARE_THIS snapman_t *_this = (snapman_t *)obj //lint -e773
-class snapman_t
+class snapman_t : public chooser_t
 {
   struct snapdesc_t
   {
@@ -18,98 +17,12 @@ class snapman_t
     qstring title;
     qstring date;
   };
-  typedef qvector<snapdesc_t *> sdlist_t;
+  typedef qvector<snapdesc_t> sdlist_t;
   snapshot_t root;
   sdlist_t sdlist;
-  int source_snapidx;
 
-  static const int widths[2];
-  static const char *const header[2];
-
-  void sdlist_clear()
-  {
-    for (sdlist_t::iterator p=sdlist.begin();p!=sdlist.end();++p)
-      delete *p;
-    sdlist.clear();
-    source_snapidx = 0;
-  }
-
-  static uint32 idaapi sizer(void *obj)
-  {
-    DECLARE_THIS;
-    return _this->sdlist.size();
-  }
-
-  static void idaapi edit(void *obj, uint32 n)
-  {
-    DECLARE_THIS;
-    snapdesc_t *sd = _this->get_item(n);
-    if ( sd == NULL )
-      return;
-
-    const char *answer = askstr(0, sd->ss->desc, "Enter new snapshot description");
-    if ( answer == NULL )
-      return;
-
-    // Update the description
-    qstrncpy(sd->ss->desc, answer, sizeof(sd->ss->desc));
-    update_snapshot_attributes(sd->ss->filename, &_this->root, sd->ss, SSUF_DESC);
-  }
-
-  static void idaapi ins(void *obj)
-  {
-    const char *answer = askstr(0, "snapshot description", "Enter snapshot description");
-    if ( answer == NULL )
-      return;
-
-    qstring err_msg;
-    snapshot_t new_attr;
-    qstrncpy(new_attr.desc, answer, sizeof(new_attr.desc));
-    if ( take_database_snapshot(&new_attr, &err_msg) )
-    {
-      msg("Created new snapshot: %s\n", new_attr.filename);
-      DECLARE_THIS;
-      _this->init();
-    }
-    else
-    {
-      warning("Failed to create a snapshot, error: %s\n", err_msg.c_str());
-    }
-  }
-
-  static uint32 idaapi del(void *obj, uint32 n)
-  {
-    DECLARE_THIS;
-    snapdesc_t *sd = _this->get_item(n);
-    if ( sd == NULL )
-      return n;
-
-    // Simply delete the file
-    qunlink(sd->ss->filename);
-
-    // Rebuild the list
-    _this->init();
-
-    return 1;
-  }
-
-  static void idaapi desc(void *obj, uint32 n, char *const *arrptr)
-  {
-    // generate the column headers
-    if ( n == 0 )
-    {
-      qstrncpy(arrptr[0], header[0], MAXSTR);
-      qstrncpy(arrptr[1], header[1], MAXSTR);
-      return;
-    }
-
-    DECLARE_THIS;
-    snapdesc_t *sd = _this->get_item(n);
-    QASSERT(561, sd != NULL);
-
-    qstrncpy(arrptr[0], sd->date.c_str(), MAXSTR);
-    qstrncpy(arrptr[1], sd->title.c_str(), MAXSTR);
-  }
+  static const int widths_[2];
+  static const char *const header_[2];
 
   static void idaapi done_restore(const char *err_msg, void *)
   {
@@ -124,28 +37,21 @@ class snapman_t
     if ( n != &root )
     {
       // Insert new description record
-      snapdesc_t *sd = new snapdesc_t();
-      sdlist.push_back(sd);
+      snapdesc_t &sd = sdlist.push_back();
 
       // Compute title
-      for (int i=0;i<level*3;i++)
-        sd->title += "  ";
-
-      // Remember selected node
+      for ( int i=0; i < level; i++ )
+        sd.title += "      ";
       if ( n->id == root.id )
-      {
-        source_snapidx = sdlist.size();
-        sd->title += "->";
-      }
-
-      sd->title += n->desc;
+        sd.title += "->";
+      sd.title += n->desc;
 
       // Compute date
       char ss_date[MAXSTR];
       qstrftime64(ss_date, sizeof(ss_date), "%Y-%m-%d %H:%M:%S", n->id);
-      sd->date = ss_date;
+      sd.date = ss_date;
       // Store ss
-      sd->ss = n;
+      sd.ss = n;
     }
     for ( snapshots_t::iterator it=n->children.begin(); it != n->children.end(); ++it )
       build_tree_list(*it, level+1);
@@ -153,13 +59,17 @@ class snapman_t
 
   snapdesc_t *get_item(uint32 n)
   {
-    return n > sdlist.size() ? NULL : sdlist[n-1];
+    return n >= sdlist.size() ? NULL : &sdlist[n];
+  }
+  const snapdesc_t *get_item(uint32 n) const
+  {
+    return n >= sdlist.size() ? NULL : &sdlist[n];
   }
 
 public:
   bool init()
   {
-    sdlist_clear();
+    sdlist.clear();
     root.clear();
     if ( !build_snapshot_tree(&root) )
     {
@@ -177,49 +87,123 @@ public:
     return true;
   }
 
-  ~snapman_t()
+  snapman_t()
+    : chooser_t(CH_MODAL | CH_KEEP | CH_CAN_INS | CH_CAN_DEL | CH_CAN_EDIT,
+                qnumber(widths_), widths_, header_,
+                "Simple snapshot manager"),
+      root(),
+      sdlist() {}
+
+  virtual size_t idaapi get_count() const
   {
-    sdlist_clear();
+    return sdlist.size();
+  }
+
+  virtual void idaapi get_row(
+          qstrvec_t *cols_,
+          int *,
+          chooser_item_attrs_t *,
+          size_t n) const
+  {
+    const snapdesc_t *sd = get_item(n);
+    QASSERT(561, sd != NULL);
+
+    qstrvec_t &cols = *cols_;
+    cols[0] = sd->date;
+    cols[1] = sd->title;
+  }
+
+  virtual cbret_t idaapi ins(ssize_t n)
+  {
+    qstring desc = "snapshot description";
+    if ( !ask_str(&desc, HIST_CMT, "Enter snapshot description") )
+      return cbret_t(); // nothing changed
+
+    qstring err_msg;
+    snapshot_t new_attr;
+    qstrncpy(new_attr.desc, desc.c_str(), sizeof(new_attr.desc));
+    if ( !take_database_snapshot(&new_attr, &err_msg) )
+    {
+      warning("Failed to create a snapshot, error: %s", err_msg.c_str());
+      return cbret_t(); // nothing changed
+    }
+    msg("Created new snapshot: %s\n", new_attr.filename);
+    init();
+    // we preserve the selection
+    // FIXME use get_item_index()
+    return n;
+  }
+
+  virtual cbret_t idaapi del(size_t n)
+  {
+    const snapdesc_t *sd = get_item(n);
+    if ( sd == NULL )
+      return cbret_t();
+
+    // Simply delete the file
+    qunlink(sd->ss->filename);
+
+    // Rebuild the list
+    init();
+
+    return adjust_last_item(n); // take in account deleting of the last item
+  }
+
+  virtual cbret_t idaapi edit(size_t n)
+  {
+    snapdesc_t *sd = get_item(n);
+    if ( sd == NULL )
+      return cbret_t();
+
+    qstring desc = sd->ss->desc;
+    if ( !ask_str(&desc, HIST_CMT, "Enter new snapshot description") )
+      return cbret_t();
+
+    // Update the description
+    qstrncpy(sd->ss->desc, desc.c_str(), sizeof(sd->ss->desc));
+    update_snapshot_attributes(sd->ss->filename, &root, sd->ss, SSUF_DESC);
+    return n;
+  }
+
+  // calculate the location of the default item only,
+  // `item_data` is a pointer to a snapshot ID
+  virtual ssize_t idaapi get_item_index(const void *item_data) const
+  {
+    qtime64_t item_id = *(const qtime64_t *)item_data;
+    for ( size_t i = 0; i < sdlist.size(); ++i )
+    {
+      if ( sdlist[i].ss->id == item_id )
+        return i;
+    }
+    return NO_SELECTION;
   }
 
   void show()
   {
     // now open the window
-    int r = choose2(CH_MODAL,// modal window
-      -1, -1, -1, -1,       // position is determined by the OS
-      this,                 // pass the snapman to the chooser
-      qnumber(header),      // number of columns
-      widths,               // widths of columns
-      sizer,                // function that returns number of lines
-      desc,                 // function that generates a line
-      "Simple snapshot manager", // window title
-      -1,                   // use the default icon for the window
-      source_snapidx,       // position the cursor on the source snapshot
-      del,                  // "kill" callback
-      ins,                  // "new" callback
-      NULL,                 // "update" callback
-      edit,                 // "edit" callback
-      NULL,                 // function to call when the user pressed Enter
-      NULL,                 // function to call when the window is closed
-      NULL,                 // use default popup menu items
-      NULL);                // use the same icon for all lines
-    if ( r > 0 )
+    ssize_t n = ::choose(this, &root.id);
+    if ( n >= 0 )
     {
-      snapdesc_t *sd = get_item(r);
+      snapdesc_t *sd = get_item(n);
       if ( sd != NULL && sd->ss != NULL )
         restore_database_snapshot(sd->ss, done_restore, NULL);
     }
   }
 };
-#undef DECLARE_THIS
+DECLARE_TYPE_AS_MOVABLE(snapman_t::snapdesc_t);
 
 // column widths
-const int snapman_t::widths[2] = { 12, 70 };
-
-const char *const snapman_t::header[2] =
+const int snapman_t::widths_[2] =
 {
-  "Date",
-  "Description",
+  12, // Date
+  70, // Description
+};
+
+// column headers
+const char *const snapman_t::header_[2] =
+{
+  "Date",         // 0
+  "Description",  // 1
 };
 
 
@@ -252,7 +236,6 @@ int idaapi init(void)
 //      Usually this callback is empty.
 void idaapi term(void)
 {
-//  warning("term choose2");
 }
 
 //--------------------------------------------------------------------------
@@ -261,13 +244,14 @@ void idaapi term(void)
 //
 //      This is the main function of plugin.
 //
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   snapman_t sm;
   if ( !sm.init() )
-    return;
+    return false;
 
   sm.show();
+  return true;
 }
 
 //--------------------------------------------------------------------------

@@ -44,7 +44,7 @@ static bool init_plugin(void)
 
     if ( inf.filetype != f_ELF )
       break;
-    if ( ph.id != TARGET_PROCESSOR )
+    if ( ph.id != TARGET_PROCESSOR && ph.id != -1 )
       break;
 
     ok = true;

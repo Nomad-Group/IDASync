@@ -53,15 +53,55 @@ public:
         children_visitor_t &visitor);
   virtual HRESULT load(pdb_sym_t &sym, DWORD id);
 
+  virtual HRESULT sip_retrieve_lines_by_va(
+          pdb_lnnums_t *out,
+          ULONGLONG va,
+          ULONGLONG length);
+  virtual HRESULT sip_retrieve_lines_by_coords(
+          pdb_lnnums_t *out,
+          DWORD file_id,
+          int lnnum,
+          int colnum);
+  virtual HRESULT sip_iterate_symbols_at_ea(
+          ULONGLONG va,
+          ULONGLONG size,
+          enum SymTagEnum tag,
+          children_visitor_t &visitor);
+  virtual HRESULT sip_iterate_file_compilands(
+          DWORD file_id,
+          children_visitor_t &visitor);
+  virtual HRESULT sip_retrieve_file_path(
+          qstring *out,
+          qstring *errbuf,
+          DWORD file_id);
+  virtual HRESULT sip_retrieve_symbol_files(
+          qvector<DWORD> *out,
+          pdb_sym_t &sym);
+  virtual HRESULT sip_find_files(
+          qvector<DWORD> *out,
+          const char *name);
+
   IDiaDataSource *dia_source;
   IDiaSession    *dia_session;
   IDiaSymbol     *dia_global;
 
 private:
-  HRESULT _do_iterate_children(
+  HRESULT safe_iterate_children(
         pdb_sym_t &sym,
         enum SymTagEnum type,
         children_visitor_t &visitor);
+  HRESULT _do_iterate_symbols_enumerator(
+          IDiaEnumSymbols *sym_enum,
+          children_visitor_t &visitor);
+
+  HRESULT _copy_line_numbers(
+          pdb_lnnums_t *out,
+          IDiaEnumLineNumbers *enumerator) const;
+
+  HRESULT _copy_files_ids(
+          qvector<DWORD> *out,
+          IDiaEnumSourceFiles *enumerator) const;
+
   DECLARE_UNCOPYABLE(local_pdb_access_t)
 };
 

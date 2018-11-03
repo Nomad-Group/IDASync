@@ -17,6 +17,7 @@
 
 #include "../idaldr.h"
 #include "../../module/java/classfil.hpp"
+#include "../../module/java/notify_codes.hpp"
 
 //--------------------------------------------------------------------------
 //
@@ -24,14 +25,16 @@
 //      and fill 'fileformatname'.
 //      otherwise return 0
 //
-static int idaapi accept_file(linput_t *li,
-                       char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
   uint32 magic;
   uint16 min_ver, maj_ver;
 
-  if ( n != 0
-    || lread4bytes(li, &magic, 1) != 0
+  if ( lread4bytes(li, &magic, 1) != 0
     || magic != MAGICNUMBER
     || lread2bytes(li, &min_ver, 1) != 0
     || lread2bytes(li, &maj_ver, 1) != 0 )
@@ -56,9 +59,10 @@ BADFMT:
     jdk = (uchar)(maj_ver - (JDK_MIN_MAJOR-1));
   }
 
-  qsnprintf(fileformatname, MAX_FILE_FORMAT_NAME,
-            "JavaVM Class File (JDK 1.%u%s)", jdk,
-            jdk == 3 ? "/CLDC" : "");
+  fileformatname->sprnt("JavaVM Class File (JDK 1.%u%s)",
+                        jdk,
+                        jdk == 3 ? "/CLDC" : "");
+  *processor = "java";
   return f_LOADER;
 }
 
@@ -68,10 +72,9 @@ BADFMT:
 //
 static void idaapi load_file(linput_t *li, ushort neflag, const char * /*fileformatname*/)
 {
-  if ( ph.id != PLFM_JAVA )
-    set_processor_type("java", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("java", SETPROC_LOADER);
 
-  if ( ph.notify(ph.loader, li, (neflag & NEF_LOPT) != 0) )
+  if ( !java_module_t::load_file(li, (neflag & NEF_LOPT) != 0) )
     INTERR(20047);
 }
 
@@ -100,7 +103,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };
-
-//----------------------------------------------------------------------

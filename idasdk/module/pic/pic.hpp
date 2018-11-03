@@ -42,7 +42,7 @@ enum regnum_t ENUM_SIZE(uint16)
 //------------------------------------------------------------------
 // specific device name
 
-extern char device[MAXSTR];
+extern qstring device;
 
 //------------------------------------------------------------------
 // processor types
@@ -65,43 +65,41 @@ extern ushort idpflags;
 
 inline bool macro(void)         { return (idpflags & IDP_MACRO) != 0; }
 
-inline bool is_bit_insn(void)
-  { return cmd.itype >= PIC_bcf && cmd.itype <= PIC_btfss
-        || cmd.itype >= PIC_bcf3 && cmd.itype <= PIC_btg3; }
-bool conditional_insn(void);    // may instruction be skipped?
+inline bool is_bit_insn(const insn_t &insn)
+{
+  return insn.itype >= PIC_bcf && insn.itype <= PIC_btfss
+      || insn.itype >= PIC_bcf3 && insn.itype <= PIC_btg3;
+}
+bool conditional_insn(const insn_t &insn, flags_t F); // may instruction be skipped?
 
-extern bool is_bank(void);
+extern bool is_bank(const insn_t &insn);
 
 const char *find_sym(ea_t address);
-const ioport_bit_t *find_bits(ea_t address);
+const ioport_bits_t *find_bits(ea_t address);
 const char *find_bit(ea_t address, int bit);
-ea_t calc_code_mem(ea_t ea);
+ea_t calc_code_mem(const insn_t &insn, ea_t ea);
 ea_t calc_data_mem(ea_t ea);
 ea_t map_port(ea_t from);
-int calc_outf(op_t &x);
+int calc_outf(const op_t &x);
 //------------------------------------------------------------------
 void interr(const char *module);
 
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi pic_header(outctx_t &ctx);
+void idaapi pic_footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);         // function to produce assume directives
+void idaapi pic_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi pic_segend(outctx_t &ctx, segment_t *seg);
+void idaapi pic_assumes(outctx_t &ctx);         // function to produce assume directives
 
-void idaapi out(void);
-int  idaapi outspec(ea_t ea,uchar segtype);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi ana(insn_t *_insn);
+int  idaapi emu(const insn_t &insn);
+void idaapi pic_data(outctx_t &ctx, bool analyze_only);
 
 int  idaapi is_align_insn(ea_t ea);
 bool idaapi create_func_frame(func_t *pfn);
-int  idaapi is_sp_based(const op_t &x);
+int  idaapi is_sp_based(const insn_t &insn, const op_t &x);
 
-int idaapi PIC_get_frame_retsize(func_t *pfn);
+int idaapi PIC_get_frame_retsize(const func_t *pfn);
 int idaapi is_jump_func(const func_t *pfn, ea_t *jump_target);
 int idaapi is_sane_insn(int nocrefs);
 int idaapi may_be_func(void);           // can a function start here?

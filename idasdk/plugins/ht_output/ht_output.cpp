@@ -33,21 +33,20 @@ void desc_notification(const char *notification_name)
 
 //---------------------------------------------------------------------------
 // Callback for ui notifications
-static int idaapi ui_callback(void * /*ud*/, int notification_code, va_list va)
+static ssize_t idaapi ui_callback(void * /*ud*/, int notification_code, va_list va)
 {
   switch ( notification_code )
   {
     // called when IDA is preparing a context menu for a view
     // Here dynamic context-depending user menu items can be added.
-    case ui_populating_tform_popup:
+    case ui_populating_widget_popup:
       {
-        TForm *f = va_arg(va, TForm *);
-        if ( get_tform_type(f) == BWN_OUTPUT )
+        TWidget *f = va_arg(va, TWidget *);
+        if ( get_widget_type(f) == BWN_OUTPUT )
         {
           TPopupMenu *p = va_arg(va, TPopupMenu *);
           selected_data.qclear();
-          selected_data.resize(MAXSTR);
-          if ( get_output_selected_text(selected_data.begin(), MAXSTR) )
+          if ( get_output_selected_text(&selected_data) )
             attach_action_to_popup(f, p, ACTION_NAME);
           desc_notification("msg_popup");
         }
@@ -59,7 +58,7 @@ static int idaapi ui_callback(void * /*ud*/, int notification_code, va_list va)
 
 //---------------------------------------------------------------------------
 // Callback for view notifications
-static int idaapi output_callback(void * /*ud*/, int notification_code, va_list va)
+static ssize_t idaapi output_callback(void * /*ud*/, int notification_code, va_list va)
 {
   switch ( notification_code )
   {
@@ -84,9 +83,9 @@ static int idaapi output_callback(void * /*ud*/, int notification_code, va_list 
         int px = va_arg(va, int);
         int py = va_arg(va, int);
         int state = va_arg(va, int);
-        char buf[MAXSTR];
-        if ( get_output_curline(buf, sizeof(buf), false) )
-          form_msg("Clicked string: %s\n", buf);
+        qstring buf;
+        if ( get_output_curline(&buf, false) )
+          form_msg("Clicked string: %s\n", buf.c_str());
         int cx,cy;
         get_output_cursor(&cx, &cy);
         msg("Parameters: x:%d, y:%d, state:%d\n", px, py, state);
@@ -135,20 +134,20 @@ static int idaapi editor_modcb(int fid, form_actions_t &f_actions)
   if ( fid == CB_INIT ) // Initialization
   {
     /* set callback for output window notifications */
-    hook_to_notification_point(HT_UI, ui_callback, NULL);
-    hook_to_notification_point(HT_OUTPUT, output_callback, NULL);
+    hook_to_notification_point(HT_UI, ui_callback);
+    hook_to_notification_point(HT_OUTPUT, output_callback);
     fa = &f_actions;
   }
   else if ( fid == CB_CLOSE )
   {
-    unhook_from_notification_point(HT_OUTPUT, output_callback, NULL);
-    unhook_from_notification_point(HT_UI, ui_callback, NULL);
+    unhook_from_notification_point(HT_OUTPUT, output_callback);
+    unhook_from_notification_point(HT_UI, ui_callback);
   }
   return 1;
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int)
+bool idaapi run(size_t)
 {
   static const char formdef[] =
     "BUTTON NO NONE\n"        // we do not want the standard buttons on the form
@@ -165,11 +164,9 @@ void idaapi run(int)
   ti.cb = sizeof(textctrl_info_t);
   ti.text = "";
 
-  OpenForm_c(formdef,
-             FORM_QWIDGET,
-             editor_modcb,
-             &ti);
+  open_form(formdef, 0, editor_modcb, &ti);
   register_action(print_selection_action);
+  return true;
 }
 
 static const char wanted_name[] = "HT_OUTPUT notifications handling example";

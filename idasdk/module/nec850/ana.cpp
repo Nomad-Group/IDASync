@@ -19,14 +19,14 @@ int detect_inst_len(uint16 w)
 }
 
 //------------------------------------------------------------------------
-// Fetchs an instruction (uses ua_next_xxx()) of a correct size (ready for decoding)
+// Fetchs an instruction (uses ua_next_xxx(insn)) of a correct size (ready for decoding)
 // Returns the size of the instruction
-int fetch_instruction(uint32 *w)
+int fetch_instruction(uint32 *w, insn_t &insn)
 {
-  uint16 hw = ua_next_word();
+  uint16 hw = insn.get_next_word();
   int r = detect_inst_len(hw);
   if ( r == 4 )
-    *w = (ua_next_word() << 16) | hw;
+    *w = (insn.get_next_word() << 16) | hw;
   else
     *w = hw;
   return r;
@@ -34,7 +34,7 @@ int fetch_instruction(uint32 *w)
 
 //------------------------------------------------------------------------
 // Decodes an instruction "w" into cmd structure
-bool decode_instruction(uint32 w, insn_t *p_ins)
+bool decode_instruction(uint32 w, insn_t &ins)
 {
 #define PARSE_L12 (((w & 1) << 11) | (w >> 21))
 #define PARSE_R1  (w & 0x1F)
@@ -51,7 +51,6 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
   // if we know how to resolve its address
   op_t *displ_op = NULL;
 
-  insn_t &ins = *p_ins;
   do
   {
     uint32 op;
@@ -78,9 +77,9 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       // NOP, Equivalent to MOV R, r (where R=r=0)
       if ( w == 0 )
       {
-        ins.itype    = NEC850_NOP;
-        ins.Op1.type = o_void;
-        ins.Op1.dtyp = dt_void;
+        ins.itype     = NEC850_NOP;
+        ins.Op1.type  = o_void;
+        ins.Op1.dtype = dt_void;
         break;
       }
 
@@ -98,7 +97,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       ins.itype     = inst_1[op];
       ins.Op1.reg   = r1;
       ins.Op1.type  = o_reg;
-      ins.Op1.dtyp  = dt_dword;
+      ins.Op1.dtype = dt_dword;
 
       if ( is_v850e )
       {
@@ -142,13 +141,13 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
             if ( sld_hu )
             {
               ins.itype       = NEC850_SLD_HU;
-              ins.Op1.dtyp    = dt_word;
-              addr          <<= 1;
+              ins.Op1.dtype   = dt_word;
+              addr <<= 1;
             }
             else
             {
               ins.itype       = NEC850_SLD_BU;
-              ins.Op1.dtyp    = dt_byte;
+              ins.Op1.dtype   = dt_byte;
             }
 
             ins.Op1.type      = o_displ;
@@ -159,7 +158,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
 
             ins.Op2.type      = o_reg;
             ins.Op2.reg       = r2;
-            ins.Op2.dtyp      = dt_dword;
+            ins.Op2.dtype     = dt_dword;
 
             break;
           }
@@ -173,7 +172,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       {
         ins.Op2.reg   = r2;
         ins.Op2.type  = o_reg;
-        ins.Op2.dtyp  = dt_dword;
+        ins.Op2.dtype = dt_dword;
       }
       break;
     }
@@ -184,7 +183,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       static const itype_flags_t inst_2[] =
       {
         { NEC850_MOV,    1 }, /* MOV imm5, reg2 */
-        { NEC850_SATADD, 1},  /* SATADD imm5, reg2 */
+        { NEC850_SATADD, 1 }, /* SATADD imm5, reg2 */
         { NEC850_ADD,    1 }, /* ADD imm5, reg2 */
         { NEC850_CMP,    1 }, /* CMP imm5, reg2 */
         { NEC850_SHR,    0 }, /* SHR imm5, reg2 */
@@ -205,9 +204,17 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
         if ( r2 == 0 && (ins.itype == NEC850_SATADD || ins.itype == NEC850_MOV) )
         {
           ins.itype     = NEC850_CALLT;
-          ins.Op1.dtyp  = dt_byte;
+          ins.Op1.dtype = dt_byte;
           ins.Op1.type  = o_imm;
           ins.Op1.value = w & 0x3F;
+          if ( g_ctbp_ea != BADADDR )
+          {
+            // resolve callt addr using ctbp
+            ea_t ctp = g_ctbp_ea + (ins.Op1.value << 1);
+            ins.Op1.type = o_near;
+            ins.Op1.addr = g_ctbp_ea + get_word(ctp);
+            ins.auxpref  = N850F_ADDR_OP1 | N850F_CALL;
+          }
           break;
         }
       }
@@ -221,14 +228,14 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
 
       ins.Op1.type  = o_imm;
       ins.Op1.value = v;
-      ins.Op1.dtyp  = dt_byte;
+      ins.Op1.dtype = dt_byte;
 
       ins.Op2.type  = o_reg;
       ins.Op2.reg   = r2;
-      ins.Op2.dtyp  = dt_dword;
+      ins.Op2.dtype = dt_dword;
 
       // ADD imm, reg -> reg = reg + imm
-      if ( ins.itype == NEC850_ADD && r2 == rSP)
+      if ( ins.itype == NEC850_ADD && r2 == rSP )
         ins.auxpref |= N850F_SP;
       break;
     }
@@ -260,15 +267,15 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
         // MOV imm32, R
         if ( ins.itype == NEC850_MOVEA )
         {
-          imm            |= ua_next_word() << 16;
+          imm            |= ins.get_next_word() << 16;
           ins.Op1.type    = o_imm;
-          ins.Op1.dtyp    = dt_dword;
+          ins.Op1.dtype   = dt_dword;
           ins.Op1.value   = imm;
           ins.itype       = NEC850_MOV;
 
           ins.Op2.type   = o_reg;
           ins.Op2.reg    = r1;
-          ins.Op2.dtyp   = dt_dword;
+          ins.Op2.dtype  = dt_dword;
           break;
         }
         // DISPOSE imm5, list12 (reg1 == 0)
@@ -282,17 +289,17 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
 
           ins.Op1.value  = (w & 0x3E) >> 1;
           ins.Op1.type   = o_imm;
-          ins.Op1.dtyp   = dt_byte;
+          ins.Op1.dtype  = dt_byte;
 
           ins.Op2.value  = L;
           ins.Op2.type   = o_reglist;
-          ins.Op2.dtyp   = dt_word;
+          ins.Op2.dtype  = dt_word;
 
           if ( r1 != 0 )
           {
-            ins.Op3.dtyp = dt_dword;
-            ins.Op3.type = o_reg;
-            ins.Op3.reg  = r1;
+            ins.Op3.dtype = dt_dword;
+            ins.Op3.type  = o_reg;
+            ins.Op3.reg   = r1;
             ins.Op3.specflag1 = N850F_USEBRACKETS;
 
             ins.itype = NEC850_DISPOSE_r;
@@ -306,17 +313,17 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       }
       bool is_signed     = inst_6[op].flags == 1;
       ins.Op1.type       = o_imm;
-      ins.Op1.dtyp       = dt_dword;
+      ins.Op1.dtype      = dt_dword;
       ins.Op1.value      = is_signed ? sval_t(int16(imm)) : imm;
       ins.Op1.specflag1 |= N850F_OUTSIGNED;
 
       ins.Op2.type       = o_reg;
       ins.Op2.reg        = r1;
-      ins.Op2.dtyp       = dt_dword;
+      ins.Op2.dtype      = dt_dword;
 
       ins.Op3.type       = o_reg;
       ins.Op3.reg        = r2;
-      ins.Op3.dtyp       = dt_dword;
+      ins.Op3.dtype      = dt_dword;
 
       // (ADDI|MOVEA) imm, sp, sp -> sp = sp + imm
       if ( (ins.itype == NEC850_ADDI || ins.itype == NEC850_MOVEA)
@@ -335,7 +342,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
 
       ins.Op2.type   = o_reg;
       ins.Op2.reg    = PARSE_R2;
-      ins.Op2.dtyp   = dt_dword;
+      ins.Op2.dtype  = dt_dword;
 
       uint32 addr;
       // LD.B
@@ -343,7 +350,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       {
         addr          = w >> 16;
         ins.itype     = NEC850_LD_B;
-        ins.Op1.dtyp  = dt_byte;
+        ins.Op1.dtype = dt_byte;
       }
       else
       {
@@ -351,13 +358,13 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
         if ( (w & (1 << 16)) == 0 )
         {
           ins.itype      = NEC850_LD_H;
-          ins.Op1.dtyp   = dt_word;
+          ins.Op1.dtype  = dt_word;
         }
         // LD.W
         else
         {
           ins.itype      = NEC850_LD_W;
-          ins.Op1.dtyp   = dt_dword;
+          ins.Op1.dtype  = dt_dword;
         }
         addr = ((w & 0xFFFE0000) >> 17) << 1;
       }
@@ -374,7 +381,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       // (3) ST.W  reg2, disp16 [reg1]
       ins.Op1.type  = o_reg;
       ins.Op1.reg   = PARSE_R2;
-      ins.Op1.dtyp  = dt_dword;
+      ins.Op1.dtype = dt_dword;
 
       ins.Op2.type  = o_displ;
       displ_op      = &ins.Op2;
@@ -386,7 +393,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       {
         addr          = w >> 16;
         ins.itype     = NEC850_ST_B;
-        ins.Op2.dtyp  = dt_byte;
+        ins.Op2.dtype = dt_byte;
       }
       else
       {
@@ -394,12 +401,12 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
         if ( (w & (1 << 16)) == 0 )
         {
           ins.itype      = NEC850_ST_H;
-          ins.Op2.dtyp   = dt_word;
+          ins.Op2.dtype  = dt_word;
         }
         else
         {
           ins.itype      = NEC850_ST_W;
-          ins.Op2.dtyp   = dt_dword;
+          ins.Op2.dtype  = dt_dword;
         }
         addr = ((w & 0xFFFE0000) >> 17) << 1;
       }
@@ -420,11 +427,11 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
         ins.auxpref   |= N850F_SP;
         ins.Op1.value  = PARSE_L12;
         ins.Op1.type   = o_reglist;
-        ins.Op1.dtyp   = dt_word;
+        ins.Op1.dtype  = dt_word;
 
         ins.Op2.value  = (w & 0x3E) >> 1;
         ins.Op2.type   = o_imm;
-        ins.Op2.dtyp   = dt_byte;
+        ins.Op2.dtype  = dt_byte;
 
         if ( subop == 1 )
         {
@@ -439,7 +446,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
           case 0:
             // disassembles as: PREPARE list12, imm5, sp
             // meaning: load sp into ep
-            ins.Op3.dtyp  = dt_word;
+            ins.Op3.dtype = dt_word;
             ins.Op3.type  = o_reg;
             ins.Op3.reg   = rSP; // stack pointer
             break;
@@ -448,23 +455,23 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
           case 1:
             // c:   a8 07 0b 80     prepare {r24}, 20, 0x1
             //10:   01 00
-            ins.Op3.dtyp  = dt_word;
+            ins.Op3.dtype = dt_word;
             ins.Op3.type  = o_imm;
-            ins.Op3.value = sval_t(int16(ua_next_word()));
+            ins.Op3.value = sval_t(int16(ins.get_next_word()));
             break;
           case 2:
             //2:   a8 07 13 80     prepare {r24}, 20, 0x10000
             //6:   01 00
-            ins.Op3.dtyp = dt_word;
-            ins.Op3.type = o_imm;
-            ins.Op3.value = ua_next_word() << 16;
+            ins.Op3.dtype = dt_word;
+            ins.Op3.type  = o_imm;
+            ins.Op3.value = ins.get_next_word() << 16;
             break;
           case 3:
             //2:   a8 07 1b 80     prepare {r24}, 20, 0x1
             //6:   01 00 00 00
-            ins.Op3.dtyp = dt_dword;
-            ins.Op3.type = o_imm;
-            ins.Op3.value = ua_next_long();
+            ins.Op3.dtype = dt_dword;
+            ins.Op3.type  = o_imm;
+            ins.Op3.value = ins.get_next_dword();
             break;
           }
         }
@@ -476,16 +483,16 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
 
         ins.itype = NEC850_LD_BU;
 
-        ins.Op1.type = o_displ;
-        displ_op     = &ins.Op1;
-        ins.Op1.reg  = r1;
-        ins.Op1.addr = int16( ((w >> 16) & ~1) | ((w & 0x20) >> 5) );
-        ins.Op1.dtyp = dt_byte;
+        ins.Op1.type  = o_displ;
+        displ_op      = &ins.Op1;
+        ins.Op1.reg   = r1;
+        ins.Op1.addr  = int16( ((w >> 16) & ~1) | ((w & 0x20) >> 5) );
+        ins.Op1.dtype = dt_byte;
         ins.Op1.specflag1 = N850F_USEBRACKETS | N850F_OUTSIGNED;
 
-        ins.Op2.type = o_reg;
-        ins.Op2.dtyp = dt_dword;
-        ins.Op2.reg  = r2;
+        ins.Op2.type  = o_reg;
+        ins.Op2.dtype = dt_dword;
+        ins.Op2.reg   = r2;
       }
       break;
     }
@@ -502,13 +509,13 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       ins.itype         = inst_8[op];
       ins.Op1.type      = o_imm;
       ins.Op1.value     = ((w & 0x3800) >> 11); // b13..b11
-      ins.Op1.dtyp      = dt_byte;
+      ins.Op1.dtype     = dt_byte;
 
       ins.Op2.type      = o_displ;
       displ_op          = &ins.Op2;
       ins.Op2.addr      = int16(w >> 16);
       ins.Op2.offb      = 2;
-      ins.Op2.dtyp      = dt_byte;
+      ins.Op2.dtype     = dt_byte;
       ins.Op2.reg       = PARSE_R1; // R
       ins.Op2.specflag1 = N850F_USEBRACKETS | N850F_OUTSIGNED;
       break;
@@ -538,7 +545,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
         ins.itype = NEC850_TRAP;
         ins.Op1.type  = o_imm;
         ins.Op1.value = PARSE_R1;
-        ins.Op1.dtyp  = dt_byte;
+        ins.Op1.dtype = dt_byte;
         break;
       }
       if ( ins.itype != 0 )
@@ -564,11 +571,11 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
           ins.Op1.type      = o_displ;
           displ_op          = &ins.Op1;
           ins.Op1.reg       = PARSE_R1;
-          ins.Op1.addr      = (w >> 17) << 1;
-          ins.Op1.dtyp      = dt_word;
-          ins.Op1.specflag1 = N850F_USEBRACKETS;
+          ins.Op1.addr      = uint32((w >> 17) << 1);
+          ins.Op1.dtype     = dt_word;
+          ins.Op1.specflag1 = N850F_USEBRACKETS | N850F_OUTSIGNED;
           ins.Op2.type      = o_reg;
-          ins.Op2.dtyp      = dt_dword;
+          ins.Op2.dtype     = dt_dword;
           ins.Op2.reg       = PARSE_R2;
           break;
         }
@@ -595,8 +602,8 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
           uint32 r2 = PARSE_R2;
           uint32 r3 = (w & 0xF8000000) >> 27;
 
-          ins.Op1.type = ins.Op2.type = ins.Op3.type = o_reg;
-          ins.Op1.dtyp = ins.Op2.dtyp = ins.Op3.dtyp = dt_dword;
+          ins.Op1.type  = ins.Op2.type  = ins.Op3.type  = o_reg;
+          ins.Op1.dtype = ins.Op2.dtype = ins.Op3.dtype = dt_dword;
           ins.Op1.reg  = r1;
           ins.Op2.reg  = r2;
           ins.Op3.reg  = r3;
@@ -617,10 +624,10 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
         {
           uint32 r2 = PARSE_R2;
           uint32 r3 = (w & 0xF8000000) >> 27;
-          ins.Op1.type = ins.Op2.type = o_reg;
-          ins.Op1.dtyp = ins.Op2.dtyp = dt_dword;
-          ins.Op1.reg  = r2;
-          ins.Op2.reg  = r3;
+          ins.Op1.type  = ins.Op2.type = o_reg;
+          ins.Op1.dtype = ins.Op2.dtype = dt_dword;
+          ins.Op1.reg   = r2;
+          ins.Op2.reg   = r3;
           break;
         }
 
@@ -651,23 +658,23 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
 
           if ( op == 0x32 ) // CMOV reg1, reg2, reg3
           {
-            ins.Op1.type = o_reg;
-            ins.Op1.dtyp = dt_dword;
-            ins.Op1.reg  = r1;
+            ins.Op1.type  = o_reg;
+            ins.Op1.dtype = dt_dword;
+            ins.Op1.reg   = r1;
           }
           else
           {
             sval_t v = r1;
             SIGN_EXTEND(sval_t, v, 5);
             ins.Op1.type       = o_imm;
-            ins.Op1.dtyp       = dt_byte;
+            ins.Op1.dtype      = dt_byte;
             ins.Op1.value      = v;
             ins.Op1.specflag1 |= N850F_OUTSIGNED;
           }
-          ins.Op2.type = ins.Op3.type = o_reg;
-          ins.Op2.dtyp = ins.Op3.dtyp = dt_dword;
-          ins.Op2.reg  = r2;
-          ins.Op3.reg  = r3;
+          ins.Op2.type  = ins.Op3.type  = o_reg;
+          ins.Op2.dtype = ins.Op3.dtype = dt_dword;
+          ins.Op2.reg   = r2;
+          ins.Op3.reg   = r3;
           break;
         }
         //
@@ -688,13 +695,13 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
             ins.itype = NEC850_MULU;
 
           ins.Op1.value = imm;
-          ins.Op1.dtyp  = dt_word;
+          ins.Op1.dtype = dt_word;
           ins.Op1.type  = o_imm;
 
-          ins.Op2.type = ins.Op3.type = o_reg;
-          ins.Op2.dtyp = ins.Op3.dtyp = dt_dword;
-          ins.Op2.reg  = PARSE_R2;
-          ins.Op3.reg  = (w & 0xF8000000) >> 27;
+          ins.Op2.type  = ins.Op3.type  = o_reg;
+          ins.Op2.dtype = ins.Op3.dtype = dt_dword;
+          ins.Op2.reg   = PARSE_R2;
+          ins.Op3.reg   = (w & 0xF8000000) >> 27;
           break;
         }
       }
@@ -720,9 +727,9 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
           NEC850_SETFGE,  NEC850_SETFGT
         };
         ins.itype = cond_insts[w & 0xF];
-        ins.Op1.type = o_reg;
-        ins.Op1.dtyp = dt_dword;
-        ins.Op1.reg  = reg2;
+        ins.Op1.type  = o_reg;
+        ins.Op1.dtype = dt_dword;
+        ins.Op1.reg   = reg2;
         break;
       }
 
@@ -750,15 +757,18 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       if ( ins.itype != 0 )
       {
         // Common stuff for the rest of Format 9 instructions
-        ins.Op1.dtyp  = ins.Op2.dtyp = dt_dword;
-        ins.Op1.type  = ins.Op2.type = o_reg;
+        ins.Op1.dtype = ins.Op2.dtype = dt_dword;
+        ins.Op1.type  = ins.Op2.type  = o_reg;
         ins.Op1.reg  += reg1;
         ins.Op2.reg  += reg2;
         break;
       }
 
+      // -> ins.itype == 0
+
+
       // No match? Try V850E
-      if ( ins.itype == 0 && is_v850e )
+      if ( is_v850e )
       {
         // SASF
         if ( op == 0x200 )
@@ -775,9 +785,9 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
             NEC850_SASFGE,  NEC850_SASFGT
           };
           ins.itype = cond_insts[w & 0xF];
-          ins.Op1.type = o_reg;
-          ins.Op1.dtyp = dt_dword;
-          ins.Op1.reg  = reg2;
+          ins.Op1.type  = o_reg;
+          ins.Op1.dtype = dt_dword;
+          ins.Op1.reg   = reg2;
           break;
         }
 
@@ -799,15 +809,15 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
           return 0; // No match!
         }
         // Common
-        ins.Op1.dtyp = dt_byte;
-        ins.Op1.type = o_reg;
-        ins.Op1.reg  = reg2;
+        ins.Op1.dtype = dt_byte;
+        ins.Op1.type  = o_reg;
+        ins.Op1.reg   = reg2;
 
-        ins.Op2.dtyp = dt_byte;
-        displ_op     = &ins.Op2;
-        ins.Op2.type = o_displ;
-        ins.Op2.addr = 0;
-        ins.Op2.reg  = reg1;
+        ins.Op2.dtype = dt_byte;
+        displ_op      = &ins.Op2;
+        ins.Op2.type  = o_displ;
+        ins.Op2.addr  = 0;
+        ins.Op2.reg   = reg1;
         ins.Op2.specflag1 = N850F_USEBRACKETS;
       }
 
@@ -825,7 +835,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
     if ( op == 0x1E )
     {
       uint32 reg  = PARSE_R2;
-      sval_t addr = (((w & 0x3F) << 15) | ((w & 0xFFFE0000) >> 17)) << 1;
+      sval_t addr = uint32((((w & 0x3F) << 15) | ((w & 0xFFFE0000) >> 17)) << 1);
       SIGN_EXTEND(sval_t, addr, 22);
 
       ins.Op1.addr = ins.ip + addr;
@@ -838,11 +848,11 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       }
       else
       {
-        ins.itype    = NEC850_JARL;
-        ins.auxpref |= N850F_CALL;
-        ins.Op2.type = o_reg;
-        ins.Op2.reg  = reg;
-        ins.Op2.dtyp = dt_dword;
+        ins.itype     = NEC850_JARL;
+        ins.auxpref  |= N850F_CALL;
+        ins.Op2.type  = o_reg;
+        ins.Op2.reg   = reg;
+        ins.Op2.dtype = dt_dword;
       }
       break;
     }
@@ -869,7 +879,7 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       SIGN_EXTEND(sval_t, dest, 9);
 
       ins.itype     = inst_3[w & 0xF];
-      ins.Op1.dtyp  = dt_word;
+      ins.Op1.dtype = dt_word;
       ins.Op1.type  = o_near;
       ins.Op1.addr  = ea_t(dest + ins.ip);
       ins.auxpref   = N850F_ADDR_OP1;
@@ -945,16 +955,16 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       else if ( idx_d == -1 || idx_r == -1 || dtyp_d == - 1 )
         return false; // could not decode
 
-      ins.Operands[idx_r].type      = o_reg;
-      ins.Operands[idx_r].reg       = reg2;
-      ins.Operands[idx_r].dtyp      = dt_dword;
+      ins.ops[idx_r].type      = o_reg;
+      ins.ops[idx_r].reg       = reg2;
+      ins.ops[idx_r].dtype     = dt_dword;
 
-      ins.Operands[idx_d].type      = o_displ;
-      displ_op                      = &ins.Operands[idx_d];
-      ins.Operands[idx_d].reg       = rEP;
-      ins.Operands[idx_d].addr      = addr;
-      ins.Operands[idx_d].dtyp      = dtyp_d;
-      ins.Operands[idx_d].specflag1 = N850F_USEBRACKETS;
+      ins.ops[idx_d].type      = o_displ;
+      displ_op                 = &ins.ops[idx_d];
+      ins.ops[idx_d].reg       = rEP;
+      ins.ops[idx_d].addr      = addr;
+      ins.ops[idx_d].dtype     = dtyp_d;
+      ins.ops[idx_d].specflag1 = N850F_USEBRACKETS;
       break;
     }
     // Unknown instructions
@@ -967,8 +977,16 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
     // A displacement with GP and GP is set?
     if ( displ_op->reg == rGP && g_gp_ea != BADADDR )
     {
-      displ_op->type  = o_mem;
-      displ_op->addr += g_gp_ea;
+      displ_op->type = o_mem;
+      if ( ins.itype == NEC850_SLD_BU || ins.itype == NEC850_LD_BU
+        || ins.itype == NEC850_SLD_HU || ins.itype == NEC850_LD_HU )
+      {
+        displ_op->addr = short(displ_op->addr) + g_gp_ea;
+      }
+      else
+      {
+        displ_op->addr += g_gp_ea;
+      }
     }
     // register zero access?
     else if ( displ_op->reg == rZERO )
@@ -976,27 +994,29 @@ bool decode_instruction(uint32 w, insn_t *p_ins)
       // since r0 is always 0, we can replace the operand by the complete address
       displ_op->type = o_mem;
       displ_op->specflag1 &= ~N850F_OUTSIGNED;
+      if ( ins.itype == NEC850_LD_BU || ins.itype == NEC850_LD_HU )
+        displ_op->addr = short(displ_op->addr);
     }
   }
-
   return ins.itype != 0;
 }
 
 //------------------------------------------------------------------------
-// Analyze one instruction and fill 'cmd' structure.
-// cmd.ea contains address of instruction to analyze.
+// Analyze one instruction and fill 'insn' structure.
+// insn.ea contains address of instruction to analyze.
 // Return length of the instruction in bytes, 0 if instruction can't be decoded.
 // This function shouldn't change the database, flags or anything else.
 // All these actions should be performed only by u_emu() function.
-int idaapi nec850_ana(void)
+int idaapi nec850_ana(insn_t *pinsn)
 {
-  uint32 w;
-  if ( cmd.ea & 0x1 )
+  insn_t &insn = *pinsn;
+  if ( insn.ea & 0x1 )
     return 0;
 
-  fetch_instruction(&w);
-  if ( decode_instruction(w, &cmd) )
-    return cmd.size;
+  uint32 w;
+  fetch_instruction(&w, insn);
+  if ( decode_instruction(w, insn) )
+    return insn.size;
   else
     return 0;
 }

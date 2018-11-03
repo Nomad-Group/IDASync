@@ -10,7 +10,7 @@
 #include "arc.hpp"
 
 // generic condition codes
-static const char * const ccode[] =
+static const char *const ccode[] =
 {
   "",   "z",  "nz", "p",
   "n",  "c",  "nc", "v",
@@ -23,7 +23,7 @@ static const char * const ccode[] =
 };
 
 // condition codes for branches
-static const char * const ccode_b[] =
+static const char *const ccode_b[] =
 {
   "",   "eq", "ne", "pl",
   "mi", "lo", "hs", "vs",
@@ -38,18 +38,33 @@ static const char * const ccode_b[] =
 /* jump delay slot codes */
 static const char ncode[][4] = { "", ".d", ".jd", ".d?" };
 
-inline void outreg(int rn)
+//----------------------------------------------------------------------
+class out_arc_t : public outctx_t
 {
-  const char *regname = (rn < ph.regsNum) ? ph.regNames[rn] : "<bad register>";
+  out_arc_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(int rn);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+};
+CASSERT(sizeof(out_arc_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS(out_arc_t)
+
+//----------------------------------------------------------------------
+void out_arc_t::outreg(int rn)
+{
+  const char *regname = (rn < ph.regs_num) ? ph.reg_names[rn] : "<bad register>";
   out_register(regname);
 }
 
+//----------------------------------------------------------------------
 /* outputs an operand 'x' */
-bool idaapi outop(op_t & x)
+bool out_arc_t::out_operand(const op_t & x)
 {
-// const char *ptr;
   ea_t v;
-
   switch ( x.type )
   {
     case o_reg:
@@ -65,57 +80,57 @@ bool idaapi outop(op_t & x)
       break;
 
     case o_imm:
-      OutValue(x, OOFS_IFSIGN | OOFW_IMM);
+      out_value(x, OOFS_IFSIGN | OOFW_IMM);
       break;
 
     case o_mem:
       {
-        ea_t ea = toEA(cmd.cs, x.addr);
-        if ( x.type == o_mem && (cmd.auxpref & aux_pcload) != 0 )
+        ea_t ea = to_ea(insn.cs, x.addr);
+        if ( x.type == o_mem && (insn.auxpref & aux_pcload) != 0 )
         {
           // A little hack to make the output
           // more readable...
           op_t y = {0};
-          if ( copy_insn_optype(x, ea, &y.value) )
+          if ( copy_insn_optype(insn, x, ea, &y.value) )
           {
-            ea_t saved_ea = cmd.ea;
-            flags_t saved_flags = uFlag;
-            y.dtyp  = x.dtyp;
+            y.dtype = x.dtype;
             y.flags = OF_SHOW;
-            uFlag = get_flags_novalue(ea);
-            cmd.ea = ea;
             out_symbol('=');
-            OutValue(y, OOFS_IFSIGN|OOFW_IMM);
-            cmd.ea = saved_ea;
-            uFlag  = saved_flags;
+            ea_t insn_ea_sav = insn_ea;
+            flags_t savedF = F;
+            insn_ea = ea;    // change context
+            F = get_flags(ea);
+            out_value(y, OOFS_IFSIGN|OOFW_IMM);
+            insn_ea = insn_ea_sav;    // restore context
+            F = savedF;
             break;
           }
         }
         out_symbol('[');
-        if ( cmd.itype != ARC_lr && cmd.itype != ARC_sr )
+        if ( insn.itype != ARC_lr && insn.itype != ARC_sr )
         {
           if ( !out_name_expr(x, ea, x.addr) )
           {
             out_tagon(COLOR_ERROR);
-            OutLong(uint32(x.addr), 16);
+            out_btoa(uint32(x.addr), 16);
             out_tagoff(COLOR_ERROR);
-            QueueSet(Q_noName, cmd.ea);
+            remember_problem(PR_NONAME, insn.ea);
           }
         }
         else
         {
-            OutLong(uint32(x.addr), 16);
+          out_btoa(uint32(x.addr), 16);
         }
         out_symbol(']');
       }
       break;
 
     case o_near:
-      v = toEA(cmd.cs, x.addr);
-      if (!out_name_expr(x, v, x.addr))
+      v = to_ea(insn.cs, x.addr);
+      if ( !out_name_expr(x, v, x.addr) )
       {
-        OutValue(x, OOF_ADDR|OOF_NUMBER|OOFS_NOSIGN|OOFW_32);
-        QueueSet(Q_noName, cmd.ea);
+        out_value(x, OOF_ADDR|OOF_NUMBER|OOFS_NOSIGN|OOFW_32);
+        remember_problem(PR_NONAME, insn.ea);
         break;
       }
       break;
@@ -127,14 +142,14 @@ bool idaapi outop(op_t & x)
       if ( x.membase == 0 )
         outreg(x.reg);
       if ( x.addr != 0
-         || isOff(uFlag,x.n)
-         || isStkvar(uFlag,x.n)
-         || isEnum(uFlag,x.n)
-         || isStroff(uFlag,x.n) )
+        || is_off(F, x.n)
+        || is_stkvar(F, x.n)
+        || is_enum(F, x.n)
+        || is_stroff(F, x.n) )
       {
         if ( x.membase == 0 )
           out_symbol(',');
-        OutValue(x, OOF_ADDR|OOFS_IFSIGN|OOF_SIGNED|OOFW_32);
+        out_value(x, OOF_ADDR|OOFS_IFSIGN|OOF_SIGNED|OOFW_32);
         if ( x.membase != 0 )
           out_symbol(',');
       }
@@ -150,9 +165,10 @@ bool idaapi outop(op_t & x)
   return 1;
 }
 
-inline bool is_branch()
+//----------------------------------------------------------------------
+inline bool is_branch(const insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case ARC_b:
     case ARC_lp:
@@ -166,21 +182,19 @@ inline bool is_branch()
   }
 #ifndef NDEBUG
   // delay slot bits must be only set for branches
-  QASSERT(10184, !has_dslot(cmd));
+  QASSERT(10184, !has_dslot(insn));
 #endif
   return false;
 }
 
-void idaapi out(void)
+//----------------------------------------------------------------------
+void out_arc_t::out_proc_mnem(void)
 {
-  char buf[MAXSTR];
-  char postfix[MAXSTR] = "";
-
-  init_output_buffer(buf, sizeof(buf));
-
-  if ( cmd.itype == ARC_null )
+  char postfix[MAXSTR];
+  postfix[0] = '\0';
+  if ( insn.itype == ARC_null )
   {
-    uint32 code = get_long(cmd.ea);
+    uint32 code = get_dword(insn.ea);
 
     int i = (code>>27)&31;
     if ( i == 3 )
@@ -195,9 +209,9 @@ void idaapi out(void)
   }
 
   /* if we have a load or store instruction, flags are used a bit different */
-  if ( cmd.itype <= ARC_store_instructions )
+  if ( insn.itype <= ARC_store_instructions )
   {
-    switch ( cmd.auxpref & aux_zmask )
+    switch ( insn.auxpref & aux_zmask )
     {
       case 0:
         break;
@@ -211,9 +225,9 @@ void idaapi out(void)
         qstrncat(postfix, "?", sizeof(postfix));
         break;
     }
-    if ( cmd.auxpref & aux_x )
+    if ( insn.auxpref & aux_x )
       qstrncat(postfix, ".x", sizeof(postfix));
-    switch ( cmd.auxpref & aux_amask )
+    switch ( insn.auxpref & aux_amask )
     {
       case 0:
         break;
@@ -230,122 +244,107 @@ void idaapi out(void)
         qstrncat(postfix, "?", sizeof(postfix));
         break;
     }
-    if ( cmd.auxpref & aux_di )
+    if ( insn.auxpref & aux_di )
       qstrncat(postfix, ".di", sizeof(postfix));
   }
-  else if ( cmd_cond() != cAL )
+  else if ( cond(insn) != cAL )
   {
-    if ( is_branch() )
+    if ( is_branch(insn) )
     {
-      qstrncat(postfix, ccode_b[cmd_cond()], sizeof(postfix));
+      qstrncat(postfix, ccode_b[cond(insn)], sizeof(postfix));
     }
     else
     {
       qstrncat(postfix, ".", sizeof(postfix));
-      qstrncat(postfix, ccode[cmd_cond()], sizeof(postfix));
+      qstrncat(postfix, ccode[cond(insn)], sizeof(postfix));
     }
   }
-  if ( is_branch() )  // delay slot code
-    qstrncat(postfix, ncode[(cmd.auxpref >> 5) & 3], sizeof(postfix));
-  else if ( (cmd.auxpref & aux_f) && (cmd.itype != ARC_flag) )   // flag implicitly sets this bit
+  if ( is_branch(insn) )  // delay slot code
+    qstrncat(postfix, ncode[(insn.auxpref >> 5) & 3], sizeof(postfix));
+  else if ( (insn.auxpref & aux_f) && (insn.itype != ARC_flag) )   // flag implicitly sets this bit
     qstrncat(postfix, ".f", sizeof(postfix));
 
-  OutMnem(8, postfix);          // output instruction mnemonics
+  out_mnem(8, postfix);    // output instruction mnemonics
+}
 
-  if (cmd.Op1.type != o_void)
-    out_one_operand(0);       // output the first operand
+//----------------------------------------------------------------------
+void out_arc_t::out_insn(void)
+{
+  out_mnemonic();
+  if ( insn.Op1.type != o_void )
+    out_one_operand(0);   // output the first operand
 
-  if (cmd.Op2.type != o_void)
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
-    out_one_operand(1);       // output the second operand
+    out_char(' ');
+    out_one_operand(1);   // output the second operand
   }
 
-  if (cmd.Op3.type != o_void)
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
-    out_one_operand(2);       // output the third operand
+    out_char(' ');
+    out_one_operand(2);   // output the third operand
   }
 
   // output a character representation of the immediate values
   // embedded in the instruction as comments
-
-  if (isVoid(cmd.ea, uFlag, 0))
-    OutImmChar(cmd.Op1);
-  if (isVoid(cmd.ea, uFlag, 1))
-    OutImmChar(cmd.Op2);
-  if (isVoid(cmd.ea, uFlag, 2))
-    OutImmChar(cmd.Op3);
+  out_immchar_cmts();
 
   // add comments for indirect calls or calculated data xrefs
-  ea_t callee = helper.altval(cmd.ea)-1;
+  nodeidx_t callee = get_callee(insn.ea);
   if ( callee == BADADDR )
-    callee = helper.altval(cmd.ea, DXREF_TAG)-1;
+    callee = get_dxref(insn.ea);
   if ( callee != BADADDR )
-  {
-    qstring name;
-    if ( get_colored_short_name(&name, callee & ~1, GN_INSNLOC) > 0 )
-    {
-      out_line(" ; ", COLOR_AUTOCMT);
-      OutLine(name.begin());
-    }
-  }
-  term_output_buffer();
-  gl_comm = 1;                  // ask to attach a possible user defined comment to it
-  MakeLine(buf);                // pass the generated line to the kernel
+    set_comment_addr(callee & ~1);
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
 // generate start of the disassembly
 
-void idaapi header(void)
+void idaapi arc_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX);
 }
 
 //--------------------------------------------------------------------------
 // generate start of a segment
-
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi arc_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  char name[MAXNAMELEN];
-  segment_t *Sarea = getseg(ea);
-
-  get_segm_name(Sarea, name, sizeof(name));
-  printf_line(0, COLSTR(".section %s", SCOLOR_ASMDIR), name);
-  if (inf.s_org)
+  qstring name;
+  get_visible_segm_name(&name, Sarea);
+  ctx.gen_printf(0, COLSTR(".section %s", SCOLOR_ASMDIR), name.c_str());
+  if ( (inf.outflags & OFLG_GEN_ORG) != 0 )
   {
-    adiff_t org = ea - get_segm_base(Sarea);
+    adiff_t org = ctx.insn_ea - get_segm_base(Sarea);
 
-    if (org != 0)
+    if ( org != 0 )
     {
       char buf[MAX_NUMBUF];
 
       btoa(buf, sizeof(buf), org);
-      printf_line(0, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+      ctx.gen_printf(0, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
     }
   }
 }
 
 //--------------------------------------------------------------------------
 // generate end of the disassembly
-
-void idaapi footer(void)
+void idaapi arc_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
+  ctx.gen_empty_line();
 
-  MakeNull();
-  register char *p = tag_addstr(buf, end, COLOR_ASMDIR, ".end");
+  ctx.out_line(".end", COLOR_ASMDIR);
 
   qstring name;
-  if ( get_colored_name(&name, inf.beginEA) > 0 )
+  if ( get_colored_name(&name, inf.start_ea) > 0 )
   {
-    APPCHAR(p, end, ' ');
-    APPCHAR(p, end, '#');
-    APPEND(p, end, name.begin());
+    ctx.out_line(" #");
+    ctx.out_line(name.begin());
   }
-  MakeLine(buf, inf.indent);
+  ctx.flush_outbuf(inf.indent);
 }

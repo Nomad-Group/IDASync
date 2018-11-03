@@ -2,12 +2,18 @@
        IDA remote debugger server
 */
 
+#ifdef _WIN32
+// We use the deprecated inet_ntoa() function for Windows XP compatibility.
+//lint -e750 local macro '' not referenced
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#endif
+
 #include "server.h"
 
 // Provide dummy versions for tinfo copy/clear. Debugger servers do not use them
 #if !defined(__NT__) || defined(UNDER_CE) // defined(__ANDROID__) || defined(__ARMLINUX__) || defined(UNDER_CE)
-idaman void ida_export copy_tinfo_t(tinfo_t *, const tinfo_t &) {}
-idaman void ida_export clear_tinfo_t(tinfo_t *) {}
+void ida_export copy_tinfo_t(tinfo_t *, const tinfo_t &) {}
+void ida_export clear_tinfo_t(tinfo_t *) {}
 #endif
 //lint -esym(714, dump_udt) not referenced
 void dump_udt(const char *, const struct udt_type_data_t &) {}
@@ -16,9 +22,15 @@ void dump_udt(const char *, const struct udt_type_data_t &) {}
 //--------------------------------------------------------------------------
 // SERVER GLOBAL VARIABLES
 static const char *server_password = NULL;
-static const char *ipv4_address = NULL;
 static bool verbose = false;
-static bool keep_broken_connections = false;
+
+enum broken_conn_hndl_t
+{
+  BCH_DEFAULT,
+  BCH_KEEP_DEBMOD,
+  BCH_KILL_PROCESS,
+};
+static broken_conn_hndl_t on_broken_conn = BCH_DEFAULT;
 
 #ifdef __SINGLE_THREADED_SERVER__
 
@@ -141,7 +153,7 @@ static void NT_CDECL shutdown_gracefully(int signum)
 
   srv_lock_begin();
 
-  for (rpc_server_list_t::iterator it = clients_list.begin(); it != clients_list.end();++it)
+  for ( rpc_server_list_t::iterator it = clients_list.begin(); it != clients_list.end(); ++it )
   {
     rpc_server_t *server = it->first;
 #ifndef __SINGLE_THREADED_SERVER__
@@ -173,6 +185,24 @@ static void NT_CDECL shutdown_gracefully(int signum)
 }
 #endif
 
+
+//------------------------------------------------------------------------
+// Function safe against time slicing attack, comparing time depends only on str length
+static bool password_matches(const char *str, const char *pass)
+{
+  int str_length = strlen(str);
+  int pass_length = strlen(pass);
+
+  int res = str_length ^ pass_length;
+
+  if ( pass_length != 0 )
+  {
+    for ( int i = 0; i < str_length; i++ )
+      res |= (pass[i % pass_length] ^ str[i]);
+  }
+  return res == 0;
+}
+
 //--------------------------------------------------------------------------
 static void handle_single_session(rpc_server_t *server)
 {
@@ -190,7 +220,7 @@ static void handle_single_session(rpc_server_t *server)
   append_dd(req, DEBUGGER_ID);
   append_dd(req, sizeof(ea_t));
 
-  rpc_packet_t *rp = server->process_request(req, true);
+  rpc_packet_t *rp = server->process_request(req, PREQ_MUST_LOGIN);
 
   bool handle_request = true;
   bool send_response  = true;
@@ -217,7 +247,7 @@ static void handle_single_session(rpc_server_t *server)
     else if ( server_password != NULL )
     {
       char *pass = extract_str(&answer, end);
-      if ( strcmp(pass, server_password) != '\0' )
+      if ( !password_matches(pass, server_password) )
       {
         lprintf("[%d] Bad password\n", sid);
         ok = false;
@@ -246,24 +276,46 @@ static void handle_single_session(rpc_server_t *server)
   server->network_error_code = 0;
   lprintf("[%d] Closing connection from %s...\n", sid, peername);
 
-  bool preserve_server = keep_broken_connections && server->get_broken_connection();
-  if ( !preserve_server )
-  { // Terminate dedicated debugger instance.
-    server->get_debugger_instance()->dbg_term();
-    server->term_irs();
+  bool preserve_server = false;
+  if ( server->get_broken_connection() )
+  {
+    if ( on_broken_conn == BCH_KEEP_DEBMOD )
+    {
+      server->term_irs();
+      lprintf("[%d] Debugged session entered into sleeping mode\n", sid);
+      server->prepare_broken_connection();
+      preserve_server = true;
+    }
+    else
+    {
+      if ( on_broken_conn == BCH_KILL_PROCESS )
+      {
+        int pid = server->get_debugger_instance()->pid;
+        if ( pid > 0 )
+        {
+          lprintf("[%d] Killing debugged process %d\n",
+                  sid, server->get_debugger_instance()->pid);
+          int code = server->kill_process();
+          if ( code != 0 )
+            lprintf("[%d] Failed to kill process after %d seconds. Giving up\n",
+                    sid, code);
+        }
+      }
+      goto TERM_DEBMOD;
+    }
   }
   else
   {
+TERM_DEBMOD:
+    server->get_debugger_instance()->dbg_term();
     server->term_irs();
-    lprintf("[%d] Debugged session entered into sleeping mode\n", sid);
-    server->prepare_broken_connection();
   }
 
   if ( !preserve_server )
   {
     // Remove the session from the list
     srv_lock_begin();
-    for (rpc_server_list_t::iterator it = clients_list.begin(); it != clients_list.end();++it)
+    for ( rpc_server_list_t::iterator it = clients_list.begin(); it != clients_list.end(); ++it )
     {
       if ( it->first != server )
         continue;
@@ -382,7 +434,7 @@ static DWORD calc_our_crc32(const char *fname)
 
 //--------------------------------------------------------------------------
 // __try handler can't be placed in fuction which requires object unwinding
-static void protected_privileged_session(IRAPIStream* pStream)
+static void protected_privileged_session(IRAPIStream *pStream)
 {
   try
   {
@@ -410,12 +462,15 @@ static void protected_privileged_session(IRAPIStream* pStream)
 
 //--------------------------------------------------------------------------
 extern "C" __declspec(dllexport)
-int ida_server(DWORD dwInput, BYTE* pInput,
-               DWORD* pcbOutput, BYTE** ppOutput,
-               IRAPIStream* pStream)
+int ida_server(
+        DWORD dwInput,
+        BYTE *pInput,
+        DWORD *pcbOutput,
+        BYTE **ppOutput,
+        IRAPIStream *pStream)
 {
   lprintf("IDA " SYSTEM SYSBITS " remote debug server v1.%d.\n"
-    "Copyright Hex-Rays 2004-2015\n", IDD_INTERFACE_VERSION);
+    "Copyright Hex-Rays 2004-2017\n", IDD_INTERFACE_VERSION);
 
   // Call the debugger module to initialize its subsystem once
   if ( !init_subsystem() )
@@ -469,6 +524,35 @@ bool are_broken_connections_supported(void)
   return debmod_t::reuse_broken_connections;
 }
 
+//-------------------------------------------------------------------------
+static qstring qinet_ntop(const struct sockaddr_in &sa)
+{
+#ifdef __NT__
+  // inet_ntop() is not available in Windows XP.
+  return inet_ntoa(sa.sin_addr);
+#else
+  char hostnam_buf[MAXSTR];
+  return inet_ntop(AF_INET, &sa.sin_addr, hostnam_buf, sizeof(hostnam_buf));
+#endif
+}
+
+//-------------------------------------------------------------------------
+static void usage(void)
+{
+#define BROKEN_CONNS_HELP                                               \
+  "  -k...  behavior on broken connections\n"                           \
+  "         -k keep debugger session alive\n"                           \
+  "         -kk kill process before closing debugger module"
+
+  error("usage: ida_remote [switches]\n"
+        "  -i...  IP address to bind to (default to any)\n"
+        "  -v     verbose\n"
+        "  -p...  port number\n"
+        "  -P...  password\n"
+        "%s", are_broken_connections_supported() ? BROKEN_CONNS_HELP : "");
+#undef BROKEN_CONNS_HELP
+}
+
 //--------------------------------------------------------------------------
 // debugger remote server - TCP/IP mode
 int NT_CDECL main(int argc, char *argv[])
@@ -489,10 +573,15 @@ int NT_CDECL main(int argc, char *argv[])
     return -1;
   }
 
+  qstring password;
+  if ( qgetenv("IDA_DBGSRV_PASSWD", &password) )
+    server_password = password.c_str();
+
   bool reuse_conns = are_broken_connections_supported();
   int port_number = DEBUGGER_PORT_NUMBER;
-  lprintf("IDA " SYSTEM SYSBITS " remote debug server(" __SERVER_TYPE__ ") v1.%d. Hex-Rays (c) 2004-2015\n", IDD_INTERFACE_VERSION);
-  while ( argc > 1 && (argv[1][0] == '-' || argv[1][0] == '/'))
+  char *ipv4_address = NULL;
+  lprintf("IDA " SYSTEM SYSBITS " remote debug server(" __SERVER_TYPE__ ") v1.%d. Hex-Rays (c) 2004-2017\n", IDD_INTERFACE_VERSION);
+  while ( argc > 1 && (argv[1][0] == '-' || argv[1][0] == '/') )
   {
     switch ( argv[1][1] )
     {
@@ -500,26 +589,47 @@ int NT_CDECL main(int argc, char *argv[])
       port_number = atoi(&argv[1][2]);
       break;
     case 'P':
-      server_password = argv[1] + 2;
+      if ( password.empty() )
+      {
+        server_password = argv[1] + 2;
+        lprintf("The switch -P is unsecure. Please store the password in the IDA_DBGSRV_PASSWD environment variable\n");
+      }
+      else
+      {
+        lprintf("Warning! -P switch has been ignored because the IDA_DBGSRV_PASSWD environment variable is set\n");
+      }
       break;
     case 'i':
       ipv4_address = argv[1] + 2;
+      if ( ipv4_address[0] == '\0' && argc > 2 )
+      { // apparently the user added a space after -i
+        argv++;
+        argc--;
+        ipv4_address = argv[1];
+      }
       break;
     case 'v':
       verbose = true;
+      debug = 0x10000; // turn on debugger-related debug messages
       break;
     case 'k':
       if ( !reuse_conns )
         error("Sorry, debugger doesn't support reusing broken connections\n");
-      keep_broken_connections = true;
+      switch ( argv[1][2] )
+      {
+        case '\0':
+          on_broken_conn = BCH_KEEP_DEBMOD;
+          break;
+        case 'k':
+          on_broken_conn = BCH_KILL_PROCESS;
+          break;
+        default:
+          usage();
+          break;
+      }
       break;
     default:
-      error("usage: ida_remote [switches]\n"
-               "  -i...  IP address to bind to (default to any)\n"
-               "  -v     verbose\n"
-               "  -p...  port number\n"
-               "  -P...  password\n"
-               "%s", reuse_conns ? "  -k     keep broken connections\n" : "");
+      usage();
       break;
     }
     argv++;
@@ -551,14 +661,15 @@ int NT_CDECL main(int argc, char *argv[])
   struct sockaddr_in sa;
   memset(&sa, 0, sizeof(sa));
   sa.sin_family = AF_INET;
-  sa.sin_port   = qhtons(short(port_number));
+  sa.sin_port = qhtons(short(port_number));
   if ( ipv4_address != NULL )
-    sa.sin_addr.s_addr = inet_addr(ipv4_address);
-  if( sa.sin_addr.s_addr == INADDR_NONE )
   {
-    lprintf("Cannot parse IP v4 address %s, falling back to INADDR_ANY\n", ipv4_address);
-    sa.sin_addr.s_addr = INADDR_ANY;
-    ipv4_address = NULL;
+    if ( !qhost2addr(&sa, ipv4_address, port_number) )
+    {
+      lprintf("Cannot parse IP v4 address \"%s\", falling back to INADDR_ANY\n", ipv4_address);
+      sa.sin_addr.s_addr = INADDR_ANY;
+      ipv4_address = NULL;
+    }
   }
 
   if ( bind(listen_socket, (sockaddr *)&sa, sizeof(sa)) == SOCKET_ERROR )
@@ -567,27 +678,33 @@ int NT_CDECL main(int argc, char *argv[])
   if ( listen(listen_socket, SOMAXCONN) == SOCKET_ERROR )
     neterr(irs, "listen");
 
-  hostent *local_host = gethostbyname("");
-  if ( local_host != NULL )
+  qstring suffix;
+  qstring hostname = qinet_ntop(sa);
+  struct sockaddr_in hinf;
+  if ( qhost2addr(&hinf, "") )
   {
-    const char *local_ip;
-    if ( ipv4_address != NULL )
-      local_ip = ipv4_address;
+    suffix = qinet_ntop(hinf);
+    if ( hostname != suffix )
+    {
+      suffix.insert(" (my ip ");
+      suffix.append(")");
+    }
     else
-      local_ip = inet_ntoa(*(struct in_addr *)*local_host->h_addr_list);
-    if ( local_host->h_name != NULL && local_ip != NULL )
-      lprintf("Host %s (%s): ", local_host->h_name, local_ip);
-    else if ( local_ip != NULL )
-      lprintf("Host %s: ", local_ip);
+    {
+      suffix.clear();
+    }
   }
-  lprintf("Listening on port #%u...\n", port_number);
+  lprintf("Listening on %s:%u%s...\n", hostname.c_str(), uint(port_number), suffix.c_str());
 
   while ( true )
   {
     socklen_t salen = sizeof(sa);
     // try to set CLOEXEC bit as soon as possible on Linux
-#if defined(__LINUX__) && !defined(__ARM__)
+#if defined(__LINUX__) && !defined(__ARM__) && !defined(__ANDROID_X86__)
     SOCKET rpc_socket = accept4(listen_socket, (sockaddr *)&sa, &salen, SOCK_CLOEXEC);
+    // On ESXi accept4 is not implemented, so we fallback to accept.
+    if ( rpc_socket == INVALID_SOCKET && errno == ENOSYS )
+      rpc_socket = accept(listen_socket, (sockaddr *)&sa, &salen);
 #else
     SOCKET rpc_socket = accept(listen_socket, (sockaddr *)&sa, &salen);
 #endif
@@ -614,7 +731,7 @@ int NT_CDECL main(int argc, char *argv[])
 #endif // defined(__LINUX__) && defined(LIBWRAP)
 
     // Only Linux has accept4(), so we have to set CLOEXEC now for other Unixes
-#if defined(__MAC__) || defined(__LINUX__) && defined(__ARM__)
+#if defined(__MAC__) || (defined(__LINUX__) && (defined(__ARM__) || defined(__ANDROID_X86__)))
     fcntl(rpc_socket, F_SETFD, FD_CLOEXEC);
 #endif
 

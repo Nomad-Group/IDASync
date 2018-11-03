@@ -37,7 +37,7 @@ class sample_processor_t(idaapi.processor_t):
     plnames = ['My processor module']
 
     # register names
-    regNames = [
+    reg_names = [
         # General purpose registers
         "SP", # aka R0
         "R1",
@@ -61,13 +61,13 @@ class sample_processor_t(idaapi.processor_t):
         "DS"
     ]
 
-    # number of registers (optional: deduced from the len(regNames))
-    regsNum = len(regNames)
+    # number of registers (optional: deduced from the len(reg_names))
+    regs_num = len(reg_names)
 
     # Segment register information (use virtual CS and DS registers if your
     # processor doesn't have segment registers):
-    regFirstSreg = 16 # index of CS
-    regLastSreg  = 17 # index of DS
+    reg_first_sreg = 16 # index of CS
+    reg_last_sreg  = 17 # index of DS
 
     # size of a segment register in bytes
     segreg_size = 0
@@ -75,8 +75,8 @@ class sample_processor_t(idaapi.processor_t):
     # You should define 2 virtual segment registers for CS and DS.
 
     # number of CS/DS registers
-    regCodeSreg = 16
-    regDataSreg = 17
+    reg_code_sreg = 16
+    reg_data_sreg = 17
 
     # Array of typical code start sequences (optional)
     codestart = ['\x55\x8B', '\x50\x51']
@@ -117,13 +117,6 @@ class sample_processor_t(idaapi.processor_t):
     # instructions
     icode_return = 5
 
-    # If the FIXUP_VHIGH and FIXUP_VLOW fixup types are supported
-    # then the number of bits in the HIGH part. For example,
-    # SPARC will have here 22 because it has HIGH22 and LOW10 relocations.
-    # See also: the description of PR_FULL_HIFXP bit
-    # (optional)
-    high_fixup_bits = 0
-
     # only one assembler is supported
     assembler = {
         # flag
@@ -137,9 +130,6 @@ class sample_processor_t(idaapi.processor_t):
 
         # array of automatically generated header lines they appear at the start of disassembled text (optional)
         'header': ["Line1", "Line2"],
-
-        # array of unsupported instructions (array of cmd.itype) (optional)
-        'badworks': [6, 11],
 
         # org directive
         'origin': "org",
@@ -215,13 +205,6 @@ class sample_processor_t(idaapi.processor_t):
         # 'seg ' prefix (example: push seg seg001)
         'a_seg': "seg",
 
-        #
-        # translation to use in character and string constants.
-        # usually 1:1, i.e. trivial translation
-        # If specified, must be 256 chars long
-        # (optional)
-        'XlatAsciiOutput': "".join([chr(x) for x in xrange(256)]),
-
         # current IP (instruction pointer) symbol in assembler
         'a_curip': "$",
 
@@ -290,9 +273,6 @@ class sample_processor_t(idaapi.processor_t):
         # (optional)
         'a_vstruc_fmt': "",
 
-        # 3-byte data (optional)
-        'a_3byte': "",
-
         # 'rva' keyword for image based offsets (optional)
         # (see nalt.hpp, REFINFO_RVA)
         'a_rva': "rva"
@@ -301,25 +281,25 @@ class sample_processor_t(idaapi.processor_t):
 
     # ----------------------------------------------------------------------
     # The following callbacks are optional.
-	# *** Please remove the callbacks that you don't plan to implement ***
+    # *** Please remove the callbacks that you don't plan to implement ***
 
-    def header(self):
+    def notify_out_header(self, ctx):
         """function to produce start of disassembled text"""
         pass
 
-    def footer(self):
+    def notify_out_footer(self, ctx):
         """function to produce end of disassembled text"""
         pass
 
-    def segstart(self, ea):
+    def notify_out_segstart(self, ctx, ea):
         """function to produce start of segment"""
         pass
 
-    def segend(self, ea):
+    def notify_out_segend(self, ctx, ea):
         """function to produce end of segment"""
         pass
 
-    def assumes(self, ea):
+    def notify_out_assumes(self, ctx):
         """function to produce assume directives"""
         pass
 
@@ -334,13 +314,13 @@ class sample_processor_t(idaapi.processor_t):
         """
         pass
 
-    def notify_newprc(self, nproc):
+    def notify_newprc(self, nproc, keep_cfg):
         """
         Before changing proccesor type
         nproc - processor number in the array of processor names
-        return 1-ok,0-prohibit
+        return >=0-ok,<0-prohibit
         """
-        return 1
+        return 0
 
     def notify_newfile(self, filename):
         """A new file is loaded (already)"""
@@ -367,8 +347,8 @@ class sample_processor_t(idaapi.processor_t):
         """
         An item in the database (insn or data) is being deleted
         @param args: ea
-        @return: >0-ok, <=0 - the kernel should stop
-                 if the return value is positive:
+        @return: >=0-ok, <0 - the kernel should stop
+                 if the return value is not negative:
                      bit0 - ignored
                      bit1 - do not delete srareas at the item end
         """
@@ -401,21 +381,21 @@ class sample_processor_t(idaapi.processor_t):
         """The database is being saved. Processor module should save its local data"""
         pass
 
-    def data_out(self, ea):
+    def notify_out_data(self, ctx, analyze_only):
         """
         Generate text represenation of data items
         This function MAY change the database and create cross-references, etc.
         """
         pass
 
-    def cmp_opnd(self, op1, op2):
+    def notify_cmp_opnd(self, op1, op2):
         """
         Compare instruction operands.
         Returns 1-equal,0-not equal operands.
         """
         return False
 
-    def can_have_type(self, op):
+    def notify_can_have_type(self, op):
         """
         Can the operand have a type as offset, segment, decimal, etc.
         (for example, a register AX can't have a type, meaning that the user can't
@@ -433,7 +413,7 @@ class sample_processor_t(idaapi.processor_t):
         """
         return BADADDR
 
-    def set_idp_options(self, keyword, type, value):
+    def notify_set_idp_options(self, keyword, type, value):
         """
         Set IDP-specific option
         args:
@@ -443,7 +423,6 @@ class sample_processor_t(idaapi.processor_t):
                       IDPOPT_STR  string constant
                       IDPOPT_NUM  number
                       IDPOPT_BIT  zero/one
-                      IDPOPT_FLT  float
                       IDPOPT_I64  64bit number
                       0 -> You should display a dialog to configure the processor module
           value   - the actual value
@@ -456,7 +435,7 @@ class sample_processor_t(idaapi.processor_t):
         """
         return idaapi.IDPOPT_OK
 
-    def gen_map_file(self, qfile):
+    def notify_gen_map_file(self, qfile):
         """
         Generate map file. If this function is absent then the kernel will create the map file.
         This function returns number of lines in output file.
@@ -466,28 +445,28 @@ class sample_processor_t(idaapi.processor_t):
         r2 = qfile.write("Line 2\n!")
         return 2 # two lines
 
-    def create_func_frame(self, func_ea):
+    def notify_create_func_frame(self, func_ea):
         """
         Create a function frame for a newly created function.
         Set up frame size, its attributes etc.
         """
         return False
 
-    def is_far_jump(self, icode):
+    def notify_is_far_jump(self, icode):
         """
         Is indirect far jump or call instruction?
         meaningful only if the processor has 'near' and 'far' reference types
         """
         return False
 
-    def is_align_insn(self, ea):
+    def notify_is_align_insn(self, ea):
         """
         Is the instruction created only for alignment purposes?
         Returns: number of bytes in the instruction
         """
         return 0
 
-    def outspec(self, ea, segtype):
+    def notify_out_special_item(self, ctx, segtype):
         """
         Generate text representation of an item in a special segment
         i.e. absolute symbols, externs, communal definitions etc.
@@ -495,7 +474,7 @@ class sample_processor_t(idaapi.processor_t):
         """
         return 0
 
-    def get_frame_retsize(self, func_ea):
+    def notify_get_frame_retsize(self, func_ea):
         """
         Get size of function return address in bytes
         If this function is absent, the kernel will assume
@@ -504,7 +483,7 @@ class sample_processor_t(idaapi.processor_t):
         """
         return 2
 
-    def is_switch(self, swi):
+    def notify_is_switch(self, swi):
         """
         Find 'switch' idiom.
         Fills 'si' structure with information
@@ -513,7 +492,7 @@ class sample_processor_t(idaapi.processor_t):
         """
         return False
 
-    def is_sp_based(self, op):
+    def notify_is_sp_based(self, op):
         """
         Check whether the operand is relative to stack pointer or frame pointer.
         This function is used to determine how to output a stack variable
@@ -541,16 +520,16 @@ class sample_processor_t(idaapi.processor_t):
         """
         The kernel is about to delete a function
         @param func_ea: function start EA
-        @return: 1-ok,<=0-do not delete
+        @return: 0-ok,<0-do not delete
         """
-        return 1
+        return 0
 
-    def notify_get_autocmt(self):
+    def notify_get_autocmt(self, insn):
         """
-        Get instruction comment. 'cmd' describes the instruction in question
+        Get instruction comment. 'insn' describes the instruction in question
         @return: None or the comment string
         """
-        return "comment for %d" % self.cmd.itype
+        return "comment for %d" % insn.itype
 
     def notify_create_switch_xrefs(self, jumpea, swi):
         """Create xrefs for a custom jump table
@@ -572,10 +551,10 @@ class sample_processor_t(idaapi.processor_t):
         """
         return idaapi.BADADDR
 
-    def notify_may_be_func(self, state):
+    def notify_may_be_func(self, insn, state):
         """
         can a function start here?
-        the instruction is in 'cmd'
+        the instruction is in 'insn'
           arg: state -- autoanalysis phase
             state == 0: creating functions
                   == 1: creating chunks
@@ -588,9 +567,9 @@ class sample_processor_t(idaapi.processor_t):
         Convert a register name to a register number
           args: regname
           Returns: register number or -1 if not avail
-          The register number is the register index in the regNames array
+          The register number is the register index in the reg_names array
           Most processor modules do not need to implement this callback
-          It is useful only if ph.regNames[reg] does not provide
+          It is useful only if ph.reg_names[reg] does not provide
           the correct register names
         """
         r = regname2index(regname)
@@ -599,7 +578,7 @@ class sample_processor_t(idaapi.processor_t):
         else:
             return r
 
-    def notify_is_sane_insn(self, no_crefs):
+    def notify_is_sane_insn(self, insn, no_crefs):
         """
         is the instruction sane for the current file type?
         args: no_crefs
@@ -610,11 +589,11 @@ class sample_processor_t(idaapi.processor_t):
         0: the instruction is created because
            of some coderef, user request or another
            weighty reason.
-        The instruction is in 'cmd'
-        returns: 1-ok, <=0-no, the instruction isn't
+        The instruction is in 'insn'
+        returns: >=0-ok, <0-no, the instruction isn't
         likely to appear in the program
         """
-        return 0
+        return -1
 
     def notify_func_bounds(self, code, func_ea, max_func_end_ea):
         """
@@ -628,11 +607,11 @@ class sample_processor_t(idaapi.processor_t):
         """
         return FIND_FUNC_OK
 
-    def asm_func_header(self, func_ea):
+    def asm_out_func_header(self, ctx, func_ea):
         """generate function header lines"""
         pass
 
-    def asm_func_footer(self, func_ea):
+    def asm_out_func_footer(self, ctx, func_ea):
         """generate function footer lines"""
         pass
 
@@ -641,27 +620,27 @@ class sample_processor_t(idaapi.processor_t):
         Get name of type of item at ea or id.
         (i.e. one of: byte,word,dword,near,far,etc...)
         """
-        if isCode(flag):
+        if is_code(flag):
             pfn = get_func(ea_or_id)
             # return get func name
-        elif isWord(flag):
+        elif is_word(flag):
             return "word"
         return ""
 
     def notify_init(self, idp_file):
-        # init returns non-zero on success
-        return 1
+        # init returns >=0 on success
+        return 0
 
-    def notify_outlabel(self, ea, colored_name):
+    def notify_out_label(self, ctx, label):
         """
         The kernel is going to generate an instruction label line
-        or a function header
+        or a function header.
         args:
-          ea - instruction address
-          colored_name -
-        If returns value <=0, then the kernel should not generate the label
+          ctx - output context
+          label - label to output
+        If returns value <0, then the kernel should not generate the label
         """
-        return 1
+        return 0
 
     def notify_rename(self, ea, new_name):
         """
@@ -669,22 +648,22 @@ class sample_processor_t(idaapi.processor_t):
         args:
           ea -
           new_name -
-        If returns value <=0, then the kernel should not rename it
+        If returns value <0, then the kernel should not rename it
         """
-        return 1
+        return 0
 
     def notify_may_show_sreg(self, ea):
         """
         The kernel wants to display the segment registers
         in the messages window.
         args:
-          ea 
-        if this function returns 0
+          ea
+        if this function returns <0
         then the kernel will not show
         the segment registers.
         (assuming that the module have done it)
         """
-        return 1
+        return 0
 
     def notify_coagulate(self, start_ea):
         """
@@ -726,25 +705,25 @@ class sample_processor_t(idaapi.processor_t):
         """
         pass
 
-    def notify_is_call_insn(self, ea):
+    def notify_is_call_insn(self, insn):
         """
         Is the instruction a "call"?
         args
-          ea  - instruction address
-        returns: 1-unknown, 0-no, 2-yes 
+          insn  - instruction
+        returns: 0-unknown, <0-no, 1-yes
         """
-        return 1
+        return 0
 
-    def notify_is_ret_insn(self, ea, strict):
+    def notify_is_ret_insn(self, insn, strict):
         """
         Is the instruction a "return"?
-        ea  - instruction address
+        insn  - instruction
         strict - 1: report only ret instructions
                  0: include instructions like "leave"
                     which begins the function epilog
-        returns: 1-unknown, 0-no, 2-yes
+        returns: 0-unknown, <0-no, 1-yes
         """
-        return 1
+        return 0
 
     def notify_kernel_config_loaded(self):
         """
@@ -757,32 +736,33 @@ class sample_processor_t(idaapi.processor_t):
         Does the function at 'ea' behave as __alloca_probe?
         args:
           ea
-        returns: 2-yes, 1-false
+        returns: 1-yes, 0-false
         """
-        return 1
+        return 0
 
-    def notify_out_src_file_lnnum(self, filename, lnnum):
+    def notify_gen_src_file_lnnum(self, ctx, filename, lnnum):
         """
         Callback: generate analog of
         #line "file.c" 123
         directive.
         args:
-          file - source file (may be NULL)
+          ctx   - output context
+          file  - source file (may be NULL)
           lnnum - line number
-        returns: 2-directive has been generated
+        returns: 1-directive has been generated
         """
-        return 1
+        return 0
 
-    def notify_is_insn_table_jump(self):
+    def notify_is_insn_table_jump(self, insn):
         """
         Callback: determine if instruction is a table jump or call
         If CF_JUMP bit can not describe all kinds of table
         jumps, please define this callback.
         It will be called for insns with CF_JUMP bit set.
-        input: cmd structure contains the current instruction
-        returns: 1-yes, 0-no
+        input: insn structure contains the current instruction
+        returns: 0-yes, <0-no
         """
-        return 0
+        return -1
 
     def notify_auto_empty_finally(self):
         """
@@ -790,15 +770,15 @@ class sample_processor_t(idaapi.processor_t):
         """
         pass
 
-    def notify_is_indirect_jump(self):
+    def notify_is_indirect_jump(self, insn):
         """
         Callback: determine if instruction is an indrect jump
         If CF_JUMP bit can not describe all jump types
         jumps, please define this callback.
-        input: cmd structure contains the current instruction
-        returns: 1-use CF_JUMP, 2-no, 3-yes
+        input: insn structure contains the current instruction
+        returns: 0-use CF_JUMP, 1-no, 2-yes
         """
-        return 1
+        return 0
 
     def notify_determined_main(self, main_ea):
         """
@@ -815,34 +795,35 @@ class sample_processor_t(idaapi.processor_t):
           start_ea
           funcname
         returns: -1-do not create a function,
-                  1-function is validated
-        the idp module is allowed to modify 'cmd'
+                  0-function is validated
         """
-        return 1
+        return 0
 
-    def notify_set_proc_options(self, options):
+    def notify_set_proc_options(self, options, confidence):
         """
         called if the user specified an option string in the command line:
         -p<processor name>:<options>
         can be used for e.g. setting a processor subtype
         also called if option string is passed to set_processor_type()
-        and IDC's SetProcessorType()
+        and IDC's set_processor_type()
         args:
           options
-        returns: <0 - bad option string      
+          confidence - 0: loader's suggestion,
+                       1: user's decision
+        returns: <0 - bad option string
         """
-        return 1
+        return 0
 
-    def notify_newseg(self, start_ea, segm_name, segm_class):
+    def notify_creating_segm(self, start_ea, segm_name, segm_class):
         """
         A new segment is about to be created
         args:
           start_ea
           segm_name
           segm_class
-        return 1-ok, 0-segment should not be created
+        return >=0-ok, <0-segment should not be created
         """
-        return 1
+        return 0
 
     def notify_auto_queue_empty(self, type):
         """
@@ -850,35 +831,36 @@ class sample_processor_t(idaapi.processor_t):
         args:
           atype_t type
         This callback can be called many times, so
-        only the autoMark() functions can be used from it
+        only the auto_mark() functions can be used from it
         (other functions may work but it is not tested)
         """
         return 1
 
-    def notify_gen_regvar_def(self, canon, user, cmt):
+    def notify_gen_regvar_def(self, ctx, canon, user, cmt):
         """
         generate register variable definition line
         args:
+          ctx   - output context
           canon - canonical register name (case-insensitive)
-          user - user-defined register name
-          cmt - comment to appear near definition
-        returns: 0-ok
+          user  - user-defined register name
+          cmt   - comment to appear near definition
+        returns: >0-ok
         """
-        return 1
+        return 0
 
     def notify_setsgr(self, start_ea, end_ea, regnum, value, old_value, tag):
         """
         The kernel has changed a segment register value
         args:
-          startEA
-          endEA
+          start_ea
+          end_ea
           regnum
           value
           old_value
           uchar tag (SR_... values)
-        returns: 1-ok, 0-error
+        returns: 0-ok, <0-error
         """
-        return 1
+        return 0
 
     def notify_set_compiler(self):
         """
@@ -886,27 +868,26 @@ class sample_processor_t(idaapi.processor_t):
         """
         pass
 
-    def notify_is_basic_block_end(self, call_insn_stops_block):
+    def notify_is_basic_block_end(self, insn, call_insn_stops_block):
         """
         Is the current instruction end of a basic block?
         This function should be defined for processors
         with delayed jump slots. The current instruction
-        is stored in 'cmd'
+        is stored in 'insn'
         args:
           call_insn_stops_block
-          returns: 1-unknown, 0-no, 2-yes
+          returns: 0-unknown, -1-no, 1-yes
         """
-        return 1
+        return 0
 
-    def notify_make_code(self, ea, size):
+    def notify_make_code(self, insn):
         """
-        An instruction is being created                                                                                                                                                 
+        An instruction is being created
         args:
-          ea
-          size
-        returns: 1-ok, <=0-the kernel should stop
+          insn
+        returns: 0-ok, <0-the kernel should stop
         """
-        return 1
+        return 0
 
     def notify_make_data(self, ea, flags, tid, size):
         """
@@ -916,9 +897,9 @@ class sample_processor_t(idaapi.processor_t):
           flags
           tid
           size
-        returns: 1-ok, <=0-the kernel should stop
+        returns: 0-ok, <0-the kernel should stop
         """
-        return 1
+        return 0
 
     def notify_moving_segm(self, start_ea, segm_name, segm_class, to_ea, flags):
         """
@@ -927,17 +908,18 @@ class sample_processor_t(idaapi.processor_t):
           start_ea, segm_name, segm_class - segment to move
           to_ea   - new segment start address
           int flags - combination of MSF_... bits
-        returns: 1-yes, <=0-the kernel should stop
+        returns: 0-yes, <0-the kernel should stop
         """
-        return 1
+        return 0
 
-    def notify_move_segm(self, from_ea, start_ea, segm_name, segm_class):
+    def notify_move_segm(self, from_ea, start_ea, segm_name, segm_class, changed_netdelta):
         """
         A segment is moved
         Fix processor dependent address sensitive information
         args:
           from_ea  - old segment address
           start_ea, segm_name, segm_class - moved segment
+          changed_netdelta - if ea-to-netnode mapping has been changed
         returns: nothing
         """
         pass
@@ -947,9 +929,9 @@ class sample_processor_t(idaapi.processor_t):
         The kernel wants to set 'noreturn' flags for a function
         args:
           func_start_ea
-        Returns: 1-ok, any other value-do not set 'noreturn' flag
+        Returns: 0-ok, <0-do not set 'noreturn' flag
         """
-        return 1
+        return 0
 
     def notify_verify_sp(self, func_start_ea):
         """
@@ -958,9 +940,9 @@ class sample_processor_t(idaapi.processor_t):
         for the whole function
         args:
           func_start_ea
-        Returns: 1-ok, 0-bad stack pointer
+        Returns: 0-ok, <0-bad stack pointer
         """
-        return 1
+        return 0
 
     def notify_renamed(self, ea, new_name, is_local_name):
         """
@@ -979,9 +961,9 @@ class sample_processor_t(idaapi.processor_t):
         args:
           func_start_ea, func_end_ea
           new_ea
-        Returns: 1-ok,<=0-do not change
+        Returns: 0-ok,<0-do not change
         """
-        return 1
+        return 0
 
     def notify_set_func_end(self, func_start_ea, func_end_ea, new_end_ea):
         """
@@ -989,9 +971,9 @@ class sample_processor_t(idaapi.processor_t):
         args:
           func_start_ea, func_end_ea
           new_end_ea
-        Returns: 1-ok,<=0-do not change
+        Returns: 0-ok,<0-do not change
         """
-        return 1
+        return 0
 
     def notify_treat_hindering_item(self, hindering_item_ea, new_item_flags, new_item_ea, new_item_length):
         """
@@ -1001,16 +983,16 @@ class sample_processor_t(idaapi.processor_t):
           new_item_flags
           new_item_ea
           new_item_length
-        Returns: 1-no reaction, <=0-the kernel may delete the hindering item
+        Returns: 0-no reaction, <0-the kernel may delete the hindering item
         """
-        return 1
+        return 0
 
-    def notify_get_operand_string(self, opnum):
+    def notify_get_operand_string(self, insn, opnum):
         """
         Request text string for operand (cli, java, ...)
         args:
+          insn - the instruction
           opnum - the operand number; -1 means any string operand
-        (cmd structure must contain info for the desired insn)
         Returns: requested
         """
         return ""
@@ -1029,16 +1011,16 @@ class sample_processor_t(idaapi.processor_t):
     # The following callbacks are mandatory
     #
 
-    def emu(self):
+    def notify_emu(self, insn):
         """
         Emulate instruction, create cross-references, plan to analyze
         subsequent instructions, modify flags etc. Upon entrance to this function
-        all information about the instruction is in 'cmd' structure.
+        all information about the instruction is in 'insn' structure.
         If zero is returned, the kernel will delete the instruction.
         """
         return 1
 
-    def outop(self, op):
+    def notify_out_operand(self, ctx, op):
         """
         Generate text representation of an instructon operand.
         This function shouldn't change the database, flags or anything else.
@@ -1049,22 +1031,22 @@ class sample_processor_t(idaapi.processor_t):
         """
         return True
 
-    def out(self):
+    def notify_out_insn(self, ctx):
         """
-        Generate text representation of an instruction in 'cmd' structure.
+        Generate text representation of an instruction in 'ctx.insn' structure.
         This function shouldn't change the database, flags or anything else.
         All these actions should be performed only by u_emu() function.
         Returns: nothing
         """
 
-    def ana(self):
+    def notify_ana(self, insn):
         """
-        Decodes an instruction into self.cmd.
-        Returns: self.cmd.size (=the size of the decoded instruction) or zero
+        Decodes an instruction into insn
+        Returns: insn.size (=the size of the decoded instruction) or zero
         """
 
         # Return decoded instruction size or zero
-        return self.cmd.size
+        return insn.size
 
 # ----------------------------------------------------------------------
 # Every processor module script must provide this function.

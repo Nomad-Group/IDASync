@@ -1,49 +1,61 @@
 
 #include "fr.hpp"
 
-// Output a register
-static void out_reg(ushort reg)
+//----------------------------------------------------------------------
+class out_fr_t : public outctx_t
 {
-  out_register(ph.regNames[reg]);
-}
+  out_fr_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void out_reg(ushort reg) { out_register(ph.reg_names[reg]); }
+  void out_reg(const op_t &op) { out_reg(op.reg); }
+  void out_imm(const op_t &op, bool no_sharp = false);
+  void out_addr(const op_t &op);
+  void out_reglist(const op_t &op);
 
-// Output an operand as a register
-static void out_reg(const op_t &op)
-{
-  out_reg(op.reg);
-}
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+  void out_proc_mnem(void);
+private:
+  void out_reg_if_bit(ushort reg, uval_t value, int bit);
+};
+CASSERT(sizeof(out_fr_t) == sizeof(outctx_t));
 
+DECLARE_OUT_FUNCS(out_fr_t)
+
+//----------------------------------------------------------------------
 // Output an operand as an immediate value
-static void out_imm(const op_t &op, bool no_sharp = false)
+void out_fr_t::out_imm(const op_t &op, bool no_sharp)
 {
   if ( !no_sharp )
     out_symbol('#');
-  OutValue(op, OOFW_IMM);
+  out_value(op, OOFW_IMM);
 }
 
+//----------------------------------------------------------------------
 // Output an operand as an address
-static void out_addr(const op_t &op)
+void out_fr_t::out_addr(const op_t &op)
 {
-  if ( !out_name_expr(op, toEA(cmd.cs, op.addr), op.addr) )
-    OutValue(op, OOF_ADDR | OOFS_NOSIGN);
+  if ( !out_name_expr(op, to_ea(insn.cs, op.addr), op.addr) )
+    out_value(op, OOF_ADDR | OOFS_NOSIGN);
 }
 
+//----------------------------------------------------------------------
 static bool print_comma = false;
-static void out_reg_if_bit(ushort reg, uval_t value, int bit)
+void out_fr_t::out_reg_if_bit(ushort reg, uval_t value, int bit)
 {
   if ( (value & bit) == bit )
   {
     if ( print_comma )
     {
       out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
     }
     out_reg(reg);
     print_comma = true;
   }
 }
 
-static void out_reglist(const op_t &op)
+void out_fr_t::out_reglist(const op_t &op)
 {
   static const uint16 regs_ldm0[] = { rR7,  rR6,  rR5,  rR4,  rR3,  rR2,  rR1,  rR0  };
   static const uint16 regs_stm0[] = { rR0,  rR1,  rR2,  rR3,  rR4,  rR5,  rR6,  rR7  };
@@ -52,7 +64,7 @@ static void out_reglist(const op_t &op)
   const uint16 *regs;
   bool left;
 
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case fr_ldm0:   regs = regs_ldm0; left = false; break;
     case fr_stm0:   regs = regs_stm0; left = true;  break;
@@ -67,72 +79,75 @@ static void out_reglist(const op_t &op)
   out_symbol('(');
   if ( left )
   {
-    for (int i = 0, bit = 128; bit != 0; bit >>= 1, i++)
+    for ( int i = 0, bit = 128; bit != 0; bit >>= 1, i++ )
       out_reg_if_bit(regs[i], op.value, bit);
   }
   else
   {
-    for (int i = 7, bit = 1; bit <= 128; bit <<= 1, i--)
+    for ( int i = 7, bit = 1; bit <= 128; bit <<= 1, i-- )
       out_reg_if_bit(regs[i], op.value, bit);
   }
   out_symbol(')');
 }
 
+//----------------------------------------------------------------------
 // Generate disassembly header
-void idaapi header(void)
+void idaapi fr_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device);
+  ctx.gen_header(GH_PRINT_ALL_BUT_BYTESEX, NULL, device.c_str());
 }
 
+//----------------------------------------------------------------------
 // Generate disassembly footer
-void idaapi footer(void)
+void idaapi fr_footer(outctx_t &ctx)
 {
-  char buf[MAXSTR];
-  char *const end = buf + sizeof(buf);
   if ( ash.end != NULL )
   {
-    MakeNull();
+    ctx.gen_empty_line();
+    ctx.out_line(ash.end, COLOR_ASMDIR);
     qstring name;
-    char *p = tag_addstr(buf, end, COLOR_ASMDIR, ash.end);
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
-      APPCHAR(p, end, ' ');
-      APPEND(p, end, name.begin());
+      ctx.out_char(' ');
+      ctx.out_line(name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_outbuf(inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }
 
+//----------------------------------------------------------------------
 // Generate a segment header
-void idaapi gen_segm_header(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi fr_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  char sname[MAXNAMELEN];
-  segment_t *Sarea = getseg(ea);
-  if ( get_segm_name(Sarea, sname, sizeof(sname)) <= 0 )
+  qstring sname;
+  if ( get_visible_segm_name(&sname, Sarea) <= 0 )
     return;
 
-  char *segname = sname;
+  const char *segname = sname.c_str();
   if ( *segname == '_' )
     segname++;
 
-  printf_line(inf.indent, COLSTR(".section .%s", SCOLOR_ASMDIR), segname);
+  ctx.gen_printf(inf.indent, COLSTR(".section .%s", SCOLOR_ASMDIR), segname);
 
-  ea_t orgbase = ea - get_segm_para(Sarea);
+  ea_t orgbase = ctx.insn_ea - get_segm_para(Sarea);
 
   if ( orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
+//----------------------------------------------------------------------
 // Output an operand.
-bool idaapi outop(op_t &op)
+bool out_fr_t::out_operand(const op_t & op)
 {
   switch ( op.type )
   {
@@ -149,7 +164,7 @@ bool idaapi outop(op_t &op)
         // this immediate is represented in the .cfg file
         // output the port name instead of the numeric value
         if ( port != NULL )
-          out_line(port->name, COLOR_IMPNAME);
+          out_line(port->name.c_str(), COLOR_IMPNAME);
         else // otherwise, simply print the value
           out_imm(op);
       }
@@ -170,7 +185,7 @@ bool idaapi outop(op_t &op)
           break;
 
         case fIRA:       // indirect relative address
-          OutValue(op, OOF_ADDR | OOFS_NOSIGN);
+          out_value(op, OOF_ADDR | OOFS_NOSIGN);
           break;
 
         case fIGRP:      // indirect general register with post-increment
@@ -187,7 +202,7 @@ bool idaapi outop(op_t &op)
           out_symbol('(');
           out_reg(rR13);
           out_symbol(',');
-          OutChar(' ');
+          out_char(' ');
           out_reg(op);
           out_symbol(')');
           break;
@@ -207,7 +222,7 @@ bool idaapi outop(op_t &op)
       {
         out_reg(rR14);
         out_symbol(',');
-        OutChar(' ');
+        out_char(' ');
         out_imm(op, true);
       }
       // @(R15, #i)
@@ -215,7 +230,7 @@ bool idaapi outop(op_t &op)
       {
         out_reg(rR15);
         out_symbol(',');
-        OutChar(' ');
+        out_char(' ');
         out_imm(op, true);
       }
       else
@@ -239,32 +254,36 @@ bool idaapi outop(op_t &op)
   return 1;
 }
 
+
+//----------------------------------------------------------------------
+void out_fr_t::out_proc_mnem(void)
+{
+  char postfix[5];
+  postfix[0] = '\0';
+
+  if ( insn.auxpref & INSN_DELAY_SHOT )
+    qstrncpy(postfix, ":D", sizeof(postfix));
+  out_mnem(8, postfix);
+}
+
+//----------------------------------------------------------------------
 // Output an instruction
-void idaapi out(void)
+void out_fr_t::out_insn(void)
 {
 
   //
   // print insn mnemonic
   //
-
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  char postfix[5];
-  postfix[0] = '\0';
-
-  if ( cmd.auxpref & INSN_DELAY_SHOT )
-    qstrncpy(postfix, ":D", sizeof(postfix));
-  OutMnem(8, postfix);
+  out_mnemonic();
 
   for ( int i=0; i < 4; i++ )
   {
-    if ( cmd.Operands[i].type != o_void )
+    if ( insn.ops[i].type != o_void )
     {
       if ( i != 0 )
       {
         out_symbol(',');
-        OutChar(' ');
+        out_char(' ');
       }
       out_one_operand(i);
     }
@@ -272,14 +291,6 @@ void idaapi out(void)
 
   // output a character representation of the immediate values
   // embedded in the instruction as comments
-  if ( isVoid(cmd.ea,uFlag,0)) OutImmChar(cmd.Op1 );
-  if ( isVoid(cmd.ea,uFlag,1)) OutImmChar(cmd.Op2 );
-  if ( isVoid(cmd.ea,uFlag,2)) OutImmChar(cmd.Op3 );
-  if ( isVoid(cmd.ea,uFlag,3)) OutImmChar(cmd.Op4 );
-
-  term_output_buffer();                   // terminate the output string
-  gl_comm = 1;                            // ask to attach a possible user-
-                                          // defined comment to it
-  MakeLine(buf);                          // pass the generated line to the
-                                          // kernel
+  out_immchar_cmts();
+  flush_outbuf();
 }

@@ -1,6 +1,6 @@
 /*
- *      CPP/D Demangler.
- *      Copyright (c) 2000-2012 by Iouri Kharon.
+ *      CPP/D/Swift Demangler.
+ *      Copyright (c) 2000-2016 by Iouri Kharon.
  *                        E-mail: yjh@styx.cabel.net
  *
  *      ALL RIGHTS RESERVED.
@@ -43,6 +43,7 @@
 #define MT_MSFASTCALL 0x0000000A // A - __msfastcall (bc)
 #define MT_CLRCALL    0x0000000B // B - __clrcall (vc7)
 #define MT_DMDCALL    0x0000000C // C - __dcall (dm D language abi)
+#define MT_VECTORCALL 0x0000000D // D - __vectorcall (vc13)
 
 //   reserved
 #define MT_LOCALNAME  0x0000000F // f - might be function or data. Currently
@@ -57,13 +58,17 @@
 #define MT_PROTECT   0x00000060 // 3 - protected
 #define MT_MEMBER    0x00000080 // 4 - undetermined (bc/wat/gcc)
 #define MT_VTABLE    0x000000A0 // 5 - vtable (bc/gnu)
-#define MT_RTTI      0x000000C0 // 6 - typeinfo table (gcc3)
+#define MT_RTTI      0x000000C0 // 6 - typeinfo table (gcc3), witness table (Swift)
 //   reserved
 
 #define M_PARMSK   0x0000FF00 // Parameter number mask (excluding ellipsis)
                               // 255 - >= 255
 #define MT_PARSHF      8      // shift to PARMSK
 #define MT_PARMAX     0xFF    // Number limiter
+                              // ATT: when CC is __vectorcall and mode is 'C'
+                              //      real argscount is unknown. This number is
+                              //      total sizeof of all arguments divided to
+                              //      sizeof of defptr
 #define M_ELLIPSIS 0x00010000   // The function _certainly_ has '...'
 #define MT_VOIDARG  0x0001FF00  // If = 0, the func(void), i.e. no parameters
 #define M_STATIC   0x00020000   // static
@@ -108,7 +113,8 @@
 #define MT_MSCOMP   0x10000000  // 1 - microsoft/symantec
 #define MT_BORLAN   0x20000000  // 2 - borland
 #define MT_WATCOM   0x30000000  // 3 - watcom
-#define MT_DMD      0x40000000  // 4 - digital mars D language
+#define MT_OTHER    0x40000000  // 4 - digital mars D language (start: _D)
+                                //   - apple Swift language (start: [_]_T)
 // !!! The following definitions must be last and in this order!
 #define MT_GNU      0x50000000  // 5 - GNU - (over VA for autodetection)
 #define MT_GCC3     0x60000000  // 6 - gcc-v3
@@ -147,28 +153,37 @@
 #define MNG_NORETTYPE    0x00000040 // Inhibit return type of functions
 #define MNG_NOBASEDT     0x00000080 // Inhibit base types
                                     //   NOTE: also inhibits "__linkproc__"
+                                    //   NOTE: -"- 'implicit self types' (Swift)
 #define MNG_NOCALLC      0x00000100 // Inhibit __pascal/__ccall/etc
                                     //   NOTE: also inhibits "extern (cc)" (D)
 #define MNG_NOPOSTFC     0x00000200 // Inhibit postfix const
 #define MNG_NOSCTYP      0x00000400 // Inhibit public/private/protected
                                     //   NOTE: also inhibits in/out/lazy for args (D)
+                                    //   NOTE: -"- dynamic/super/override/... (Swift)
 #define MNG_NOTHROW      0x00000800 // Inhibit throw description
-                                    //   NOTE: for (D) also inhibits all funcattr
+                                    //   NOTE: also inhibits all funcattr (D)
 #define MNG_NOSTVIR      0x00001000 // Inhibit "static" & "virtual"
                                     //   NOTE: also inhibits (D) top-level procs (<=)
 #define MNG_NOECSU       0x00002000 // Inhibit class/struct/union/enum[/D:typedef]
 #define MNG_NOCSVOL      0x00004000 // Inhibit const/volatile/restrict
-                                    //   NOTE: also inhibits "__unaligned"
+                                    //   NOTE: also inhibits __unaligned (vc)
+                                    //   NOTE: also inhibits transaction_safe(gcc)
                                     //   NOTE: also inhibits shared/immutable (D)
+                                    //   NOTE: also inhibits prefix/postfix/infix/inout (Swift)
 #define MNG_NOCLOSUR     0x00008000 // Inhibit __closure for borland
+                                    //         'reabstract thunk' description (Swift)
 #define MNG_NOUNALG      0x00010000 // Inhibit __unaligned (see NOCSVOL)
+                                    //   NOTE: also inhibit transaction_safe (see NOCSVOL)
 #define MNG_NOMANAGE     0x00020000 // Inhibit __pin/__box/__gc for ms(.net)
-//                       0x00040000
+                                    //   NOTE: also inhibit archetype/witness (Swift)
+#define MNG_NOMODULE     0x00040000 // Inhibit module names (Swift)
 //                       0x00080000
 //++++++
 #define MNG_SHORT_S      0x00100000 // signed (int) is displayed as s(int)
 #define MNG_SHORT_U      0x00200000 // unsigned (int) is displayed as u(int)
 #define MNG_ZPT_SPACE    0x00400000 // Display space after comma in the arglist
+                                    //   NOTE: also spaces in name:type pair (Swift)
+                                    //         and around Swift return clause ->
 #define MNG_DROP_IMP     0x00800000 // Inhibit __declspec(dllimport)
 //
 //                       0x01000000

@@ -44,8 +44,7 @@ struct ext_process_info_t : public process_info_t
   void copy_to(process_info_t *dst)
   {
     dst->pid = pid;
-    const char *src_name = ext_name.empty() ? name : ext_name.c_str();
-    qstrncpy(dst->name, src_name, sizeof(dst->name));
+    dst->name = ext_name.empty() ? name : ext_name;
   }
 };
 typedef qvector<ext_process_info_t> procvec_t;
@@ -64,6 +63,7 @@ struct pagebpt_data_t
   ea_t ea;              // address of the bpt as specified by the user
   ea_t page_ea;         // real address of the bpt as written to the process
   int user_len;         // breakpoint length as specified by the user
+  int aligned_len;      // breakpoint length aligned to the page size
   int real_len;         // real length of the breakpoint as written to the process
   uint32 old_prot;      // old page protections (before writing the bpt to the process)
                         // if 0, the bpt has not been written to the process yet.
@@ -82,21 +82,20 @@ typedef qvector<page_bpts_t::iterator> pbpt_iterators_t; // list of iterators in
 typedef std::set<ea_t> easet_t;
 
 //--------------------------------------------------------------------------
+//-V:debmod_bpt_t:730 not all members of a class are initialized inside the constructor: saved
 struct debmod_bpt_t
 {
   ea_t ea;
   uchar saved[8]; // size of the biggest supported bpt size (PPC64)
   uchar nsaved;
   int bid;        // (epoc) breakpoint id (from TRK)
-  debmod_bpt_t() : ea(BADADDR),bid(0) {}
+  debmod_bpt_t() : ea(BADADDR), nsaved(0), bid(0) {}
   debmod_bpt_t(ea_t _ea, uchar _nsaved) : ea(_ea), nsaved(_nsaved), bid(0) {}
 };
 typedef std::map<ea_t, debmod_bpt_t> debmodbpt_map_t;
 
 struct eventlist_t : public std::deque<debug_event_t>
 {
-private:
-  bool synced;
 public:
   // save a pending event
   void enqueue(const debug_event_t &ev, queue_pos_t pos)
@@ -120,12 +119,12 @@ public:
 };
 
 typedef int ioctl_handler_t(
-  class rpc_engine_t *rpc,
-  int fn,
-  const void *buf,
-  size_t size,
-  void **poutbuf,
-  ssize_t *poutsize);
+        class rpc_engine_t *rpc,
+        int fn,
+        const void *buf,
+        size_t size,
+        void **poutbuf,
+        ssize_t *poutsize);
 
 int send_ioctl(rpc_engine_t *rpc, int fn, const void *buf, size_t size, void **poutbuf, ssize_t *poutsize);
 int send_debug_names_to_ida(ea_t *addrs, const char *const *names, int qty);
@@ -188,7 +187,7 @@ protected:
 #define ELC_KEEP_SUSP 0x0002 // keep suspended state, do not resume after stepping
 
   // helper functions for programmatical single stepping
-  virtual int dbg_perform_single_step(debug_event_t *event, const insn_t &cmd);
+  virtual int dbg_perform_single_step(debug_event_t *event, const insn_t &ins);
   virtual int dbg_freeze_threads_except(thid_t) { return 0; }
   virtual int dbg_thaw_threads_except(thid_t) { return 0; }
   int resume_app_and_get_event(debug_event_t *dev);
@@ -200,7 +199,7 @@ protected:
 public:
   // initialized by dbg_init()
   int debugger_flags;
-  meminfo_vec_t old_areas;
+  meminfo_vec_t old_ranges;
   rpc_engine_t *rpc;
   bool debug_debugger;
   // Is dynamic library?
@@ -230,6 +229,17 @@ public:
   pid_t pid;
 
   debmodbpt_map_t bpts;
+  easet_t deleted_bpts; // deleted bpts in the last update_bpts() call
+  // if bpt EA was deleted then bpt raised in the same place for the
+  // same thread does not belong to IDA
+  bool is_ida_bpt(ea_t ea, thid_t tid)
+  {
+    return bpts.find(ea) != bpts.end()
+        || (deleted_bpts.find(ea) != deleted_bpts.end()
+         && (last_event.eid != BREAKPOINT
+          || last_event.ea != ea
+          || last_event.tid != tid));
+  }
 
   static bool reuse_broken_connections;
   //------------------------------------
@@ -253,8 +263,8 @@ public:
   void cleanup(void);
   AS_PRINTF(2, 3) void debdeb(const char *format, ...);
   AS_PRINTF(2, 3) bool deberr(const char *format, ...);
-  bool same_as_oldmemcfg(const meminfo_vec_t &areas) const;
-  void save_oldmemcfg(const meminfo_vec_t &areas);
+  bool same_as_oldmemcfg(const meminfo_vec_t &ranges) const;
+  void save_oldmemcfg(const meminfo_vec_t &ranges);
   bool continue_after_last_event(bool handled = true);
   lowcnd_t *get_failed_lowcnd(thid_t tid, ea_t ea);
   page_bpts_t::iterator find_page_bpt(ea_t ea, int size=1);
@@ -262,6 +272,8 @@ public:
   void enable_page_bpts(bool enable);
   ea_t calc_page_base(ea_t ea) { return align_down(ea, dbg_memory_page_size()); }
   void log_exception(const debug_event_t *ev, const exception_info_t *ei);
+  uint64 probe_file_size(int fn, uint64 step);
+  void set_input_path(const char *input_path);
 
   //------------------------------------
   // Shared methods
@@ -269,14 +281,13 @@ public:
   virtual bool check_input_file_crc32(uint32 orig_crc);
   virtual const exception_info_t *find_exception(int code);
   virtual bool get_exception_name(int code, char *buf, size_t bufsize);
-  virtual int  idaapi dbg_process_get_info(int n,
-    const char *input,
-    process_info_t *info);
+  virtual int  idaapi dbg_get_processes(procinfo_vec_t *info);
 
   //------------------------------------
   // Methods to be implemented
   //------------------------------------
-  virtual int idaapi dbg_init(bool _debug_debugger) = 0;
+  virtual void idaapi dbg_set_debugging(bool _debug_debugger) = 0;
+  virtual int  idaapi dbg_init(void) = 0;
   virtual void idaapi dbg_term(void) = 0;
   virtual int  idaapi dbg_detach_process(void) = 0;
   virtual int  idaapi dbg_start_process(const char *path,
@@ -286,7 +297,7 @@ public:
     const char *input_path,
     uint32 input_file_crc32) = 0;
   virtual gdecode_t idaapi dbg_get_debug_event(debug_event_t *event, int timeout_msecs) = 0;
-  virtual int  idaapi dbg_attach_process(pid_t process_id, int event_id) = 0;
+  virtual int  idaapi dbg_attach_process(pid_t process_id, int event_id, int flags) = 0;
   virtual int  idaapi dbg_prepare_to_pause_process(void) = 0;
   virtual int  idaapi dbg_exit_process(void) = 0;
   virtual int  idaapi dbg_continue_after_event(const debug_event_t *event) = 0;
@@ -298,33 +309,34 @@ public:
   virtual int  idaapi dbg_read_registers(thid_t thread_id,
     int clsmask,
     regval_t *values) = 0;
-  virtual int  idaapi dbg_write_register(thid_t thread_id,
+  virtual int idaapi dbg_write_register(thid_t thread_id,
     int reg_idx,
     const regval_t *value) = 0;
-  virtual int  idaapi dbg_thread_get_sreg_base(thid_t thread_id,
-    int sreg_value,
-    ea_t *ea) = 0;
+  virtual int idaapi dbg_thread_get_sreg_base(ea_t *ea, thid_t thread_id, int sreg_value) = 0;
   virtual ea_t idaapi map_address(ea_t ea, const regval_t *, int /* regnum */) { return ea; }
-  virtual int  idaapi dbg_get_memory_info(meminfo_vec_t &areas) = 0;
+  virtual int idaapi dbg_get_memory_info(meminfo_vec_t &ranges) = 0;
+  virtual int idaapi dbg_get_scattered_image(scattered_image_t & /*si*/, ea_t /*base*/) { return -1; }
+  virtual bool idaapi dbg_get_image_uuid(bytevec_t * /*uuid*/, ea_t /*base*/) { return false; }
+  virtual ea_t idaapi dbg_get_segm_start(ea_t /*base*/, const qstring & /*segname*/) { return BADADDR; }
   virtual ssize_t idaapi dbg_read_memory(ea_t ea, void *buffer, size_t size) = 0;
   virtual ssize_t idaapi dbg_write_memory(ea_t ea, const void *buffer, size_t size) = 0;
-  virtual int  idaapi dbg_is_ok_bpt(bpttype_t type, ea_t ea, int len) = 0;
+  virtual int idaapi dbg_is_ok_bpt(bpttype_t type, ea_t ea, int len) = 0;
   // for swbpts, len may be -1 (unknown size, for example arm/thumb mode) or bpt opcode length
   // dbg_add_bpt returns 2 if it adds a page bpt
-  virtual int  idaapi dbg_add_bpt(bpttype_t type, ea_t ea, int len) = 0;
-  virtual int  idaapi dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_bytes, int len) = 0;
-  virtual int  idaapi dbg_update_bpts(update_bpt_info_t *bpts, int nadd, int ndel);
-  virtual int  idaapi dbg_add_page_bpt(bpttype_t /*type*/, ea_t /*ea*/, int /*size*/) { return 0; }
+  virtual int idaapi dbg_add_bpt(bpttype_t type, ea_t ea, int len) = 0;
+  virtual int idaapi dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_bytes, int len) = 0;
+  virtual int idaapi dbg_update_bpts(update_bpt_info_t *bpts, int nadd, int ndel);
+  virtual int idaapi dbg_add_page_bpt(bpttype_t /*type*/, ea_t /*ea*/, int /*size*/) { return 0; }
   virtual bool idaapi dbg_enable_page_bpt(page_bpts_t::iterator /*p*/, bool /*enable*/) { return false; }
-  virtual int  idaapi dbg_update_lowcnds(const lowcnd_t *lowcnds, int nlowcnds);
-  virtual int  idaapi dbg_eval_lowcnd(thid_t tid, ea_t ea);
-  virtual int  idaapi dbg_open_file(const char * /*file*/, uint32 * /*fsize*/, bool /*readonly*/) { return -1; }
+  virtual int idaapi dbg_update_lowcnds(const lowcnd_t *lowcnds, int nlowcnds);
+  virtual int idaapi dbg_eval_lowcnd(thid_t tid, ea_t ea);
+  virtual int idaapi dbg_open_file(const char * /*file*/, uint64 * /*fsize*/, bool /*readonly*/) { return -1; }
   virtual void idaapi dbg_close_file(int /*fn*/) {}
-  virtual ssize_t idaapi dbg_read_file(int /*fn*/, uint32 /*off*/, void * /*buf*/, size_t /*size*/) { return 0; }
-  virtual ssize_t idaapi dbg_write_file(int /*fn*/, uint32 /*off*/, const void * /*buf*/, size_t /*size*/) { return 0; }
-  virtual int  idaapi handle_ioctl(int /*fn*/, const void* /*buf*/, size_t /*size*/,
-                                   void** /*outbuf*/, ssize_t* /*outsize*/) { return 0; }
-  virtual int  idaapi get_system_specific_errno(void) const; // this code must be acceptable by winerr()
+  virtual ssize_t idaapi dbg_read_file(int /*fn*/, qoff64_t /*off*/, void * /*buf*/, size_t /*size*/) { return 0; }
+  virtual ssize_t idaapi dbg_write_file(int /*fn*/, qoff64_t /*off*/, const void * /*buf*/, size_t /*size*/) { return 0; }
+  virtual int idaapi handle_ioctl(int /*fn*/, const void * /*buf*/, size_t /*size*/,
+                                   void ** /*outbuf*/, ssize_t * /*outsize*/) { return 0; }
+  virtual int idaapi get_system_specific_errno(void) const; // this code must be acceptable by winerr()
   virtual bool idaapi dbg_update_call_stack(thid_t, call_stack_t *) { return false; }
   virtual ea_t idaapi dbg_appcall(
     ea_t /*func_ea*/,
@@ -348,18 +360,21 @@ public:
   virtual int finalize_appcall_stack(call_context_t &, regval_map_t &, bytevec_t &) { return 0; }
   virtual ea_t calc_appcall_stack(const regvals_t &regvals);
   virtual bool should_stop_appcall(thid_t tid, const debug_event_t *event, ea_t ea);
+  virtual bool should_suspend_at_exception(const debug_event_t *event, const exception_info_t *ei);
   virtual bool preprocess_appcall_cleanup(thid_t, call_context_t &) { return true; }
   virtual int get_regidx(const char *regname, int *clsmask) = 0;
   virtual uint32 dbg_memory_page_size(void) { return 0x1000; }
   virtual bool idaapi dbg_prepare_broken_connection(void) { return false; }
-  virtual bool idaapi dbg_continue_broken_connection(pid_t) { old_areas.clear(); return true; }
+  virtual bool idaapi dbg_continue_broken_connection(pid_t) { old_ranges.clear(); return true; }
   virtual bool idaapi dbg_enable_trace(thid_t, bool, int) { return false; }
   virtual bool idaapi dbg_is_tracing_enabled(thid_t, int) { return false; }
   virtual int idaapi dbg_rexec(const char *cmdline);
   virtual int read_bpt_orgbytes(ea_t *p_ea, int *p_len, uchar *buf, int bufsize);
   virtual void dbg_get_debapp_attrs(debapp_attrs_t *out_pattrs) const;
+  virtual bool idaapi dbg_get_srcinfo_path(qstring * /*path*/, ea_t /*base*/) const { return false; }
 
   bool restore_broken_breakpoints(void);
+  void set_addr_size(int size) { debapp_attrs.addrsize = size; }
 };
 
 //---------------------------------------------------------------------------
@@ -398,14 +413,16 @@ int for_all_debuggers(debmod_visitor_t &v);
 
 // Common method between MacOS and Linux to launch a process
 int idaapi maclnx_launch_process(
-  debmod_t *debmod,
-  const char *path,
-  const char *args,
-  const char *startdir,
-  int flags,
-  const char *input_path,
-  uint32 input_file_crc32,
-  void **child_pid);
+        debmod_t *debmod,
+        const char *path,
+        const char *args,
+        const char *startdir,
+        int flags,
+        const char *input_path,
+        uint32 input_file_crc32,
+        void **child_pid);
+
+bool add_idc_funcs(const struct ext_idcfunc_t funcs[], size_t nfuncs, bool reg);
 
 //
 // Externs

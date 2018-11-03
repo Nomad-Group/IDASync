@@ -1,5 +1,5 @@
 /*
- *      Interactive disassembler (IDA).
+ *
  *      Copyright (c) 1990-2015 Hex-Rays
  *      ALL RIGHTS RESERVED.
  *
@@ -37,8 +37,8 @@
    __ARM__     - ARM
 */
 
-/// IDA SDK v6.8
-#define IDA_SDK_VERSION      680
+/// IDA SDK v7.0
+#define IDA_SDK_VERSION      700
 
 /// x86 processor by default
 #ifndef __PPC__
@@ -50,17 +50,11 @@
 #define __UNIX__
 #endif
 
-// Only 64-bit IDA is available on 64-bit platforms
-#ifdef __X64__
-#undef __EA64__
-#define __EA64__
-#endif
-
 /// \def{BADMEMSIZE, Invalid memory size}
 #ifdef __X64__
-#define BADMEMSIZE 0xFFFFFFFFFFFFFFFF
+#define BADMEMSIZE 0x7FFFFFFFFFFFFFFFull
 #else
-#define BADMEMSIZE 0xFFFFFFFF
+#define BADMEMSIZE 0x7FFFFFFFul
 #endif
 
 /// \def{ENUM_SIZE, Compiler-independent way to specify size of enum values}
@@ -74,11 +68,14 @@
 #include <stdlib.h>     /* size_t, NULL, memory */
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <assert.h>
 #include <limits.h>
 #include <ctype.h>
 #include <time.h>
+#ifdef __cplusplus
 #include <new>
+#endif
 #if defined(__NT__)
 #  include <malloc.h>
 #endif
@@ -97,9 +94,13 @@
 #    include <io.h>
 #    include <direct.h>
 #  endif
+#ifdef __cplusplus
 #  include <map>
+#endif
 #else
+#ifdef __cplusplus
 #  include <algorithm>
+#endif
 #  include <wchar.h>
 #  include <string.h>
 #  include <unistd.h>
@@ -115,7 +116,8 @@ typedef int off_t;
 #include <sys/stat.h>
 #endif
 
-#pragma pack(push, 4)
+#endif // SWIG
+
 #define STL_SUPPORT_PRESENT
 
 //---------------------------------------------------------------------------
@@ -123,9 +125,11 @@ typedef int off_t;
 /// \def{C_INCLUDE,     helper for 'extern "C" {}' statements}
 /// \def{C_INCLUDE_END, \copydoc C_INCLUDE}
 /// \def{INLINE,        inline keyword for c++}
-#ifdef __cplusplus
+#if defined(__cplusplus) || defined(SWIG)
 #define EXTERNC         extern "C"
-#define C_INCLUDE       EXTERNC {
+#define C_INCLUDE       EXTERNC \
+   {
+
 #define C_INCLUDE_END   }
 #define INLINE          inline
 #else
@@ -141,7 +145,6 @@ typedef int off_t;
 #error "Please define one of: __NT__, __OS2__, __MSDOS__, __LINUX__,__MAC__,__BSD__"
 #endif
 
-#endif // SWIG
 //---------------------------------------------------------------------------
 #ifndef MAXSTR
 #define MAXSTR 1024                ///< maximum string size
@@ -215,6 +218,13 @@ typedef int off_t;
 /// Macro to avoid of message 'Parameter x is never used'
 #define qnotused(x)   (void)x
 
+// this macro can be used as a suffix for declarations/definitions instead of qnotused()
+#if defined(__clang__) || defined(__GNUC__)
+# define QUNUSED  __attribute__((unused))
+#else
+# define QUNUSED
+#endif
+
 /// \def{va_argi, GNU C complains about some data types in va_arg because they are promoted to int and proposes to replace them by int}
 #ifdef __GNUC__
 #define va_argi(va, type)  ((type)va_arg(va, int))
@@ -243,6 +253,7 @@ typedef int off_t;
   #define ida_module_data
   #define __fastcall
   #define ida_local
+  #define ida_override
 #elif defined(__NT__)                   // MS Windows
   #define idaapi            __stdcall
   #define ida_export        idaapi
@@ -260,6 +271,7 @@ typedef int off_t;
     #define ida_module_data
   #endif
   #define ida_local
+  #define ida_override override
 #elif defined(__UNIX__)                 // for unix
   #define idaapi
   #if defined(__MAC__)
@@ -278,6 +290,8 @@ typedef int off_t;
   #define ida_export_data
   #define ida_module_data
   #define __fastcall
+  // it seems that our gcc compiler doesn't support the 'override' keyword
+  #define ida_override
 #endif
 
 /// Functions callable from any thread are marked with this keyword
@@ -285,7 +299,7 @@ typedef int off_t;
 
 //---------------------------------------------------------------------------
 #ifndef __cplusplus
-typedef int bool;
+typedef int bool;   //-V607 Ownerless typedef
 #define false 0
 #define true 1
 #endif
@@ -313,11 +327,16 @@ typedef ulonglong       uint64; ///< unsigned 64 bit value
 
 /// \fn{int64 qatoll(const char *nptr), Convert string to 64 bit integer}
 #if defined(__UNIX__)
-inline int64 qatoll(const char *nptr) { return atoll(nptr); }
+INLINE int64 qatoll(const char *nptr) { return atoll(nptr); }
 #elif defined(_MSC_VER)
-inline int64 qatoll(const char *nptr) { return _atoi64(nptr); }
+INLINE int64 qatoll(const char *nptr) { return _atoi64(nptr); }
 #else
-inline int64 qatoll(const char *nptr) { return atol(nptr); }
+INLINE int64 qatoll(const char *nptr) { return atol(nptr); }
+#endif
+
+// VS2010 lacks strtoull
+#ifdef _MSC_VER
+#define strtoull _strtoui64
 #endif
 
 /// \typedef{wchar16_t, 2-byte char}
@@ -344,6 +363,10 @@ typedef ptrdiff_t ssize_t;
   #define FMT_64 "ll"
   #define FMT_Z  "zu"
   #define FMT_ZS "zd"
+#elif defined(_MSC_VER) && _MSC_VER >= 1900
+  #define FMT_64 "I64"
+  #define FMT_Z  "zu"
+  #define FMT_ZS "td"
 #elif defined(_MSC_VER) || defined(__MINGW32__)
   #define FMT_64 "I64"
   #ifdef __X64__
@@ -397,6 +420,18 @@ typedef asize_t uval_t;   ///< unsigned value used by the processor.
 typedef adiff_t sval_t;   ///< signed value used by the processor.
                           ///<  - for 32-bit ::ea_t - ::int32
                           ///<  - for 64-bit ::ea_t - ::int64
+/// Error code (errno)
+typedef int error_t;
+
+typedef char op_dtype_t;
+
+
+#ifdef __cplusplus
+#define DEFARG(decl, val) decl = val
+#else
+#define DEFARG(decl, val) decl
+#endif
+
 #ifndef SWIG
 #define BADADDR ea_t(-1)  ///< this value is used for 'bad address'
 #define BADSEL  sel_t(-1) ///< 'bad selector' value
@@ -411,17 +446,17 @@ typedef uint64 qtime64_t; ///< 64-bit time value expressed as seconds and
 
 /// Get the 'seconds since the epoch' part of a qtime64_t
 
-inline uint32 get_secs(qtime64_t t)
+INLINE uint32 get_secs(qtime64_t t)
 {
-  return uint32(t>>32);
+  return (uint32)(t>>32);
 }
 
 
 /// Get the microseconds part of a qtime64_t
 
-inline uint32 get_usecs(qtime64_t t)
+INLINE uint32 get_usecs(qtime64_t t)
 {
-  return uint32(t);
+  return (uint32)(t);
 }
 
 
@@ -429,9 +464,9 @@ inline uint32 get_usecs(qtime64_t t)
 /// \param secs   seconds
 /// \param usecs  microseconds
 
-inline qtime64_t make_qtime64(uint32 secs, int32 usecs=0)
+INLINE qtime64_t make_qtime64(uint32 secs, DEFARG(int32 usecs,0))
 {
-  return (qtime64_t(secs) << 32) | usecs;
+  return ((qtime64_t)(secs) << 32) | usecs;
 }
 
 
@@ -466,7 +501,7 @@ idaman THREAD_SAFE bool ida_export qlocaltime(struct tm *_tm, qtime32_t t);
 
 /// Same as qlocaltime(struct tm *, qtime32_t), but accepts a 64-bit time value
 
-inline THREAD_SAFE bool qlocaltime64(struct tm *_tm, qtime64_t t)
+INLINE THREAD_SAFE bool qlocaltime64(struct tm *_tm, qtime64_t t)
 {
   return qlocaltime(_tm, get_secs(t));
 }
@@ -498,10 +533,9 @@ idaman THREAD_SAFE void ida_export qsleep(int milliseconds);
 /// High resolution timer.
 /// On Unix systems, returns current time in nanoseconds.
 /// On Windows, returns a high resolution counter (QueryPerformanceCounter)
-/// \param[out] nsecs  result
+/// \return stamp in nanoseconds
 
-idaman THREAD_SAFE void ida_export get_nsec_stamp(uint64 *nsecs);
-
+idaman THREAD_SAFE uint64 ida_export get_nsec_stamp(void);
 
 /// Get the current time with microsecond resolution (in fact the resolution
 /// is worse on windows)
@@ -520,7 +554,7 @@ idaman THREAD_SAFE bool ida_export gen_rand_buf(void *buffer, size_t bufsz);
 #define qoff64_t int64        ///< file offset
 
 /// Describes miscellaneous file attributes
-struct qstatbuf64
+struct qstatbuf
 {
   uint64    qst_dev;     ///< ID of device containing file
   uint32    qst_ino;     ///< inode number
@@ -540,7 +574,7 @@ struct qstatbuf64
 // non standard functions are missing:
 #ifdef _MSC_VER
 #if _MSC_VER <= 1200
-#define for if(0) ; else for    ///< MSVC <= 1200 is not compliant to the ANSI standard
+#define for if(0); else for    ///< MSVC <= 1200 is not compliant to the ANSI standard
 #else
 #pragma warning(disable : 4200) ///< zero-sized array in structure (non accept from cmdline)
 #endif
@@ -551,6 +585,9 @@ struct qstatbuf64
 #define fileno _fileno
 #define getcwd _getcwd
 #define memicmp _memicmp
+#  define  F_OK   0
+#  define  W_OK   2
+#  define  R_OK   4
 //@}
 #endif
 
@@ -567,9 +604,6 @@ idaman bool ida_export_data is_ida_kernel;
 #define eReadError    3    ///< read error
 #define eFileTooLarge 4    ///< file too large
 
-/// Error code (errno)
-typedef int error_t;
-
 
 /// Set qerrno
 
@@ -581,21 +615,6 @@ idaman THREAD_SAFE error_t ida_export set_qerrno(error_t code);
 idaman THREAD_SAFE error_t ida_export get_qerrno(void);
 
 //---------------------------------------------------------------------------
-/// Constant to specify which platform we're on
-enum ostype_t
-{
-   osMSDOS,    ///< MS DOS 32-bit extender
-   osAIX_RISC, ///< IBM AIX RS/6000
-   osOS2,      ///< OS/2
-   osNT,       ///< MS Windows (all platforms)
-   osLINUX,    ///< Linux
-   osMACOSX,   ///< Mac OS X
-   osBSD,      ///< FreeBSD
-};
-
-extern ostype_t ostype; ///< set based on which of  __NT__,  __MAC__, ... is defined
-
-//---------------------------------------------------------------------------
 // debugging macros
 /// \def{ZZZ, debug print}
 /// \def{BPT, trigger a breakpoint from IDA. also see #INTERR}
@@ -604,7 +623,7 @@ extern ostype_t ostype; ///< set based on which of  __NT__,  __MAC__, ... is def
 #  define BPT __emit__(0xcc)
 #  define __FUNCTION__ __FUNC__
 #elif defined(__GNUC__)
-#  ifdef __arm__
+#  if defined(__arm__) || defined(__aarch64__)
 #    ifdef __LINUX__
 #      define BPT __builtin_trap()
 #    else
@@ -630,8 +649,9 @@ extern ostype_t ostype; ///< set based on which of  __NT__,  __MAC__, ... is def
 #else
 #define __CASSERT_N0__(l) COMPILE_TIME_ASSERT_ ## l
 #define __CASSERT_N1__(l) __CASSERT_N0__(l)
-#define CASSERT(cnd) typedef char __CASSERT_N1__(__LINE__) [(cnd) ? 1 : -1]
-#define CASSERT0(cnd) (sizeof(char [1 - 2*!(cnd)]) - 1)
+#define  __CASSERT_N2__(l)  dummy_var_ ## __CASSERT_N0__(l)
+#define CASSERT(cnd) typedef char __CASSERT_N1__(__LINE__)[(cnd) ? 1 : -1] QUNUSED
+#define CASSERT0(cnd) (sizeof(char[1 - 2*!(cnd)]) - 1)
 #endif
 
 /// \def{INTERR, Show internal error message and terminate execution abnormally.
@@ -656,13 +676,10 @@ idaman THREAD_SAFE void  ida_export qfree(void *alloc);                         
 idaman THREAD_SAFE char *ida_export qstrdup(const char *string);                      ///< System independent strdup
 #define qnew(t)        ((t*)qalloc(sizeof(t)))  ///< create a new object in memory
 /// \def{qnewarray, qalloc_array() is safer than qnewarray}
-#ifdef NO_OBSOLETE_FUNCS
 #define qnewarray(t,n)  use_qalloc_array
-#else
-#define qnewarray(t,n) ((t*)qcalloc((n),sizeof(t)))
-#endif
 
 /// Use this class to avoid integer overflows when allocating arrays
+#ifdef __cplusplus
 template <class T>
 T *qalloc_array(size_t n)
 {
@@ -690,7 +707,7 @@ T *qrealloc_array(T *ptr, size_t n)
       struct is_pointer;
       struct is_array {};
       template <typename T>
-      static is_pointer check_type(const T *, const T * const *);
+      static is_pointer check_type(const T *, const T *const *);
       static is_array check_type(const void *, const void *);
   };
 #elif defined(_MSC_VER) && !defined(__LINT__)
@@ -698,6 +715,7 @@ T *qrealloc_array(T *ptr, size_t n)
 #else // poor man's implementation for other compilers and lint
 #  define qnumber(array) (sizeof(array)/sizeof(array[0]))
 #endif
+#endif //__cplusplus
 
 /// \def{qoffsetof, gcc complains about offsetof() - we had to make our version}
 #ifdef __GNUC__
@@ -731,7 +749,7 @@ T *qrealloc_array(T *ptr, size_t n)
 
 idaman THREAD_SAFE void *ida_export memrev(void *buf, ssize_t size);
 
-#ifdef __GNUC__
+#if defined(__GNUC__) && !defined(_WIN32)
 idaman THREAD_SAFE int ida_export memicmp(const void *x, const void *y, size_t size);
 #endif
 
@@ -758,9 +776,11 @@ idaman THREAD_SAFE char *ida_export strrpl(char *str, int char1, int char2);
 
 
 /// Get tail of a string
-inline       char *tail(      char *str) { return strchr(str, '\0'); }
+INLINE char *tail(char *str) { return strchr(str, '\0'); }
+#ifdef __cplusplus
 /// \copydoc tail(char *)
 inline const char *tail(const char *str) { return strchr(str, '\0'); }
+#endif
 
 
 /// A safer strncpy - makes sure that there is a terminating zero.
@@ -805,25 +825,26 @@ idaman THREAD_SAFE char *ida_export qstrupr(char *str);
 idaman THREAD_SAFE const char *ida_export stristr(const char *s1, const char *s2);
 
 
+#ifdef __cplusplus
 /// Same as stristr(const char *, const char *) but returns a non-const result
-
 inline char *idaapi stristr(char *s1, const char *s2) { return CONST_CAST(char *)(stristr((const char *)s1, s2)); }
+#endif
 
 /// is...() functions misbehave with 'char' argument. introduce more robust function
-inline bool ida_local qisspace(char c) { return isspace(uchar(c)) != 0; }
-inline bool ida_local qisalpha(char c) { return isalpha(uchar(c)) != 0; }   ///< see qisspace()
-inline bool ida_local qisalnum(char c) { return isalnum(uchar(c)) != 0; }   ///< see qisspace()
-inline bool ida_local qispunct(char c) { return ispunct(uchar(c)) != 0; }   ///< see qisspace()
-inline bool ida_local qislower(char c) { return islower(uchar(c)) != 0; }   ///< see qisspace()
-inline bool ida_local qisupper(char c) { return isupper(uchar(c)) != 0; }   ///< see qisspace()
-inline bool ida_local qisprint(char c) { return isprint(uchar(c)) != 0; }   ///< see qisspace()
-inline bool ida_local qisdigit(char c) { return isdigit(uchar(c)) != 0; }   ///< see qisspace()
-inline bool ida_local qisxdigit(char c) { return isxdigit(uchar(c)) != 0; } ///< see qisspace()
+INLINE bool ida_local qisspace(char c) { return isspace((uchar)(c)) != 0; }
+INLINE bool ida_local qisalpha(char c) { return isalpha((uchar)(c)) != 0; }   ///< see qisspace()
+INLINE bool ida_local qisalnum(char c) { return isalnum((uchar)(c)) != 0; }   ///< see qisspace()
+INLINE bool ida_local qispunct(char c) { return ispunct((uchar)(c)) != 0; }   ///< see qisspace()
+INLINE bool ida_local qislower(char c) { return islower((uchar)(c)) != 0; }   ///< see qisspace()
+INLINE bool ida_local qisupper(char c) { return isupper((uchar)(c)) != 0; }   ///< see qisspace()
+INLINE bool ida_local qisprint(char c) { return isprint((uchar)(c)) != 0; }   ///< see qisspace()
+INLINE bool ida_local qisdigit(char c) { return isdigit((uchar)(c)) != 0; }   ///< see qisspace()
+INLINE bool ida_local qisxdigit(char c) { return isxdigit((uchar)(c)) != 0; } ///< see qisspace()
 
 /// Get lowercase equivalent of given char
-inline char ida_local qtolower(char c) { return tolower(uchar(c)); }
+INLINE int ida_local qtolower(char c) { return tolower((uchar)(c)); }
 /// Get uppercase equivalent of given char
-inline char ida_local qtoupper(char c) { return toupper(uchar(c)); }
+INLINE int ida_local qtoupper(char c) { return toupper((uchar)(c)); }
 
 // We forbid using dangerous functions in IDA
 #if !defined(USE_DANGEROUS_FUNCTIONS) && !defined(_lint)
@@ -890,11 +911,16 @@ idaman AS_PRINTF(3, 4) THREAD_SAFE int ida_export append_snprintf(char *buf, con
 /// still need to call qsnprintf with a dynamically built format string.
 /// OTOH, there are absolutely no checks of the input arguments, so be careful!
 GCC_DIAG_OFF(format-nonliteral);
-inline int nowarn_qsnprintf(char *buf, size_t size, const char *format, ...)
+INLINE int nowarn_qsnprintf(char *buf, size_t size, const char *format, ...)
 {
   va_list va;
+  int code;
   va_start(va, format);
-  int code = ::qvsnprintf(buf, size, format, va);
+#ifdef __cplusplus
+  code = ::qvsnprintf(buf, size, format, va);
+#else
+  code = qvsnprintf(buf, size, format, va);
+#endif
   va_end(va);
   return code;
 }
@@ -928,6 +954,17 @@ idaman THREAD_SAFE char *ida_export qmakepath(char *buf, size_t bufsize, const c
 /// This function calls error() if any problem occurs.
 
 idaman void ida_export qgetcwd(char *buf, size_t bufsize);
+
+
+/// Change the current working directory.
+/// \param path     the new directory
+/// The possible return values are the same as those of the POSIX 'chdir'
+
+#ifdef __NT__
+idaman int ida_export qchdir(const char *path);
+#else
+#define qchdir chdir
+#endif
 
 
 /// Get the directory part of the path.
@@ -987,17 +1024,17 @@ idaman THREAD_SAFE char *ida_export qmake_full_path(char *dst, size_t dstsize, c
 
 
 /// Search for a file in the PATH environment variable or the current directory.
-/// \param file        the file name to look for. If the file is an absolute path
-///                    then buf will return the file value.
 /// \param buf         output buffer to hold the full file path
 /// \param bufsize     output buffer size
+/// \param file        the file name to look for. If the file is an absolute path
+///                    then buf will return the file value.
 /// \param search_cwd  search the current directory if file was not found in the PATH
 /// \return true if the file was found and false otherwise
 
 idaman THREAD_SAFE bool ida_export search_path(
-        const char *file,
         char *buf,
         size_t bufsize,
+        const char *file,
         bool search_cwd);
 
 /// Delimiter of directory lists
@@ -1102,24 +1139,23 @@ idaman THREAD_SAFE int   ida_export qcreate(const char *file, int stat);
 
 idaman THREAD_SAFE int   ida_export qread(int h, void *buf, size_t n);                        ///< \copydoc qopen
 idaman THREAD_SAFE int   ida_export qwrite(int h, const void *buf, size_t n);                 ///< \copydoc qopen
-idaman THREAD_SAFE int32 ida_export qtell(int h);                                             ///< \copydoc qopen
-idaman THREAD_SAFE int32 ida_export qseek(int h, int32 offset, int whence);                   ///< \copydoc qopen
+idaman THREAD_SAFE qoff64_t ida_export qtell(int h);                                          ///< \copydoc qopen
+idaman THREAD_SAFE qoff64_t ida_export qseek(int h, int64 offset, int whence);              ///< \copydoc qopen
 idaman THREAD_SAFE int   ida_export qclose(int h);                                            ///< \copydoc qopen
 idaman THREAD_SAFE int   ida_export qdup(int h);                                              ///< \copydoc qopen
 idaman THREAD_SAFE int   ida_export qfsync(int h);                                            ///< \copydoc qopen
 
 
 /// Get the file size.
-/// This function may return 0 if the file is not found or if the file is too large (>4GB).
-/// Call get_qerrno() and compare against eFileTooLarge to tell between the two cases.
+/// This function may return 0 if the file is not found.
 
-idaman THREAD_SAFE uint32 ida_export qfilesize(const char *fname);
+idaman THREAD_SAFE uint64 ida_export qfilesize(const char *fname);
 
 /// Get file length in bytes.
 /// \param h  file descriptor
 /// \return file length in bytes, -1 if error
 
-idaman THREAD_SAFE uint32 ida_export qfilelength(int h);
+idaman THREAD_SAFE uint64 ida_export qfilelength(int h);
 
 /// Change file size.
 /// \param h      file descriptor
@@ -1127,7 +1163,7 @@ idaman THREAD_SAFE uint32 ida_export qfilelength(int h);
 /// \retval 0     on success
 /// \retval -1    otherwise and qerrno is set
 
-idaman THREAD_SAFE int   ida_export qchsize(int h, uint32 fsize);
+idaman THREAD_SAFE int ida_export qchsize(int h, uint64 fsize);
 
 /// Create an empty directory.
 /// \param file  name (or full path) of directory to be created
@@ -1135,27 +1171,21 @@ idaman THREAD_SAFE int   ida_export qchsize(int h, uint32 fsize);
 /// \return 0    success
 /// \return -1   otherwise and qerrno is set
 
-idaman THREAD_SAFE int   ida_export qmkdir(const char *file, int mode);
+idaman THREAD_SAFE int ida_export qmkdir(const char *file, int mode);
 
 
 /// Does the given file exist?
 
-idaman THREAD_SAFE bool  ida_export qfileexist(const char *file);
+idaman THREAD_SAFE bool ida_export qfileexist(const char *file);
 
 
 /// Does the given path specify a directory?
 
-idaman THREAD_SAFE bool  ida_export qisdir(const char *file);
+idaman THREAD_SAFE bool ida_export qisdir(const char *file);
 
 /*--------------------------------------------------*/
-idaman THREAD_SAFE qoff64_t ida_export qtell64(int h);                                ///< Same as qtell(), but with large file (>2Gb) support
-idaman THREAD_SAFE qoff64_t ida_export qseek64(int h, qoff64_t offset, int whence);   ///< Same as qseek(), but with large file (>2Gb) support
-idaman THREAD_SAFE uint64   ida_export qfilesize64(const char *fname);                ///< Same as qfilesize(), but with large file (>2Gb) support
-idaman THREAD_SAFE uint64   ida_export qfilelength64(int h);                          ///< Same as qfilelength(), but with large file (>2Gb) support
-idaman THREAD_SAFE int      ida_export qchsize64(int h, uint64 fsize);                ///< Same as qchsize(), but with large file (>2Gb) support
-idaman THREAD_SAFE bool     ida_export qfileexist64(const char *file);                ///< Same as qfileexist(), but with large file (>2Gb) support
-idaman THREAD_SAFE int      ida_export qstat64(const char *path, qstatbuf64 *buf);    ///< Same as qstat(), but with large file (>2Gb) support
-idaman THREAD_SAFE int      ida_export qfstat64(int h, qstatbuf64 *buf);              ///< Same as qfstat(), but with large file (>2Gb) support
+idaman THREAD_SAFE int      ida_export qstat(const char *path, struct qstatbuf *buf);
+idaman THREAD_SAFE int      ida_export qfstat(int h, struct qstatbuf *buf);
 
 //---------------------------------------------------------------------------
 /// Add a function to be called at exit time
@@ -1178,47 +1208,47 @@ idaman THREAD_SAFE NORETURN void ida_export qexit(int code);
 //---------------------------------------------------------------------------
 #define qmin(a,b) ((a) < (b)? (a): (b)) ///< universal min
 #define qmax(a,b) ((a) > (b)? (a): (b)) ///< universal max
-#if defined(__EA64__) && defined(__VC__) && defined(__cplusplus)
-#if _MSC_VER < 1600
-static inline int64 abs(int64 n) { return _abs64(n); }
-#endif
-static inline int32 abs(uint32 n) { return abs((int32)n); }
+#ifdef __cplusplus
+template <class T> T qabs(T x) { return x < 0 ? -x : x; }
+#else
+int qabs(int x) { return x < 0 ? -x : x; }
 #endif
 
 //----------------------------------------------------------------------
 /// Test if 'bit' is set in 'bitmap'
-inline bool idaapi test_bit(const uchar *bitmap, size_t bit)
+INLINE bool idaapi test_bit(const uchar *bitmap, size_t bit)
 {
   return (bitmap[bit/8] & (1<<(bit&7))) != 0;
 }
 /// Set 'bit' in 'bitmap'
-inline void idaapi set_bit(uchar *bitmap, size_t bit)
+INLINE void idaapi set_bit(uchar *bitmap, size_t bit)
 {
   uchar *p = bitmap + bit/8;
-  *p = uchar(*p | (1<<(bit&7)));
+  *p = (uchar)(*p | (1<<(bit&7)));
 }
 /// Clear 'bit' in 'bitmap'
-inline void idaapi clear_bit(uchar *bitmap, size_t bit)
+INLINE void idaapi clear_bit(uchar *bitmap, size_t bit)
 {
   uchar *p = bitmap + bit/8;
-  *p = uchar(*p & ~(1<<(bit&7)));
+  *p = (uchar)(*p & ~(1<<(bit&7)));
 }
 /// Set first 'nbits' of 'bitmap'
-inline void idaapi set_all_bits(uchar *bitmap, size_t nbits)
+INLINE void idaapi set_all_bits(uchar *bitmap, size_t nbits)
 {
   memset(bitmap, 0xFF, (nbits+7)/8);
   if ( (nbits & 7) != 0 )
   {
     uchar *p = bitmap + nbits/8;
-    *p = uchar(*p & ~((1 << (nbits&7))-1));
+    *p = (uchar)(*p & ~((1 << (nbits&7))-1));
   }
 }
 /// Clear first 'nbits' of 'bitmap'
-inline void idaapi clear_all_bits(uchar *bitmap, size_t nbits)
+INLINE void idaapi clear_all_bits(uchar *bitmap, size_t nbits)
 {
   memset(bitmap, 0, (nbits+7)/8);
 }
 
+#ifdef __cplusplus
 //----------------------------------------------------------------------
 /// Functions to work with intervals
 namespace interval
@@ -1239,6 +1269,7 @@ namespace interval
     return off >= off1 && off < off1+s1;
   }
 }
+#endif
 
 //----------------------------------------------------------------------
 #ifdef __cplusplus
@@ -1303,7 +1334,7 @@ template<class T, class U> void idaapi setflag(T &where, U bit, bool cnd)
 template<class T> bool is_mul_ok(T count, T elsize)
 {
   CASSERT((T)(-1) > 0); // make sure T is unsigned
-  if ( elsize  == 0 || count == 0 )
+  if ( elsize == 0 || count == 0 )
     return true;
   return count <= ((T)(-1)) / elsize;
 }
@@ -1495,7 +1526,7 @@ template <class T> inline void qswap(T &a, T &b)
         (buf)[0] = '\0';                          \
         break;                                    \
       }                                           \
-      if (( *(buf) = *__ida_in++) == '\0' )       \
+      if ( (*(buf) = *__ida_in++) == '\0' )       \
         break;                                    \
       (buf)++;                                    \
     }                                             \
@@ -1561,8 +1592,8 @@ idaman THREAD_SAFE void *ida_export qvector_reserve(void *vec, void *old, size_t
 
 // Internal declarations to detect pod-types
 /// \cond
-struct ida_true_type {};
-struct ida_false_type {};
+struct ida_true_type { char f[1]; };
+struct ida_false_type { char f[2]; };
 template <class T> struct ida_type_traits     { typedef ida_false_type is_pod_type; };
 template <class T> struct ida_type_traits<T*> { typedef ida_true_type is_pod_type; };
 template <> struct ida_type_traits< char>  { typedef ida_true_type is_pod_type; };
@@ -1595,6 +1626,14 @@ template <class T> inline bool may_move_bytes(void)
   typedef typename ida_movable_type<T>::is_movable_type mmb_t;
   return check_type_trait(mmb_t());
 }
+
+// Check the type of the variable,
+// can be used with CASSERT to check the ask_form() arguments.
+// See IS_QSTRING as example of usage.
+// Do not forget to surround macros with GCC_DIAG_OFF(return-type)/GCC_DIAG_ON(return-type)
+#define DECLARE_IDA_TYPE_FUNCS(t)                 \
+inline ida_true_type &is_ ## t ## _type(t &) {}   \
+inline ida_false_type &is_ ## t ## _type(...) {}
 /// \endcond
 
 //---------------------------------------------------------------------------
@@ -1612,11 +1651,12 @@ template <class T> class qvector
   /// Copy contents of given qvector into this one
   qvector<T> &assign(const qvector<T> &x)
   {
-    if ( x.n > 0 )
+    size_t xn = x.n;
+    if ( xn > 0 )
     {
-      array = (T*)qalloc_or_throw(x.alloc * sizeof(T));
-      alloc = x.alloc;
-      while ( n < x.n )
+      array = (T*)qalloc_or_throw(xn * sizeof(T));
+      alloc = xn;
+      while ( n < xn )
       {
         new (array+n) T(x.array[n]);
         ++n;
@@ -1637,7 +1677,7 @@ template <class T> class qvector
     else
     {
       ssize_t s = cnt;
-      while( --s >= 0 )
+      while ( --s >= 0 )
       {
         new(dst) T(*src);
         src->~T();
@@ -1661,7 +1701,7 @@ template <class T> class qvector
       ssize_t s = cnt;
       dst += s;
       src += s;
-      while( --s >= 0 )
+      while ( --s >= 0 )
       {
         --src;
         --dst;
@@ -1677,7 +1717,13 @@ public:
   /// Constructor - creates a new qvector identical to 'x'
   qvector(const qvector<T> &x) : array(NULL), n(0), alloc(0) { assign(x); }
   /// Destructor
-  ~qvector(void) { clear(); }
+  ~qvector(void)
+  {
+    if ( is_pod_type<T>() )
+      qfree(array);
+    else
+      clear();
+  }
   DEFINE_MEMORY_ALLOCATION_FUNCS()
   /// Append a new element to the end the qvector.
   void push_back(const T &x)
@@ -1750,6 +1796,8 @@ public:
   /// Allow assignment of one qvector to another using '='
   qvector<T> &operator=(const qvector<T> &x)
   {
+    if ( this == &x )
+      return *this;
     size_t mn = qmin(n, x.n);
     for ( size_t i=0; i < mn; i++ )
       array[i] = x.array[i];
@@ -2188,12 +2236,12 @@ inline const uchar *idaapi qstrstr(const uchar *s1, const uchar *s2) { return (c
 /// Find a character within a string.
 /// \return a pointer to the first occurrence of 'c' within 's1', NULL if c is not found in s1
 //@{
-inline       char *idaapi qstrchr(      char *s1, char c) { return strchr(s1, c); }
+inline char *idaapi qstrchr(char *s1, char c) { return strchr(s1, c); }
 inline const char *idaapi qstrchr(const char *s1, char c) { return strchr(s1, c); }
-inline       uchar *idaapi qstrchr(      uchar *s1, uchar c) { return (      uchar *)strchr((      char *)s1, c); }
+inline uchar *idaapi qstrchr(uchar *s1, uchar c) { return (uchar *)strchr((char *)s1, c); }
 inline const uchar *idaapi qstrchr(const uchar *s1, uchar c) { return (const uchar *)strchr((const char *)s1, c); }
 idaman THREAD_SAFE const wchar16_t *ida_export qstrchr(const wchar16_t *s1, wchar16_t c);
-inline THREAD_SAFE       wchar16_t *ida_export qstrchr(      wchar16_t *s1, wchar16_t c)
+inline THREAD_SAFE wchar16_t *idaapi qstrchr(wchar16_t *s1, wchar16_t c)
   { return (wchar16_t *)qstrchr((const wchar16_t *)s1, c); }
 //@}
 
@@ -2202,11 +2250,11 @@ inline THREAD_SAFE       wchar16_t *ida_export qstrchr(      wchar16_t *s1, wcha
 /// \return a pointer to the last occurrence of 'c' within 's1', NULL if c is not found in s1
 //@{
 inline const char *idaapi qstrrchr(const char *s1, char c) { return strrchr(s1, c); }
-inline       char *idaapi qstrrchr(      char *s1, char c) { return strrchr(s1, c); }
+inline char *idaapi qstrrchr(char *s1, char c) { return strrchr(s1, c); }
 inline const uchar *idaapi qstrrchr(const uchar *s1, uchar c) { return (const uchar *)strrchr((const char *)s1, c); }
-inline       uchar *idaapi qstrrchr(      uchar *s1, uchar c) { return (      uchar *)strrchr((const char *)s1, c); }
+inline uchar *idaapi qstrrchr(uchar *s1, uchar c) { return (uchar *)strrchr((const char *)s1, c); }
 idaman THREAD_SAFE const wchar16_t *ida_export qstrrchr(const wchar16_t *s1, wchar16_t c);
-inline THREAD_SAFE       wchar16_t *ida_export qstrrchr(      wchar16_t *s1, wchar16_t c)
+inline THREAD_SAFE wchar16_t *idaapi qstrrchr(wchar16_t *s1, wchar16_t c)
   { return (wchar16_t *)qstrrchr((const wchar16_t *)s1, c); }
 //@}
 
@@ -2216,7 +2264,7 @@ inline THREAD_SAFE       wchar16_t *ida_export qstrrchr(      wchar16_t *s1, wch
 /// The reason why we have this is because it is not compiler dependent
 /// (hopefully) and therefore can be used in IDA API
 template<class qchar>
-class _qstring
+class _qstring  //-V:_qstring:690 The class implements the '=' operator, but lacks a copy constructor. It is dangerous to use such a class.
 {
   qvector<qchar> body;
 public:
@@ -2227,9 +2275,9 @@ public:
   {
     if ( ptr != NULL )
     {
-      size_t len = ::qstrlen(ptr) + 1;
-      body.resize(len);
-      memcpy(body.begin(), ptr, len*sizeof(qchar));
+      size_t len = ::qstrlen(ptr);
+      body.resize(len + 1);
+      memmove(body.begin(), ptr, len*sizeof(qchar));
     }
   }
   /// Constructor - creates a new qstring using first 'len' chars from 'ptr'
@@ -2238,12 +2286,14 @@ public:
     if ( len > 0 )
     {
       body.resize(len+1);
-      memcpy(body.begin(), ptr, len*sizeof(qchar));
+      memmove(body.begin(), ptr, len*sizeof(qchar));
     }
   }
   void swap(_qstring<qchar> &r) { body.swap(r.body); }                        ///< Swap contents of two qstrings. see qvector::swap()
   size_t length(void) const { size_t l = body.size(); return l ? l - 1 : 0; } ///< Get number of chars in this qstring (not including terminating zero)
   size_t size(void) const { return body.size(); }                             ///< Get number of chars in this qstring (including terminating zero)
+  size_t capacity(void) const { return body.capacity(); }                     ///< Get number of chars this qstring can contain (including terminating zero)
+
   /// Resize to the given size.
   /// The resulting qstring will have length() = s, and size() = s+1                   \n
   /// if 's' is greater than the current size then the extra space is filled with 'c'. \n
@@ -2305,12 +2355,30 @@ public:
     if ( len > 0 )
     {
       body.resize(len+1);
-      memcpy(body.begin(), str, len*sizeof(qchar));
+      memmove(body.begin(), str, len*sizeof(qchar));
       body[len] = '\0';
     }
     else
     {
       qclear();
+    }
+    return *this;
+  }
+  _qstring &operator=(const _qstring &qstr)
+  {
+    if ( this != &qstr )
+    {
+      size_t len = qstr.length();
+      if ( len > 0 )
+      {
+        body.resize(len + 1);
+        memmove(body.begin(), qstr.begin(), len*sizeof(qchar));
+        body[len] = '\0';
+      }
+      else
+      {
+        qclear();
+      }
     }
     return *this;
   }
@@ -2397,7 +2465,7 @@ public:
   /// Find a substring.
   /// \param str  the substring to look for
   /// \param pos  starting position
-  /// \return the position of the beginning of the first occurrence of str, -1 of none exists
+  /// \return the position of the beginning of the first occurrence of str, _qstring::npos of none exists
   size_t find(const qchar *str, size_t pos=0) const
   {
     if ( pos <= length() )
@@ -2442,7 +2510,7 @@ public:
   /// Find a character in the qstring.
   /// \param c    the character to look for
   /// \param pos  starting position
-  /// \return index of first occurrence of 'c' if c is found, -1 otherwise
+  /// \return index of first occurrence of 'c' if c is found, _qstring::npos otherwise
   size_t find(qchar c, size_t pos=0) const
   {
     if ( pos <= length() )
@@ -2457,7 +2525,7 @@ public:
   /// Search backwards for a character in the qstring.
   /// \param c    the char to look for
   /// \param pos  starting position
-  /// \return index of first occurrence of 'c' if c is found, -1 otherwise
+  /// \return index of first occurrence of 'c' if c is found, _qstring::npos otherwise
   size_t rfind(qchar c, size_t pos=0) const
   {
     if ( pos <= length() )
@@ -2483,7 +2551,7 @@ public:
   /// Remove characters from the qstring.
   /// \param idx  starting position
   /// \param cnt  number of characters to remove
-  _qstring& remove(size_t idx, size_t cnt)
+  _qstring &remove(size_t idx, size_t cnt)
   {
     size_t len = length();
     if ( idx < len && cnt != 0 )
@@ -2504,7 +2572,7 @@ public:
   /// Insert a character into the qstring.
   /// \param idx  position of insertion (if idx >= length(), the effect is the same as append)
   /// \param c    char to insert
-  _qstring& insert(size_t idx, qchar c)
+  _qstring &insert(size_t idx, qchar c)
   {
     size_t len = length();
     body.resize(len+2);
@@ -2522,7 +2590,7 @@ public:
   /// \param idx     position of insertion (if idx >= length(), the effect is the same as append)
   /// \param str     the string to insert
   /// \param addlen  number of chars from 'str' to insert
-  _qstring& insert(size_t idx, const qchar *str, size_t addlen)
+  _qstring &insert(size_t idx, const qchar *str, size_t addlen)
   {
     size_t len = length();
     body.resize(len+addlen+1);
@@ -2534,11 +2602,11 @@ public:
       memmove(p2, p1, (len-idx)*sizeof(qchar));
       len = idx;
     }
-    memcpy(body.begin()+len, str, addlen*sizeof(qchar));
+    memmove(body.begin()+len, str, addlen*sizeof(qchar));
     return *this;
   }
   /// Same as insert(size_t, const qchar *, size_t), but all chars in str are inserted
-  _qstring& insert(size_t idx, const qchar *str)
+  _qstring &insert(size_t idx, const qchar *str)
   {
     if ( str != NULL )
     {
@@ -2548,7 +2616,7 @@ public:
     return *this;
   }
   /// Same as insert(size_t, const qchar *), but takes a qstring parameter
-  _qstring& insert(size_t idx, const _qstring &qstr)
+  _qstring &insert(size_t idx, const _qstring &qstr)
   {
     size_t len = length();
     size_t add = qstr.length();
@@ -2564,11 +2632,11 @@ public:
     memcpy(body.begin()+len, qstr.begin(), add*sizeof(qchar));
     return *this;
   }
-  _qstring& insert(qchar c)               { return insert(0, c);    } ///< Prepend the qstring with 'c'
-  _qstring& insert(const qchar *str)      { return insert(0, str);  } ///< Prepend the qstring with 'str'
-  _qstring& insert(const _qstring &qstr)  { return insert(0, qstr); } ///< Prepend the qstring with 'qstr'
+  _qstring &insert(qchar c)               { return insert(0, c);    } ///< Prepend the qstring with 'c'
+  _qstring &insert(const qchar *str)      { return insert(0, str);  } ///< Prepend the qstring with 'str'
+  _qstring &insert(const _qstring &qstr)  { return insert(0, qstr); } ///< Prepend the qstring with 'qstr'
   /// Append c to the end of the qstring
-  _qstring& append(qchar c)
+  _qstring &append(qchar c)
   {
     size_t len = length();
     body.resize(len+2);
@@ -2579,16 +2647,16 @@ public:
   /// Append a string to the qstring.
   /// \param str     the string to append
   /// \param addlen  number of characters from 'str' to append
-  _qstring& append(const qchar *str, size_t addlen)
+  _qstring &append(const qchar *str, size_t addlen)
   {
     size_t len = length();
     body.resize(len+addlen+1);
     body[len+addlen] = '\0';
-    memcpy(body.begin()+len, str, addlen*sizeof(qchar));
+    memmove(body.begin()+len, str, addlen*sizeof(qchar));
     return *this;
   }
   /// Same as append(const qchar *, size_t), but all chars in 'str' are appended
-  _qstring& append(const qchar *str)
+  _qstring &append(const qchar *str)
   {
     if ( str != NULL )
     {
@@ -2598,7 +2666,7 @@ public:
     return *this;
   }
   /// Same as append(const qchar *), but takes a qstring argument
-  _qstring& append(const _qstring &qstr)
+  _qstring &append(const _qstring &qstr)
   {
     size_t add = qstr.length();
     if ( add != 0 )
@@ -2611,7 +2679,7 @@ public:
     return *this;
   }
   /// Append result of qvsnprintf() to qstring
-  AS_PRINTF(2, 0) _qstring& cat_vsprnt(const char *format, va_list va)
+  AS_PRINTF(2, 0) _qstring &cat_vsprnt(const char *format, va_list va)
   { // since gcc64 forbids reuse of va_list, we make a copy for the second call:
     va_list copy;
     va_copy(copy, va);
@@ -2625,7 +2693,7 @@ public:
     return *this;
   }
   /// Replace qstring with the result of qvsnprintf()
-  AS_PRINTF(2, 0) _qstring& vsprnt(const char *format, va_list va)
+  AS_PRINTF(2, 0) _qstring &vsprnt(const char *format, va_list va)
   { // since gcc64 forbids reuse of va_list, we make a copy for the second call:
     va_list copy;
     va_copy(copy, va);
@@ -2639,7 +2707,7 @@ public:
     return *this;
   }
   /// Append result of qsnprintf() to qstring
-  AS_PRINTF(2, 3) _qstring& cat_sprnt(const char *format, ...)
+  AS_PRINTF(2, 3) _qstring &cat_sprnt(const char *format, ...)
   {
     va_list va;
     va_start(va, format);
@@ -2648,7 +2716,7 @@ public:
     return *this;
   }
   /// Replace qstring with the result of qsnprintf()
-  AS_PRINTF(2, 3) _qstring& sprnt(const char *format, ...)
+  AS_PRINTF(2, 3) _qstring &sprnt(const char *format, ...)
   {
     va_list va;
     va_start(va, format);
@@ -2656,12 +2724,24 @@ public:
     va_end(va);
     return *this;
   }
+  /// Replace qstring with the result of qsnprintf()
+  /// \sa inline int nowarn_qsnprintf(char *buf, size_t size, const char *format, ...)
+  GCC_DIAG_OFF(format-nonliteral);
+  _qstring &nowarn_sprnt(const char *format, ...) //-V524 body is equal to sprnt
+  {
+    va_list va;
+    va_start(va, format);
+    vsprnt(format, va);
+    va_end(va);
+    return *this;
+  }
+  GCC_DIAG_ON(format-nonliteral);
   /// Fill qstring with a character.
   /// The qstring is resized if necessary until 'len' chars have been filled
   /// \param pos  starting position
   /// \param c    the character to fill
   /// \param len  number of positions to fill with 'c'
-  _qstring& fill(size_t pos, qchar c, size_t len)
+  _qstring &fill(size_t pos, qchar c, size_t len)
   {
     size_t endp = pos + len + 1;
     if ( body.size() < endp )
@@ -2673,7 +2753,7 @@ public:
     return *this;
   }
   /// Clear contents of qstring and fill with 'c'
-  _qstring& fill(qchar c, size_t len)
+  _qstring &fill(qchar c, size_t len)
   {
     body.qclear();
     if ( len > 0 )
@@ -2681,7 +2761,7 @@ public:
     return *this;
   }
   /// Remove all instances of the specified char from the beginning of the qstring
-  _qstring& ltrim(qchar blank = ' ')
+  _qstring &ltrim(qchar blank = ' ')
   {
     if ( !empty() )
     {
@@ -2698,7 +2778,7 @@ public:
     return *this;
   }
   /// Remove all instances of the specified char from the end of the qstring
-  _qstring& rtrim(qchar blank = ' ')
+  _qstring &rtrim(qchar blank = ' ')
   {
     if ( !empty() )
     {
@@ -2711,7 +2791,7 @@ public:
     return *this;
   }
   /// Remove all instances of the specified char from both ends of the qstring
-  _qstring& trim2(qchar blank = ' ')
+  _qstring &trim2(qchar blank = ' ')
   {
     rtrim(blank);
     ltrim(blank);
@@ -2800,7 +2880,7 @@ public:
     size_t nbytes = qmin(size(), b.size());
     iterator p = begin();
     for ( size_t i=0; i < nbytes; i++, ++p )
-      *p = uchar(*p & ~b[i]);
+      *p = (uchar)(*p & ~b[i]);
   }
 };
 
@@ -2869,7 +2949,7 @@ public:
     iter(constness listnode_t *x) : cur(x) {}                           \
   public:                                                               \
     typedef constness T value_type;                                     \
-    iter(void) {}                                                       \
+    iter(void) : cur(NULL) {}                                           \
     iter(const iter &x) : cur(x.cur) {}                                 \
     cstr                                                                \
     iter &operator=(const iter &x) { cur = x.cur; return *this; }       \
@@ -2877,7 +2957,7 @@ public:
     bool operator!=(const iter &x) const { return cur != x.cur; }       \
     constness T &operator*(void) const { return ((datanode_t*)cur)->data; }  \
     constness T *operator->(void) const { return &(operator*()); } \
-    iter& operator++(void)       /* prefix ++  */                       \
+    iter &operator++(void)       /* prefix ++  */                       \
     {                                                                   \
       cur = cur->next;                                                  \
       return *this;                                                     \
@@ -2888,7 +2968,7 @@ public:
       ++(*this);                                                        \
       return tmp;                                                       \
     }                                                                   \
-    iter& operator--(void)       /* prefix --  */                       \
+    iter &operator--(void)       /* prefix --  */                       \
     {                                                                   \
       cur = cur->prev;                                                  \
       return *this;                                                     \
@@ -2900,8 +2980,8 @@ public:
       return tmp;                                                       \
     }                                                                   \
   };
-  DEFINE_LIST_ITERATOR(iterator, , friend class const_iterator;)
-  DEFINE_LIST_ITERATOR(const_iterator, const, const_iterator(const iterator &x) : cur(x.cur) {})
+  DEFINE_LIST_ITERATOR(iterator,, friend class const_iterator; )
+  DEFINE_LIST_ITERATOR(const_iterator, const, const_iterator(const iterator &x) : cur(x.cur) {} )
 
 /// Used to define qlist::reverse_iterator and qlist::const_reverse_iterator
 #define DEFINE_REVERSE_ITERATOR(riter, iter)                            \
@@ -2917,8 +2997,8 @@ public:
     riter  operator++(int) { iter q=p; --p; return q; }                 \
     riter &operator--(void) { ++p; return *this; }                      \
     riter  operator--(int) { iter q=p; ++p; return q; }                 \
-    bool operator==(const riter& x) const { return p == x.p; }          \
-    bool operator!=(const riter& x) const { return p != x.p; }          \
+    bool operator==(const riter &x) const { return p == x.p; }          \
+    bool operator!=(const riter &x) const { return p != x.p; }          \
   };
   DEFINE_REVERSE_ITERATOR(reverse_iterator, iterator)
   DEFINE_REVERSE_ITERATOR(const_reverse_iterator, const_iterator)
@@ -2985,7 +3065,7 @@ public:
   /// \param p  the position to insert the element
   /// \param x  the element to be inserted
   /// \return position of newly inserted element
-  iterator insert(iterator p, const T& x)
+  iterator insert(iterator p, const T &x)
   {
     datanode_t *tmp = (datanode_t*)qalloc_or_throw(sizeof(datanode_t));
     new (&(tmp->data)) T(x);
@@ -3067,6 +3147,7 @@ typedef qvector<int> intvec_t;        ///< vector of integers
 typedef qvector<qstring> qstrvec_t;   ///< vector of strings
 typedef qvector<qwstring> qwstrvec_t; ///< vector of unicode strings
 typedef qvector<bool> boolvec_t;      ///< vector of bools
+typedef qvector<size_t> sizevec_t;    ///< vector of sizes
 
 // Our containers do not care about their addresses. They can be moved around with simple memcpy
 /// \cond
@@ -3087,6 +3168,62 @@ struct janitor_t
 protected:
   T &resource;
 };
+
+//-------------------------------------------------------------------------
+/// Template to compare any 2 values of the same type. Returns -1/0/1
+template <class T>
+int compare(const T &a, const T &b)
+{
+  if ( a < b )
+    return -1;
+  if ( a > b )
+    return 1;
+  return 0;
+}
+
+//-------------------------------------------------------------------------
+template <class T>
+int compare(const qvector<T> &a, const qvector<T> &b)
+{
+  return compare_containers(a, b);
+}
+
+//-------------------------------------------------------------------------
+template <class T>
+int compare(const qlist<T> &a, const qlist<T> &b)
+{
+  return compare_containers(a, b);
+}
+
+//-------------------------------------------------------------------------
+template <class T, class U>
+int compare(const std::pair<T, U> &a, const std::pair<T, U> &b)
+{
+  int code = compare(a.first, b.first);
+  if ( code != 0 )
+    return code;
+  return compare(a.second, b.second);
+}
+
+//-------------------------------------------------------------------------
+/// Template to compare any 2 containers of the same type. Returns -1/0/1
+template <class T>
+int compare_containers(const T &l, const T &r)
+{
+  typename T::const_iterator p = l.begin();
+  typename T::const_iterator q = r.begin();
+  for ( ; p != l.end() && q != r.end(); ++p,++q )
+  {
+    int code = compare(*p, *q);
+    if ( code != 0 )
+      return code;
+  }
+  if ( p == l.end() && q != r.end() )
+    return -1;
+  if ( p != l.end() && q == r.end() )
+    return 1;
+  return 0;
+}
 
 //-------------------------------------------------------------------------
 /// Align element up to nearest boundary
@@ -3123,8 +3260,8 @@ template <class T> T align_down(T val, int elsize)
   #define DEFINE_VIRTUAL_DTOR(name) virtual void idaapi dummy_dtor_for_gcc(void) {}
   #define DECLARE_VIRTUAL_DTOR(name) virtual void idaapi dummy_dtor_for_gcc(void)
 #else
-  #define DEFINE_VIRTUAL_DTOR(name) virtual idaapi ~name(void) {}
-  #define DECLARE_VIRTUAL_DTOR(name) virtual idaapi ~name(void)
+  #define DEFINE_VIRTUAL_DTOR(name) virtual ~name(void) {}
+  #define DECLARE_VIRTUAL_DTOR(name) virtual ~name(void)
 #endif
 
 /// Declare class as uncopyable.
@@ -3132,58 +3269,34 @@ template <class T> T align_down(T val, int elsize)
 ///  there will be a compilation or link error)
 #define DECLARE_UNCOPYABLE(T) T &operator=(const T &); T(const T &);
 
-#endif // __cplusplus
+#ifndef SWIG
+//-------------------------------------------------------------------------
+// check the variable type
+/// \cond
+GCC_DIAG_OFF(return-type)
+DECLARE_IDA_TYPE_FUNCS(qstring)
+DECLARE_IDA_TYPE_FUNCS(sizevec_t)
+DECLARE_IDA_TYPE_FUNCS(qstrvec_t)
+GCC_DIAG_ON(return-type)
 
-struct hit_counter_t;
-idaman void ida_export reg_hit_counter(hit_counter_t *, bool do_reg);
+#define IS_QSTRING(v)   (sizeof(is_qstring_type(v))   == sizeof(ida_true_type))
+#define IS_SIZEVEC_T(v) (sizeof(is_sizevec_t_type(v)) == sizeof(ida_true_type))
+#define IS_QSTRVEC_T(v) (sizeof(is_qstrvec_t_type(v)) == sizeof(ida_true_type))
 
-
-/// Create new ::hit_counter_t with given name
-
-idaman THREAD_SAFE hit_counter_t *ida_export create_hit_counter(const char *name);
-
-idaman THREAD_SAFE void ida_export hit_counter_timer(hit_counter_t *, bool enable);
-
-/// Statistical counter for profiling
-struct hit_counter_t
-{
-  const char *name;     ///< name is owned by hit_counter_t
-                        ///< reg_hit_counter() allocates it
-  int total, misses;
-  uint64 elapsed;       ///< number of elapsed counts
-  uint64 stamp;         ///< start time
-  hit_counter_t(const char *_name)
-    : name(_name), total(0), misses(0), elapsed(0)
-    { reg_hit_counter(this, true); }
-  virtual ~hit_counter_t(void) { reg_hit_counter(this, false); }
-  /// Prints the counter to the message window and resets it
-  virtual void print(void);
-  // time functions
-  void start(void) { hit_counter_timer(this, true); }
-  void stop(void) { hit_counter_timer(this, false); }
-};
-
-/// Formalized counter increment - see ::hit_counter_t
-class incrementer_t
-{
-  hit_counter_t &ctr;
-public:
-  incrementer_t(hit_counter_t &_ctr) : ctr(_ctr) { ctr.total++; ctr.start(); }
-  ~incrementer_t(void) { ctr.stop(); }
-  DEFINE_MEMORY_ALLOCATION_FUNCS()
-  void failed(void) { ctr.misses++; }
-};
-
-#ifndef UNICODE
-#define cwstr(dst, src, dstsize) ::qstrncpy(dst, src, dstsize)
-#define wcstr(dst, src, dstsize) ::qstrncpy(dst, src, dstsize)
+/// \endcond
 #endif
 
+#endif // __cplusplus
+
+#ifndef __cplusplus
+typedef struct bytevec_tag bytevec_t;
+typedef struct qstring_tag qstring;
+typedef struct qwstring_tag qwstring;
+#endif
 
 /// Encode base64
 
 idaman THREAD_SAFE bool ida_export base64_encode(qstring *output, const void *input, size_t size);
-
 
 /// Decode base64
 
@@ -3199,97 +3312,221 @@ idaman THREAD_SAFE bool ida_export base64_decode(bytevec_t *output, const char *
 idaman THREAD_SAFE bool ida_export replace_tabs(qstring *out, const char *str, int tabsize);
 
 
-/// Unicode -> char
-
-idaman THREAD_SAFE bool ida_export u2cstr(const wchar16_t *in, qstring *out, int nsyms=-1);
-
-
-///< Char -> unicode
-
-idaman THREAD_SAFE bool ida_export c2ustr(const char *in, qwstring *out, int nsyms=-1);
-
-
-/// utf-8 -> 16bit unicode
-
-idaman THREAD_SAFE int ida_export utf8_unicode(const char *in, wchar16_t *out, size_t outsize);
-
-
-/// 16bit unicode -> utf8
-
-idaman THREAD_SAFE bool ida_export unicode_utf8(qstring *res, const wchar16_t *in, int nsyms);
+/// \defgroup c_str_conv Functions: c strings
+/// String C-style conversions (convert \\n to a newline and vice versa)
+//@{
+idaman THREAD_SAFE char *ida_export str2user(char *dst, const char *src, size_t dstsize); ///< Make a user representation
+idaman THREAD_SAFE char *ida_export user2str(char *dst, const char *src, size_t dstsize); ///< Make an internal representation
+#ifdef __cplusplus
+idaman THREAD_SAFE char ida_export back_char(const char *&p);                             ///< Translate char after '\\'
+idaman THREAD_SAFE void ida_export qstr2user(qstring *dst, const char *src, int nsyms=-1);///< see str2user()
+inline void qstr2user(qstring *dst, const qstring &src) { qstr2user(dst, src.c_str(), src.length()); }
+idaman THREAD_SAFE void ida_export user2qstr(qstring *dst, const qstring &src);           ///< see user2str()
+#else
+idaman THREAD_SAFE char ida_export back_char(const char **p);                             ///< Translate char after '\\'
+idaman THREAD_SAFE void ida_export qstr2user(qstring *dst, const qstring *src);           ///< see str2user()
+idaman THREAD_SAFE void ida_export user2qstr(qstring *dst, const qstring *src);           ///< see user2str()
+#endif
+//@}
 
 
-/// Windows utf-8 (<0xFFFF) -> idb representation (oem)
+/// Does byte sequence consist of valid UTF-8-encoded codepoints?
+/// \param in the byte sequence
+/// \returns success
 
-idaman THREAD_SAFE bool ida_export win_utf2idb(char *buf);
+idaman THREAD_SAFE bool ida_export is_valid_utf8(const char *in);
 
 
-/// Read one utf-8 character from string. if error, return -1
+#ifdef __cplusplus
+
+/// UTF-8 -> UTF-16
+
+idaman THREAD_SAFE bool ida_export utf8_utf16(qwstring *out, const char *in, int nsyms=-1);
+
+
+/// UTF-16 -> UTF-8
+
+idaman THREAD_SAFE bool ida_export utf16_utf8(qstring *out, const wchar16_t *in, int nsyms=-1);
+
+
+/// \defgroup IDBDEC_ IDB default encoding -> UTF-8 encoding flags
+/// used by idb_utf8
+//@{
+#define IDBDEC_ESCAPE  0x00000001 ///< convert non-printable characters to C escapes (\n, \xNN, \uNNNN)
+//@}
+
+/// IDB default C string encoding -> UTF-8
+/// \returns success (i.e., all bytes converted)
+
+idaman THREAD_SAFE bool ida_export idb_utf8(qstring *out, const char *in, int nsyms=-1, int flags=0);
+
+
+#if defined(__NT__) && !defined(UNDER_CE)
+// These are typically used in the text UI (TUI), and
+// also to convert argv to UTF-8 at startup.
+idaman THREAD_SAFE bool ida_export change_codepage(
+        qstring *out,
+        const char *in,
+        int incp,
+        int outcp);
+
+/// ANSI codepage (e.g., argv) <-> UTF-8
+#define MY_CP_ACP   0
+#define MY_CP_OEM   1
+#define MY_CP_UTF8  65001
+INLINE THREAD_SAFE bool scr_utf8(qstring *out, const char *in)
+{
+  return change_codepage(out, in, MY_CP_OEM, MY_CP_UTF8);
+}
+
+INLINE THREAD_SAFE bool utf8_scr(qstring *out, const char *in)
+{
+  return change_codepage(out, in, MY_CP_UTF8, MY_CP_OEM);
+}
+
+INLINE THREAD_SAFE bool acp_utf8(qstring *out, const char *in)
+{
+  return change_codepage(out, in, MY_CP_ACP, MY_CP_UTF8);
+}
+
+#undef MY_CP_UTF8
+#undef MY_CP_OEMCP
+#else  // !__NT__
+INLINE THREAD_SAFE bool idaapi change_codepage(qstring *, const char *, int, int) { return false; }
+INLINE THREAD_SAFE bool scr_utf8(qstring *out, const char *in) { *out = in; return true; }
+INLINE THREAD_SAFE bool utf8_scr(qstring *out, const char *in) { *out = in; return true; }
+#endif // __NT__
+
+
+//-------------------------------------------------------------------------
+// helpers to compose 16/32-bit wchar's from [M]UTF-8-encoded data
+inline wchar16_t utf8_wchar16(uchar b0, uchar b1)
+{
+  return (wchar16_t(b0 & 0x1f) << 6) | (b1 & 0x3f);
+}
+
+//-------------------------------------------------------------------------
+inline wchar16_t utf8_wchar16(uchar b0, uchar b1, uchar b2)
+{
+  return (wchar16_t(b0 & 0x0f) << 12)
+       | (wchar16_t(b1 & 0x3f) << 6)
+       | (b2 & 0x3f);
+}
+
+//-------------------------------------------------------------------------
+inline wchar32_t utf8_wchar32(uchar b0, uchar b1, uchar b2, uchar b3)
+{
+  return (wchar32_t(b0 & 0x07) << 18)
+       | (wchar32_t(b1 & 0x3f) << 12)
+       | (wchar32_t(b2 & 0x3f) << 6)
+       | (b3 & 0x3f);
+}
+
+#endif // __cplusplus
+
+
+#define BADCP wchar32_t(-1)
+
+/// Read one UTF-8 character from string. if error, return BADUCP
 
 idaman THREAD_SAFE wchar32_t ida_export get_utf8_char(const char **pptr);
 
-#if defined(__NT__) && !defined(UNDER_CE)
-/// Do not use windows CharToOem/OemToChar functions - ida can replace CodePage
-idaman void ida_export char2oem(char *inout);
-idaman void ida_export oem2char(char *inout); ///< \copydoc char2oem
-#else
-inline void idaapi char2oem(char* /*inout*/) { }
-inline void idaapi oem2char(char* /*inout*/) { }
-#endif
+
+/// Advance by n codepoints into the UTF-8 buffer.
+///
+/// Each bad byte (i.e., can't be decoded as UTF-8) will count as 1 codepoint.
+/// In addition, encountering an unexpected end-of-string (i.e., '\0') will
+/// cause this function to stop and return a non-zero value.
+///
+/// \param putf8 a pointer to the UTF-8 bytes buffer to advance into
+/// \param n     the number of codepoints to advance into the buffer
+/// \returns the number of codepoints that we failed to decode, thus:
+///          0 - success, >0 - a terminating zero was encountered.
+
+idaman THREAD_SAFE size_t ida_export skip_utf8(const char **putf8, size_t n);
 
 
-/// Set codepages to be used for char2oem/oem2char (Windows only).
-/// if parameter == -1, use CP_ACP and CP_OEMCP
-/// \return false if codepage unsupported
+/// Encode the codepoint into a UTF-8 byte sequence, and add terminating zero
+/// \param out  output buffer (must be at least MAX_UTF8_SEQ_LEN bytes wide)
+/// \param cp   the codepoint to encode
+/// \returns how many bytes were put into the output buffer
+///          (without the terminating zero), or size_t(-1) on failure
 
-idaman bool ida_export set_codepages(int acp/* = CP_ACP*/, int oemcp/* = CP_OEMCP*/);
+idaman THREAD_SAFE ssize_t ida_export put_utf8_char(char *out, wchar32_t cp);
 
 
-/// Get codepages used for char2oem/oem2char (Windows only).
-/// \param[out] oemcp  pointer to oem codepage
-/// \return current codepage
+// Get number of codepoints in UTF-8 string. Any 'bad' byte
+// (i.e., can't be decoded) counts for 1 codepoint.
 
-idaman int ida_export get_codepages(int* oemcp);
+idaman THREAD_SAFE size_t ida_export qustrlen(const char *utf8);
 
-#ifdef __NT__
-/// Convert data from codepage incp to outcp.
-/// Either codepage can be CP_UTF16 for Unicode text (buffer sizes are still in bytes!)
-/// flags: 1: convert control characters (0x01-0x1F) to glyphs
-/// \param insize  insize == -1: input is null-terminated
-/// \return number of bytes after conversion (not counting termination zero)
 
-idaman int ida_export convert_codepage(const void* in, int insize, void* out, size_t outsize, int incp, int outcp, int flags = 0);
 
-#else
-inline int idaapi convert_codepage(const void* /*in*/, int /*insize*/, void* /*out*/, size_t /*outsize*/, int /*incp*/, int /*outcp*/, int /*flags*/ = 0) { return 0; }
-#endif
 
+
+/// \defgroup CEF_ Convert encoding flags
+/// used by convert_encoding
+//@{
+#define CEF_RETERR 0x1 // return -1 if iconv() returns -1
+//@}
 
 /// Convert data from encoding fromcode into tocode.
+/// \param flags see CEF_*
 /// \return number of input bytes converted (can be less than actual size if there was an invalid character)
 /// -1 if source or target encoding is not supported
 /// possible encoding names: windows codepages ("CP1251" etc), charset names ("Shift-JIS"), and many encodings supported by iconv
 
-idaman int ida_export convert_encoding(const char *fromcode, const char *tocode, const bytevec_t *indata, bytevec_t *out, int flags = 0);
+idaman ssize_t ida_export convert_encoding(
+        bytevec_t *out,
+        const char *fromcode,
+        const char *tocode,
+        const uchar *indata,
+        ssize_t insize,
+        DEFARG(int flags,0));
+
+#ifdef __cplusplus
+inline ssize_t convert_encoding(
+        bytevec_t *out,
+        const char *fromcode,
+        const char *tocode,
+        const bytevec_t *indata,
+        DEFARG(int flags,0))
+{
+  QASSERT(1451, ssize_t(indata->size()) >= 0);
+  return convert_encoding(out, fromcode, tocode, indata->begin(), indata->size(), flags);
+}
+#endif
+
+#define ENC_WIN1252 "windows-1252"
+#define ENC_UTF8    "UTF-8" // modified UTF-8, used by Dalvik and Java (https://en.wikipedia.org/wiki/UTF-8#Modified_UTF-8)
+#define ENC_MUTF8   "MUTF-8"
+#define ENC_UTF16   "UTF-16"
+#define ENC_UTF16LE "UTF-16LE"
+#define ENC_UTF16BE "UTF-16BE"
+#define ENC_UTF32LE "UTF-32LE"
+#define ENC_UTF32BE "UTF-32BE"
+
+
+
 
 #ifndef CP_UTF8
-#define CP_UTF8 65001 ///< utf-8 codepage
+#define CP_UTF8 65001 ///< UTF-8 codepage
 #endif
 
 #ifndef CP_UTF16
-#define CP_UTF16 1200 ///< utf-16 codepage
+#define CP_UTF16 1200 ///< UTF-16 codepage
 #endif
 
 #ifdef __NT__
-#ifndef INVALID_FILE_ATTRIBUTES
-#define INVALID_FILE_ATTRIBUTES ((DWORD)-1) ///< old Visual C++ compilers were not defining this
-#endif
-#ifndef BELOW_NORMAL_PRIORITY_CLASS
-#define BELOW_NORMAL_PRIORITY_CLASS       0x00004000 ///< \copydoc INVALID_FILE_ATTRIBUTES
-#endif
+#  ifndef INVALID_FILE_ATTRIBUTES
+#    define INVALID_FILE_ATTRIBUTES ((DWORD)-1) ///< old Visual C++ compilers were not defining this
+#  endif
+#  ifndef BELOW_NORMAL_PRIORITY_CLASS
+#    define BELOW_NORMAL_PRIORITY_CLASS       0x00004000 ///< \copydoc INVALID_FILE_ATTRIBUTES
+#  endif
 #endif
 
-idaman ida_export_data char SubstChar; ///< default char, used if a char cannot be represented in a codepage
+#define SUBSTCHAR '_'     ///< default char, used if a char cannot be represented in a codepage
 
 typedef uint32 flags_t;   ///< 32-bit flags for each address
 typedef ea_t tid_t;       ///< type id (for enums, structs, etc)
@@ -3301,6 +3538,7 @@ typedef uint32 bgcolor_t;       ///< background color in RGB
 // Command line
 //-------------------------------------------------------------------------
 
+#ifdef __cplusplus
 /// Tools for command line parsing
 struct channel_redir_t
 {
@@ -3324,43 +3562,49 @@ struct channel_redir_t
   int length;                  ///< length of the redirection string in the command line
 };
 typedef qvector<channel_redir_t> channel_redirs_t; ///< vector of channel_redir_t objects
-
+#else
+typedef struct channel_redirs_tag channel_redirs_t;
+typedef struct qstrvec_tag qstrvec_t;
+#endif
 
 /// Parse a space separated string (escaping with backslash is supported).
-/// \param cmdline      the string to be parsed
 /// \param[out] args    a string vector to hold the results
 /// \param[out] redirs  map of channel redirections found in cmdline
 ///                        - if NULL, redirections won't be parsed
 ///                        - if there are syntax errors in redirections, consider them as arguments
+/// \param cmdline      the string to be parsed
 /// \param flags        #LP_PATH_WITH_ARGS or 0
 /// \return the number of parsed arguments
 
-idaman THREAD_SAFE size_t ida_export parse_command_line3(
-        const char *cmdline,
+idaman THREAD_SAFE size_t ida_export parse_command_line(
         qstrvec_t *args,
         channel_redirs_t *redirs,
+        const char *cmdline,
         int flags);
 
 
 /// Copy and expand command line arguments.
 /// For '@filename' arguments the file contents are inserted into the resulting argv.
 /// Format of the file: one switch per line, ';' for comment lines
+/// On windows, argv will also be interpreted as OEM codepage, and
+/// will be decoded as such and re-encoded into UTF-8.
 /// \param[out] p_argc  size of the returned argv array
 /// \param argc         number of entries in argv array
 /// \param argv         array of strings
 /// \return new argv (terminated by NULL).
 ///          It must be freed with free_argv()
 
-idaman char **ida_export expand_argv(int *p_argc, int argc, const char *const argv[]);
+char **expand_argv(int *p_argc, int argc, const char *const argv[]);
 
 
 /// Free 'argc' elements of 'argv'
 
-inline void free_argv(int argc, char **argv)
+INLINE void free_argv(int argc, char **argv)
 {
+  int i;
   if ( argv != NULL )
   {
-    for ( int i = 0; i < argc; i++ )
+    for ( i = 0; i < argc; i++ )
       qfree(argv[i]);
     qfree(argv);
   }
@@ -3375,12 +3619,7 @@ inline void free_argv(int argc, char **argv)
 idaman bool ida_export quote_cmdline_arg(qstring *arg);
 
 
-/// Parse the -r command line switch (for instant debugging).
-/// r_switch points to the value of the -r switch. Example: win32@localhost+
-/// \return true-ok, false-parse error
-
-idaman bool ida_export parse_dbgopts(struct instant_dbgopts_t *ido, const char *r_switch);
-
+#ifdef __cplusplus
 /// Options for instant debugging
 struct instant_dbgopts_t
 {
@@ -3393,6 +3632,15 @@ struct instant_dbgopts_t
   int event_id;         ///< event to trigger upon attaching
   bool attach;          ///< should attach to a process?
 };
+#else
+struct instant_dbgopts_t;
+#endif
+
+/// Parse the -r command line switch (for instant debugging).
+/// r_switch points to the value of the -r switch. Example: win32@localhost+
+/// \return true-ok, false-parse error
+
+idaman bool ida_export parse_dbgopts(struct instant_dbgopts_t *ido, const char *r_switch);
 
 
 //-------------------------------------------------------------------------
@@ -3417,6 +3665,7 @@ struct launch_process_params_t
                                  ///< only one of LP_LAUNCH_*_BIT bits can be specified
 #define LP_NO_ASLR        0x0040 ///< disable ASLR (only mac)
 #define LP_DETACH_TTY     0x0080 ///< detach the current tty (unix)
+#define LP_HIDE_WINDOW    0x0100 ///< tries to hide new window on startup (only windows)
 //@}
   const char *path;              ///< file to run
   const char *args;              ///< command line arguments
@@ -3430,19 +3679,26 @@ struct launch_process_params_t
   const char *startdir;          ///< current directory for the new process
   void *info;                    ///< os specific info (on windows it points to PROCESS_INFORMATION)
                                  ///< on unix, not used
+#ifdef __cplusplus
   launch_process_params_t(void)  ///< constructor
     : cb(sizeof(*this)), flags(0), path(NULL), args(NULL),
-      in_handle(-1), out_handle(-1),  err_handle(-1),
+      in_handle(-1), out_handle(-1), err_handle(-1),
       env(NULL), startdir(NULL), info(NULL) {}
+#endif
 };
 
 /// Launch the specified process in parallel.
 /// \return handle (unix: child pid), NULL - error
 
+#ifdef __cplusplus
 idaman THREAD_SAFE void *ida_export launch_process(
         const launch_process_params_t &lpp,
+        qstring *errbuf=NULL);
+#else
+idaman THREAD_SAFE void *ida_export launch_process(
+        const struct launch_process_params_t *lpp,
         qstring *errbuf);
-
+#endif
 
 /// Forcibly terminate a running process.
 /// \returns 0-ok, otherwise an error code that can be passed to winerr()
@@ -3454,7 +3710,7 @@ idaman THREAD_SAFE int ida_export term_process(void *handle);
 /// Here: child, status, flags - the same as in system call waitpid()
 /// \param timeout_ms  timeout in milliseconds
 
-idaman THREAD_SAFE int ida_export qwait_timed(int child, int *status, int flags, int timeout_ms);
+idaman THREAD_SAFE int ida_export qwait_timed(int *status, int child, int flags, int timeout_ms);
 
 #if defined(__UNIX__)
 #  ifdef WCONTINUED
@@ -3467,9 +3723,9 @@ idaman THREAD_SAFE int ida_export qwait_timed(int child, int *status, int flags,
 #  else
 #    define QWNOHANG 1
 #  endif
-inline int qwait(int child, int *status, int flags)
+inline int qwait(int *status, int child, int flags)
 {
-  return qwait_timed(child, status, flags, (flags & QWNOHANG) != 0 ? 0 : -1);
+  return qwait_timed(status, child, flags, (flags & QWNOHANG) != 0 ? 0 : -1);
 }
 #endif
 
@@ -3489,7 +3745,7 @@ inline int qwait(int child, int *status, int flags)
 idaman THREAD_SAFE int ida_export check_process_exit(
         void *handle,
         int *exit_code,
-        int msecs=-1);
+        DEFARG(int msecs,-1));
 
 /// Teletype control
 enum tty_control_t
@@ -3503,7 +3759,7 @@ enum tty_control_t
 /// Check if the current process is the owner of the TTY specified
 /// by 'fd' (typically an opened descriptor to /dev/tty).
 
-idaman THREAD_SAFE tty_control_t ida_export is_control_tty(int fd);
+idaman THREAD_SAFE enum tty_control_t ida_export is_control_tty(int fd);
 
 
 /// If the current terminal is the controlling terminal of the calling
@@ -3524,15 +3780,20 @@ idaman THREAD_SAFE void ida_export qcontrol_tty(void);
 //-------------------------------------------------------------------------
 
 /// Thread callback function
-typedef int (idaapi *qthread_cb_t)(void *ud);
+typedef int idaapi qthread_cb_t(void *ud);
 
 /// Thread opaque handle
-typedef struct __qthread_t {} *qthread_t;
+#ifdef __cplusplus
+#define OPAQUE_HANDLE(n) typedef struct __ ## n {} *n
+#else
+#define OPAQUE_HANDLE(n) typedef struct __ ## n  { char __dummy; } *n
+#endif
+OPAQUE_HANDLE(qthread_t);
 
 
 /// Create a thread and return a thread handle
 
-idaman THREAD_SAFE qthread_t ida_export qthread_create(qthread_cb_t thread_cb, void *ud);
+idaman THREAD_SAFE qthread_t ida_export qthread_create(qthread_cb_t *thread_cb, void *ud);
 
 
 /// Free a thread resource (does not kill the thread)
@@ -3568,14 +3829,15 @@ idaman THREAD_SAFE bool ida_export is_main_thread(void);
 /// Thread safe function to work with the environment
 
 idaman THREAD_SAFE bool ida_export qsetenv(const char *varname, const char *value);
-idaman THREAD_SAFE bool ida_export qgetenv(const char *varname, qstring *buf=NULL); ///< \copydoc qsetenv
+idaman THREAD_SAFE bool ida_export qgetenv(const char *varname, DEFARG(qstring *buf,NULL)); ///< \copydoc qsetenv
 
 
 //-------------------------------------------------------------------------
 /// Semaphore.
 /// Named semaphores are public, nameless ones are local to the process
 //-------------------------------------------------------------------------
-typedef struct __qsemaphore_t {} *qsemaphore_t;
+OPAQUE_HANDLE(qsemaphore_t);
+
 idaman THREAD_SAFE qsemaphore_t ida_export qsem_create(const char *name, int init_count);   ///< Create a new semaphore
 idaman THREAD_SAFE bool ida_export qsem_free(qsemaphore_t sem);                             ///< Free a semaphore
 idaman THREAD_SAFE bool ida_export qsem_post(qsemaphore_t sem);                             ///< Unlock a semaphore
@@ -3584,12 +3846,14 @@ idaman THREAD_SAFE bool ida_export qsem_wait(qsemaphore_t sem, int timeout_ms); 
 //-------------------------------------------------------------------------
 /// Mutex
 //-------------------------------------------------------------------------
-typedef struct __qmutex_t {} *qmutex_t;
+OPAQUE_HANDLE(qmutex_t);
 idaman THREAD_SAFE bool ida_export qmutex_free(qmutex_t m);      ///< Free a mutex
-idaman THREAD_SAFE qmutex_t ida_export qmutex_create();          ///< Create a new mutex
+idaman THREAD_SAFE qmutex_t ida_export qmutex_create(void);          ///< Create a new mutex
 idaman THREAD_SAFE bool ida_export qmutex_lock(qmutex_t m);      ///< Lock a mutex
 idaman THREAD_SAFE bool ida_export qmutex_unlock(qmutex_t m);    ///< Unlock a mutex
 
+
+#ifdef __cplusplus
 /// Mutex locker object. Will lock a given mutex upon creation and unlock it when the object is destroyed
 class qmutex_locker_t
 {
@@ -3598,6 +3862,7 @@ public:
   qmutex_locker_t(qmutex_t _lock) : lock(_lock) { qmutex_lock(lock); }
   ~qmutex_locker_t(void) { qmutex_unlock(lock); }
 };
+#endif
 
 //-------------------------------------------------------------------------
 //  PIPES
@@ -3634,49 +3899,23 @@ idaman THREAD_SAFE int ida_export qpipe_close(qhandle_t handle);
 
 
 /// Wait for file/socket/pipe handles.
+/// \param[out] idx       handle index
 /// \param handles        handles to wait for
 /// \param n              number of handles
 /// \param write_bitmask  bitmask of indexes of handles opened for writing
-/// \param idx            handle index
 /// \param timeout_ms     timeout value in milliseconds
 /// \return error code. on timeout, returns 0 and sets idx to -1
 
 idaman THREAD_SAFE int ida_export qwait_for_handles(
+        int *idx,
         const qhandle_t *handles,
         int n,
         uint32 write_bitmask,
-        int *idx,
         int timeout_ms);
 
 
 
 #ifndef NO_OBSOLETE_FUNCS
-idaman DEPRECATED THREAD_SAFE size_t ida_export parse_command_line(const char *cmdline, qstrvec_t *args);
-idaman DEPRECATED THREAD_SAFE size_t ida_export parse_command_line2(const char *cmdline, qstrvec_t *args, channel_redirs_t *redirs);
-idaman DEPRECATED char *ida_export qsplitpath(char *path, char **dir, char **file);
-idaman DEPRECATED void *ida_export init_process(const launch_process_params_t &lpi, qstring *errbuf);
-idaman DEPRECATED THREAD_SAFE int ida_export get_process_exit_code(void *handle, int *exit_code);
-idaman DEPRECATED NORETURN void ida_export vinterr(const char *file, int line, const char *format, va_list va);
-idaman DEPRECATED error_t ida_export_data qerrno;
-#if !defined(__BORLANDC__) && !defined(_MSC_VER)
-idaman DEPRECATED THREAD_SAFE char *ida_export strlwr(char *s);
-idaman DEPRECATED THREAD_SAFE char *ida_export strupr(char *s);
-#endif
-#define launch_process_t launch_process_params_t ///< for convenience
-#ifndef __GNUC__
-typedef uint32 ulong; ///< unsigned 32 bit value
-#endif
-#if defined(__VC__) && defined(__X64__)
-#define __VC64__
-#define qstat _stat64                   // use qstat64()
-#define qfstat _fstat64                 // use qfstat64()
-#define qstatbuf struct __stat64
-#else
-#define qstat stat
-#define qfstat fstat
-#define qstatbuf struct stat
-#endif
-#endif
+#endif // NO_OBSOLETE_FUNCS
 
-#pragma pack(pop)
 #endif /* _PRO_H */

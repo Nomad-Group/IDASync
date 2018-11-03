@@ -34,6 +34,17 @@ enum elf_RTYPE_avr
   R_AVR_MS8_LDI_NEG     = 23,
   R_AVR_LO8_LDI_GS      = 24,
   R_AVR_HI8_LDI_GS      = 25,
+  R_AVR_8               = 26,
+  R_AVR_8_LO8           = 27,
+  R_AVR_8_HI8           = 28,
+  R_AVR_8_HLO8          = 29,
+  R_AVR_DIFF8           = 30,
+  R_AVR_DIFF16          = 31,
+  R_AVR_DIFF32          = 32,
+  R_AVR_LDS_STS_16      = 33,
+  R_AVR_PORT6           = 34,
+  R_AVR_PORT5           = 35,
+  R_AVR_32_PCREL        = 36,
 };
 
 // Flags:

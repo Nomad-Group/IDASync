@@ -7,9 +7,10 @@
 
 #ifndef _IDD_HPP
 #define _IDD_HPP
-#include <area.hpp>
+#include <range.hpp>
 #include <ua.hpp>
-#pragma pack(push, 4)
+
+//-V:debug_event_t:730 not all members of a class are initialized inside the constructor
 
 /*! \file idd.hpp
 
@@ -20,7 +21,7 @@
 */
 
 /// The IDD interface version number
-#define         IDD_INTERFACE_VERSION   19
+#define         IDD_INTERFACE_VERSION   22
 
 class idc_value_t;
 class tinfo_t;
@@ -48,10 +49,11 @@ typedef int thid_t;                  ///< thread id
 /// Process information
 struct process_info_t
 {
-  pid_t pid;         ///< process id
-  char name[MAXSTR]; ///< process name
+  pid_t pid;    ///< process id
+  qstring name; ///< process name
 };
 DECLARE_TYPE_AS_MOVABLE(process_info_t);
+typedef qvector<process_info_t> procinfo_vec_t;
 
 //--------------------------------------------------------------------
 /// Runtime attributes of the debugger/process.
@@ -73,7 +75,7 @@ struct debapp_attrs_t
                         ///< (is used as a key value in exceptions.cfg)
 
 /// \def{DEF_ADDRSIZE, Default address size - see debapp_attrs_t::addrsize}
-#ifdef __X64__
+#ifdef __EA64__
 #define DEF_ADDRSIZE  8
 #else
 #define DEF_ADDRSIZE  4
@@ -114,7 +116,7 @@ struct register_info_t
                                       ///< the corresponding ::regval_t will use ::bytevec_t
 //@}
   register_class_t register_class;    ///< segment, mmx, etc.
-  char dtyp;                          ///< Register size (see \ref dt_)
+  op_dtype_t dtype;                   ///< Register size (see \ref dt_)
   const char *const *bit_strings;     ///< strings corresponding to each bit of the register.
                                       ///< (NULL = no bit, same name = multi-bits mask)
   uval_t default_bit_strings_mask;    ///< mask of default bits
@@ -128,20 +130,20 @@ DECLARE_TYPE_AS_MOVABLE(register_info_t);
 
 /// Used by debugger modules to report memory are information to IDA kernel.
 /// It is ok to return empty fields if information is not available.
-struct memory_info_t : public area_t
+struct memory_info_t : public range_t
 {
-  memory_info_t(void)
-    : sbase(0),bitness(0),perm(0) {}
-  qstring name;                ///< Memory area name
-  qstring sclass;              ///< Memory area class name
+  qstring name;                ///< Memory range name
+  qstring sclass;              ///< Memory range class name
   ea_t sbase;                  ///< Segment base (meaningful only for segmented architectures, e.g. 16-bit x86)
                                ///< The base is specified in paragraphs (i.e. shifted to the right by 4)
   uchar bitness;               ///< Number of bits in segment addresses (0-16bit, 1-32bit, 2-64bit)
-  uchar perm;                  ///< Memory area permissions (0-no information): see segment.hpp
+  uchar perm;                  ///< Memory range permissions (0-no information): see segment.hpp
+  memory_info_t(void)
+    : sbase(0),bitness(0),perm(0) {}
   bool operator ==(const memory_info_t &r) const
   {
-    return startEA == r.startEA
-        && endEA   == r.endEA
+    return start_ea == r.start_ea
+        && end_ea   == r.end_ea
         && name    == r.name
         && sclass  == r.sclass
         && sbase   == r.sbase
@@ -152,6 +154,14 @@ struct memory_info_t : public area_t
 };
 DECLARE_TYPE_AS_MOVABLE(memory_info_t);
 typedef qvector<memory_info_t> meminfo_vec_t; ///< vector of memory info objects
+
+/// Used by debugger modules to keep track of images that are not mapped uniformly into memory.
+struct scattered_segm_t : public range_t
+{
+  qstring name; ///< name of the segment
+};
+DECLARE_TYPE_AS_MOVABLE(scattered_segm_t);
+typedef qvector<scattered_segm_t> scattered_image_t; ///< vector of scattered segments
 
 //====================================================================
 //
@@ -265,6 +275,7 @@ struct debug_event_t
     return eid == BREAKPOINT && bpt.kea != BADADDR ? bpt.kea : ea;
   }
 };
+DECLARE_TYPE_AS_MOVABLE(debug_event_t);
 
 typedef int bpttype_t; ///< hardware breakpoint type (see \ref BPT_H)
 
@@ -272,7 +283,6 @@ typedef int bpttype_t; ///< hardware breakpoint type (see \ref BPT_H)
 /// Fire the breakpoint upon one of these events
 //@{
 const bpttype_t
-  BPT_OLD_EXEC = 0,                   ///< obsolete: see ::BPT_EXEC
   BPT_WRITE    = 1,                   ///< Write access
   BPT_READ     = 2,                   ///< Read access
   BPT_RDWR     = 3,                   ///< Read/write access
@@ -304,7 +314,7 @@ struct exception_info_t
   qstring name;           ///< Exception standard name
   qstring desc;           ///< Long message used to display info about the exception
 
-  exception_info_t(void) {}
+  exception_info_t(void) : code(0), flags(0) {}
   exception_info_t(uint _code, uint32 _flags, const char *_name, const char *_desc)
     : code(_code), flags(_flags), name(_name), desc(_desc) {}
 };
@@ -341,6 +351,8 @@ struct regval_t
   /// Assign this regval to the given value
   regval_t &operator = (const regval_t &r)
   {
+    if ( this == &r )
+      return *this;
     if ( r.rvtype >= 0 )
     {
       if ( rvtype >= 0 )
@@ -444,7 +456,8 @@ struct idd_opinfo_t
 /// Call stack trace information
 struct call_stack_info_t
 {
-  ea_t callea;          ///< the address of the call instruction
+  ea_t callea;          ///< the address of the call instruction.
+                        ///< for the 0th frame this is usually just the current value of EIP.
   ea_t funcea;          ///< the address of the called function
   ea_t fp;              ///< the value of the frame pointer of the called function
   bool funcok;          ///< is the function present?
@@ -467,24 +480,24 @@ struct call_stack_t : public qvector<call_stack_info_t>
 
 
 /// Call a function from the debugged application.
-/// \param func_ea  address to call
-/// \param tid      thread to use. #NO_THREAD means to use the current thread
-/// \param tif      type of the function to call
-/// \param argnum   number of actual arguments
-/// \param argv     array of arguments
 /// \param[out] r   function return value
 ///                   - for #APPCALL_MANUAL, r will hold the new stack point value
 ///                   - for #APPCALL_DEBEV, r will hold the exception information upon failure
 ///                                   and the return code will be eExecThrow
+/// \param func_ea  address to call
+/// \param tid      thread to use. #NO_THREAD means to use the current thread
+/// \param ptif     pointer to type of the function to call
+/// \param argv     array of arguments
+/// \param argnum   number of actual arguments
 /// \return #eOk if successful, otherwise an error code
 
 idaman error_t ida_export dbg_appcall(
+        idc_value_t *retval,
         ea_t func_ea,
         thid_t tid,
-        const tinfo_t *tif,
-        int argnum,
+        const tinfo_t *ptif,
         idc_value_t *argv,
-        idc_value_t *r);
+        size_t argnum);
 
 
 /// Cleanup after manual appcall.
@@ -676,36 +689,39 @@ struct debugger_t
   bool fake_memory(void) const
     { return (flags & DBG_FLAG_FAKE_MEMORY) != 0; }
 
-  const char    **register_classes;         ///< Array of register class names
-  int             register_classes_default; ///< Mask of default printed register classes
-  register_info_t *_registers;              ///< Array of registers. Use registers() to access it
-  int             registers_size;           ///< Number of registers
+  const char **register_classes;             ///< Array of register class names
+  int register_classes_default;              ///< Mask of default printed register classes
+  register_info_t *_registers;               ///< Array of registers. Use registers() to access it
+  int registers_size;                        ///< Number of registers
 
-  int             memory_page_size;         ///< Size of a memory page
+  int memory_page_size;                      ///< Size of a memory page
 
-  const uchar     *bpt_bytes;               ///< Array of bytes for a breakpoint instruction
-  uchar            bpt_size;                ///< Size of this array
-  uchar            filetype;                ///< for miniidbs: use this value
-                                            ///< for the file type after attaching
-                                            ///< to a new process
-  ushort           resume_modes;            ///< \ref DBG_RESMOD_
+  const uchar *bpt_bytes;                    ///< Array of bytes for a breakpoint instruction
+  uchar bpt_size;                            ///< Size of this array
+  uchar filetype;                            ///< for miniidbs: use this value
+                                             ///< for the file type after attaching
+                                             ///< to a new process
+  ushort resume_modes;                       ///< \ref DBG_RESMOD_
 /// \defgroup DBG_RESMOD_ Resume modes
 /// Used by debugger_t::resume_modes
 //@{
-#define DBG_RESMOD_STEP_INTO      0x0001    ///< ::RESMOD_INTO is available
-#define DBG_RESMOD_STEP_OVER      0x0002    ///< ::RESMOD_OVER is available
-#define DBG_RESMOD_STEP_OUT       0x0004    ///< ::RESMOD_OUT is available
-#define DBG_RESMOD_STEP_SRCINTO   0x0008    ///< ::RESMOD_SRCINTO is available
-#define DBG_RESMOD_STEP_SRCOVER   0x0010    ///< ::RESMOD_SRCOVER is available
-#define DBG_RESMOD_STEP_SRCOUT    0x0020    ///< ::RESMOD_SRCOUT is available
-#define DBG_RESMOD_STEP_USER      0x0040    ///< ::RESMOD_USER is available
-#define DBG_RESMOD_STEP_HANDLE    0x0080    ///< ::RESMOD_HANDLE is available
+#define DBG_RESMOD_STEP_INTO      0x0001     ///< ::RESMOD_INTO is available
+#define DBG_RESMOD_STEP_OVER      0x0002     ///< ::RESMOD_OVER is available
+#define DBG_RESMOD_STEP_OUT       0x0004     ///< ::RESMOD_OUT is available
+#define DBG_RESMOD_STEP_SRCINTO   0x0008     ///< ::RESMOD_SRCINTO is available
+#define DBG_RESMOD_STEP_SRCOVER   0x0010     ///< ::RESMOD_SRCOVER is available
+#define DBG_RESMOD_STEP_SRCOUT    0x0020     ///< ::RESMOD_SRCOUT is available
+#define DBG_RESMOD_STEP_USER      0x0040     ///< ::RESMOD_USER is available
+#define DBG_RESMOD_STEP_HANDLE    0x0080     ///< ::RESMOD_HANDLE is available
 //@}
   bool is_resmod_avail(int resmod) const
     { return (resume_modes & (1 << (resmod - 1))) != 0; }
 
   // A function for accessing the '_registers' array
-  inline register_info_t &registers(int idx);
+  inline register_info_t &registers(int idx)
+  {
+    return _registers[idx];
+  }
 
 #if !defined(_MSC_VER)  // this compiler complains :(
   static const int default_port_number = 23946;
@@ -724,13 +740,12 @@ struct debugger_t
   /// \return success
   bool (idaapi *term_debugger)(void);
 
-  /// Return information about the n-th "compatible" running process.
-  /// If n is 0, the processes list is reinitialized.
+  /// Return information about the running processes.
   /// This function is called from the main thread.
   /// \retval 1  ok
   /// \retval 0  failed
   /// \retval -1 network error
-  int (idaapi *process_get_info)(int n, process_info_t *info);
+  int (idaapi *get_processes)(procinfo_vec_t *procs);
 
   /// Start an executable to debug.
   /// This function is called from debthread.
@@ -761,16 +776,20 @@ struct debugger_t
 #define DBG_PROC_32BIT  0x04            ///< application is 32-bit
 #define DBG_PROC_64BIT  0x08            ///< application is 64-bit
 #define DBG_NO_TRACE    0x10            ///< do not trace the application (mac/linux)
+#define DBG_HIDE_WINDOW 0x20            ///< application should be hidden on startup (windows)
 //@}
 #define CRC32_MISMATCH  0x40000000      ///< crc32 mismatch bit (see return values for debugger_t::start_process)
 
   /// Attach to an existing running process.
   /// event_id should be equal to -1 if not attaching to a crashed process.
   /// This function is called from debthread.
+  /// \param pid               process id to attach
+  /// \param event_id          event to trigger upon attaching
+  /// \param dbg_proc_flags    \ref DBG_PROC_
   /// \retval  1  ok
   /// \retval  0  failed
   /// \retval -1  network error
-  int (idaapi *attach_process)(pid_t pid, int event_id);
+  int (idaapi *attach_process)(pid_t pid, int event_id, int dbg_proc_flags);
 
   /// Detach from the debugged process.
   /// May be called while the process is running or suspended.
@@ -862,7 +881,7 @@ struct debugger_t
   /// This function is called from debthread.
   /// \param tid      thread id
   /// \param clsmask  bitmask of register classes to read
-  /// \param regval   pointer to vector of regvals for all registers.
+  /// \param values   pointer to vector of regvals for all registers.
   ///                 regval is assumed to have debugger_t::registers_size elements
   /// \retval  1  ok
   /// \retval  0  failed
@@ -873,7 +892,7 @@ struct debugger_t
   /// This function is called from debthread.
   /// \param tid     thread id
   /// \param regidx  register index
-  /// \param regval  new value of the register
+  /// \param value   new value of the register
   /// \retval  1  ok
   /// \retval  0  failed
   /// \retval -1  network error
@@ -882,27 +901,27 @@ struct debugger_t
   /// Get information about the base of a segment register.
   /// Currently used by the IBM PC module to resolve references like fs:0.
   /// This function is called from debthread.
+  /// \param answer      pointer to the answer. can't be NULL.
   /// \param tid         thread id
   /// \param sreg_value  value of the segment register (returned by get_reg_val())
-  /// \param answer      pointer to the answer. can't be NULL.
   /// \retval  1  ok
   /// \retval  0  failed
   /// \retval -1  network error
-  int (idaapi *thread_get_sreg_base)(thid_t tid, int sreg_value, ea_t *answer);
+  int (idaapi *thread_get_sreg_base)(ea_t *answer, thid_t tid, int sreg_value);
 
   /// \name Memory manipulation
   /// The following functions manipulate bytes in the memory.
   //@{
 
-  /// Get information on the memory areas.
-  /// The debugger module fills 'areas'. The returned vector MUST be sorted.
+  /// Get information on the memory ranges.
+  /// The debugger module fills 'ranges'. The returned vector MUST be sorted.
   /// This function is called from debthread.
   /// \retval  -3  use idb segmentation
   /// \retval  -2  no changes
   /// \retval  -1  the process does not exist anymore
   /// \retval   0  failed
   /// \retval   1  new memory layout is returned
-  int (idaapi *get_memory_info)(meminfo_vec_t &areas);
+  int (idaapi *get_memory_info)(meminfo_vec_t &ranges);
 
   /// Read process memory.
   /// Returns number of read bytes.
@@ -955,9 +974,9 @@ struct debugger_t
   /// Open/close/read a remote file.
   /// These functions are called from the main thread
   //@{
-  int  (idaapi *open_file)(const char *file, uint32 *fsize, bool readonly); // -1-error
+  int  (idaapi *open_file)(const char *file, uint64 *fsize, bool readonly); // -1-error
   void (idaapi *close_file)(int fn);
-  ssize_t (idaapi *read_file)(int fn, uint32 off, void *buf, size_t size);
+  ssize_t (idaapi *read_file)(int fn, qoff64_t off, void *buf, size_t size);
   //@}
 
   /// Map process address.
@@ -1078,7 +1097,7 @@ struct debugger_t
   int (idaapi *eval_lowcnd)(thid_t tid, ea_t ea);
 
   /// This function is called from main thread
-  ssize_t (idaapi *write_file)(int fn, uint32 off, const void *buf, size_t size);
+  ssize_t (idaapi *write_file)(int fn, qoff64_t off, const void *buf, size_t size);
 
   /// Perform a debugger-specific function.
   /// This function is called from debthread
@@ -1101,42 +1120,24 @@ struct debugger_t
   /// Get (store to out_pattrs) process/debugger-specific runtime attributes.
   /// This function is called from main thread.
   void (idaapi *get_debapp_attrs)(debapp_attrs_t *out_pattrs);
+
+  /// Get the path to a file containing source debug info for the given module.
+  /// This allows srcinfo providers to call into the debugger when looking for debug info.
+  /// It is useful in certain cases like the iOS debugger, which is a remote debugger but
+  /// the remote debugserver does not provide dwarf info. So, we allow the debugger client
+  /// to decide where to look for debug info locally.
+  /// \param path  output path (file might not exist)
+  /// \param base  base address of a module in the target process
+  /// \return success, result stored in 'path'
+  bool (idaapi *get_srcinfo_path)(qstring *path, ea_t base);
 };
 
-#ifndef NO_OBSOLETE_FUNCS
-DEPRECATED typedef thid_t thread_id_t;
-DEPRECATED typedef pid_t process_id_t;
-#define PROCESS_NO_THREAD 0          // No thread
-DEPRECATED struct idd_opinfo_old_t { ea_t addr; uval_t value;  bool modified; };
-idaman DEPRECATED error_t ida_export appcall(ea_t func_ea, thid_t tid, const type_t *type, const p_list *fields, int argnum, idc_value_t *argv, idc_value_t *r);
+#ifdef __X64__
+  CASSERT(sizeof(debugger_t) == 424);
+#else
+  CASSERT(sizeof(debugger_t) == 216);
 #endif
 
-CASSERT((sizeof(debugger_t) % 4) == 0);
-
-inline register_info_t &debugger_t::registers(int idx)
-{
-  if ( version < 19 )
-  {
-    struct register_info_old_t
-    {
-      const char *name;
-      uint32 flags;
-      register_class_t register_class;
-      char dtyp;
-      const char *const *bit_strings;
-      uint32 bit_strings_default;
-    };
-    register_info_old_t *regs = (register_info_old_t *)_registers;
-    regs += idx;
-    return *(register_info_t *)regs;
-  }
-  return _registers[idx];
-}
-
-//====================================================================
-// internal kernel function, should not be used by plugins yet
-// 1-resumed,0-suspended,-1-error
-int idaapi handle_debug_event(const debug_event_t *ev, int rqflags);
 
 #define RQ_MASKING  0x0001  // masking step handler: unless errors, tmpbpt handlers won't be called
                             // should be used only with request_internal_step()
@@ -1157,5 +1158,4 @@ int idaapi handle_debug_event(const debug_event_t *ev, int rqflags);
 #define RQ_RESMOD_SHIFT 12
 #define RQ_INTO (RESMOD_INTO << RQ_RESMOD_SHIFT)
 
-#pragma pack(pop)
 #endif // _IDD_HPP

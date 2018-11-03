@@ -79,7 +79,8 @@ QList<Edge *> Node::edges() const
 
 void Node::calculateForces()
 {
-  if (!scene() || scene()->mouseGrabberItem() == this) {
+  if ( !scene() || scene()->mouseGrabberItem() == this )
+  {
     newPos = pos();
     return;
   }
@@ -87,16 +88,18 @@ void Node::calculateForces()
   // Sum up all forces pushing this item away
   qreal xvel = 0;
   qreal yvel = 0;
-  foreach (QGraphicsItem *item, scene()->items()) {
+  foreach (QGraphicsItem *item, scene()->items())
+  {
     Node *node = qgraphicsitem_cast<Node *>(item);
-    if (!node)
+    if ( !node )
       continue;
 
     QLineF line(mapFromItem(node, 0, 0), QPointF(0, 0));
     qreal dx = line.dx();
     qreal dy = line.dy();
     double l = 2.0 * (dx * dx + dy * dy);
-    if (l > 0) {
+    if ( l > 0 )
+    {
       xvel += (dx * 150.0) / l;
       yvel += (dy * 150.0) / l;
     }
@@ -104,9 +107,10 @@ void Node::calculateForces()
 
   // Now subtract all forces pulling items together
   double weight = (edgeList.size() + 1) * 100;
-  foreach (Edge *edge, edgeList) {
+  foreach (Edge *edge, edgeList)
+  {
     QPointF pos;
-    if (edge->sourceNode() == this)
+    if ( edge->sourceNode() == this )
       pos = mapFromItem(edge->destNode(), 0, 0);
     else
       pos = mapFromItem(edge->sourceNode(), 0, 0);
@@ -114,7 +118,7 @@ void Node::calculateForces()
     yvel += pos.y() / weight;
   }
 
-  if (qAbs(xvel) < 0.1 && qAbs(yvel) < 0.1)
+  if ( qAbs(xvel) < 0.1 && qAbs(yvel) < 0.1 )
     xvel = yvel = 0;
 
   QRectF sceneRect = scene()->sceneRect();
@@ -125,7 +129,7 @@ void Node::calculateForces()
 
 bool Node::advance()
 {
-  if (newPos == pos())
+  if ( newPos == pos() )
     return false;
 
   setPos(newPos);
@@ -134,15 +138,16 @@ bool Node::advance()
 
 QVariant Node::itemChange(GraphicsItemChange change, const QVariant &value)
 {
-  switch (change) {
-  case ItemPositionHasChanged:
-    foreach (Edge *edge, edgeList)
-      edge->adjust();
-    graph->itemMoved();
-    break;
-  default:
-    break;
-  };
+  switch ( change )
+  {
+    case ItemPositionHasChanged:
+      foreach (Edge *edge, edgeList)
+        edge->adjust();
+      graph->itemMoved();
+      break;
+    default:
+      break;
+  }
 
   return QGraphicsTextItem::itemChange(change, value);
 }

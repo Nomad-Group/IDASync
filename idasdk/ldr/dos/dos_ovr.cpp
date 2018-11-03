@@ -66,12 +66,12 @@ o_type PrepareOverlayType(linput_t *li, exehdr *E)
 static bool isStubPascal(ea_t ea)
 {
   return get_word(ea) == 0x3FCD            // int 3F
-      && (int32)get_long(ea+4) > 0         // fileoff
+      && (int32)get_dword(ea+4) > 0         // fileoff
       && get_word(ea+8) != 0               // codesize
       && (short)get_word(ea+10) >= 0       // relsize (assume max 32k)
       && (short)get_word(ea+12) > 0        // nentries
       && (short)get_word(ea+12) < (0x7FFF / sizeof(ovrentry_t)) // nentries
-      && isEnabled(toEA(inf.baseaddr + get_word(ea+14), 0)); // prevstub
+      && is_mapped(to_ea(inf.baseaddr + get_word(ea+14), 0)); // prevstub
 }
 
 //------------------------------------------------------------------------
@@ -86,18 +86,18 @@ linput_t *CheckExternOverlays(void)
     return NULL;
   }
 
-  for ( segment_t *s = get_first_seg(); s != NULL; s = get_next_seg(s->startEA) )
+  for ( segment_t *s = get_first_seg(); s != NULL; s = get_next_seg(s->start_ea) )
   {
-    ea_t ea = s->startEA;
+    ea_t ea = s->start_ea;
     if ( isStubPascal(ea) )
     {
-      switch ( askyn_c(ASKBTN_NO,
-                       "This file contains reference to Pascal-stype overlays\n"
-                       "\3Do you want to load it?") )
+      switch ( ask_yn(ASKBTN_NO,
+                      "This file contains reference to Pascal-stype overlays\n"
+                      "Do you want to load it?") )
       {
 
         case ASKBTN_NO:
-          return(NULL);
+          return NULL;
         case ASKBTN_CANCEL:
           loader_failure();
         default:  //Yes
@@ -105,9 +105,9 @@ linput_t *CheckExternOverlays(void)
       }
       while ( true )
       {
-        p = askfile_c(0,
-                      set_file_ext(buf, sizeof(buf), buf, "ovr"),
-                      "Please enter pascal overlays file");
+        p = ask_file(false,
+                     set_file_ext(buf, sizeof(buf), buf, "ovr"),
+                     "Please enter pascal overlays file");
         CheckCtrlBrk();
         if ( p == NULL )
           return NULL;
@@ -125,31 +125,31 @@ linput_t *CheckExternOverlays(void)
 //------------------------------------------------------------------------
 static void removeBytes(void)
 {
-  ea_t ea = inf.ominEA;
+  ea_t ea = inf.omin_ea;
 
   msg("Deleting bytes which do not belong to any segment...\n");
   for ( int i = 0; ; ++i )
   {
-    if ( ea >= inf.omaxEA )
+    if ( ea >= inf.omax_ea )
       break;
 
     segment_t *sptr = getnseg(i);
 
-    if ( ea < sptr->startEA )
+    if ( ea < sptr->start_ea )
     {
-      showAddr(ea);
+      show_addr(ea);
       deb(IDA_DEBUG_LDR,
           "Deleting bytes at %a..%a (they do not belong to any segment)...\n",
           ea,
-          sptr->startEA);
-      if ( disable_flags(ea,sptr->startEA) )
+          sptr->start_ea);
+      if ( disable_flags(ea,sptr->start_ea) )
       {
         warning("Maximal number of segments is reached, some bytes are out of segments");
         return;
       }
       CheckCtrlBrk();
     }
-    ea = sptr->endEA;
+    ea = sptr->end_ea;
   }
 }
 
@@ -187,21 +187,21 @@ static void describeStub(ea_t stubEA)
     if ( st == NULL )
       goto badst;
     st->props |= SF_NOLIST;
-    if ( add_struc_fld(st, byteflag()|hexflag(), 2,
+    if ( add_struc_fld(st, byte_flag()|hex_flag(), 2,
                        "int_code", "Overlay manager interrupt")
-      || add_struc_fld(st, wordflag()|hexflag(), sizeof(short),
+      || add_struc_fld(st, word_flag()|hex_flag(), sizeof(short),
                        "memswap", "Runtime memory swap address")
-      || add_struc_fld(st, dwrdflag()|hexflag(), sizeof(int32),
+      || add_struc_fld(st, dword_flag()|hex_flag(), sizeof(int32),
                        "fileoff", "Offset in the file to the code")
-      || add_struc_fld(st, wordflag()|hexflag(), sizeof(short),
+      || add_struc_fld(st, word_flag()|hex_flag(), sizeof(short),
                        "codesize", "Code size")
-      || add_struc_fld(st, wordflag()|hexflag(), sizeof(short),
+      || add_struc_fld(st, word_flag()|hex_flag(), sizeof(short),
                        "relsize", "Relocation area size")
-      || add_struc_fld(st, wordflag()|decflag(), sizeof(short),
+      || add_struc_fld(st, word_flag()|dec_flag(), sizeof(short),
                        "nentries", "Number of overlay entries")
-      || add_struc_fld(st, wordflag()|segflag(), sizeof(short),
+      || add_struc_fld(st, word_flag()|seg_flag(), sizeof(short),
                        "prevstub", "Previous stub")
-      || add_struc_fld(st, byteflag()|hexflag(), STUBUNK_SIZE,
+      || add_struc_fld(st, byte_flag()|hex_flag(), STUBUNK_SIZE,
                        "workarea", NULL) )
     {
 badst:
@@ -217,7 +217,7 @@ badst:
       set_array_parameters(member_id(st, 0), &apt);
       set_array_parameters(member_id(st,offsetof(stub_t,unknown)), &apt);
       // st->props |= SF_NOLIST;
-      // save_struc(st);
+      // save_struc(st, true);
       id = st->id;
     }
   }
@@ -230,8 +230,8 @@ badst:
 
   if ( id != BADNODE )
   {
-    do_unknown_range(stubEA, sizeof(stub_t), DOUNK_EXPAND);
-    doStruct(stubEA, sizeof(stub_t), id);
+    del_items(stubEA, DELIT_EXPAND, sizeof(stub_t));
+    create_struct(stubEA, sizeof(stub_t), id);
   }
 
   stubEA += sizeof(stub_t);
@@ -253,14 +253,14 @@ static void load_overlay(
         uint32 exeinfo,
         ea_t stubEA,
         segment_t *s,
-        int32 fboff)
+        qoff64_t fboff)
 {
   ea_t entEA = stubEA + sizeof(stub_t);
   stub_t stub;
 
-  if ( !get_many_bytes(stubEA, &stub, sizeof(stub)) )
+  if ( get_bytes(&stub, sizeof(stub), stubEA) != sizeof(stub) )
     errstruct();
-  msg("Overlay stub at %a, code at %a...\n", stubEA, s->startEA);
+  msg("Overlay stub at %a, code at %a...\n", stubEA, s->start_ea);
   if ( stub.CDh != 0xCD )
     errstruct();   // bad stub
 
@@ -271,8 +271,8 @@ static void load_overlay(
     ++stub.codesize;
     waszero = true;
   }
-  s->endEA = s->startEA + stub.codesize;
-  file2base(li, fboff+stub.fileoff, s->startEA, s->endEA,
+  s->end_ea = s->start_ea + stub.codesize;
+  file2base(li, fboff+stub.fileoff, s->start_ea, s->end_ea,
             fboff == 0
           ? FILEREG_NOTPATCHABLE
           : FILEREG_PATCHABLE);
@@ -283,24 +283,21 @@ static void load_overlay(
   }
 
   uint i;
-  for( i = 0; i < stub.nentries; ++i )
+  for ( i = 0; i < stub.nentries; ++i )
   {
-    showAddr(entEA);
+    show_addr(entEA);
     put_byte(entEA, 0xEA);     // jmp far
     ushort offset = get_word(entEA+2);
     put_word(entEA+1, offset); // offset
     put_word(entEA+3, s->sel); // selector
-    auto_make_proc(toEA(ask_selector(s->sel), offset));
+    auto_make_proc(to_ea(sel2para(s->sel), offset));
     entEA += sizeof(ovrentry_t);
     CheckCtrlBrk();
   }
 
   qlseek(li, fboff + stub.fileoff + stub.codesize);
 
-  fixup_data_t fd;
-  fd.type = FIXUP_SEG16;
-  fd.off  = 0;
-  fd.displacement = 0;
+  fixup_data_t fd(FIXUP_SEG16);
 
   uint relcnt = stub.relsize / 2;
   validate_array_count(li, &relcnt, sizeof(ushort), "Relocation count");
@@ -319,8 +316,8 @@ static void load_overlay(
       if ( *relc > stub.codesize )
         errstruct();
 
-      ea_t xEA = s->startEA + *relc++;
-      showAddr(xEA);
+      ea_t xEA = s->start_ea + *relc++;
+      show_addr(xEA);
       ushort relseg = get_word(xEA);
       if ( exeinfo != 0 )
       {
@@ -331,9 +328,9 @@ static void load_overlay(
         relseg = si.seg;
       }
 
-      fd.sel = relseg + (ushort)inf.baseaddr;
-      set_fixup(xEA, &fd);
-      put_word(xEA, fd.sel);
+      fd.sel = relseg + inf.baseaddr;
+      fd.set(xEA);
+      put_word(xEA, ushort(fd.sel));
       CheckCtrlBrk();
     } while ( --relcnt );
     qfree(relb);
@@ -346,8 +343,8 @@ static void add_seg16(ea_t ea)
 {
   segment_t s;
   s.sel     = ea >> 4;
-  s.startEA = ea;
-  s.endEA   = BADADDR;
+  s.start_ea = ea;
+  s.end_ea   = BADADDR;
   s.align   = saRelByte;
   s.comb    = scPub;
   add_segm_ex(&s, NULL, NULL, ADDSEG_NOSREG);
@@ -358,25 +355,25 @@ static sel_t AdjustStub(ea_t ea) // returns prev stub
 {
   segment_t *seg = getseg(ea);
 
-  if ( ea != seg->startEA )
+  if ( ea != seg->start_ea )
     add_seg16(ea);
 
   ushort nentries = get_word(ea+12);
   uint32 segsize = sizeof(stub_t) + nentries * sizeof(ovrentry_t);
   seg = getseg(ea);
 
-  asize_t realsize = seg->endEA - seg->startEA;
+  asize_t realsize = seg->end_ea - seg->start_ea;
   if ( segsize > realsize )
     return BADSEL;      // this stub is bad
 
   if ( segsize != realsize )
   {
-    ea_t next = seg->startEA + segsize;
+    ea_t next = seg->start_ea + segsize;
 
-    set_segm_end(seg->startEA, next, 0);
+    set_segm_end(seg->start_ea, next, 0);
     next += 0xF;
     next &= ~0xF;
-    if ( isEnabled(next) )
+    if ( is_mapped(next) )
     {
       segment_t *s = getseg(next);
       if ( s == NULL )
@@ -390,13 +387,13 @@ static sel_t AdjustStub(ea_t ea) // returns prev stub
 void LoadPascalOverlays(linput_t *li)
 {
   //AdjustPascalOverlay
-  for ( ea_t ea = inf.minEA; ea < inf.maxEA; )
+  for ( ea_t ea = inf.min_ea; ea < inf.max_ea; )
   {
     ea &= ~0xF;
     if ( isStubPascal(ea) )
     {
       AdjustStub(ea);
-      ea = getseg(ea)->endEA;
+      ea = getseg(ea)->end_ea;
       ea += 0xF;
       CheckCtrlBrk();
     }
@@ -410,24 +407,25 @@ void LoadPascalOverlays(linput_t *li)
   int i = 0;
   for ( segment_t *s0 = get_first_seg(); s0 != NULL; s0 = get_next_seg(ea), ++i )
   {
-    ea = s0->startEA;
+    ea = s0->start_ea;
 
     if ( get_byte(ea) != 0xCD || get_byte(ea+1) != 0x3F )
       continue;
     set_segm_class(s0, stub_class);
-    set_segm_name(s0, stub_name_fmt, i);
+    char sname[32];
+    qsnprintf(sname, sizeof(sname), stub_name_fmt, i);
+    set_segm_name(s0, sname);
 
     segment_t s;
-    s.align   = saRelByte;
-    s.comb    = scPub;
-    s.align   = saRelPara;
-    s.startEA = (inf.maxEA + 0xF) & ~0xF;
-    s.sel = setup_selector(s.startEA >> 4);
+    s.comb = scPub;
+    s.align = saRelPara;
+    s.start_ea = (inf.max_ea + 0xF) & ~0xF;
+    s.sel = setup_selector(s.start_ea >> 4);
     // 04.06.99 ig: what is exeinfo and why it is passed as 0 here?
     load_overlay(li, 0/*???*/, ea, &s, ovr_off); //i
-    if ( !add_segm_ex(&s, NULL, ovr_class, ADDSEG_NOSREG|ADDSEG_SPARSE) )
+    qsnprintf(sname, sizeof(sname), ovr_name_fmt, i);
+    if ( !add_segm_ex(&s, sname, ovr_class, ADDSEG_NOSREG|ADDSEG_SPARSE) )
       loader_failure();
-    set_segm_name(&s, ovr_name_fmt, i);
     describeStub(ea);
     CheckCtrlBrk();
   }
@@ -441,7 +439,7 @@ static ea_t CppInfoBase(fbov_t *fbov)
   ea_t siEA = get_fileregion_ea(fbov->exeinfo);
 
   if ( siEA == BADADDR
-    || !get_many_bytes(siEA, &si, sizeof(si)) )
+    || get_bytes(&si, sizeof(si), siEA) != sizeof(si) )
   {
     errstruct();
   }
@@ -457,8 +455,8 @@ static ea_t CppInfoBase(fbov_t *fbov)
         errstruct();
       lseg = si.seg;
 
-      if ( siEA < inf.ominEA+sizeof(si)
-        || !get_many_bytes(siEA -= sizeof(si), &si, sizeof(si)) )
+      if ( siEA < inf.omin_ea+sizeof(si)
+        || get_bytes(&si, sizeof(si), siEA -= sizeof(si)) != sizeof(si) )
       {
         errstruct();
       }
@@ -491,7 +489,7 @@ sel_t LoadCppOverlays(linput_t *li)
   {
     seginfo_t si;
 
-    if ( !get_many_bytes(siEA, &si, sizeof(si)) )
+    if ( get_bytes(&si, sizeof(si), siEA) != sizeof(si) )
       errstruct();
     siEA += sizeof(si);
 
@@ -530,28 +528,31 @@ sel_t LoadCppOverlays(linput_t *li)
     if ( si.flags & SI_OVR )
     {
       s.align = saRelPara;
-      s.startEA = (inf.maxEA + 0xF) & ~0xF;
-      s.sel = setup_selector(s.startEA >> 4);
-      //i endEA is set in load_overlay()
-      load_overlay(li, fbov.exeinfo, toEA(si.seg, 0), &s, ovr_off);
+      s.start_ea = (inf.max_ea + 0xF) & ~0xF;
+      s.sel = setup_selector(s.start_ea >> 4);
+      //i end_ea is set in load_overlay()
+      load_overlay(li, fbov.exeinfo, to_ea(si.seg, 0), &s, ovr_off);
       if ( s.type != SEG_NULL )
         s.type = SEG_CODE;
-      if ( !add_segm_ex(&s, NULL, ovr_class, ADDSEG_NOSREG|ADDSEG_SPARSE) )
+      char sname[32];
+      qsnprintf(sname, sizeof(sname), ovr_name_fmt, i);
+      if ( !add_segm_ex(&s, sname, ovr_class, ADDSEG_NOSREG|ADDSEG_SPARSE) )
         loader_failure();
-      set_segm_name(&s, ovr_name_fmt, i);
       s.name = 0;
       s.type = SEG_NORM;        // undefined segment type
       sclass = stub_class;
     }
-    s.sel     = si.seg;
-    s.startEA = toEA(s.sel, si.minoff);
-    s.endEA   = toEA(s.sel, si.maxoff);
+    s.sel      = si.seg;
+    s.start_ea = to_ea(s.sel, si.minoff);
+    s.end_ea   = to_ea(s.sel, si.maxoff);
     if ( !add_segm_ex(&s, NULL, sclass, ADDSEG_NOSREG|ADDSEG_SPARSE) )
       loader_failure();
     if ( si.flags & SI_OVR )
     {
-      describeStub(s.startEA);
-      set_segm_name(&s, stub_name_fmt, i);
+      describeStub(s.start_ea);
+      char sname[32];
+      qsnprintf(sname, sizeof(sname), stub_name_fmt, i);
+      set_segm_name(&s, sname);
     }
     CheckCtrlBrk();
   }
@@ -606,7 +607,7 @@ static uint CreateMsOverlaysTable(linput_t *li, bool *PossibleDynamic)
     if ( E.exe_ident != EXE_ID   //only MZ !
       || ost < delta
       || (uint32)o.Toff + (E.ReloCnt*4) > (ost -= delta)
-      || o.size > ost)
+      || o.size > ost )
     {
       return Count;
     }
@@ -631,12 +632,7 @@ static uint CreateMsOverlaysTable(linput_t *li, bool *PossibleDynamic)
 //------------------------------------------------------------------------
 static void LoadMsOvrData(linput_t *li, uint Count, bool Dynamic)
 {
-  fixup_data_t fd;
-
-  fd.type         = FIXUP_SEG16;
-  fd.off          = 0;
-  fd.displacement = 0;
-
+  fixup_data_t fd(FIXUP_SEG16);
   for ( uint i = 1; i <= Count; ++i )
   {
     modsc_t o;
@@ -648,18 +644,19 @@ static void LoadMsOvrData(linput_t *li, uint Count, bool Dynamic)
     segment_t s;
     s.comb    = scPub;
     s.align   = saRelPara;
-    s.startEA = (inf.maxEA + 0xF) & ~0xF;
-    s.sel = setup_selector(s.startEA >> 4);
+    s.start_ea = (inf.max_ea + 0xF) & ~0xF;
+    s.sel = setup_selector(s.start_ea >> 4);
     msnode.altset(i, s.sel);
-    s.endEA = s.startEA + ((uint32)o.Mpara << 4);
+    s.end_ea = s.start_ea + ((uint32)o.Mpara << 4);
     file2base(li,
-              o.bpos + o.Hsiz*16,
-              s.startEA,
-              s.startEA + o.size,
+              o.bpos + o.Hsiz*16LL,
+              s.start_ea,
+              s.start_ea + o.size,
               FILEREG_PATCHABLE);
-    if ( !add_segm_ex(&s, NULL, ovr_class, ADDSEG_NOSREG|ADDSEG_SPARSE) )
+    char sname[32];
+    qsnprintf(sname, sizeof(sname), ovr_name_fmt, i);
+    if ( !add_segm_ex(&s, sname, ovr_class, ADDSEG_NOSREG|ADDSEG_SPARSE) )
       loader_failure();
-    set_segm_name(&s, ovr_name_fmt, i);
 
     qlseek(li, o.bpos + o.Toff);
 
@@ -673,18 +670,18 @@ static void LoadMsOvrData(linput_t *li, uint Count, bool Dynamic)
 //             address == pseudodata segment  to load (from data in ovr!)
 //             We should checked it but don't have any testcase
       ea_t xEA = Dynamic
-               ? s.startEA + buf[0]
-               : s.startEA + toEA(buf[1], buf[0]);
+               ? s.start_ea + buf[0]
+               : s.start_ea + to_ea(buf[1], buf[0]);
 
-      if ( xEA >= s.endEA )
+      if ( xEA >= s.end_ea )
         errstruct();
 
-      showAddr(xEA);
+      show_addr(xEA);
 
       ushort ubs = ushort(get_word(xEA) + inf.baseaddr);
       put_word(xEA, ubs);
       fd.sel = ubs;
-      set_fixup(xEA, &fd);
+      fd.set(xEA);
       add_segm_by_selector(ubs, CLASS_CODE);
       CheckCtrlBrk();
     }
@@ -702,15 +699,15 @@ interr:
   }
 
   uint32 src[2] = { 0, dsc.bpos };
-  ea_t dstea, sea, ea = inf.minEA;
+  ea_t dstea, sea, ea = inf.min_ea;
   uint AddSkip, Count = *Cnt;
   uint i, j;  // watcom ...
   segment_t *s;
 
   msg("Searching the overlay reference data table...\n");
-  while ( ea + sizeof(src) < inf.maxEA
+  while ( ea + sizeof(src) < inf.max_ea
        && (sea = bin_search(ea,
-                            inf.maxEA,
+                            inf.max_ea,
                             (uchar *)src,
                             NULL,
                             sizeof(src),
@@ -720,8 +717,8 @@ interr:
     ea = sea + sizeof(uint32);
     s = getseg(ea);
     if ( s == NULL
-      || ea - s->startEA < sizeof(uint32)*(Count+1)
-      || ea + (2*sizeof(uint32) * Count) > s->endEA )
+      || ea - s->start_ea < sizeof(uint32)*(Count+1)
+      || ea + (2*sizeof(uint32) * Count) > s->end_ea )
     {
 nextfndadd:
       ea += sizeof(uint32);
@@ -733,12 +730,12 @@ nextfnd:
     for ( i = 2; i <= Count + AddSkip; ++i )
     {
       ea += sizeof(uint32);
-      uint32 pos = get_long(ea);
+      uint32 pos = get_dword(ea);
 
       if ( pos == 0 )
       {
         ++AddSkip;
-        if ( ea + (2*sizeof(uint32) * (Count+AddSkip-i)) > s->endEA )
+        if ( ea + (2*sizeof(uint32) * (Count+AddSkip-i)) > s->end_ea )
           goto nextfnd;
       }
       else
@@ -761,7 +758,7 @@ found:
     ea = sea + sizeof(uint32);
     for ( i = 2; i <= Count; ++i )
     {
-      if ( !get_long(ea += sizeof(uint32)) )
+      if ( !get_dword(ea += sizeof(uint32)) )
       {
         if ( !AddSkip )
           goto interr;
@@ -785,14 +782,14 @@ found:
   ea = sea - ((Count-1) * sizeof(ushort)) - 1;  // -1 -- unification
   do
   {
-    ea = bin_search(s->startEA,
+    ea = bin_search(s->start_ea,
                     ea+1,
                     (uchar *)src,
                     NULL,
                     sizeof(ushort),
                     BIN_SEARCH_BACKWARD,
                     BIN_SEARCH_CASE | BIN_SEARCH_NOBREAK);
-    if ( ea == BADADDR)
+    if ( ea == BADADDR )
       goto badtable;
   } while ( (sea - ea) % sizeof(ushort) );
 
@@ -818,7 +815,7 @@ found:
     AddSkip = i;
     do
     {
-      if ( get_long(sea - sizeof(uint32)) )
+      if ( get_dword(sea - sizeof(uint32)) )
         break;
       if ( (ref_oi_cnt -= 2) <= 1 )
         goto badtable;
@@ -845,7 +842,7 @@ found:
       Count += i;
       do
       {
-        if ( get_long(ea += sizeof(uint32)) )
+        if ( get_dword(ea += sizeof(uint32)) )
           goto badtable;
       }
       while ( --i );
@@ -861,14 +858,25 @@ found:
   ref_off_EA = ea;
 
   sea = ref_ind_EA;
+  AddSkip = 0;  // added 07.04.2015 (bmpcad)
   for ( i = 1; i < ref_oi_cnt; ++i )
   {
     ea  += sizeof(ushort);
     sea += sizeof(ushort);
 
-    uint rsz = get_word(ea);
+    uint rsz;
+    j = get_word(sea);
+    if ( !j )
+    {
+      if ( i <= Count )
+          goto badofftb;
+      ++AddSkip;
+      continue;
+    }
 
-    if ( msnode.supval(get_word(sea), &dsc, sizeof(dsc)) != sizeof(dsc) )
+    rsz = get_word(ea);
+
+    if ( msnode.supval(j, &dsc, sizeof(dsc)) != sizeof(dsc) )
     {
       if ( rsz )
         goto badofftb;
@@ -878,14 +886,16 @@ found:
     {
 badofftb:
       ask_for_feedback("Incompatible offset table");
+      AddSkip = 0;
+      break;
     }
   }
 
-  sea = dstea + (Count+1)*sizeof(uint32);
+  sea = dstea + (Count+1+AddSkip)*sizeof(uint32);
   for ( i = 1; i <= Count; ++i )
   {
     sea += sizeof(uint32);
-    uint32 dt = get_long(sea);
+    uint32 dt = get_dword(sea);
 
     if ( msnode.supval(i, &dsc, sizeof(dsc)) != sizeof(dsc) )
     {
@@ -914,18 +924,28 @@ badmemtb:
     }
   }
 
+  for ( i = 0; i < AddSkip; i++ )
+  {
+      sea += sizeof(uint32);
+      if ( get_dword(sea) != 0 )
+      {
+        ask_for_feedback("Incompatible extension in overlay tables");
+        break;
+      }
+  }
+
   msg("All tables OK\n");
-  doWord(ref_off_EA, i = ref_oi_cnt*sizeof(ushort));
-  do_name_anyway(ref_off_EA, "ovr_off_tbl");
-  doWord(ref_ind_EA, i);
-  do_name_anyway(ref_ind_EA, "ovr_index_tbl");
+  create_word(ref_off_EA, i = (ref_oi_cnt - AddSkip)*sizeof(ushort));
+  force_name(ref_off_EA, "ovr_off_tbl");
+  create_word(ref_ind_EA, i);
+  force_name(ref_ind_EA, "ovr_index_tbl");
   *Cnt = Count;
   i = (Count + 1) * sizeof(uint32);
-  doDwrd(dstea, i);
-  do_name_anyway(dstea, "ovr_start_tbl");
-  dstea += i;
-  doDwrd(dstea, i);
-  do_name_anyway(dstea, "ovr_memsiz_tbl");
+  create_dword(dstea, i);
+  force_name(dstea, "ovr_start_tbl");
+  dstea += i + (AddSkip * sizeof(uint32));
+  create_dword(dstea, i);
+  force_name(dstea, "ovr_memsiz_tbl");
   return s->sel;
 }
 
@@ -933,25 +953,26 @@ badmemtb:
 static segment_t *MsOvrStubSeg(uint *stub_cnt, ea_t r_top, sel_t dseg)
 {
   msg("Searching for the stub segment...\n");
-  for ( int i = 0; i < segs.get_area_qty(); ++i )
+  int count = get_segm_qty();
+  for ( int i = 0; i < count; ++i )
   {
     segment_t *seg = getnseg(i);
     if ( seg->sel == dseg )
       continue;
-    ea_t ea = seg->startEA;
+    ea_t ea = seg->start_ea;
     uchar buf[3*sizeof(ushort)];
 
     if ( ea >= r_top )
       break;
 
-    if ( !get_many_bytes(ea, buf, sizeof(buf)) )
+    if ( get_bytes(buf, sizeof(buf), ea) != sizeof(buf) )
       continue;
     if ( *(uint32 *)buf || *(ushort *)&buf[sizeof(uint32)] )
       continue;
 
     uint  cnt = 0;
     uchar frs = (uchar)-1;
-    while ( (ea += sizeof(buf)) < seg->endEA - sizeof(buf) )
+    while ( (ea += sizeof(buf)) < seg->end_ea - sizeof(buf) )
     {
       if ( (frs = get_byte(ea)) != 0xCD || get_byte(ea+1) != 0x3F )
         break;
@@ -973,11 +994,11 @@ static segment_t *MsOvrStubSeg(uint *stub_cnt, ea_t r_top, sel_t dseg)
 //------------------------------------------------------------------------
 static void CreateMsStubProc(segment_t *s, uint stub_cnt)
 {
-  ea_t ea = s->startEA;
+  ea_t ea = s->start_ea;
 
   set_segm_name(s, "STUB");
   set_segm_class(s, CLASS_CODE);
-  doByte(ea, 3*sizeof(ushort));
+  create_byte(ea, 3*sizeof(ushort));
   ea += 3*sizeof(ushort);
   msg("Patching the overlay stub-segment...\n");
   for ( uint ind, i = 0; i < stub_cnt; ++i, ea += 3*sizeof(ushort) )
@@ -1002,17 +1023,17 @@ badref:
       if ( off >= o.size )
         goto badref;
 
-      showAddr(ea);
+      show_addr(ea);
       put_byte(ea, 0xEA);   // jmp far
       put_word(ea+1, off);  // offset
       put_word(ea+3, sel);  // selector
       put_byte(ea+5, 0x90); //NOP -> for autoanalisis
       auto_make_proc(ea);
-      auto_make_proc(toEA(ask_selector(sel), off));
+      auto_make_proc(to_ea(sel2para(sel), off));
       CheckCtrlBrk();
     }
   }
-  doAlign(ea, s->endEA - ea, 0);
+  create_align(ea, s->end_ea - ea, 0);
 }
 
 //------------------------------------------------------------------------
@@ -1023,7 +1044,7 @@ sel_t LoadMsOverlays(linput_t *li, bool PossibleDynamic)
 
   if ( ovr_off )
     warning("File has extra information\n"
-            "\3Loading 0x%X bytes, total file size 0x%X",
+            "\3Loading 0x%X bytes, total file size 0x%" FMT_64 "X",
             ovr_off, qlsize(li));
 
   if ( Cnt )
@@ -1034,7 +1055,7 @@ sel_t LoadMsOverlays(linput_t *li, bool PossibleDynamic)
     else if ( !PossibleDynamic )
       ask_for_feedback("Can not find the overlay call data table");
 
-    ea_t r_top = inf.maxEA;
+    ea_t r_top = inf.max_ea;
     LoadMsOvrData(li, Cnt, PossibleDynamic);
 
     if ( ref_oi_cnt != (uint)-1 )

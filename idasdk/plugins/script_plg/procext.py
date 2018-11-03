@@ -23,8 +23,8 @@ class linux_idp_hook_t(idaapi.IDP_Hooks):
         idaapi.IDP_Hooks.__init__(self)
         self.cmd = idaapi.cmd
 
-    def custom_ana(self):
-        if idaapi.get_many_bytes(self.cmd.ea, 2) != "\xCD\x80":
+    def ev_ana_insn(self):
+        if idaapi.get_bytes(self.cmd.ea, 2) != "\xCD\x80":
             return False
 
         self.cmd.itype = NN_kernel_call

@@ -9,21 +9,143 @@
  */
 
 #include "m65816.hpp"
+#include "bt.hpp"
 
 //----------------------------------------------------------------------
-ea_t calc_addr(const op_t &x, ea_t *orig_ea)
+class out_m65816_t : public outctx_t
+{
+  out_m65816_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void out_dp(const op_t &x);
+  void out_addr_near_b(const op_t &x);
+  void out_addr_near(const op_t &x);
+  void out_addr_far(const op_t &x);
+  void print_orig_ea(const op_t &x);
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_m65816_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_m65816_t)
+
+//----------------------------------------------------------------------
+void out_m65816_t::out_dp(const op_t &x)
+{
+  sel_t dp = get_sreg(insn.ea, rD);
+  if ( dp != BADSEL )
+  {
+    ea_t orig_ea = dp + x.addr;
+    ea_t ea = xlat(orig_ea);
+
+    //if ( dp != 0 )
+    //  out_symbol('(');
+
+    if ( !out_name_expr(x, ea, BADADDR) )
+    {
+      out_tagon(COLOR_ERROR);
+      out_value(x, OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+      out_tagoff(COLOR_ERROR);
+      remember_problem(PR_NONAME, insn.ea);
+    }
+
+    //if ( dp != 0 )
+    //{
+    //  out_symbol(' ');
+    //  out_symbol('-');
+    //  out_symbol(' ');
+    //  out_btoa(dp << 8, 16);
+    //  out_symbol(')');
+    //}
+  }
+  else
+  {
+    out_value(x, OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+  }
+}
+
+//----------------------------------------------------------------------
+void out_m65816_t::out_addr_near_b(const op_t &x)
+{
+  sel_t db = get_sreg(insn.ea, rB);
+  if ( db != BADSEL )
+  {
+    ea_t orig_ea = (db << 16) + x.addr;
+    ea_t ea = xlat(orig_ea);
+
+    if ( !out_name_expr(x, ea, BADADDR) )
+    {
+      out_tagon(COLOR_ERROR);
+      out_value(x, OOF_ADDR|OOFS_NOSIGN|OOFW_16);
+      out_tagoff(COLOR_ERROR);
+      remember_problem(PR_NONAME, insn.ea);
+    }
+  }
+  else
+  {
+    out_value(x, OOF_ADDR|OOFS_NOSIGN|OOFW_16);
+  }
+}
+
+//-------------------------------------------------------------------------
+void out_m65816_t::out_addr_near(const op_t &x)
+{
+  ea_t orig_ea = map_code_ea(insn, x);
+  ea_t ea = xlat(orig_ea);
+  if ( !out_name_expr(x, ea, BADADDR) )
+  {
+    out_tagon(COLOR_ERROR);
+    out_value(x, OOF_ADDR|OOFS_NOSIGN|OOFW_16);
+    out_tagoff(COLOR_ERROR);
+    remember_problem(PR_NONAME, insn.ea);
+  }
+}
+
+//----------------------------------------------------------------------
+void out_m65816_t::out_addr_far(const op_t &x)
+{
+  ea_t orig_ea = x.addr;
+  ea_t ea = xlat(orig_ea);
+
+  if ( !out_name_expr(x, ea, BADADDR) )
+  {
+    out_tagon(COLOR_ERROR);
+    out_value(x, OOF_ADDR|OOFS_NOSIGN|OOFW_24);
+    out_tagoff(COLOR_ERROR);
+    remember_problem(PR_NONAME, insn.ea);
+  }
+}
+
+//----------------------------------------------------------------------
+void out_m65816_t::print_orig_ea(const op_t &x)
+{
+  if ( !has_cmt(F) )
+  {
+    char buf[64];
+    qsnprintf(buf, sizeof(buf),
+              COLSTR(" %s orig=0x%0*a", SCOLOR_AUTOCMT),
+              ash.cmnt,
+              (x.type == o_far || x.type == o_mem_far) ? 6 : 4,
+              x.addr);
+    out_line(buf);
+  }
+}
+
+//----------------------------------------------------------------------
+ea_t calc_addr(const op_t &x, ea_t *orig_ea, const insn_t &insn)
 {
   ea_t ea;
   switch ( x.type )
   {
     case o_near:
-      ea = toEA(codeSeg(x.addr, x.n), x.addr);
+      ea = map_code_ea(insn, x);
       goto XLAT_ADDR;
     case o_far:
+    case o_mem_far:
       ea = x.addr;
       goto XLAT_ADDR;
     case o_mem:
-      ea = toEA(dataSeg_op(x.n), x.addr);
+      ea = map_data_ea(insn, x);
 XLAT_ADDR:
       if ( orig_ea != NULL )
         *orig_ea = ea;
@@ -34,24 +156,23 @@ XLAT_ADDR:
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_m65816_t::out_operand(const op_t &x)
 {
   ea_t ea, orig_ea;
   switch ( x.type )
   {
     case o_reg:
-      out_register(ph.regNames[x.reg]);
+      out_register(ph.reg_names[x.reg]);
       break;
     case o_imm:
       out_symbol('#');
-      OutValue(x, 0);
+      out_value(x, 0);
       break;
     case o_near:
     case o_far:
-    case o_mem:
-      if ( cmd.indirect )
+      if ( insn.indirect )
         out_symbol('(');
-      ea = calc_addr(x, &orig_ea);
+      ea = calc_addr(x, &orig_ea, insn);
       if ( !out_name_expr(x, ea, BADADDR) )
       {
         uint32 v = x.addr;
@@ -60,38 +181,66 @@ bool idaapi outop(op_t &x)
         else
           v &= 0xFFFF;
         out_tagon(COLOR_ERROR);
-        OutLong(v, 16);
+        out_btoa(v, 16);
         out_tagoff(COLOR_ERROR);
-        QueueSet(Q_noName, cmd.ea);
+        remember_problem(PR_NONAME, insn.ea);
       }
-      if ( cmd.indirect )
+      if ( insn.indirect )
         out_symbol(')');
       if ( orig_ea != ea )
+        print_orig_ea(x);
+      break;
+    case o_mem:
+    case o_mem_far:
       {
-        char buf[64];
-        qsnprintf(buf, sizeof(buf),
-                  COLSTR(" %s orig=0x%0*a", SCOLOR_AUTOCMT),
-                  ash.cmnt,
-                  x.type == o_far ? 6 : 4,
-                  x.addr);
-        OutLine(buf);
+        if ( insn.indirect )
+          out_symbol('(');
+
+        if ( x.type == o_mem_far )
+        {
+          ea = calc_addr(x, &orig_ea, insn);
+          out_addr_far(x);
+        }
+        else
+        {
+          sel_t db = get_sreg(insn.ea, rB);
+          if ( db == BADSEL )
+            ea = orig_ea = x.addr;
+          else
+            ea = calc_addr(x, &orig_ea, insn);
+          out_addr_near_b(x);
+        }
+
+        if ( insn.indirect )
+          out_symbol(')');
+
+        if ( orig_ea != ea )
+          print_orig_ea(x);
       }
       break;
     case o_displ:
       switch ( x.phrase )
       {
         case rS:
-        case rD:
-          out_register(ph.regNames[x.phrase]);
+          out_register(ph.reg_names[x.phrase]);
           out_symbol(',');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+          out_char(' ');
+          out_value(x, OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+          break;
+        case rD:
+          out_register(ph.reg_names[x.phrase]);
+          out_symbol(',');
+          out_char(' ');
+          out_dp(x);
           break;
         case rSiY:
           out_symbol('(');
           out_register("S");
           out_symbol(',');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+          out_char(' ');
+          out_value(x, OOF_ADDR|OOFS_NOSIGN|OOFW_8);
           out_symbol(',');
+          out_char(' ');
           out_register("Y");
           out_symbol(')');
           break;
@@ -100,30 +249,36 @@ bool idaapi outop(op_t &x)
           out_symbol('(');
           out_register("D");
           out_symbol(',');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+          out_char(' ');
+          out_dp(x);
           out_symbol(')');
           break;
         case rDiL:
           out_symbol('[');
           out_register("D");
           out_symbol(',');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+          out_char(' ');
+          out_dp(x);
           out_symbol(']');
           break;
         case rDX:
         case rDY:
           out_register("D");
           out_symbol(',');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+          out_char(' ');
+          out_dp(x);
           out_symbol(',');
+          out_char(' ');
           out_register((x.phrase == rDX) ? "X" : "Y");
           break;
         case riDX:
           out_symbol('(');
           out_register("D");
           out_symbol(',');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+          out_char(' ');
+          out_dp(x);
           out_symbol(',');
+          out_char(' ');
           out_register("X");
           out_symbol(')');
           break;
@@ -132,32 +287,49 @@ bool idaapi outop(op_t &x)
           out_symbol(x.phrase == rDiLY ? '[' : '(');
           out_register("D");
           out_symbol(',');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_8);
+          out_char(' ');
+          out_dp(x);
           out_symbol(x.phrase == rDiLY ? ']' : ')');
           out_symbol(',');
+          out_char(' ');
           out_register("Y");
           break;
         case rAbsi:
           out_symbol('(');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_16);
+          out_addr_near_b(x);
           out_symbol(')');
           break;
         case rAbsiL:
           out_symbol('[');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_16);
+          out_addr_near_b(x);
           out_symbol(']');
           break;
         case rAbsX:
         case rAbsY:
-        case rAbsLX:
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_24);
+          out_addr_near_b(x);
           out_symbol(',');
+          out_char(' ');
           out_register(x.phrase == rAbsY ? "Y" : "X");
+          break;
+        case rAbsLX:
+          {
+            ea_t lorig_ea = x.addr;
+            ea_t lea = xlat(lorig_ea);
+
+            out_addr_far(x);
+            out_symbol(',');
+            out_char(' ');
+            out_register("X");
+
+            if ( lorig_ea != lea )
+              print_orig_ea(x);
+          }
           break;
         case rAbsXi:
           out_symbol('(');
-          OutValue(x,OOF_ADDR|OOFS_NOSIGN|OOFW_16);
+          out_addr_near(x); // jmp, jsr
           out_symbol(',');
+          out_char(' ');
           out_register("X");
           out_symbol(')');
           break;
@@ -169,7 +341,7 @@ bool idaapi outop(op_t &x)
       return 0;
     default:
     err:
-      warning("out: %a: bad optype %d", cmd.ea, x.type);
+      warning("out: %a: bad optype %d", insn.ea, x.type);
       break;
   }
   return 1;
@@ -177,142 +349,136 @@ bool idaapi outop(op_t &x)
 
 
 //----------------------------------------------------------------------
-inline bool forced_print(ea_t ea, int reg)
+static bool forced_print(flags_t F, int reg)
 {
-  return (reg == rFm || reg == rFx) && isFunc(get_flags_novalue(ea));
+  return (reg == rFm || reg == rFx) && is_func(F);
 }
 
 //----------------------------------------------------------------------
-void idaapi assumes(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+void idaapi m65816_assumes(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   char buf[MAXSTR];
   char *ptr = buf;
   char *end = buf + sizeof(buf);
-  for ( int reg=ph.regFirstSreg; reg <= ph.regLastSreg; reg++ )
+  segment_t *seg = getseg(ea);
+  bool seg_started = (ea == seg->start_ea);
+  for ( int reg=ph.reg_first_sreg; reg <= ph.reg_last_sreg; reg++ )
   {
     if ( reg == rCs )
       continue;
-    segreg_area_t srarea;
-    get_srarea2(&srarea, ea, reg);
-    segreg_area_t prev;
-    bool prev_exists = get_srarea2(&prev, ea - 1, reg);
-    // if 'prev' does not exist, force to print because we are at
-    // the beginning of the segment
-    sel_t curval  = srarea.val;
-    sel_t prevval = prev_exists ? prev.val : curval - 1;
-    if ( curval != prevval || forced_print(ea, reg) )
+    sreg_range_t srrange;
+    if ( !get_sreg_range(&srrange, ea, reg) )
+      continue;
+    sel_t curval = srrange.val;
+    if ( seg_started || srrange.start_ea == ea )
     {
-      if ( reg == rFm || reg == rFx )
+      sreg_range_t prev;
+      bool prev_exists = get_sreg_range(&prev, ea - 1, reg);
+      if ( seg_started
+        || (prev_exists && prev.val != curval)
+        || forced_print(ctx.F, reg) )
       {
-        printf_line(0, ".%c%d", reg == rFm ? 'A' : 'I', curval > 0 ? 8 : 16);
-      }
-      else
-      {
-        if ( ptr != buf )
-          APPCHAR(ptr, end, ' ');
-        ptr += qsnprintf(ptr, end-ptr, "%s=%a", ph.regNames[reg], curval);
+        if ( reg == rFm || reg == rFx )
+        {
+          ctx.gen_printf(0, ".%c%d", reg == rFm ? 'A' : 'I', curval > 0 ? 8 : 16);
+        }
+        else
+        {
+          if ( ptr != buf )
+            APPCHAR(ptr, end, ' ');
+          ptr += qsnprintf(ptr, end-ptr, "%s=%a", ph.reg_names[reg], curval);
+        }
       }
     }
   }
   if ( ptr != buf )
-    gen_cmt_line("%s", buf);
+    ctx.gen_cmt_line("%s", buf);
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_m65816_t::out_insn(void)
 {
-  char buf[MAXSTR];
-
-  init_output_buffer(buf, sizeof(buf));
-  if ( inf.s_showbads
-    && cmd.Op1.type == o_displ
-    && (cmd.Op1.phrase == rX || cmd.Op1.phrase == rY)
-    && cmd.Op1.value == uchar(cmd.Op1.value) )
-  {
-    OutBadInstruction();
-  }
-
-  OutMnem();
+  out_mnemonic();
   out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
   }
 
-  if ( isVoid(cmd.ea, uFlag, 0) )
-    OutImmChar(cmd.Op1);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi m65816_header(outctx_t &ctx)
 {
-  gen_cmt_line("%s Processor:        %s", ash.cmnt, inf.procName);
-  gen_cmt_line("%s Target assembler: %s", ash.cmnt, ash.name);
+  ctx.gen_cmt_line("%s Processor:        %s", ash.cmnt, inf.procname);
+  ctx.gen_cmt_line("%s Target assembler: %s", ash.cmnt, ash.name);
   if ( ash.header != NULL )
     for ( const char *const *ptr=ash.header; *ptr != NULL; ptr++ )
-      MakeLine(*ptr,0);
+      ctx.flush_buf(*ptr,0);
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Srange) could be made const
+void idaapi m65816_segstart(outctx_t &ctx, segment_t *Srange)
 {
-  segment_t *Sarea = getseg(ea);
-  char name[MAXNAMELEN];
-  get_segm_name(Sarea, name, sizeof(name));
+  qstring name;
+  get_visible_segm_name(&name, Srange);
   if ( ash.uflag & UAS_SECT )
   {
-    printf_line(0, COLSTR("%s: .section",SCOLOR_ASMDIR), name);
+    ctx.gen_printf(0, COLSTR("%s: .section",SCOLOR_ASMDIR), name.c_str());
   }
   else
   {
-    printf_line(inf.indent, COLSTR("%s.segment %s",SCOLOR_ASMDIR),
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s.segment %s",SCOLOR_ASMDIR),
                    (ash.uflag & UAS_NOSEG) ? ash.cmnt : "",
-                   name);
+                   name.c_str());
     if ( ash.uflag & UAS_SELSG )
-      MakeLine(name, inf.indent);
+      ctx.flush_buf(name.c_str(), inf.indent);
     if ( ash.uflag & UAS_CDSEG )
-      MakeLine(COLSTR("CSEG",SCOLOR_ASMDIR), inf.indent);  // XSEG - eXternal memory
+      ctx.flush_buf(COLSTR("CSEG",SCOLOR_ASMDIR), inf.indent);  // XSEG - eXternal memory
   }
-  if ( inf.s_org )
+  if ( (inf.outflags & OFLG_GEN_ORG) != 0 )
   {
-    ea_t org = ea - get_segm_base(Sarea);
+    ea_t org = ctx.insn_ea - get_segm_base(Srange);
     if ( org != 0 )
     {
       char buf[MAX_NUMBUF];
       btoa(buf, sizeof(buf), org);
-      printf_line(inf.indent, COLSTR("%s %s",SCOLOR_ASMDIR), ash.origin, buf);
+      ctx.gen_printf(inf.indent, COLSTR("%s %s",SCOLOR_ASMDIR), ash.origin, buf);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi m65816_footer(outctx_t &ctx)
 {
   char buf[MAXSTR];
   if ( ash.end != NULL )
   {
-    MakeNull();
+    ctx.gen_empty_line();
     char *ptr = buf;
     char *end = buf + sizeof(buf);
     APPEND(ptr, end, ash.end);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
       if ( ash.uflag & UAS_NOENS )
         APPEND(ptr, end, ash.cmnt);
       APPCHAR(ptr, end, ' ');
       APPEND(ptr, end, name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_buf(buf, inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }

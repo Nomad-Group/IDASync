@@ -21,7 +21,7 @@ static const char *const register_names[] =
   "Wptr",       // Work space pointer, pointing to the stack of the currently executing process
   "Tdesc",      // Task descriptor
   "IOreg",      // Input and output register
-  "cs",  "ds",
+  "cs", "ds",
 };
 
 //--------------------------------------------------------------------------
@@ -67,7 +67,6 @@ static const asm_t hypasm =
   "Hypthetical assembler",
   0,
   NULL,         // header lines
-  NULL,         // no bad instructions
   "org",        // org
   "end",        // end
 
@@ -90,10 +89,6 @@ static const asm_t hypasm =
   "ds %s",      // uninited arrays
   "equ",        // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "$",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -118,29 +113,15 @@ static const asm_t hypasm =
 static const asm_t *const asms[] = { &hypasm, NULL };
 
 //--------------------------------------------------------------------------
-static ioport_t *ports = NULL;
-static size_t numports = 0;
-static char device[MAXSTR] = "";
+static qstring device;
 static const char cfgname[] = "st20.cfg";
-
-static void load_symbols(void)
-{
-  free_ioports(ports, numports);
-  ports = read_ioports(&numports, cfgname, device, sizeof(device), NULL);
-}
-
-const ioport_t *find_sym(int address)
-{
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port;
-}
 
 //--------------------------------------------------------------------------
 const char *idaapi set_idp_options(const char *keyword,int /*value_type*/,const void * /*value*/)
 {
-  if ( keyword != NULL ) return IDPOPT_BADKEY;
-  if ( choose_ioport_device(cfgname, device, sizeof(device), NULL) )
-    load_symbols();
+  if ( keyword != NULL )
+    return IDPOPT_BADKEY;
+  choose_ioport_device(&device, cfgname);
   return IDPOPT_OK;
 }
 
@@ -148,67 +129,142 @@ const char *idaapi set_idp_options(const char *keyword,int /*value_type*/,const 
 netnode helper;
 int procnum;
 
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
 {
-  va_list va;
-  va_start(va, msgid);
+  switch ( code )
+  {
+    case idb_event::savebase:
+    case idb_event::closebase:
+      helper.supset(0, device.c_str());
+      break;
+  }
+  return 0;
+}
 
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ st20");
-      helper.supval(0, device, sizeof(device));
+      helper.supstr(&device, 0);
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
-    default:
+    case processor_t::ev_term:
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::newfile:  // new file loaded
-    case processor_t::oldfile:  // old file loaded
-      load_symbols();
-      break;
-
-    case processor_t::savebase:
-    case processor_t::closebase:
-      helper.supset(0, device);
-      break;
-
-    case processor_t::newprc:   // new processor type
+    case processor_t::ev_newprc:   // new processor type
       procnum = va_arg(va, int);
-      if ( isc4() ) ph.retcodes = retcodes4;
+      // bool keep_cfg = va_argi(va, bool);
+      if ( isc4() )
+        ph.retcodes = retcodes4;
       break;
 
-    case processor_t::is_jump_func:
+    case processor_t::ev_is_jump_func:
       {
         const func_t *pfn = va_arg(va, const func_t *);
         ea_t *jump_target = va_arg(va, ea_t *);
         return is_jump_func(pfn, jump_target);
       }
 
-    case processor_t::is_sane_insn:
-      return is_sane_insn(va_arg(va, int));
+    case processor_t::ev_is_sane_insn:
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        int no_crefs = va_arg(va, int);
+        return is_sane_insn(*insn, no_crefs) == 1 ? 1 : -1;
+      }
 
-    case processor_t::may_be_func:
-                                // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
-                                // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
-      return may_be_func();
+    case processor_t::ev_may_be_func:
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        return may_be_func(*insn);
+      }
 
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        st20_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        st20_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        st20_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        st20_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return st20_ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return st20_emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
   }
-  va_end(va);
-  return 1;
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -226,11 +282,15 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_ST20,                    // id
-  PRN_HEX|PR_RNAMESOK,
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_ST20,              // id
+                          // flag
+    PRN_HEX
+  | PR_RNAMESOK,
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -239,31 +299,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  NULL,                 // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  intel_data,           // generate ...                    data directive
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   cs,                   // first
   ds,                   // last
@@ -275,28 +312,13 @@ processor_t LPH =
 
   ST20_null,
   ST20_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 0 },      // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  NULL,                 // int (*is_sp_based)(op_t &x);
-  NULL,                 // int (*create_func_frame)(func_t *pfn);
-  NULL,                 // int (*get_frame_retsize(func_t *pfn)
-  NULL,                 // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   ST20_eret,            // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

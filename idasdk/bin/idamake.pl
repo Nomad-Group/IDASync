@@ -5,13 +5,15 @@
 #         -D    define a symbol (unfortunately, only one such switch is supported)
 #         -f    makefile name
 #         -j    number of jobs
-#         -n    print commands but do not run them
+#         -n    print commands but do not run them (is passed to make)
+#         -p    print make database (is passed to make)
+#         -s    silent (is passed to make)
+#         -C    change to directory (is passed to make)
 #         -v    ignore IDAMAKE_SIMPLIFY, display full command lines
 #         -Z    append raw output to idasrc/current/idamake.log
 #         -z    filter stdin to stdout (for debugging)
 #
 #       The IDAMAKE_SIMPLIFY envvar turns on filtering of compiler command line
-#       The IDAMAKE_PARALLEL envvar turns on parallel compilation
 #
 
 use strict;
@@ -20,7 +22,7 @@ use warnings;
 use Getopt::Std;
 my %opt;
 my @ea32 = ('int', 'unsigned int', 'uint32', 'int32');
-my @ea64 = ('long long int', 'long long unsigned int', 'uint64', 'int64');
+my @ea64 = ('long long int', 'long long unsigned int', 'unsigned long long', 'uint64', 'int64');
 
 #--------------------------------------------------------------------------
 # can the type be used for %a?
@@ -29,7 +31,7 @@ sub is_ea_type
   my $type = shift;
   my $is64 = shift;
 
-  $type =~ s/ {aka (.*)}//;
+  $type =~ s/ \{aka (.*)}//;
   return 1 if $type eq 'ea_t'
            || $type eq 'adiff_t'
            || $type eq 'asize_t'
@@ -52,7 +54,7 @@ sub is_8bytes_if_x64
 {
   my $type = shift;
 
-  $type =~ s/ {aka (.*)}//;
+  $type =~ s/ \{aka (.*)}//;
   return $type =~ /long( unsigned)? int/
       || $type =~ /^(__)?u?int64_t$/;
 }
@@ -76,7 +78,8 @@ sub simplify_command_line
   }
 
   my $out = 'compile';
-  my $compiling = ($cmd =~ /^(\/opt\/mac\/bin\/i686-apple-darwin8-)?g(\+\+|cc)/);
+  my $compiling = $cmd =~ /^(\/opt\/mac\/bin\/i686-apple-darwin8-)|(.*afl-)?g(\+\+|cc)/
+               || $cmd =~ /\/bin\/g\+\+ /;
   if ( $compiling )
   {
     $compiling = $cmd =~ / -c /; # really compiling
@@ -111,7 +114,7 @@ sub simplify_command_line
         $skipnext = 0;
         next;
       }
-      if ( /^-o$/ || /^-arch/ )
+      if ( /^-o$/ || /^-arch/ || /^-isysroot/ )
       {
         $skipnext = 1;
         next;
@@ -159,9 +162,10 @@ sub print_filtered_gcc_output
     $x64  = 1 if /-D__X64__/;
 
     # clean file/function info when we start a new command
-    if ( /^(g(\+\+|cc)|cp|qcp\.sh|make\[\d\]:|ar:|compile|moc|uic|rcc|link|lib|name|strip|mkdeb|perl|#) /
+    if ( /^(g(\+\+|cc)|cp|rm|qcp\.sh|make\[\d\]:|ar:|compile|moc|uic|rcc|link|lib|name|strip|mkdeb|perl|#) /
       || /^(Parsing|Generating|Done|IDA API|Symbol Table Maker) /
-      || /bin\/(qar\.sh|moc|uic|rcc) /
+      || /bin\/(qar\.sh|moc|uic|rcc|g\+\+) /
+      || m#^../../third_party/afl/afl-g#
       || m#^/usr/bin/python #
       || /^Thank you for using IDA\. Have a nice day!/
       || /make -f makefile\.unx deploy$/
@@ -209,26 +213,30 @@ sub print_filtered_gcc_output
     s/(\xE2\x80\x98)|(\xE2\x80\x99)|‘|’|`/'/g;   # convert (utf-8) tick/backtick to apostrophe
 
     # suppress uninteresting warnings
-    if ( /format '\%.*a' expects (argument of )?type 'double', but argument \d+ has type '(.*)'/ )
+    if ( /format ('\%.*a' )?(expects|specifies) (argument of )?type 'double'(,)? but (the )?argument (\d+ )?has type '(.*?)'/ )
     {
-      next if is_ea_type($2, $is64);
+      next if is_ea_type($7, $is64);
     }
-    if ( /format '\%.*a' expects (argument of )?type 'float\*', but argument \d+ has type '([^*]*)\*/ )
+    if ( /format ('\%.*a' )?(expects|specifies) (argument of )?type 'float( )?\*'(,)? but (the )?argument (\d+ )?has type '([^ |*]*)( )?\*/ )
     {
-      next if is_ea_type($2, $is64);
+      next if is_ea_type($8, $is64);
     }
 
-    if ( /format '%.*ll[duxX]' expects (argument of )?type 'long long( unsigned)? int', but argument \d+ has type '(.*)'/ )
+    if ( /format '%.*ll[duxX]' expects (argument of )?type 'long long( unsigned)? int', but argument \d+ has type '(.*?)'/ )
     {
       next if $x64 && is_8bytes_if_x64($3);
     }
 
     next if /is already a friend of/ && $ENV{__MAC__};
-    next if /format '\%.*l[duxX]' expects (argument of )?type 'long( unsigned)? int', but argument \d+ has type 's?size_t( {aka.*})?'/;
-    next if /format not a string literal and no format arguments/;
+    next if /qglobal.h.*This version of Mac OS X is unsupported/;
+    next if /format ('\%.*l[duxX]' )?(expects|specifies) (argument of )?type '(long|unsigned|long unsigned) int'(,)? but (the )?argument (\d+ )?has type 's?size_t('| )/;
+    next if /format ('\%.*l[duxX]' )?(expects|specifies) (argument of )?type '(long|unsigned|long unsigned) int( )?\*'(,)? but (the )?argument (\d+ )?has type 's?size_t( )?\*/;
     next if /(double|float) format, different type arg/;
     next if /zero-length (gnu_)?printf format string/;
-    next if /command line option "-fvisibility-inlines-hidden" is valid for C\+\+/;
+    # These three are probably relevant only for ui/qt/wingraph
+    next if /command line option ['"]-fvisibility-inlines-hidden['"] is valid for C\+\+/;
+    next if /^step4.c:.*\[-Wunused-but-set-variable\]/;
+    next if /^tree.c:.*\[-Wunused-but-set-variable\]/;
     next if /suggest parentheses around '&&' within '\|\|'/;
     next if /forced in submake: disabling jobserver mode/;
     next if /enumeral and non-enumeral type in conditional expression/;
@@ -240,9 +248,15 @@ sub print_filtered_gcc_output
     next if /warning: deleting object of polymorphic class type '(ida)place_t' which has non-virtual destructor/;
     next if /<command-line>:0:0: warning: "_FORTIFY_SOURCE" redefined \[enabled by default\]/;
     next if /note: this is the location of the previous definition/;
-    # i do not know why the mac linker issues this warning, the file looks fine:
-    next if /object file '(.*)\.a\(.*\)' doesn't contain architecture information for/;
-
+    next if /note: expanded from macro/;
+    next if /[0-9]+ warning(s)? generated/;
+    next if /treating 'c' input as 'c\+\+' when in C\+\+ mode/;
+    # mac bug: https://discussions.apple.com/thread/4143805?tstart=0
+    next if /DYLD_ environment variables being ignored because main executable.*is setuid or setgid/;
+    next if /implicit conversion from 'unsigned long long' to 'ea_t'/;
+    next if /warning: format specifies type 'unsigned short' but the argument has type 'int'/;
+    next if /warning: -z  defs ignored/;
+    next if /: note:/;
     next if /^$/;
 
     # ok, it seems to be a real bug/warning
@@ -265,33 +279,25 @@ sub print_filtered_gcc_output
 sub main
 {
   my $make = $ENV{__BSD__} ? "/usr/local/bin/gmake" : "make";
-  my $fname = $opt{f} ? $opt{f} : (-f "makefile.unx" ? "makefile.unx" : "makefile");
+  my $makedir = $opt{C} ? $opt{C} : ".";
+  my $fname = $opt{f} ? $opt{f} : (-f "$makedir/makefile.unx" ? "makefile.unx" : "makefile");
 
   my $opts = $opt{D} ? "-D$opt{D}" : "";
-  $opts .= " -p" if $opt{p};
   $opts .= " -n" if $opt{n};
-  my $jobs = $opt{j};
-  unless ( $jobs )
-  {
-    $jobs = $ENV{IDAMAKE_PARALLEL} || 0;
-    if ( $jobs == 1 )
-    { # asked to run in parallel, find out the number of processors
-      my $ncpus = ($^O eq "MSWin32") ? $ENV{NUMBER_OF_PROCESSORS}     # win
-                : ($^O eq "darwin")  ? `/usr/sbin/sysctl hw.ncpu | cut -f 2 -d " "` # mac
-                :             `grep processor /proc/cpuinfo | wc -l`; # linux
-      $jobs = $ncpus + 0;
-    }
-  }
-  $jobs = $jobs ? ("-j".$jobs) : "";
-#  print "$make $jobs -f $fname $opt{D} @ARGV 2>&1|\n";
-  open my $FP, "$make $jobs -f $fname $opts @ARGV 2>&1|" or die "Failed to launch make: $!";
+  $opts .= " -p" if $opt{p};
+  $opts .= " -j".$opt{j} if $opt{j};
+  $opts .= " -s" if $opt{s};
+  $opts .= " -C".$opt{C} if $opt{C};
+  my $keep_going = $opt{k} ? "-k" : "";
+  #print "$make -f $fname $opts @ARGV 2>&1\n";
+  open my $FP, "$make $keep_going -f $fname $opts @ARGV 2>&1|" or die "Failed to launch make: $!";
   print_filtered_gcc_output($FP);
   close $FP;
   exit($? != 0);
 }
 
 #--------------------------------------------------------------------------
-getopts("f:D:j:npvZz", \%opt) or die;
+getopts("f:D:j:npsvZzkC:", \%opt) or die;
 if ( $opt{z} )
 {
   print_filtered_gcc_output(*STDIN);

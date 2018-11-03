@@ -1,54 +1,54 @@
 import idaapi
-from idaapi import Choose2
-from idaapi import Form
+from ida_kernwin import Choose, Form
 
-#<pycode(ex_formchooser)>
 # --------------------------------------------------------------------------
-class MainChooserClass(Choose2):
+class MainChooserClass(Choose):
     def __init__(self, title, icon):
-        Choose2.__init__(self,
-                         title,
-                         [ ["Item", 10] ],
-                         icon=icon,
-                         flags=Choose2.CH_NOIDB,
-                         embedded=True, width=30, height=20)
-
-    def OnClose(self):
-        pass
+        Choose.__init__(self,
+                        title,
+                        [ ["Item", 10] ],
+                        icon=icon,
+                        flags=Choose.CH_NOIDB,
+                        embedded=True, width=30, height=20)
 
     def OnGetLine(self, n):
-        return ["Option %d" % n]
+        return ["Option %d" % (n + 1)]
 
     def OnGetSize(self):
         return 10
 
-    def OnCommand(self, n, cmd_id):
-        if cmd_id == self.cmd_id1:
-            print("Context menu on: %d" % n)
 
-        return 0
+# --------------------------------------------------------------------------
+class AuxChooserClass(Choose):
+    def __init__(self, title, icon):
+        Choose.__init__(self,
+                        title,
+                        [ ["Item", 10] ],
+                        icon=icon,
+                        flags=Choose.CH_NOIDB | Choose.CH_MULTI,
+                        embedded=True, width=30, height=20)
+
+    def OnGetLine(self, n):
+        return ["Item %d" % (n + 1)]
+
+    def OnGetSize(self):
+        return self.form.main_current_index + 1
 
 
 # --------------------------------------------------------------------------
-class AuxChooserClass(Choose2):
-    def __init__(self, title, icon):
-        Choose2.__init__(self,
-                         title,
-                         [ ["Item", 10] ],
-                         icon=icon,
-                         flags=Choose2.CH_NOIDB | Choose2.CH_MULTI,
-                         embedded=True, width=30, height=20)
+class TestActionHandler(idaapi.action_handler_t):
+    def __init__(self, chooser):
+        idaapi.action_handler_t.__init__(self)
+        self.chooser = chooser
 
-    def OnClose(self):
-        pass
+    def activate(self, ctx):
+        sel = []
+        for idx in ctx.chooser_selection:
+            sel.append(str(idx))
+        print("Menu item clicked. Current selection: %s" % sel);
 
-    def OnGetLine(self, n):
-        return ["Item %d" % n]
-
-    def OnGetSize(self):
-        t = self.form.main_current_index
-        return 0 if t < 0 else t+1
-
+    def update(self, ctx):
+        return idaapi.AST_ENABLE_ALWAYS
 
 # --------------------------------------------------------------------------
 class MyChooserForm(Form):
@@ -68,8 +68,13 @@ class MyChooserForm(Form):
         "\xEA\x01\xA3\x65\x55\x0B\x33\x14\x07\x63\x00\x00\x00\x00\x49\x45"
         "\x4E\x44\xAE\x42\x60\x82")
 
+    TITLE_PFX = "Form with choosers"
+
 
     def Free(self):
+        self.hooks.unhook()
+        self.hooks = None
+
         # Call the base
         Form.Free(self)
 
@@ -77,6 +82,10 @@ class MyChooserForm(Form):
         if self.icon_id != 0:
             idaapi.free_custom_icon(self.icon_id)
             self.icon_id = 0
+
+        # Remove local bindings
+        self.EChMain = None
+        self.EChAux  = None
 
 
     def __init__(self):
@@ -94,7 +103,7 @@ class MyChooserForm(Form):
         self.EChAux.form = self
 
         Form.__init__(self, r"""STARTITEM 0
-Form with choosers
+%s
 
     {FormChangeCb}
     Select an item in the main chooser:
@@ -104,24 +113,50 @@ Form with choosers
 
     <Selection:{ctrlSelectionEdit}>
 
-""", {
+""" % self.TITLE_PFX, {
             'ctrlSelectionEdit' : Form.StringInput(),
             'FormChangeCb'      : Form.FormChangeCb(self.OnFormChange),
             'ctrlMainChooser'   : Form.EmbeddedChooserControl(self.EChMain),
             'ctrlAuxChooser'    : Form.EmbeddedChooserControl(self.EChAux),
         })
 
+        # Add an action to the popup menu of the main chooser
+        class Hooks(idaapi.UI_Hooks):
+            def __init__(self, form):
+                idaapi.UI_Hooks.__init__(self)
+                self.form = form
+
+            def finish_populating_widget_popup(self, widget, popup):
+                # ids are assigned automatically
+                # so the id of the MainChooser is 1
+                if idaapi.get_widget_type(widget) == idaapi.BWN_CHOOSER \
+                       and idaapi.get_widget_title(widget) == \
+                               MyChooserForm.TITLE_PFX + ":1":
+                    actdesc = idaapi.action_desc_t(
+                        None, 
+                        "Test",
+                        TestActionHandler(self.form.EChMain),
+                        "Ctrl-K", # shortcut
+                        None,     # tooltip
+                        self.form.icon_id)
+                    idaapi.attach_dynamic_action_to_popup(
+                        widget,
+                        popup,
+                        actdesc)
+        self.hooks = Hooks(self)
+        self.hooks.hook()
+
 
     def refresh_selection_edit(self):
-        if self.main_current_index < 0:
+        if self.main_current_index == -1:
             s = "No selection in the main chooser"
         else:
-            s = "Main %d" % self.main_current_index
+            s = "Main %d" % (self.main_current_index + 1)
 
             # Get selection in the aux chooser
             sel = self.GetControlValue(self.ctrlAuxChooser)
             if sel:
-                s = "%s - Aux item(s): %s" % (s, ",".join(str(x) for x in sel))
+                s = "%s - Aux item(s): %s" % (s, ",".join(str(x + 1) for x in sel))
 
         # Update string input
         self.SetControlValue(self.ctrlSelectionEdit, s)
@@ -129,27 +164,16 @@ Form with choosers
 
     def OnFormChange(self, fid):
         if fid == -1:
-            print("Initialization")
+            print("initializing")
             self.refresh_selection_edit()
 
-            # Add an item to the context menu of the main chooser
-            id = self.ctrlMainChooser.AddCommand("Test", icon=self.icon_id)
-            print "id=%d" % id
-            if id < 0:
-                print("Failed to install menu for main embedded chooser")
-            else:
-                self.EChMain.cmd_id1 = id
-
         elif fid == -2:
-            print("Terminating");
+            print("terminating");
 
         elif fid == self.ctrlMainChooser.id:
             print("main chooser selection change");
             l = self.GetControlValue(self.ctrlMainChooser);
-            if not l:
-                self.main_current_index = -1
-            else:
-                self.main_current_index = l[0]
+            self.main_current_index = l[0] if l else -1
 
             # Refresh auxiliar chooser
             self.RefreshField(self.ctrlAuxChooser)
@@ -164,8 +188,6 @@ Form with choosers
             print("unknown id %d" % fid)
 
         return 1
-
-#</pycode(ex_formchooser)>
 
 def main():
     global f

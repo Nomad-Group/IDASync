@@ -86,29 +86,31 @@
 #define rBBPC    rCR14
 
 // m32r registers
-enum m32r_registers {
-    // General-purpose registers
-    rR0, rR1, rR2, rR3, rR4,
-    rR5, rR6, rR7, rR8, rR9,
-    rR10, rR11, rR12, rR13, rR14, rR15,
+enum m32r_registers
+{
+  // General-purpose registers
+  rR0, rR1, rR2, rR3, rR4,
+  rR5, rR6, rR7, rR8, rR9,
+  rR10, rR11, rR12, rR13, rR14, rR15,
 
-    // Control registers
-    rCR0, rCR1, rCR2, rCR3, rCR6,
+  // Control registers
+  rCR0, rCR1, rCR2, rCR3, rCR6,
 
-    // Program counter
-    rPC,
+  // Program counter
+  rPC,
 
-    // m32rx special registers
+  // m32rx special registers
 
-    rA0, rA1,                                        // Accumulators
-    rCR4, rCR5, rCR7, rCR8, rCR9,                    // Add. control registers
-    rCR10, rCR11, rCR12, rCR13, rCR14, rCR15,
+  rA0, rA1,                                        // Accumulators
+  rCR4, rCR5, rCR7, rCR8, rCR9,                    // Add. control registers
+  rCR10, rCR11, rCR12, rCR13, rCR14, rCR15,
 
-    rVcs, rVds    // these 2 registers are required by the IDA kernel
+  rVcs, rVds    // these 2 registers are required by the IDA kernel
 };
 
 // m32r indirect addressing mode
-enum m32r_phrases {
+enum m32r_phrases
+{
     fRI,        // @R         Register indirect
     fRIBA,      // @R+        Register indirect update before add
     fRIAA,      // @+R        Register indirect update after add
@@ -116,9 +118,10 @@ enum m32r_phrases {
 };
 
 // this module supports 2 processors: m32r and m32rx
-enum processor_subtype_t {
-    prc_m32r = 0,
-    prc_m32rx = 1
+enum processor_subtype_t
+{
+  prc_m32r = 0,
+  prc_m32rx = 1
 };
 
 extern processor_subtype_t ptype;
@@ -128,23 +131,21 @@ extern uint32 idpflags;
 inline bool use_synthetic_insn(void) { return (idpflags & NETNODE_USE_INSN_SYNTHETIC) != 0; }
 inline bool use_reg_aliases(void)    { return (idpflags & NETNODE_USE_REG_ALIASES) != 0; }
 
-extern char device[];
+extern qstring device;
 
 // exporting our routines
-void idaapi header(void);
-void idaapi footer(void);
-void idaapi gen_segm_header(ea_t addr);
-int idaapi ana(void);
-int idaapi emu(void);
-void idaapi out(void);
-bool idaapi outop(op_t &op);
+void idaapi m32r_header(outctx_t &ctx);
+void idaapi m32r_footer(outctx_t &ctx);
+void idaapi m32r_segstart(outctx_t &ctx, segment_t *seg);
+int idaapi ana(insn_t *_insn);
+int idaapi emu(const insn_t &insn);
 const ioport_t *find_sym(ea_t address);
 bool idaapi create_func_frame(func_t *pfn);
-int  idaapi m32r_get_frame_retsize(func_t *pfn);
-int  idaapi is_sp_based(const op_t &op);
-bool idaapi can_have_type(op_t &op);
-int m32r_create_switch_xrefs(ea_t insn_ea, const switch_info_ex_t &si);
-int m32r_calc_switch_cases(ea_t insn_ea, const switch_info_ex_t *si, casevec_t *casevec, eavec_t *targets);
+int  idaapi m32r_get_frame_retsize(const func_t *pfn);
+int  idaapi is_sp_based(const insn_t &insn, const op_t &op);
+bool idaapi can_have_type(const op_t &op);
+int m32r_create_switch_xrefs(ea_t insn_ea, const switch_info_t &si);
+int m32r_calc_switch_cases(casevec_t *casevec, eavec_t *targets, ea_t insn_ea, const switch_info_t &si);
 
 #endif /* _M32R_HPP */
 

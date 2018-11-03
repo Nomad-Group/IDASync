@@ -62,27 +62,30 @@ static void set_codeseqs()
 
 //--------------------------------------------------------------------------
 // handler for some IDB events
-static int idaapi idb_notify(void *, int notification_code, va_list va)
+static ssize_t idaapi idb_notify(void *, int notification_code, va_list va)
 {
   switch ( notification_code )
   {
+    case idb_event::closebase:
+    case idb_event::savebase:
+      helper.altset(-1, idpflags);
+      break;
+
     case idb_event::op_type_changed:
       // An operand type (offset, hex, etc...) has been set or deleted
       {
         ea_t ea = va_arg(va, ea_t);
         int n = va_arg(va, int);
-        if ( isCode(get_flags_novalue(ea)) )
+        if ( is_code(get_flags(ea)) )
         {
-          insn_t saved = cmd;
-          if ( ea != cmd.ea )
-            decode_insn(ea);
-          op_t& x = cmd.Operands[n];
+          insn_t insn;
+          decode_insn(&insn, ea);
+          op_t &x = insn.ops[n];
           if ( x.type == o_mem )
           {
-            ea = toEA(cmd.cs, x.addr);
-            copy_insn_optype(x, ea, NULL, true);
+            ea = to_ea(insn.cs, x.addr);
+            copy_insn_optype(insn, x, ea, NULL, true);
           }
-          cmd = saved;
         }
       }
       break;
@@ -90,210 +93,8 @@ static int idaapi idb_notify(void *, int notification_code, va_list va)
   return 0;
 }
 
-//----------------------------------------------------------------------
-// The kernel event notifications
-// Here you may take desired actions upon some kernel events
-static int idaapi notify(processor_t::idp_notify msgid, ...)
-{
-  va_list va;
-
-  va_start(va, msgid);
-
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-
-  if (code)
-    return code;
-
-  switch (msgid)
-  {
-    case processor_t::init:
-      helper.create("$ arc");
-      inf.mf = 0;               // Set little-endian mode of the IDA kernel
-      set_codeseqs();
-      hook_to_notification_point(HT_IDB, idb_notify, NULL);
-      break;
-
-    case processor_t::term:
-      unhook_from_notification_point(HT_IDB, idb_notify, NULL);
-      break;
-
-    case processor_t::newfile:
-      set_codeseqs();
-      break;
-
-    case processor_t::oldfile:
-      idpflags = (ushort)helper.altval(-1);
-      break;
-
-    case processor_t::closebase:
-    case processor_t::savebase:
-      helper.altset(-1, idpflags);
-      break;
-
-    case processor_t::newseg:
-      break;
-
-    case processor_t::newprc:
-      ptype = va_argi(va, processor_subtype_t);
-      if ( uint(ptype) > prc_arcompact )
-        return 0;
-      set_codeseqs();
-      break;
-
-    case processor_t::is_call_insn:
-                                // Is the instruction a "call"?
-                                // ea_t ea  - instruction address
-                                // returns: 1-unknown, 0-no, 2-yes
-      {
-        ea_t ea = va_arg(va, ea_t);
-        insn_t saved = cmd;
-        code = decode_insn(ea) != 0 && is_call_insn() ? 2 : 0;
-        cmd = saved;
-        return code;
-      }
-
-    case processor_t::is_ret_insn:
-      {
-        ea_t ea = va_arg(va, ea_t);
-//        bool strict = va_argi(va, bool);
-        insn_t saved = cmd;
-        code = decode_insn(ea) != 0 && is_return_insn() ? 2 : 0;
-        cmd = saved;
-        return code;
-      }
-
-    case processor_t::is_basic_block_end:
-      return is_basic_block_end() ? 2 : 0;
-
-    case processor_t::undefine:
-      {
-        // an item is being undefined; delete data attached to it
-        ea_t ea = va_arg(va, ea_t);
-        del_insn_info(ea);
-      }
-      return 2;
-
-// +++ TYPE CALLBACKS
-    case processor_t::decorate_name3:
-      {
-        qstring *outbuf  = va_arg(va, qstring *);
-        const char *name = va_arg(va, const char *);
-        bool mangle      = va_argi(va, bool);
-        cm_t cc          = va_argi(va, cm_t);
-        return gen_decorate_name3(outbuf, name, mangle, cc) ? 2 : 0;
-      }
-
-    case processor_t::max_ptr_size:
-      return 4+1;
-
-    case processor_t::based_ptr:
-      {
-        uint ptrt      = va_arg(va, unsigned int); qnotused(ptrt);
-        char **ptrname = va_arg(va, char **);
-        *ptrname = NULL;
-        return 0;                       // returns: size of type
-      }
-
-    case processor_t::get_default_enum_size: // get default enum size
-                                // args:  cm_t cm
-                                // returns: sizeof(enum)
-      {
-//        cm_t cm        =  va_argi(va, cm_t);
-        return inf.cc.size_e;
-      }
-
-    case processor_t::calc_arglocs3:
-      {
-        func_type_data_t *fti = va_arg(va, func_type_data_t *);
-        return calc_arc_arglocs(fti) ? 2 : -1;
-      }
-
-    case processor_t::calc_varglocs3:
-      {
-        func_type_data_t *fti = va_arg(va, func_type_data_t *);
-        regobjs_t *regargs    = va_arg(va, regobjs_t *);
-        /*relobj_t *stkargs =*/ va_arg(va, relobj_t *);
-        int nfixed            = va_arg(va, int);
-        return calc_arc_varglocs(fti, regargs, nfixed) ? 2 : -1;
-      }
-
-    case processor_t::calc_retloc3:
-      {
-        const tinfo_t *type = va_arg(va, const tinfo_t *);
-        cm_t cc             = va_argi(va, cm_t);
-        argloc_t *retloc    = va_arg(va, argloc_t *);
-        return calc_arc_retloc(*type, cc, retloc) ? 2 : -1;
-      }
-
-    case processor_t::use_stkarg_type3:
-      return false;
-
-    case processor_t::use_regarg_type3:
-      {
-        int *used                 = va_arg(va, int *);
-        ea_t ea                   = va_arg(va, ea_t);
-        const funcargvec_t *rargs = va_arg(va, const funcargvec_t *);
-        *used = use_arc_regarg_type(ea, *rargs);
-        return 2;
-      }
-
-    case processor_t::use_arg_types3:
-      {
-        ea_t ea               = va_arg(va, ea_t);
-        func_type_data_t *fti = va_arg(va, func_type_data_t *);
-        funcargvec_t *rargs   = va_arg(va, funcargvec_t *);
-        use_arc_arg_types(ea, fti, rargs);
-        return 2;
-      }
-
-    case processor_t::get_fastcall_regs3:
-    case processor_t::get_varcall_regs3:
-      {
-        const int *regs;
-        get_arc_fastcall_regs(&regs);
-        callregs_t *callregs = va_arg(va, callregs_t *);
-        callregs->set(ARGREGS_INDEPENDENT, regs, NULL);
-        return callregs->nregs + 2;
-      }
-
-    case processor_t::get_thiscall_regs3:
-      {
-        callregs_t *callregs = va_arg(va, callregs_t *);
-        callregs->reset();
-        return 2;
-      }
-
-    case processor_t::calc_cdecl_purged_bytes2:
-                                // calculate number of purged bytes after call
-      {
-        // ea_t ea                     = va_arg(va, ea_t);
-        return 2;
-      }
-
-    case processor_t::get_stkarg_offset2:
-                                // get offset from SP to the first stack argument
-                                // args: none
-                                // returns: the offset+2
-      return 2;
-
-// --- TYPE CALLBACKS
-
-    default:
-      return handle_old_type_callbacks(msgid, va);
-  }
-  va_end(va);
-  return 1;
-}
-
-static const ushort gnu_bad_insn[] = { ARC_flag, 0 };
-
 //-----------------------------------------------------------------------
-//                                                                       ASMI
+//      ASMI
 //-----------------------------------------------------------------------
 static const asm_t gnuas =
 {
@@ -303,7 +104,6 @@ static const asm_t gnuas =
   "GNU assembler",
   0,
   NULL,                         // no headers
-  gnu_bad_insn,                 // GNU-as can't produce flag.f
   ".org",                       // org directive
   0,                            // end directive
   "#",                          // comment string
@@ -325,8 +125,6 @@ static const asm_t gnuas =
   ".space %s",                  // uninited arrays
   "=",                          // equ
   NULL,                         // seg prefix
-  NULL, NULL, NULL,
-  NULL,                         // xlat ascii
   ".",                          // curent ip
   NULL,                         // func_header
   NULL,                         // func_footer
@@ -355,61 +153,61 @@ static const char *idaapi set_idp_options(const char *keyword,int value_type,con
   if ( keyword == NULL )
   {
     static const char form[] =
-"HELP\n"
-"ARC specific options\n"
-"\n"
-" Simplify instructions\n"
-"\n"
-"      If this option is on, IDA will simplify instructions and replace\n"
-"      them by more natural pseudo-instructions or alternative mnemonics.\n"
-"      For example,\n"
-"\n"
-"                    sub.f   0, a, b\n"
-"\n"
-"     will be replaced by\n"
-"\n"
-"                    cmp a, b\n"
-"\n"
-"\n"
-" Inline constant pool loads\n"
-"\n"
-"     If this option is on, IDA will use =label syntax for\n"
-"     pc-relative loads (commonly used to load constants)\n"
-"     For example,\n"
-"\n"
-"                   ld      r1, [pcl,0x1C]\n"
-"                   ...\n"
-"                   .long 0x2051D1C8\n"
-"\n"
-"     will be replaced by\n"
-"\n"
-"                   ld      r1, =0x2051D1C8\n"
-"\n"
-"\n"
-" Track register accesses\n"
-"\n"
-"     This option tells IDA to track values loaded\n"
-"     into registers and use it to improve the listing.\n"
-"     For example,\n"
-"\n"
-"                   mov     r13, 0x172C\n"
-"                   ...\n"
-"                   add     r0, r13, 0x98\n"
-"\n"
-"     will be replaced by\n"
-"\n"
-"                   add     r0, r13, (dword_17C4 - 0x172C)\n"
-"\n"
-"\n"
-"ENDHELP\n"
-"ARC specific options\n"
-"\n"
-" <~S~implify instructions:C>\n"
-" <~I~nline constant pool loads:C>\n"
-" <Track ~r~egister accesses:C>>\n"
-"\n"
-"\n";
-    AskUsingForm_c(form, &idpflags);
+      "HELP\n"
+      "ARC specific options\n"
+      "\n"
+      " Simplify instructions\n"
+      "\n"
+      "      If this option is on, IDA will simplify instructions and replace\n"
+      "      them by more natural pseudo-instructions or alternative mnemonics.\n"
+      "      For example,\n"
+      "\n"
+      "                    sub.f   0, a, b\n"
+      "\n"
+      "     will be replaced by\n"
+      "\n"
+      "                    cmp a, b\n"
+      "\n"
+      "\n"
+      " Inline constant pool loads\n"
+      "\n"
+      "     If this option is on, IDA will use =label syntax for\n"
+      "     pc-relative loads (commonly used to load constants)\n"
+      "     For example,\n"
+      "\n"
+      "                   ld      r1, [pcl,0x1C]\n"
+      "                   ...\n"
+      "                   .long 0x2051D1C8\n"
+      "\n"
+      "     will be replaced by\n"
+      "\n"
+      "                   ld      r1, =0x2051D1C8\n"
+      "\n"
+      "\n"
+      " Track register accesses\n"
+      "\n"
+      "     This option tells IDA to track values loaded\n"
+      "     into registers and use it to improve the listing.\n"
+      "     For example,\n"
+      "\n"
+      "                   mov     r13, 0x172C\n"
+      "                   ...\n"
+      "                   add     r0, r13, 0x98\n"
+      "\n"
+      "     will be replaced by\n"
+      "\n"
+      "                   add     r0, r13, (dword_17C4 - 0x172C)\n"
+      "\n"
+      "\n"
+      "ENDHELP\n"
+      "ARC specific options\n"
+      "\n"
+      " <~S~implify instructions:C>\n"
+      " <~I~nline constant pool loads:C>\n"
+      " <Track ~r~egister accesses:C>>\n"
+      "\n"
+      "\n";
+    ask_form(form, &idpflags);
     return IDPOPT_OK;
   }
   else
@@ -464,23 +262,304 @@ static const bytes_t retcodes[] =
   { 0, NULL }                    // NULL terminated array
 };
 
+//----------------------------------------------------------------------
+// The kernel event notifications
+// Here you may take desired actions upon some kernel events
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
+  switch ( msgid )
+  {
+    case processor_t::ev_init:
+      helper.create("$ arc");
+      inf.set_be(false);               // Set little-endian mode of the IDA kernel
+      set_codeseqs();
+      hook_to_notification_point(HT_IDB, idb_notify);
+      break;
+
+    case processor_t::ev_term:
+      unhook_from_notification_point(HT_IDB, idb_notify);
+      break;
+
+    case processor_t::ev_newfile:
+      set_codeseqs();
+      break;
+
+    case processor_t::ev_oldfile:
+      idpflags = (ushort)helper.altval(-1);
+      break;
+
+    case processor_t::ev_creating_segm:
+      break;
+
+    case processor_t::ev_newprc:
+      ptype = va_argi(va, processor_subtype_t);
+      //bool keep_cfg = va_argi(va, bool);
+      if ( uint(ptype) > prc_arcompact )
+      {
+        code = -1;
+        break;
+      }
+      set_codeseqs();
+      break;
+
+    case processor_t::ev_out_mnem:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_mnem(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_is_call_insn:
+                                // Is the instruction a "call"?
+                                // ea_t ea  - instruction address
+                                // returns: 1-unknown, 0-no, 2-yes
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        code = is_arc_call_insn(*insn) ? 1 : -1;
+        return code;
+      }
+
+    case processor_t::ev_is_ret_insn:
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+//        bool strict = va_argi(va, bool);
+        code = is_arc_return_insn(*insn) ? 1 : -1;
+        return code;
+      }
+
+    case processor_t::ev_is_basic_block_end:
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        return is_arc_basic_block_end(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_undefine:
+      {
+        // an item is being undefined; delete data attached to it
+        ea_t ea = va_arg(va, ea_t);
+        del_insn_info(ea);
+      }
+      return 1;
+
+// +++ TYPE CALLBACKS
+    case processor_t::ev_decorate_name:
+      {
+        qstring *outbuf  = va_arg(va, qstring *);
+        const char *name = va_arg(va, const char *);
+        bool mangle      = va_argi(va, bool);
+        cm_t cc          = va_argi(va, cm_t);
+        tinfo_t *type    = va_arg(va, tinfo_t *);
+        return gen_decorate_name(outbuf, name, mangle, cc, type) ? 1 : 0;
+      }
+
+    case processor_t::ev_max_ptr_size:
+      return 4;
+
+    case processor_t::ev_get_default_enum_size: // get default enum size
+                                // args:  cm_t cm
+                                // returns: sizeof(enum)
+      {
+//        cm_t cm        =  va_argi(va, cm_t);
+        return inf.cc.size_e;
+      }
+
+    case processor_t::ev_calc_arglocs:
+      {
+        func_type_data_t *fti = va_arg(va, func_type_data_t *);
+        return calc_arc_arglocs(fti) ? 1 : -1;
+      }
+
+    case processor_t::ev_calc_varglocs:
+      {
+        func_type_data_t *fti = va_arg(va, func_type_data_t *);
+        regobjs_t *regargs    = va_arg(va, regobjs_t *);
+        /*relobj_t *stkargs =*/ va_arg(va, relobj_t *);
+        int nfixed = va_arg(va, int);
+        return calc_arc_varglocs(fti, regargs, nfixed) ? 1 : -1;
+      }
+
+    case processor_t::ev_calc_retloc:
+      {
+        argloc_t *retloc    = va_arg(va, argloc_t *);
+        const tinfo_t *type = va_arg(va, const tinfo_t *);
+        cm_t cc             = va_argi(va, cm_t);
+        return calc_arc_retloc(retloc, *type, cc) ? 1 : -1;
+      }
+
+    case processor_t::ev_use_stkarg_type:
+      return 0;
+
+    case processor_t::ev_use_regarg_type:
+      {
+        int *used                 = va_arg(va, int *);
+        ea_t ea                   = va_arg(va, ea_t);
+        const funcargvec_t *rargs = va_arg(va, const funcargvec_t *);
+        *used = use_arc_regarg_type(ea, *rargs);
+        return 1;
+      }
+
+    case processor_t::ev_use_arg_types:
+      {
+        ea_t ea               = va_arg(va, ea_t);
+        func_type_data_t *fti = va_arg(va, func_type_data_t *);
+        funcargvec_t *rargs   = va_arg(va, funcargvec_t *);
+        use_arc_arg_types(ea, fti, rargs);
+        return 1;
+      }
+
+    case processor_t::ev_get_cc_regs:
+      {
+        callregs_t *callregs = va_arg(va, callregs_t *);
+        cm_t cc = va_argi(va, cm_t);
+        if ( cc == CM_CC_FASTCALL || cc == CM_CC_ELLIPSIS )
+        {
+          const int *regs;
+          get_arc_fastcall_regs(&regs);
+          callregs->set(ARGREGS_INDEPENDENT, regs, NULL);
+          return 1;
+        }
+        else if ( cc == CM_CC_THISCALL )
+        {
+          callregs->reset();
+          return 1;
+        }
+      }
+      break;
+
+    case processor_t::ev_calc_cdecl_purged_bytes:
+                                // calculate number of purged bytes after call
+      {
+        // ea_t ea                     = va_arg(va, ea_t);
+        return 0;
+      }
+
+    case processor_t::ev_get_stkarg_offset:
+                                // get offset from SP to the first stack argument
+                                // args: none
+                                // returns: the offset+2
+      return 0;
+
+// --- TYPE CALLBACKS
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        arc_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        arc_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        arc_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_get_frame_retsize:
+      {
+        int *frsize = va_arg(va, int *);
+        const func_t *pfn = va_arg(va, const func_t *);
+        *frsize = arc_get_frame_retsize(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
+  }
+  return code;
+}
+
 //-----------------------------------------------------------------------
 //                      Processor Definition
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_ARC,                     // id
-    PR_USE32            // 32-bit processor
-  | PR_DEFSEG32         // create 32-bit segments by default
-  | PRN_HEX             // Values are hexadecimal by default
-  | PR_TYPEINFO | PR_TINFO // Support the type system notifications
-  | PR_CNDINSNS         // Has conditional instructions
-  | PR_DELAYED          // Has delay slots
-  | PR_USE_ARG_TYPES    // use ph.use_arg_types callback
-  | PR_RNAMESOK,        // register names can be reused for location names
-  8,                            // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_ARC,               // id
+                          // flag
+    PR_USE32              // 32-bit processor
+  | PR_DEFSEG32           // create 32-bit segments by default
+  | PRN_HEX               // Values are hexadecimal by default
+  | PR_TYPEINFO           // Support the type system notifications
+  | PR_CNDINSNS           // Has conditional instructions
+  | PR_DELAYED            // Has delay slots
+  | PR_USE_ARG_TYPES      // use ph.use_arg_types callback
+  | PR_RNAMESOK,          // register names can be reused for location names
+                          // flag2
+  PR2_IDP_OPTS,           // the module has processor-specific configuration options
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,                      // array of short processor names
   // the short names are used to specify the processor
@@ -493,31 +572,8 @@ processor_t LPH =
 
   notify,                       // the kernel event notification callback
 
-  header,                       // generate the disassembly header
-  footer,                       // generate the disassembly footer
-
-  segstart,                     // generate a segment declaration (start of segment)
-  std_gen_segm_footer,          // generate a segment footer (end of segment)
-
-  NULL,                         // generate 'assume' directives
-
-  ana,                          // analyze an instruction and fill the 'cmd' structure
-  emu,                          // emulate an instruction
-
-  out,                          // generate a text representation of an instruction
-  outop,                        // generate a text representation of an operand
-  intel_data,                   // generate a text representation of a data item
-  NULL,                         // compare operands
-  NULL,                         // can an operand have a type?
-
-  qnumber(RegNames),            // Number of registers
   RegNames,                     // Register names
-  NULL,                         // get abstract register
-
-  0,                            // Number of register files
-  NULL,                         // Register file names
-  NULL,                         // Register descriptions
-  NULL,                         // Pointer to CPU registers
+  qnumber(RegNames),            // Number of registers
 
   rVcs,                         // first
   rVds,                         // last
@@ -528,22 +584,9 @@ processor_t LPH =
   retcodes,
 
   0, ARC_last,
-  Instructions,
-  NULL,
-  NULL,
+  Instructions,                 // instruc
   0,                            // size of tbyte
-  NULL,
   {0},                          // real width
-  NULL,
-  NULL,                         // int32 (*gen_map_file)(FILE *fp);
-  NULL,                         // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  is_sp_based,                  // is the operand based on SP register?
-  create_func_frame,            // create frame of newly created function
-  arc_get_frame_retsize,        // get function return size
-  NULL,                         // generate declaration of stack variable
-  gen_spcdef,                   // generate text for an item in a special segment
   0,                            // Icode of a return instruction
-  set_idp_options,              // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,                // Is alignment instruction?
   NULL,                         // Micro virtual machine description
 };

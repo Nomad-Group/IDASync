@@ -26,7 +26,7 @@ void idaapi term(void)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   class msg_req_t: public ui_request_t
   {
@@ -66,6 +66,7 @@ void idaapi run(int /*arg*/)
     new msg_req_t("over 5 times\n"),
     new stepover_req_t(5),
     NULL);
+  return true;
 }
 
 

@@ -9,7 +9,7 @@
 #include "ins.hpp"
 
 //------------------------------------------------------------------------
-// customization of the 'cmd' structure:
+// customization of the insn_t structure:
 
 // XA bit references:
 
@@ -102,25 +102,23 @@ predefined_t *GetPredefined(predefined_t *ptr,int addr,int bit);
 int IsPredefined(const char *name);
 
 //------------------------------------------------------------------------
-void    idaapi header(void);
-void    idaapi footer(void);
+void idaapi xa_header(outctx_t &ctx);
+void idaapi xa_footer(outctx_t &ctx);
 
-void    idaapi segstart(ea_t ea);
+void idaapi xa_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi ana(void);
-int     idaapi emu(void);
-void    idaapi out(void);
-bool    idaapi outop(op_t &op);
+int  idaapi ana(insn_t *insn);
+int  idaapi emu(const insn_t &insn);
 
-void    idaapi xa_data(ea_t ea);
+void idaapi xa_data(outctx_t &ctx, bool analyze_only);
 
 bool idaapi xa_create_func(func_t *pfn);
 
-bool idaapi xa_is_switch(switch_info_ex_t *si);
+bool idaapi xa_is_switch(switch_info_t *si, const insn_t &insn);
 
-int idaapi xa_frame_retsize(func_t *pfn);
+int idaapi xa_frame_retsize(const func_t *pfn);
 
-void idaapi xa_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v);
+void idaapi xa_stkvar_def(outctx_t &ctx, const member_t *mptr, sval_t v);
 
 int idaapi xa_align_insn(ea_t ea);
 

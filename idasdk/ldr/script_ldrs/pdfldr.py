@@ -29,7 +29,7 @@ itself is now captured in group 13.
 \/S\s*\/(J|#4A|#4a)(a|#61)(v|#76)(a|#61)(S|#53)(c|#63)(r|#72)(i|#69)(p|#70)(t|#74)\s*\/(J|#4A|#4a)(S|#53)
 \((.+?)>>
 
-2. 
+2.
 ---------------
 
 """
@@ -75,7 +75,7 @@ def extract_shellcode(lines):
         # advance the match pos
         p += 8
         shellcode.append("".join(data))
-    
+
     # That's it
     return shellcode
 
@@ -172,13 +172,12 @@ def extract_pdf_shellcode(buf):
     return ret
 
 # -----------------------------------------------------------------------
-def accept_file(li, n):
+def accept_file(li, filename):
     """
     Check if the file is of supported format
 
     @param li: a file-like object which can be used to access the input data
-    @param n : format number. The function will be called with incrementing 
-               number until it returns zero
+    @param filename: name of the file, if it is an archive member name then the actual file doesn't exist
     @return: 0 - no more supported formats
              string "name" - format name to display in the chooser dialog
              dictionary { 'format': "name", 'options': integer }
@@ -187,10 +186,6 @@ def accept_file(li, n):
     """
 
     # we support only one format per file
-    if n > 0:
-        return 0
-
-
     li.seek(0)
     if li.read(5) != '%PDF-':
         return 0
@@ -200,11 +195,11 @@ def accept_file(li, n):
     if not r:
         return 0
 
-    return 'PDF with shellcode'
+    return {'format': 'PDF with shellcode', 'processor': 'metapc'}
 
 # -----------------------------------------------------------------------
 def load_file(li, neflags, format):
-    
+
     """
     Load the file into database
 
@@ -214,7 +209,7 @@ def load_file(li, neflags, format):
     """
 
     # Select the PC processor module
-    idaapi.set_processor_type("metapc", SETPROC_ALL|SETPROC_FATAL)
+    idaapi.set_processor_type("metapc", SETPROC_LOADER)
 
     buf = read_whole_file(li)
     r = extract_pdf_shellcode(buf)
@@ -227,11 +222,11 @@ def load_file(li, neflags, format):
     for id, ver, n, sc in r:
         size = len(sc)
         end  = start + size
-        
+
         # Create the segment
-        seg.startEA = start
-        seg.endEA   = end
-        seg.bitness = 1 # 32-bit
+        seg.start_ea = start
+        seg.end_ea   = end
+        seg.bitness  = 1 # 32-bit
         idaapi.add_segm_ex(seg, "obj_%d_%d_%d" % (id, ver, n), "CODE", 0)
 
         # Copy the bytes
@@ -244,7 +239,7 @@ def load_file(li, neflags, format):
         start = ((end / 0x1000) + 1) * 0x1000
 
     # Select the bochs debugger
-    LoadDebugger("bochs", 0)
+    load_debugger("bochs", 0)
 
     return 1
 
@@ -262,7 +257,7 @@ def test1(sample = SAMPLE1):
 
     for id, ver in r:
         obj = find_obj(buf, id, ver)
-        
+
         # extract the JS stream object
         f = file('obj_%d_%d.bin' % (id, ver), 'wb')
         f.write(obj)

@@ -10,6 +10,8 @@ TEMPLATE = lib
 # this is to avoid the version number in the name of the plugin
 CONFIG += plugin
 
+QT += widgets
+
 # the namespace for Qt
 QT_NAMESPACE = QT
 
@@ -34,7 +36,7 @@ win32 {
     TARGET_EXT = .plx
     DEFINES += __LINUX__ \
                _FORTIFY_SOURCE=0
-    SYSNAME = lnx
+    SYSNAME = linux
     COMPILER_NAME = gcc
     # avoid linking GLIBC_2.11 symbols (longjmp_chk)
     CFLAGS += -D_FORTIFY_SOURCE=0

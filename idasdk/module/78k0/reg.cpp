@@ -6,7 +6,7 @@
 
 #include "78k0.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //----------------------------------------------------------------------
 static const char *const RegNames[] =
@@ -19,13 +19,12 @@ static const char *const RegNames[] =
 //----------------------------------------------------------------------
 static const asm_t nec78k0 =
 {
-  AS_COLON | ASB_BINF4 | AS_N2CHR ,
+  AS_COLON | ASB_BINF4 | AS_N2CHR,
   // пользовательские флажки
   0,
   "NEC 78K0 Assembler",                 // название ассемблера
   0,                                                    // номер в help'e
   NULL,                                                 // автозаголовок
-  NULL,                                                 // массив не испоьзующихся инструкций
   ".org",
   ".end",
 
@@ -48,25 +47,21 @@ static const asm_t nec78k0 =
                     // #d - size of array
                     // #v - value of array elements
                     // #s - size specifier
-  ".rs %s",    // uninited data (reserve space)
+  ".rs %s",// uninited data (reserve space)
   ".equ",
-  NULL,         // seg prefix
-  NULL,         // preline for checkarg
-  NULL,      // checkarg_atomprefix
-  NULL,   // checkarg operations
-  NULL,   // XlatAsciiOutput
-  "$",    // a_curip
+  NULL,    // seg prefix
+  "$",     // a_curip
 
-  NULL,         // returns function header line
-  NULL,         // returns function footer line
-  NULL,         // public
-  NULL,         // weak
-  NULL,         // extrn
-  NULL,         // comm
-  NULL,         // get_type_name
-  NULL         // align
+  NULL,    // returns function header line
+  NULL,    // returns function footer line
+  NULL,    // public
+  NULL,    // weak
+  NULL,    // extrn
+  NULL,    // comm
+  NULL,    // get_type_name
+  NULL,    // align
 
-  ,'(', ')',     // lbrace, rbrace
+  '(', ')',// lbrace, rbrace
   NULL,    // mod
   NULL,    // and
   NULL,    // or
@@ -115,22 +110,22 @@ static const bytes_t retcodes[] =
 //----------------------------------------------------------------------
 
 static netnode helper;
-char device[MAXSTR] = "";
-static size_t numports = 0;
-static ioport_t *ports = NULL;
+qstring device;
+static ioports_t ports;
 
 #include "../iocommon.cpp"
 
 
 //------------------------------------------------------------------
-bool nec_find_ioport_bit(int port, int bit)
+bool nec_find_ioport_bit(outctx_t &ctx, int port, int bit)
 {
 
   //поиск бита из регистра в списке портов
-  const ioport_bit_t *b = find_ioport_bit(ports, numports, port, bit);
-  if ( b != NULL && b->name != NULL ){
+  const ioport_bit_t *b = find_ioport_bit(ports, port, bit);
+  if ( b != NULL && !b->name.empty() )
+  {
     //выводим имя бита из регистра
-    out_line(b->name, COLOR_IMPNAME);
+    ctx.out_line(b->name.c_str(), COLOR_IMPNAME);
     return true;
   }
   return false;
@@ -140,9 +135,9 @@ bool nec_find_ioport_bit(int port, int bit)
 
 void set_dopolnit_info(void)
 {
-  for ( int banknum = 0; banknum < 4; banknum++)
+  for ( int banknum = 0; banknum < 4; banknum++ )
   {
-    for ( int Regs = 0; Regs < 8; Regs++)
+    for ( int Regs = 0; Regs < 8; Regs++ )
     {
       char temp[100];
       qsnprintf(temp, sizeof(temp), "Bank%d_%s", banknum, RegNames[Regs]);
@@ -158,62 +153,97 @@ void set_dopolnit_info(void)
 }
 
 //----------------------------------------------------------------------
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
   switch ( msgid )
   {
-    case processor_t::init:
-      inf.mf = 0;
-      inf.s_genflags |= INFFL_LZERO;
+    case processor_t::ev_init:
+      inf.set_be(false);
+      inf.set_gen_lzero(true);
       helper.create("$ 78k0");
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
+    case processor_t::ev_term:
+      ports.clear();
       break;
 
-    case processor_t::newfile:
+    case processor_t::ev_newfile:
       //Выводит длг. окно процессоров, и позволяет выбрать нужный, считывает для выбраного
       //процессора информацию из cfg. По считаной информации подписывает порты и регстры
       {
         char cfgfile[QMAXFILE];
         get_cfg_filename(cfgfile, sizeof(cfgfile));
-        if ( choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0) )
-          set_device_name(device, IORESP_ALL);
+        if ( choose_ioport_device(&device, cfgfile, parse_area_line0) )
+          set_device_name(device.c_str(), IORESP_ALL);
         set_dopolnit_info();
       }
       break;
 
-    case processor_t::newprc:
-      {
-        char buf[MAXSTR];
-        if ( helper.supval(-1, buf, sizeof(buf)) > 0 )
-          set_device_name(buf, IORESP_PORT);
-      }
+    case processor_t::ev_newprc:
+      if ( helper.supstr(&device, -1) > 0 )
+        set_device_name(device.c_str(), IORESP_PORT);
       break;
 
-    case processor_t::newseg:
+    case processor_t::ev_creating_segm:
       {
         segment_t *s = va_arg(va, segment_t *);
         // Set default value of DS register for all segments
         set_default_dataseg(s->sel);
       }
       break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        N78K_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        N78K_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        N78K_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return N78K_ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return N78K_emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
     default:
       break;
   }
-  va_end(va);
-  return 1;
+  return 0;
 }
 
 //-----------------------------------------------------------------------
@@ -221,11 +251,16 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_NEC_78K0,                // id процессора
-  PRN_HEX|PR_SEGTRANS|PR_SEGS,  // can use register names for byte names
-  8,                                                    // 8 bits in a byte for code segments
-  8,                            // 8 bits in a byte
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_NEC_78K0,          // id процессора
+                          // flag
+    PRN_HEX
+  | PR_SEGTRANS
+  | PR_SEGS,
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte
 
   shnames,                      // короткие имена процессоров (до 9 символов)
   lnames,                       // длинные имена процессоров
@@ -234,62 +269,18 @@ processor_t LPH =
 
   notify,                       // функция оповещения
 
-  N78K_header,                  // создание заголовка текста
-  N78K_footer,                  // создание конца текста
-
-  N78K_segstart,                // начало сегмента
-  std_gen_segm_footer,          // конец сегмента - стандартный, без завершения
-
-  NULL,                         // директивы смены сегмента - не используются
-
-  N78K_ana,                     // канализатор
-  N78K_emu,                     // эмулятор инструкций
-
-  N78K_out,                     // текстогенератор
-  N78K_outop,                   // тектогенератор операндов
-  N78K_data,                    // генератор описания данных
-  NULL,                         // сравнивалка операндов
-  NULL,                         // can have type
-
-  qnumber(RegNames),            // Number of registers
   RegNames,                                             // Regsiter names
-  NULL,                         // получить значение регистра
+  qnumber(RegNames),            // Number of registers
 
-  0,                            // число регистровых файлов
-  NULL,                         // имена регистровых файлов
-  NULL,                         // описание регистров
-  NULL,                         // Pointer to CPU registers
   rVcs, rVds,
-#if IDP_INTERFACE_VERSION > 37
   2,                            // size of a segment register
-#endif
   rVcs, rVds,
   NULL,                         // типичные коды начала кодов
   retcodes,                     // коды return'ov
-#if IDP_INTERFACE_VERSION <= 37
-  NULL,                         // возвращает вероятность кодовой последовательности
-#endif
   0, NEC_78K_0_last,            // первая и последняя инструкции
-  Instructions,                 // массив названия инструкций
-  NULL,                         // проверка на инструкцию дальнего перехода
-#if IDP_INTERFACE_VERSION <= 37
-  NULL,                         // встроенный загрузчик
-#endif
-  NULL,                         // транслятор смещений
+  Instructions,                 // instruc
   3,                            // размер tbyte - 24 бита
-  NULL,                         // преобразователь плавающей точки
-  {0,0,0,0},                    // длины данных с плавающей точкой
-  NULL,                         // поиск switch
-  NULL,                         // генератор MAP-файла
-  NULL,                         // строка -> адрес
-  NULL,                         // проверка на смещение в стеке
-  NULL,                         // создание фрейма функции
-  NULL,                                                 // Get size of function return address in bytes (2/4 by default)
-  NULL,                         // создание строки описания стековой переменной
-  NULL,                         // генератор текста для ....
+  { 0,0,0,0 },                  // длины данных с плавающей точкой
   0,                            // Icode для команды возврата
-  NULL,                         // передача опций в IDP
-  NULL,                         // Is the instruction created only for alignment purposes?
   NULL,                         // micro virtual mashine
-  0                             // fixup bits
 };

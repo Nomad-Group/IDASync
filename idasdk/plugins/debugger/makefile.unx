@@ -1,17 +1,25 @@
-ifndef __BSD__
+ifneq ($(wildcard ../../parse),)
+  ENABLE_LOWCNDS=1
+endif
+ifneq ($(wildcard ../../ida),)
+  ifndef __CEARM__
+    ENABLE_REMOTEPDB=1
+  endif
+endif
+
 #DONT_FORCE_CPP=1
 #__CFLAGS=-DLIBWRAP
 #LIBWRAP=-lwrap
 
-PLUGIN_SCRIPT_PATH=../plugin.script
+PLUGIN_SCRIPT_PATH=../../plugins/plugin.script
+STRIPOBJS=rpc_server.cpp
 
 O1=debmod
 O2=pc_debmod
 ifdef __LINUX__
+  PINBASE_DEBMOD=$(F)linuxbase_debmod$(O)
   ifdef __ARM__
     SERVER=armlinux_server
-    ADDITIONAL_GOALS=$(SERVER)
-    DONT_BUILD_PLUGIN=1
     INCFLAGS=-DWAIT_IN_MAIN_THREAD # we are compiling for wd
 #    STATIC_BUILD=-static -lpthread # specify the lib once more so that the linker sees it
   else
@@ -28,51 +36,50 @@ ifdef __LINUX__
   PLUGIN_SCRIPT=-Wl,--version-script=linux_debmod.script -Wl,--export-dynamic,--build-id
 else
   INCFLAGS=-I../../ldr/mach-o/h
-  ifdef __IPHONE__
-    SERVER=iphone_server
-    DONT_BUILD_PLUGIN=1
-  else
-    SERVER=mac_server
-    PROC=mac_user
-  endif
+  PINBASE_DEBMOD=$(F)macbase_debmod$(O)
+  SERVER=mac_server
+  PROC=mac_user
   O3=mac_debmod
   O4=excServer
   O5=symmacho
   O6=macbase_debmod
+  ADDITIONAL_LIBS=-framework Security -framework CoreFoundation
 endif
 
 # do not build mixed servers, where sizeof(ea_t)==8 but sizeof(size_t)==4
 # they do not make any sense
-ifdef __EA64__
-ifndef __X64__
-SERVER=
+ifneq ($(__EA64__),$(__X64__))
+  SERVER=
 endif
+
+ifndef __X64__
+  DONT_BUILD_PLUGIN=1
 endif
 
 ifdef ENABLE_LOWCNDS
   LOWCND_FLAGS=-DENABLE_LOWCNDS
   LOWCND_LIBS=$(L)idc$(A)
   LOWCND_OBJS=$(F)idcfuncs$(O) $(L)dbgsrv_funcs$(O)
-  O6=idcfuncs
+  O7=idcfuncs
 endif
 
 ifdef ENABLE_REMOTEPDB
   REMOTEPDB_FLAGS=-DENABLE_REMOTEPDB
 endif
-__CFLAGS=$(INCFLAGS) $(LOWCND_FLAGS) $(REMOTEPDB_FLAGS) -Ibochs_ctrl/$(F)
-
-ifndef __ARM__ # ARM Linux: no stub or cfg files, only the server
-  ADDITIONAL_GOALS=$(ALLDIRS) $(SERVER) loaddll_test cfg
-  ifndef __X64__
-    ADDITIONAL_GOALS+=win32_stub linux_stub armlinux_stub mac_stub iphone_stub wince_stub gdb_user bochs_user replay_user
-  endif
-endif
+__CFLAGS=$(INCFLAGS) $(NORTTI) -DBUILD_DEBUGGER $(LOWCND_FLAGS) $(REMOTEPDB_FLAGS)
 
 ifdef __X64__
-  DONT_BUILD_PLUGIN=1
+MODULES=win32_stub      \
+        linux_stub      \
+        armlinux_stub   \
+        mac_stub        \
+        cfg             \
+
 endif
 
-include ../plugin.mak
+ADDITIONAL_GOALS=$(SERVER) $(MODULES)
+
+include ../../plugins/plugin.mak
 
 # all debug servers should go under the dbgsrv directory
 SERVERBIN=$(R)dbgsrv/
@@ -82,23 +89,32 @@ STUB_COMMON=$(RPC_COMMON) $(F)rpc_client$(O) $(F)rpc_debmod$(O) $(F)debmod$(O)
 SERVER_COMMON=$(F)server$(O) $(RPC_COMMON) $(F)rpc_server$(O) $(F)debmod$(O) \
               $(F)$(TARGET_PROCESSOR_MODULE)_debmod$(O) $(LOWCND_OBJS)
 
-.PHONY: mkdeb iphone_server mac_server linux_server
+.PHONY: mkdeb mac_server linux_server
 
 #-----------------------------------------------------------------------------
 # Servers
 #------------
 MAC_OBJS=$(SERVER_COMMON) $(F)mac_debmod$(O) $(F)macbase_debmod$(O) $(F)tcpip$(O) $(F)excServer$(O) $(F)symmacho$(O)
+MAPFILE=-Wl,-map,$(F)$(@F).map
+MKDEB=/usr/local/bin/mkdeb
 
+# NOTE: perform the steps in mac_server_certificate.txt before using CODESIGN_MAC_SERVER!
+ifdef CODESIGN_MAC_SERVER
+  CODESIGN_IDENTITY?=mac_server
+  ifdef MAC_KEYCHAIN
+    CODESIGN_OPTS=--keychain $(MAC_KEYCHAIN).keychain
+  endif
+  MAC_SERVER_FINAL=codesign $(CODESIGN_OPTS) -s $(CODESIGN_IDENTITY)
+else
+  MAC_SERVER_FINAL=$(MKDEB)
+endif
+
+PLIST_NAME=mac_debug$(B).plist
+EMBEDPLIST=-Wl,-sectcreate,__TEXT,__info_plist,$(PLIST_NAME)
 mac_server: $(SERVERBIN)mac_server$(B)
-iphone_server: $(SERVERBIN)iphone_server
-$(SERVERBIN)mac_server$(B) $(SERVERBIN)iphone_server: $(MAC_OBJS) $(LOWCND_LIBS) $(L)pro$(A)
-	$(call link_dumb,$@ $(MAC_OBJS) $(LOWCND_LIBS))
-#ifdef __IPHONE__
-#	export CODESIGN_ALLOCATE=$(DEV)/usr/bin/codesign_allocate
-#	codesign -v -v -fs "Ilfak Guilfanov" $@
-#	ldid -Sgdb.xml $@
-#endif
-	mkdeb $@
+$(SERVERBIN)mac_server$(B): $(MAC_OBJS) $(LOWCND_LIBS) $(L)pro$(A) $(PLIST_NAME)
+	$(call link_dumb,$@ $(MAC_OBJS) $(LOWCND_LIBS) $(MAPFILE) $(EMBEDPLIST) $(ADDITIONAL_LIBS))
+	$(MAC_SERVER_FINAL) $@
 iloop: loop.cpp
 	$(CCL) -o $@ loop.cpp $(STDLIBS)
 isignal: linux/signal.cpp
@@ -106,15 +122,17 @@ isignal: linux/signal.cpp
 #----------------------------------------------------------------------------
 # Linux server
 LINUX_OBJS=$(SERVER_COMMON) $(WRPOBJ) $(F)linux_debmod$(O) \
-	   $(F)linuxbase_debmod$(O) \
+           $(F)linuxbase_debmod$(O) \
            $(F)symelf$(O) $(F)tcpip$(O) $(F)linux_wait$(O)
+LINUX_LIBS=$(LOWCND_LIBS) $(L)pro$(A) $(LIBWRAP) $(ADDITIONAL_LIBS) $(STDLIBS)
+LINUX_MAP =-Wl,-Map,$(F)$(LINUX_SERVER)$(B).map
 
 $(LINUX_SERVER): $(SERVERBIN)$(LINUX_SERVER)$(B)
 $(SERVERBIN)$(LINUX_SERVER)$(B): $(LINUX_OBJS) $(LOWCND_LIBS) $(L)pro$(A)
-	$(CCL) -o$@ $(PLUGIN_SCRIPT) $(LINUX_OBJS) $(DUMB) $(LOWCND_LIBS) $(L)pro$(A) $(LIBWRAP) $(ADDITIONAL_LIBS) $(STDLIBS) $(STATIC_BUILD)
+	$(CCL) -o$@ $(PLUGIN_SCRIPT) $(LINUX_OBJS) $(DUMB) $(LINUX_LIBS) $(STATIC_BUILD) $(LINUX_MAP)
 #-----------------------------------------------------------------------------
 # Stubs
-CLLOPTS=-L$(R) $(LINKIDA) $(PLUGIN_SCRIPT) $(STDLIBS)
+CLLOPTS=-L$(L) $(LINKIDA) $(PLUGIN_SCRIPT) $(STDLIBS)
 #------------
 WIN32_LOCAL_OBJ=$(F)win32_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON) $(F)w32sehch$(O)
 WIN32CLIENT=$(BIN_PATH)win32_stub$(PLUGIN)
@@ -149,306 +167,333 @@ mac_stub: $(MACCLIENT)
 $(MACCLIENT): $(MAC_LOCAL_OBJ) $(PLUGIN_SCRIPT_PATH)
 	$(CCL) $(OUTDLL) $(OUTSW)$@ $(MAC_LOCAL_OBJ) $(CLLOPTS)
 #------------
-IPHONE_LOCAL_OBJ=$(F)iphone_rstub$(O) $(F)tcpip$(O) $(STUB_COMMON)
-IPHONECLIENT=$(BIN_PATH)iphone_stub$(PLUGIN)
-iphone_stub: $(IPHONECLIENT)
-$(IPHONECLIENT): $(IPHONE_LOCAL_OBJ) $(PLUGIN_SCRIPT_PATH)
-	$(CCL) $(OUTDLL) $(OUTSW)$@ $(IPHONE_LOCAL_OBJ) $(CLLOPTS)
 
-#------------
+#----------------------------------------------------------------------------
 cfg: $(C)exceptions.cfg
-$(C)exceptions.cfg: exceptions.cfg
+
+$(C)%.cfg: %.cfg
 	$(CP) $? $@
 
-excServer.c:  /usr/include/mach/exc.defs
-	mig /usr/include/mach/exc.defs
+$(C)%.xml: %.xml
+	$(CP) $? $@
 
-mkdeb: /usr/local/bin/mkdeb
-/usr/local/bin/mkdeb: mkdeb.cpp
+
+excServer.c:
+	mig $(MACSDK)/usr/include/mach/exc.defs
+
+mkdeb: $(MKDEB)
+$(MKDEB): mkdeb.cpp
 	rm -f mkdeb
 	$(CCL) -o mkdeb mkdeb.cpp
 	sudo cp mkdeb $@
 	sudo chown root $@
 	sudo chmod 4100 $@
-	sudo chmod +a "ig allow execute" $@
-	sudo chmod +a "elias allow execute" $@
-	sudo chmod +a "igor allow execute" $@
 
+
+#----------------------------------------------------------------------------
+loaddll_test: $(R)loaddll_test$(B)
+$(R)loaddll_test$(B): $(F)loaddll_test$(O) $(DUMB) $(L)pro$(A)
+	$(call link_dumb,$@ $(F)loaddll_test$(O) -ldl)
+
+clean::
+	rm -f $(WIN32_LOCAL_OBJ) $(WINCE_STUB_OBJ) $(LINUX_LOCAL_OBJ) $(ARM_LINUX_LOCAL_OBJ) $(MAC_LOCAL_OBJ)
+	rm -f $(LINUX_OBJS) $(F)$(LINUX_SERVER)$(B).map
+	rm -f $(WIN32CLIENT) $(ARM_LINUXCLIENT) $(LINUXCLIENT) $(WINCECLIENT) $(MACCLIENT)
+	rm -f $(SERVERBIN)mac_server$(B) $(SERVERBIN)linux_server$(B) $(SERVERBIN)armlinux_server$(B)
+	rm -f $(C)exceptions.cfg
+	-@[ -d $(OBJDIR) ] && rmdir $(OBJDIR)
+	-@[ -d obj ] && rmdir obj
 
 # MAKEDEP dependency list ------------------
-$(F)arm_debmod$(O): $(I)area.hpp $(I)auto.hpp $(I)bytes.hpp $(I)expr.hpp      \
-	          $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp          \
-	          $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
-	          $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp  \
-	          $(I)offset.hpp $(I)pro.h $(I)queue.hpp $(I)segment.hpp    \
-	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp                    \
-	          ../../ldr/aof/aof.h ../../module/arm/../idaidp.hpp        \
-	          ../../module/arm/arm.hpp ../../module/arm/ins.hpp         \
-	          ../../module/arm/opinfo.cpp arm_debmod.cpp arm_debmod.h   \
-	          consts.h deb_arm.hpp debmod.h
-$(F)armlinux_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
-	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
-	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
-	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
-	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
-	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp                    \
-	          arm_local_impl.cpp armlinux_rstub.cpp async.h             \
-	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
-	          deb_arm.hpp debmod.h linux_local_impl.cpp rapi/rapi.h     \
-	          rpc_client.h rpc_debmod.h rpc_engine.h rpc_hlp.h tcpip.h
-$(F)async$(O)   : $(I)auto.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
-	          $(I)fpro.h $(I)ida.hpp $(I)kernwin.hpp $(I)llong.hpp      \
-	          $(I)pro.h async.cpp async.h consts.h rapi/rapi.h
-$(F)chktrk$(O)  : $(I)diskio.hpp $(I)err.h $(I)fpro.h $(I)kernwin.hpp       \
-	          $(I)llong.hpp $(I)pro.h chktrk.cpp metrotrk.cpp           \
-	          metrotrk.h
-$(F)debmod$(O)  : $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
-	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
-	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
-	          $(I)llong.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp   \
-	          $(I)pro.h $(I)segment.hpp $(I)typeinf.hpp $(I)ua.hpp      \
-	          $(I)xref.hpp consts.h debmod.cpp debmod.h
-$(F)epoc_debmod$(O): $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
-	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
-	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
-	          $(I)llong.hpp $(I)nalt.hpp $(I)netnode.hpp $(I)pro.h      \
-	          $(I)segment.hpp $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp    \
-	          arm_debmod.h consts.h deb_arm.hpp debmod.h                \
-	          epoc_debmod.cpp epoc_debmod.h metrotrk.cpp metrotrk.h
-$(F)epoc_user$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
-	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
-	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
-	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
-	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
-	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp arm_debmod.h       \
-	          arm_local_impl.cpp common_local_impl.cpp                  \
-	          common_stub_impl.cpp consts.h deb_arm.hpp debmod.h        \
-	          epoc_debmod.h epoc_local_impl.cpp epoc_user.cpp           \
-	          metrotrk.h
-$(F)linux_check$(O): linux_check.c
-$(F)linux_debmod$(O): $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
-	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
-	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
-	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
-	          $(I)netnode.hpp $(I)pro.h $(I)prodir.h $(I)segment.hpp    \
-	          $(I)ua.hpp $(I)xref.hpp ../../ldr/elf/elf.h               \
-	          ../../ldr/elf/elfbase.h            \
-	          arm_debmod.h async.h consts.h deb_arm.hpp deb_pc.hpp      \
-	          debmod.h linux_debmod.cpp linux_debmod.h linuxbase_debmod.h \
-	          linux_threads.cpp pc_debmod.h rapi/rapi.h rpc_engine.h    \
-	          rpc_hlp.h rpc_server.h symelf.hpp tcpip.h
-$(F)linux_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
-	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
-	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
-	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
-	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
-	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp async.h            \
-	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
-	          deb_pc.hpp debmod.h linux_local_impl.cpp linux_rstub.cpp  \
-	          pc_local_impl.cpp rapi/rapi.h rpc_client.h rpc_debmod.h   \
-	          rpc_engine.h rpc_hlp.h tcpip.h
-$(F)linux_user$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)err.h          \
-	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
-	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
-	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
-	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)srarea.hpp  \
-	          $(I)ua.hpp $(I)xref.hpp arm_debmod.h                      \
-	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
-	          deb_arm.hpp deb_pc.hpp debmod.h linux_debmod.h            \
-	          linux_local_impl.cpp linux_user.cpp pc_debmod.h           \
-	          pc_local_impl.cpp linuxbase_debmod.h
-$(F)linux_wait$(O): $(I)area.hpp $(I)expr.hpp $(I)ida.hpp $(I)idd.hpp         \
-	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)pro.h     \
-	          $(I)ua.hpp $(I)xref.hpp arm_debmod.h consts.h             \
-	          deb_arm.hpp deb_pc.hpp debmod.h linux_debmod.h            \
-	          linux_wait.cpp pc_debmod.h linuxbase_debmod.h
-$(F)mac_debmod$(O): $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
-	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
-	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
-	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
-	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)ua.hpp      \
-	          $(I)xref.hpp ../../ldr/mach-o/common.h consts.h           \
-	          deb_arm.hpp deb_pc.hpp debmod.h mac_debmod.cpp            \
-	          mac_debmod.h pc_debmod.h symelf.hpp symmacho.hpp	    \
-		  linuxbase_debmod.cpp linuxbase_debmod.h macbase_debmod.h 
-$(F)mac_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
-	          $(I)err.h $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp            \
-	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
-	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
-	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)ua.hpp      \
-	          $(I)xref.hpp async.h common_local_impl.cpp                \
-	          common_stub_impl.cpp consts.h deb_pc.hpp debmod.h         \
-	          mac_local_impl.cpp mac_rstub.cpp pc_local_impl.cpp        \
-	          rapi/ceapimap.h rapi/rapi.h rpc_client.h rpc_debmod.h     \
-	          rpc_engine.h rpc_hlp.h tcpip.h
-$(F)mac_user$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
-	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
-	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
-	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
-	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
-	          $(I)srarea.hpp $(I)ua.hpp $(I)xref.hpp                    \
-	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
-	          deb_arm.hpp deb_pc.hpp debmod.h mac_debmod.h              \
-	          mac_local_impl.cpp mac_user.cpp pc_debmod.h               \
-	          pc_local_impl.cpp symelf.hpp symmacho.hpp macbase_debmod.h
-$(F)pc_debmod$(O): $(I)area.hpp $(I)expr.hpp $(I)ida.hpp $(I)idd.hpp         \
-	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)pro.h     \
-	          $(I)ua.hpp $(I)xref.hpp consts.h deb_pc.hpp debmod.h      \
-	          pc_debmod.cpp pc_debmod.h
-$(F)rpc_client$(O): $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
-	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
-	          $(I)lines.hpp $(I)llong.hpp $(I)name.hpp $(I)pro.h        \
-	          $(I)ua.hpp $(I)xref.hpp async.h consts.h debmod.h         \
-	          rapi/rapi.h rpc_client.cpp rpc_client.h rpc_engine.h      \
-	          rpc_hlp.h tcpip.h
-$(F)rpc_debmod$(O): $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
-	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
-	          $(I)lines.hpp $(I)llong.hpp $(I)pro.h $(I)segment.hpp     \
-	          $(I)ua.hpp $(I)xref.hpp async.h consts.h debmod.h         \
-	          rapi/rapi.h rpc_client.h rpc_debmod.cpp rpc_debmod.h      \
-	          rpc_engine.h rpc_hlp.h tcpip.h
-$(F)rpc_engine$(O): $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
-	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
-	          $(I)lines.hpp $(I)llong.hpp $(I)pro.h $(I)ua.hpp          \
-	          $(I)xref.hpp async.h consts.h debmod.h rapi/rapi.h        \
-	          rpc_engine.cpp rpc_engine.h rpc_hlp.h tcpip.h
-$(F)rpc_hlp$(O) : $(I)area.hpp $(I)bytes.hpp $(I)expr.hpp $(I)fpro.h        \
+$(F)debmod$(O)  : $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp             \
+	          $(I)diskio.hpp $(I)err.h $(I)expr.hpp $(I)fpro.h          \
 	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
 	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp  \
-	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
-	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp consts.h          \
-	          rpc_hlp.cpp rpc_hlp.h
-$(F)rpc_server$(O): $(I)area.hpp $(I)bytes.hpp $(I)diskio.hpp $(I)err.h       \
-	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
-	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
-	          $(I)llong.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp   \
-	          $(I)pro.h $(I)segment.hpp $(I)typeinf.hpp $(I)ua.hpp      \
-	          $(I)xref.hpp async.h consts.h debmod.h rapi/rapi.h        \
-	          rpc_engine.h rpc_hlp.h rpc_server.cpp rpc_server.h        \
-	          server.h tcpip.h
-$(F)server$(O)  : $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
-	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
-	          $(I)lines.hpp $(I)llong.hpp $(I)pro.h $(I)ua.hpp          \
-	          $(I)xref.hpp async.h consts.h debmod.h rapi/rapi.h        \
-	          rpc_engine.h rpc_hlp.h rpc_server.h server.cpp server.h   \
-	          tcpip.h
-$(F)symelf$(O)  : $(I)area.hpp $(I)diskio.hpp $(I)expr.hpp $(I)fpro.h       \
-	          $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp $(I)lines.hpp     \
-	          $(I)llong.hpp $(I)pro.h $(I)ua.hpp $(I)xref.hpp           \
-	          ../../ldr/elf/common.cpp ../../ldr/elf/elf.h              \
-	          ../../ldr/elf/elfbase.h ../../ldr/elf/elfr_arm.h          \
-	          ../../ldr/elf/elfr_ia6.h ../../ldr/elf/elfr_mip.h         \
-	          ../../ldr/elf/elfr_ppc.h ../../ldr/elf/reader.cpp         \
-	          consts.h debmod.h symelf.cpp symelf.hpp
-$(F)tcpip$(O)   : $(I)err.h $(I)expr.hpp $(I)kernwin.hpp $(I)llong.hpp      \
-	          $(I)pro.h consts.h tcpip.cpp tcpip.h
-$(F)util$(O)    : $(I)area.hpp $(I)expr.hpp $(I)fpro.h $(I)ida.hpp          \
-	          $(I)idd.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
-	          $(I)pro.h $(I)ua.hpp $(I)xref.hpp consts.h debmod.h       \
-	          util.cpp
-$(F)w32sehch$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)fpro.h         \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)range.hpp      \
+	          $(I)segment.hpp $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp   \
+	          consts.h debmod.cpp debmod.h
+$(F)pc_debmod$(O): $(I)bytes.hpp $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp     \
+	          $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)range.hpp $(I)ua.hpp $(I)xref.hpp consts.h  \
+	          deb_pc.hpp debmod.h pc_debmod.cpp pc_debmod.h
+
+ifdef __LINUX__
+$(F)linux_debmod$(O): $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp             \
+	          $(I)diskio.hpp $(I)err.h $(I)fpro.h $(I)funcs.hpp         \
+	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
+	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)prodir.h       \
+	          $(I)range.hpp $(I)segment.hpp $(I)ua.hpp $(I)xref.hpp     \
+	          ../../plugins/dwarf/look_for_debug_file.cpp arm_debmod.h  \
+	          consts.h deb_arm.hpp deb_pc.hpp debmod.h                  \
+	          linux_debmod.cpp linux_debmod.h linux_threads.cpp         \
+	          linuxbase_debmod.h pc_debmod.h symelf.hpp
+$(F)linux_user$(O): $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp             \
+	          $(I)dbg.hpp $(I)err.h $(I)expr.hpp $(I)fpro.h             \
 	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
 	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp               \
 	          $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp  \
-	          $(I)pro.h $(I)segment.hpp $(I)ua.hpp $(I)xref.hpp         \
-	          w32sehch.cpp w32sehch.h
-$(F)win32_debmod$(O): $(I)area.hpp $(I)auto.hpp $(I)bytes.hpp $(I)dbg.hpp       \
-	          $(I)diskio.hpp $(I)err.h $(I)exehdr.h $(I)expr.hpp        \
-	          $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp          \
-	          $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
-	          $(I)nalt.hpp $(I)netnode.hpp $(I)pro.h $(I)prodir.h       \
-	          $(I)segment.hpp $(I)ua.hpp $(I)xref.hpp                   \
-	          ../../ldr/pe/common.cpp ../../ldr/pe/common.h             \
-	          ../../ldr/pe/pe.h arm_debmod.h async.h consts.h           \
-	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h rapi/rapi.h   \
-	          rpc_engine.h rpc_hlp.h rpc_server.h tcpip.h               \
-	          win32_debmod.cpp win32_debmod.h win32_debmod_impl.cpp     \
-	          win32_rpc.h win32_undoc.h win32_util_impl.cpp             \
-	          winbase_debmod.h wince.hpp wince_debmod.h                 \
-	          wince_debmod_impl.cpp xscale/Breakpoint.h
-$(F)win32_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
-	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
-	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
-	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
-	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
-	          $(I)srarea.hpp $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp    \
-	          rpc_hlp.h win32_rpc.h ../../ldr/pe/pe.h                    \
-	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
-	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
-	          ../../plugins/pdb/pdblocal.hpp  async.h                   \
+	          $(I)pro.h $(I)range.hpp $(I)segment.hpp $(I)segregs.hpp   \
+	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp arm_debmod.h      \
 	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
-	          deb_pc.hpp debmod.h pc_local_impl.cpp rapi/rapi.h         \
-	          rpc_client.h rpc_debmod.h rpc_engine.h rpc_hlp.h tcpip.h  \
-	          w32sehch.h win32_local_impl.cpp win32_rpc.h               \
-	          win32_rstub.cpp
-$(F)win32_server_impl$(O): $(I)area.hpp $(I)bytes.hpp $(I)expr.hpp $(I)fpro.h        \
-	          $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp         \
-	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp  \
-	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
-	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp                   \
-	          rpc_hlp.h win32_rpc.h   \
-	          ../../ldr/pe/cor.h ../../ldr/pe/corhdr.h                  \
-	          ../../ldr/pe/mycor.h ../../ldr/pe/pe.h                    \
-	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
-	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
-	          ../../plugins/pdb/pdblocal.hpp                            \
-	          ../../plugins/pdb/pdbremote.hpp arm_debmod.h consts.h     \
-	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h rpc_hlp.h     \
-	          tilfuncs.hpp win32_debmod.h win32_rpc.h                   \
-	          win32_server_impl.cpp winbase_debmod.h wince.hpp          \
-	          wince_debmod.h
-$(F)win32_server_stub$(O): $(I)area.hpp $(I)expr.hpp $(I)ida.hpp $(I)idd.hpp         \
-	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)pro.h     \
-	          $(I)ua.hpp $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h    \
-	          consts.h deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h      \
-	          win32_debmod.h win32_server_stub.cpp winbase_debmod.h     \
-	          wince.hpp wince_debmod.h
-$(F)win32_user$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)err.h          \
-	          $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp         \
+	          deb_arm.hpp deb_pc.hpp debmod.h linux_debmod.h            \
+	          linux_local_impl.cpp linux_user.cpp linuxbase_debmod.h    \
+	          pc_debmod.h pc_local_impl.cpp
+$(F)linux_wait$(O): $(I)bytes.hpp $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp     \
+	          $(I)lines.hpp $(I)llong.hpp $(I)nalt.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)range.hpp $(I)ua.hpp $(I)xref.hpp           \
+	          arm_debmod.h consts.h deb_arm.hpp deb_pc.hpp debmod.h     \
+	          linux_debmod.h linux_wait.cpp linuxbase_debmod.h          \
+	          pc_debmod.h
+$(F)linuxbase_debmod$(O): $(I)bytes.hpp $(I)diskio.hpp $(I)fpro.h $(I)ida.hpp       \
+	          $(I)idd.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
+	          $(I)nalt.hpp $(I)netnode.hpp $(I)pro.h $(I)prodir.h       \
+	          $(I)range.hpp $(I)ua.hpp $(I)xref.hpp arm_debmod.h        \
+	          consts.h deb_arm.hpp deb_pc.hpp debmod.h                  \
+	          linuxbase_debmod.cpp linuxbase_debmod.h pc_debmod.h
+$(F)symelf$(O)  : $(I)auto.hpp $(I)bitrange.hpp $(I)bytes.hpp               \
+	          $(I)config.hpp $(I)diskio.hpp $(I)entry.hpp               \
+	          $(I)fixup.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp        \
 	          $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp     \
 	          $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp    \
-	          $(I)netnode.hpp $(I)pro.h $(I)segment.hpp $(I)srarea.hpp  \
-	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp                   \
-	          rpc_hlp.h win32_rpc.h   \
-	          ../../ldr/pe/cor.h ../../ldr/pe/corhdr.h                  \
-	          ../../ldr/pe/mycor.h ../../ldr/pe/pe.h                    \
-	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
-	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
-	          ../../plugins/pdb/pdblocal.hpp                            \
-	          ../../plugins/pdb/pdbremote.hpp arm_debmod.h              \
-	          common_local_impl.cpp common_stub_impl.cpp consts.h       \
-	          deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h               \
-	          pc_local_impl.cpp rpc_hlp.h w32sehch.h win32_debmod.h     \
-	          win32_local_impl.cpp win32_rpc.h win32_user.cpp           \
-	          winbase_debmod.h wince.hpp wince_debmod.h
-$(F)winbase_debmod$(O): $(I)area.hpp $(I)expr.hpp $(I)ida.hpp $(I)idd.hpp         \
-	          $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp $(I)pro.h     \
-	          $(I)ua.hpp $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h    \
-	          consts.h deb_arm.hpp deb_pc.hpp debmod.h pc_debmod.h      \
-	          winbase_debmod.cpp winbase_debmod.h wince.hpp             \
-	          wince_debmod.h
-$(F)wince_debmod$(O): $(I)area.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp        \
-	          $(I)fpro.h $(I)ida.hpp $(I)idd.hpp $(I)kernwin.hpp        \
-	          $(I)lines.hpp $(I)llong.hpp $(I)pro.h $(I)ua.hpp          \
-	          $(I)xref.hpp ../../ldr/pe/pe.h arm_debmod.h async.h       \
-	          consts.h deb_arm.hpp debmod.h rapi/rapi.h rpc_engine.h    \
-	          rpc_hlp.h rpc_server.h tcpip.h wince.hpp                  \
-	          wince_debmod.cpp wince_debmod.h xscale/Breakpoint.h
-$(F)wince_rstub$(O): $(I)area.hpp $(I)bytes.hpp $(I)dbg.hpp $(I)diskio.hpp     \
-	          $(I)err.h $(I)expr.hpp $(I)fpro.h $(I)funcs.hpp           \
+	          $(I)netnode.hpp $(I)offset.hpp $(I)pro.h $(I)range.hpp    \
+	          $(I)segment.hpp $(I)segregs.hpp $(I)ua.hpp $(I)xref.hpp   \
+	          ../../ldr/elf/../idaldr.h ../../ldr/elf/common.cpp        \
+	          ../../ldr/elf/elf.h ../../ldr/elf/elfbase.h               \
+	          ../../ldr/elf/elfr_arm.h ../../ldr/elf/elfr_ia64.h        \
+	          ../../ldr/elf/elfr_mips.h ../../ldr/elf/elfr_ppc.h        \
+	          ../../ldr/elf/reader.cpp                                  \
+	          ../../module/arm/notify_codes.hpp consts.h debmod.h       \
+	          symelf.cpp symelf.hpp
+
+else
+
+$(F)excServer$(O): ../../ldr/mach-o/h/arm/_types.h                           \
+	          ../../ldr/mach-o/h/i386/_types.h                          \
+	          ../../ldr/mach-o/h/mach/arm/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/arm/vm_types.h                    \
+	          ../../ldr/mach-o/h/mach/boolean.h                         \
+	          ../../ldr/mach-o/h/mach/i386/boolean.h                    \
+	          ../../ldr/mach-o/h/mach/i386/kern_return.h                \
+	          ../../ldr/mach-o/h/mach/i386/vm_param.h                   \
+	          ../../ldr/mach-o/h/mach/i386/vm_types.h                   \
+	          ../../ldr/mach-o/h/mach/kern_return.h                     \
+	          ../../ldr/mach-o/h/mach/machine/boolean.h                 \
+	          ../../ldr/mach-o/h/mach/machine/kern_return.h             \
+	          ../../ldr/mach-o/h/mach/machine/vm_types.h                \
+	          ../../ldr/mach-o/h/mach/message.h                         \
+	          ../../ldr/mach-o/h/mach/port.h                            \
+	          ../../ldr/mach-o/h/mach/ppc/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/ppc/kern_return.h                 \
+	          ../../ldr/mach-o/h/mach/ppc/vm_param.h                    \
+	          ../../ldr/mach-o/h/mach/ppc/vm_types.h                    \
+	          ../../ldr/mach-o/h/ppc/_types.h                           \
+	          ../../ldr/mach-o/h/sys/_posix_availability.h              \
+	          ../../ldr/mach-o/h/sys/_symbol_aliasing.h                 \
+	          ../../ldr/mach-o/h/sys/cdefs.h excServer.c
+$(F)mac_debmod$(O): $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp             \
+	          $(I)diskio.hpp $(I)err.h $(I)fpro.h $(I)funcs.hpp         \
 	          $(I)ida.hpp $(I)idd.hpp $(I)idp.hpp $(I)kernwin.hpp       \
 	          $(I)lines.hpp $(I)llong.hpp $(I)loader.hpp $(I)nalt.hpp   \
-	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)segment.hpp    \
-	          $(I)srarea.hpp $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp    \
-	          rpc_hlp.h win32_rpc.h ../../ldr/pe/pe.h                   \
-	          ../../plugins/pdb/common.h ../../plugins/pdb/cvconst.h    \
-	          ../../plugins/pdb/dia2.h ../../plugins/pdb/pdbaccess.hpp  \
-	          ../../plugins/pdb/pdblocal.hpp arm_local_impl.cpp        \
-	          arm_regs.cpp async.h common_local_impl.cpp                \
-	          common_stub_impl.cpp consts.h deb_arm.hpp debmod.h        \
-	          rapi/rapi.h rpc_client.h rpc_debmod.h rpc_engine.h        \
-	          rpc_hlp.h tcpip.h win32_local_impl.cpp win32_rpc.h        \
-	          wince.hpp wince_rstub.cpp
-else
-all:
+	          $(I)name.hpp $(I)netnode.hpp $(I)pro.h $(I)range.hpp      \
+	          $(I)segment.hpp $(I)ua.hpp $(I)xref.hpp                   \
+	          ../../ldr/mach-o/common.h                                 \
+	          ../../ldr/mach-o/h/architecture/byte_order.h              \
+	          ../../ldr/mach-o/h/arm/_types.h                           \
+	          ../../ldr/mach-o/h/i386/_types.h                          \
+	          ../../ldr/mach-o/h/i386/eflags.h                          \
+	          ../../ldr/mach-o/h/libkern/OSByteOrder.h                  \
+	          ../../ldr/mach-o/h/libkern/i386/OSByteOrder.h             \
+	          ../../ldr/mach-o/h/libkern/i386/_OSByteOrder.h            \
+	          ../../ldr/mach-o/h/libkern/machine/OSByteOrder.h          \
+	          ../../ldr/mach-o/h/mach-o/arm/reloc.h                     \
+	          ../../ldr/mach-o/h/mach-o/arm64/reloc.h                   \
+	          ../../ldr/mach-o/h/mach-o/fat.h                           \
+	          ../../ldr/mach-o/h/mach-o/hppa/reloc.h                    \
+	          ../../ldr/mach-o/h/mach-o/i860/reloc.h                    \
+	          ../../ldr/mach-o/h/mach-o/loader.h                        \
+	          ../../ldr/mach-o/h/mach-o/m88k/reloc.h                    \
+	          ../../ldr/mach-o/h/mach-o/nlist.h                         \
+	          ../../ldr/mach-o/h/mach-o/ppc/reloc.h                     \
+	          ../../ldr/mach-o/h/mach-o/reloc.h                         \
+	          ../../ldr/mach-o/h/mach-o/sparc/reloc.h                   \
+	          ../../ldr/mach-o/h/mach-o/stab.h                          \
+	          ../../ldr/mach-o/h/mach-o/x86_64/reloc.h                  \
+	          ../../ldr/mach-o/h/mach/arm/_structs.h                    \
+	          ../../ldr/mach-o/h/mach/arm/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/arm/thread_state.h                \
+	          ../../ldr/mach-o/h/mach/arm/thread_status.h               \
+	          ../../ldr/mach-o/h/mach/arm/vm_types.h                    \
+	          ../../ldr/mach-o/h/mach/boolean.h                         \
+	          ../../ldr/mach-o/h/mach/i386/_structs.h                   \
+	          ../../ldr/mach-o/h/mach/i386/boolean.h                    \
+	          ../../ldr/mach-o/h/mach/i386/fp_reg.h                     \
+	          ../../ldr/mach-o/h/mach/i386/kern_return.h                \
+	          ../../ldr/mach-o/h/mach/i386/thread_state.h               \
+	          ../../ldr/mach-o/h/mach/i386/thread_status.h              \
+	          ../../ldr/mach-o/h/mach/i386/vm_param.h                   \
+	          ../../ldr/mach-o/h/mach/i386/vm_types.h                   \
+	          ../../ldr/mach-o/h/mach/kern_return.h                     \
+	          ../../ldr/mach-o/h/mach/machine.h                         \
+	          ../../ldr/mach-o/h/mach/machine/boolean.h                 \
+	          ../../ldr/mach-o/h/mach/machine/kern_return.h             \
+	          ../../ldr/mach-o/h/mach/machine/thread_status.h           \
+	          ../../ldr/mach-o/h/mach/machine/vm_types.h                \
+	          ../../ldr/mach-o/h/mach/message.h                         \
+	          ../../ldr/mach-o/h/mach/port.h                            \
+	          ../../ldr/mach-o/h/mach/ppc/_structs.h                    \
+	          ../../ldr/mach-o/h/mach/ppc/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/ppc/kern_return.h                 \
+	          ../../ldr/mach-o/h/mach/ppc/thread_status.h               \
+	          ../../ldr/mach-o/h/mach/ppc/vm_param.h                    \
+	          ../../ldr/mach-o/h/mach/ppc/vm_types.h                    \
+	          ../../ldr/mach-o/h/mach/shared_region.h                   \
+	          ../../ldr/mach-o/h/mach/vm_prot.h                         \
+	          ../../ldr/mach-o/h/mach/vm_types.h                        \
+	          ../../ldr/mach-o/h/ppc/_types.h                           \
+	          ../../ldr/mach-o/h/sys/_posix_availability.h              \
+	          ../../ldr/mach-o/h/sys/_symbol_aliasing.h                 \
+	          ../../ldr/mach-o/h/sys/appleapiopts.h                     \
+	          ../../ldr/mach-o/h/sys/cdefs.h                            \
+	          ../../ldr/mach-o/h/sys/ptrace.h                           \
+	          ../../ldr/mach-o/macho_node.h consts.h deb_pc.hpp         \
+	          debmod.h mac_debmod.cpp mac_debmod.h macbase_debmod.h     \
+	          pc_debmod.h symmacho.hpp
+$(F)mac_user$(O): $(I)bitrange.hpp $(I)bytes.hpp $(I)config.hpp             \
+	          $(I)dbg.hpp $(I)diskio.hpp $(I)err.h $(I)expr.hpp         \
+	          $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp $(I)idd.hpp          \
+	          $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
+	          $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp  \
+	          $(I)pro.h $(I)range.hpp $(I)segment.hpp $(I)segregs.hpp   \
+	          $(I)typeinf.hpp $(I)ua.hpp $(I)xref.hpp                   \
+	          ../../ldr/mach-o/h/architecture/byte_order.h              \
+	          ../../ldr/mach-o/h/arm/_types.h                           \
+	          ../../ldr/mach-o/h/i386/_types.h                          \
+	          ../../ldr/mach-o/h/libkern/OSByteOrder.h                  \
+	          ../../ldr/mach-o/h/libkern/i386/OSByteOrder.h             \
+	          ../../ldr/mach-o/h/libkern/i386/_OSByteOrder.h            \
+	          ../../ldr/mach-o/h/libkern/machine/OSByteOrder.h          \
+	          ../../ldr/mach-o/h/mach-o/fat.h                           \
+	          ../../ldr/mach-o/h/mach-o/nlist.h                         \
+	          ../../ldr/mach-o/h/mach-o/reloc.h                         \
+	          ../../ldr/mach-o/h/mach/arm/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/arm/vm_types.h                    \
+	          ../../ldr/mach-o/h/mach/boolean.h                         \
+	          ../../ldr/mach-o/h/mach/i386/boolean.h                    \
+	          ../../ldr/mach-o/h/mach/i386/vm_param.h                   \
+	          ../../ldr/mach-o/h/mach/i386/vm_types.h                   \
+	          ../../ldr/mach-o/h/mach/machine.h                         \
+	          ../../ldr/mach-o/h/mach/machine/boolean.h                 \
+	          ../../ldr/mach-o/h/mach/machine/vm_types.h                \
+	          ../../ldr/mach-o/h/mach/port.h                            \
+	          ../../ldr/mach-o/h/mach/ppc/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/ppc/vm_param.h                    \
+	          ../../ldr/mach-o/h/mach/ppc/vm_types.h                    \
+	          ../../ldr/mach-o/h/mach/shared_region.h                   \
+	          ../../ldr/mach-o/h/mach/vm_prot.h                         \
+	          ../../ldr/mach-o/h/mach/vm_types.h                        \
+	          ../../ldr/mach-o/h/ppc/_types.h                           \
+	          ../../ldr/mach-o/h/sys/_posix_availability.h              \
+	          ../../ldr/mach-o/h/sys/_symbol_aliasing.h                 \
+	          ../../ldr/mach-o/h/sys/appleapiopts.h                     \
+	          ../../ldr/mach-o/h/sys/cdefs.h                            \
+	          ../../ldr/mach-o/h/sys/ptrace.h                           \
+	          ../../ldr/mach-o/macho_node.h common_local_impl.cpp       \
+	          common_stub_impl.cpp consts.h deb_pc.hpp debmod.h         \
+	          mac_debmod.h mac_local_impl.cpp mac_user.cpp              \
+	          macbase_debmod.h macho_rebase.cpp pc_debmod.h             \
+	          pc_local_impl.cpp symmacho.hpp
+$(F)macbase_debmod$(O): $(I)bytes.hpp $(I)diskio.hpp $(I)fpro.h $(I)ida.hpp       \
+	          $(I)idd.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
+	          $(I)nalt.hpp $(I)netnode.hpp $(I)pro.h $(I)prodir.h       \
+	          $(I)range.hpp $(I)ua.hpp $(I)xref.hpp                     \
+	          ../../ldr/mach-o/h/architecture/byte_order.h              \
+	          ../../ldr/mach-o/h/arm/_types.h                           \
+	          ../../ldr/mach-o/h/i386/_types.h                          \
+	          ../../ldr/mach-o/h/libkern/OSByteOrder.h                  \
+	          ../../ldr/mach-o/h/libkern/i386/OSByteOrder.h             \
+	          ../../ldr/mach-o/h/libkern/i386/_OSByteOrder.h            \
+	          ../../ldr/mach-o/h/libkern/machine/OSByteOrder.h          \
+	          ../../ldr/mach-o/h/mach-o/fat.h                           \
+	          ../../ldr/mach-o/h/mach/arm/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/arm/vm_types.h                    \
+	          ../../ldr/mach-o/h/mach/boolean.h                         \
+	          ../../ldr/mach-o/h/mach/i386/boolean.h                    \
+	          ../../ldr/mach-o/h/mach/i386/vm_param.h                   \
+	          ../../ldr/mach-o/h/mach/i386/vm_types.h                   \
+	          ../../ldr/mach-o/h/mach/machine.h                         \
+	          ../../ldr/mach-o/h/mach/machine/boolean.h                 \
+	          ../../ldr/mach-o/h/mach/machine/vm_types.h                \
+	          ../../ldr/mach-o/h/mach/ppc/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/ppc/vm_param.h                    \
+	          ../../ldr/mach-o/h/mach/ppc/vm_types.h                    \
+	          ../../ldr/mach-o/h/ppc/_types.h consts.h deb_pc.hpp       \
+	          debmod.h macbase_debmod.cpp macbase_debmod.h pc_debmod.h  \
+	          symmacho.hpp
+$(F)symmacho$(O): $(I)auto.hpp $(I)bitrange.hpp $(I)bytes.hpp               \
+	          $(I)config.hpp $(I)diskio.hpp $(I)entry.hpp               \
+	          $(I)fixup.hpp $(I)fpro.h $(I)funcs.hpp $(I)ida.hpp        \
+	          $(I)idp.hpp $(I)kernwin.hpp $(I)lines.hpp $(I)llong.hpp   \
+	          $(I)loader.hpp $(I)nalt.hpp $(I)name.hpp $(I)netnode.hpp  \
+	          $(I)offset.hpp $(I)pro.h $(I)range.hpp $(I)segment.hpp    \
+	          $(I)segregs.hpp $(I)ua.hpp $(I)xref.hpp                   \
+	          ../../ldr/ar/aixar.hpp ../../ldr/ar/ar.hpp                \
+	          ../../ldr/ar/arcmn.cpp ../../ldr/mach-o/../ar/ar.hpp      \
+	          ../../ldr/mach-o/../idaldr.h ../../ldr/mach-o/base.cpp    \
+	          ../../ldr/mach-o/common.cpp ../../ldr/mach-o/common.h     \
+	          ../../ldr/mach-o/h/architecture/byte_order.h              \
+	          ../../ldr/mach-o/h/arm/_types.h                           \
+	          ../../ldr/mach-o/h/i386/_types.h                          \
+	          ../../ldr/mach-o/h/i386/eflags.h                          \
+	          ../../ldr/mach-o/h/libkern/OSByteOrder.h                  \
+	          ../../ldr/mach-o/h/libkern/i386/OSByteOrder.h             \
+	          ../../ldr/mach-o/h/libkern/i386/_OSByteOrder.h            \
+	          ../../ldr/mach-o/h/libkern/machine/OSByteOrder.h          \
+	          ../../ldr/mach-o/h/mach-o/arm/reloc.h                     \
+	          ../../ldr/mach-o/h/mach-o/arm64/reloc.h                   \
+	          ../../ldr/mach-o/h/mach-o/fat.h                           \
+	          ../../ldr/mach-o/h/mach-o/hppa/reloc.h                    \
+	          ../../ldr/mach-o/h/mach-o/i860/reloc.h                    \
+	          ../../ldr/mach-o/h/mach-o/loader.h                        \
+	          ../../ldr/mach-o/h/mach-o/m88k/reloc.h                    \
+	          ../../ldr/mach-o/h/mach-o/nlist.h                         \
+	          ../../ldr/mach-o/h/mach-o/ppc/reloc.h                     \
+	          ../../ldr/mach-o/h/mach-o/reloc.h                         \
+	          ../../ldr/mach-o/h/mach-o/sparc/reloc.h                   \
+	          ../../ldr/mach-o/h/mach-o/stab.h                          \
+	          ../../ldr/mach-o/h/mach-o/x86_64/reloc.h                  \
+	          ../../ldr/mach-o/h/mach/arm/_structs.h                    \
+	          ../../ldr/mach-o/h/mach/arm/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/arm/thread_state.h                \
+	          ../../ldr/mach-o/h/mach/arm/thread_status.h               \
+	          ../../ldr/mach-o/h/mach/arm/vm_types.h                    \
+	          ../../ldr/mach-o/h/mach/boolean.h                         \
+	          ../../ldr/mach-o/h/mach/i386/_structs.h                   \
+	          ../../ldr/mach-o/h/mach/i386/boolean.h                    \
+	          ../../ldr/mach-o/h/mach/i386/fp_reg.h                     \
+	          ../../ldr/mach-o/h/mach/i386/kern_return.h                \
+	          ../../ldr/mach-o/h/mach/i386/thread_state.h               \
+	          ../../ldr/mach-o/h/mach/i386/thread_status.h              \
+	          ../../ldr/mach-o/h/mach/i386/vm_param.h                   \
+	          ../../ldr/mach-o/h/mach/i386/vm_types.h                   \
+	          ../../ldr/mach-o/h/mach/kern_return.h                     \
+	          ../../ldr/mach-o/h/mach/machine.h                         \
+	          ../../ldr/mach-o/h/mach/machine/boolean.h                 \
+	          ../../ldr/mach-o/h/mach/machine/kern_return.h             \
+	          ../../ldr/mach-o/h/mach/machine/thread_status.h           \
+	          ../../ldr/mach-o/h/mach/machine/vm_types.h                \
+	          ../../ldr/mach-o/h/mach/message.h                         \
+	          ../../ldr/mach-o/h/mach/port.h                            \
+	          ../../ldr/mach-o/h/mach/ppc/_structs.h                    \
+	          ../../ldr/mach-o/h/mach/ppc/boolean.h                     \
+	          ../../ldr/mach-o/h/mach/ppc/kern_return.h                 \
+	          ../../ldr/mach-o/h/mach/ppc/thread_status.h               \
+	          ../../ldr/mach-o/h/mach/ppc/vm_param.h                    \
+	          ../../ldr/mach-o/h/mach/ppc/vm_types.h                    \
+	          ../../ldr/mach-o/h/mach/vm_prot.h                         \
+	          ../../ldr/mach-o/h/ppc/_types.h                           \
+	          ../../ldr/mach-o/h/sys/_posix_availability.h              \
+	          ../../ldr/mach-o/h/sys/_symbol_aliasing.h                 \
+	          ../../ldr/mach-o/h/sys/cdefs.h                            \
+	          ../../ldr/mach-o/macho_node.h symmacho.cpp symmacho.hpp
 endif

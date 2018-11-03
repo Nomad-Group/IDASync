@@ -16,18 +16,25 @@ RomFormatName        = "Windows CE ROM"
 def dwordAt(li, off):
     li.seek(off)
     s = li.read(4)
-    if len(s) < 4: 
+    if len(s) < 4:
         return 0
     return struct.unpack('<I', s)[0]
 
 # -----------------------------------------------------------------------
-def accept_file(li, n):
+def guess_processor(li):
+    jump = dwordAt(li, 0)
+    if jump & 0xFF000000 == 0xEA000000: # looks like an ARM branch?
+        return "arm"
+    else:
+        return "metapc"
+
+# -----------------------------------------------------------------------
+def accept_file(li, filename):
     """
     Check if the file is of supported format
 
     @param li: a file-like object which can be used to access the input data
-    @param n : format number. The function will be called with incrementing 
-               number until it returns zero
+    @param filename: name of the file, if it is an archive member name then the actual file doesn't exist
     @return: 0 - no more supported formats
              string "name" - format name to display in the chooser dialog
              dictionary { 'format': "name", 'options': integer }
@@ -35,22 +42,19 @@ def accept_file(li, n):
                to indicate preferred format
     """
 
-    # we support only one format per file
-    if n > 0:
-        return 0
-
     # check the CECE signature
     li.seek(ROM_SIGNATURE_OFFSET)
     if li.read(4) == ROM_SIGNATURE:
         # accept the file
-        return RomFormatName
-    
+        proc = guess_processor(li)
+        return {'format': RomFormatName, 'processor': proc}
+
     # unrecognized format
     return 0
 
 # -----------------------------------------------------------------------
 def load_file(li, neflags, format):
-    
+
     """
     Load the file into database
 
@@ -58,18 +62,17 @@ def load_file(li, neflags, format):
     @param neflags: options selected by the user, see loader.hpp
     @return: 0-failure, 1-ok
     """
-    
+
     if format == RomFormatName:
-        jump = dwordAt(li, 0)
-        if jump & 0xFF000000 == 0xEA000000: # looks like an ARM branch?
-            idaapi.set_processor_type("arm", SETPROC_ALL|SETPROC_FATAL)
-        
+        proc = guess_processor(li)
+        idaapi.set_processor_type(proc, SETPROC_LOADER)
+
         li.seek(0, idaapi.SEEK_END)
         size = li.tell()
 
         #next dword after signature is a pointer to ROMHDR
         romhdr  = dwordAt(li, ROM_SIGNATURE_OFFSET + 4)
-        
+
         # let's try to find such imagebase that potential ROMHDR's "physfirst" value matches it
         imgbase = (romhdr-size) & ~0xfff
         bases = []
@@ -83,16 +86,16 @@ def load_file(li, neflags, format):
         if len(bases) == 1:
             start = bases[0]
         elif len(bases) > 1:
-            print "Warning: several potential imagebases detemined: " + ", ".join("%08X"%i for i in bases)
+            print "warning: several potential imagebases detemined: " + ", ".join("%08X"%i for i in bases)
             start = bases[-1]
         else:
-            Warning("Unable to determine load image base.")
+            warning("Unable to determine load image base.")
             start = 0x80000000
         print "Using imagebase %08X" % start
-        
+
         physlast = dwordAt(li, romhdr - start + 12)
         if physlast <= start:
-            Warning("Internal error")
+            warning("Internal error")
             return 0
         size = physlast - start
 
@@ -106,10 +109,10 @@ def load_file(li, neflags, format):
         print "Load OK"
         return 1
 
-    Warning("Unknown format name: '%s'" % format)
+    warning("Unknown format name: '%s'" % format)
     return 0
 
 # -----------------------------------------------------------------------
 def move_segm(frm, to, sz, fileformatname):
-    Warning("move_segm(from=%s, to=%s, sz=%d, formatname=%s" % (hex(frm), hex(to), sz, fileformatname))
+    warning("move_segm(from=%s, to=%s, sz=%d, formatname=%s" % (hex(frm), hex(to), sz, fileformatname))
     return 0

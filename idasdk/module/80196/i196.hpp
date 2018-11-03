@@ -9,7 +9,7 @@
 
 #include "../idaidp.hpp"
 #include "ins.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 //------------------------------------------------------------------------
 // customization of cmd structure:
@@ -36,17 +36,14 @@ typedef struct
 } predefined_t;
 
 //------------------------------------------------------------------------
+void idaapi i196_header(outctx_t &ctx);
+void idaapi i196_footer(outctx_t &ctx);
 
-void idaapi header( void );
-void idaapi footer( void );
+void idaapi i196_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi i196_segend(outctx_t &ctx, segment_t *seg);
 
-void idaapi segstart( ea_t ea );
-void idaapi segend( ea_t ea );
-
-int  idaapi ana( void );
-int  idaapi emu( void );
-void idaapi out( void );
-bool idaapi outop( op_t &op );
+int  idaapi ana(insn_t *_insn);
+int  idaapi emu(const insn_t &insn);
 
 //void i196_data(ea_t ea);
 

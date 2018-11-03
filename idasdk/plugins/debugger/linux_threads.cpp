@@ -6,6 +6,21 @@
 
 #define local static
 
+//-------------------------------------------------------------------
+#ifdef TDEB
+#define ddeb(x) _ddeb x
+AS_PRINTF(1, 2) inline void _ddeb(const char *format, ...)
+{
+  va_list va;
+  va_start(va, format);
+  vmsg(format, va);
+  va_end(va);
+}
+#else
+#define ddeb(x) (void)0
+#endif
+
+//-------------------------------------------------------------------
 //#define MANUALLY_LOAD_THREAD_DB
 #ifdef MANUALLY_LOAD_THREAD_DB
 // On some systems libthread_db can not be linked statically because only .so files exists.
@@ -150,7 +165,7 @@ local const char *tdb_strerr(td_err_e err)
     case TD_BADKEY:      return "invalid key";
     case TD_NOMSG:       return "no event message for getmsg";
     case TD_NOFPREGS:    return "FPU register set not available";
-    case TD_NOLIBTHREAD: return "application not linked with libthread";
+    case TD_NOLIBTHREAD: return "application not linked with libpthread";
     case TD_NOEVENT:     return "requested event is not supported";
     case TD_NOCAPAB:     return "capability not available";
     case TD_DBERR:       return "debugger service failed";
@@ -316,7 +331,7 @@ void linux_debmod_t::display_thrinfo(thid_t tid)
   if ( err == 0 )
   {
     td_thrinfo_t thi;
-    memset(&thi, 0 ,sizeof(thi));
+    memset(&thi, 0, sizeof(thi));
     err = td_thr_get_info(&th, &thi);
     COMPLAIN_IF_FAILED("td_thr_get_info2", err);
 
@@ -387,6 +402,13 @@ local linux_debmod_t *find_debugger(ps_prochandle *hproc)
 }
 
 //--------------------------------------------------------------------------
+inline ea_t get_symbol_as_envvar(const char *name)
+{
+  qstring buf;
+  return qgetenv(name, &buf) ? strtoull(buf.begin(), NULL, 16) : BADADDR;
+}
+
+//--------------------------------------------------------------------------
 idaman ps_err_e ps_pglobal_lookup(
         ps_prochandle *hproc,
         const char *obj,
@@ -413,17 +435,39 @@ idaman ps_err_e ps_pglobal_lookup(
     ea = ld->find_pending_name(name);
     if ( ea == BADADDR )
     {
-#ifdef TDEB
-      msg("FAILED TO FIND name '%s'\n", name);
-#endif
-      return PS_NOSYM;
+      if ( ld->nptl_base != BADADDR )
+        ea = get_symbol_as_envvar(name);
+      if ( ea == BADADDR )
+      {
+        if ( ld->nptl_base != BADADDR )
+          msg("*WARNING* Failed to resolve name '%s' in libpthread shared object.\n"
+              "          Support for multithread applications will be turned off.\n"
+              "          We recommend you to analyze libpthread and provide the\n"
+              "          missing symbol info as an environment variable:\n"
+              "\n"
+              "          export %s=####\n"
+              "\n"
+              "          where #### is the hexadecimal address of the symbol.\n"
+              "          The full list of symbols is in syms_as_envvars.py\n",
+              name, name);
+        return PS_NOSYM;
+      }
+      ea += ld->nptl_base;
     }
+#ifdef TDEB
+    if ( streq(name, "nptl_version") )
+    {
+      char buf[8 + 1];
+      buf[0] = '\0';
+      ld->_read_memory(-1, ea, buf, 8, false);
+      buf[8] = '\0';
+      msg("nptl_version='%s'\n", buf);
+    }
+#endif
     psname_cache[name] = ea;
   }
-  *sym_addr = (void*)ea;
-#ifdef TDEB
-  msg("ps_pglobal_lookup('%s') => %a\n", name, ea);
-#endif
+  *sym_addr = psaddr_t(size_t(ea));
+  ddeb(("ps_pglobal_lookup('%s') => %a\n", name, ea));
   return PS_OK;
 }
 
@@ -433,7 +477,30 @@ idaman pid_t ps_getpid(ps_prochandle *hproc)
   return hproc->pid;
 }
 
-#ifndef __ANDROID__
+#ifdef __ANDROID__
+#  ifdef __X64__
+//--------------------------------------------------------------------------
+idaman ps_err_e ps_get_thread_area(const struct ps_prochandle *, lwpid_t lwpid, int idx, void **base)
+{
+  struct iovec iovec;
+  uint64_t reg;
+
+  iovec.iov_base = &reg;
+  iovec.iov_len = sizeof (reg);
+
+  if ( ptrace(PTRACE_GETREGSET, lwpid, NT_ARM_TLS, &iovec) != 0 )
+    return PS_ERR;
+
+  /* IDX is the bias from the thread pointer to the beginning of the
+     thread descriptor.  It has to be subtracted due to implementation
+     quirks in libthread_db.  */
+  *base = (void *) (reg - idx);
+
+  return PS_OK;
+}
+#  endif
+
+#else   // !__ANDROID__
 //--------------------------------------------------------------------------
 idaman ps_err_e ps_pdread(
         ps_prochandle *hproc,
@@ -441,34 +508,24 @@ idaman ps_err_e ps_pdread(
         void *buf,
         size_t size)
 {
-#ifdef TDEB
-  msg("ps_pdread(%a, %ld)\n", ea_t(addr), size);
-#endif
+  ddeb(("ps_pdread(%a, %ld)\n", ea_t(addr), size));
   linux_debmod_t *ld = find_debugger(hproc);
   if ( ld == NULL )
   {
-#ifdef TDEB
-    msg("\t=> bad pid\n");
-#endif
+    ddeb(("\t=> bad pid\n"));
     return PS_BADPID;
   }
   if ( ld->thread_handle == INVALID_HANDLE_VALUE
     || ld->_read_memory(ld->thread_handle, size_t(addr), buf, size, false) <= 0 )
   {
-#ifdef TDEB
-    msg("\t=> read error (1)\n");
-#endif
+    ddeb(("\t=> read error (1)\n"));
     if ( ld->_read_memory(hproc->pid, size_t(addr), buf, size, false) <= 0 )
     {
-#ifdef TDEB
-      msg("\t=> read error (2)\n");
-#endif
+      ddeb(("\t=> read error (2)\n"));
       return PS_ERR;
     }
   }
-#ifdef TDEB
-  msg("\t=> read OK\n");
-#endif
+  ddeb(("\t=> read OK\n"));
   return PS_OK;
 }
 
@@ -552,13 +609,17 @@ idaman ps_err_e ps_get_thread_area(const struct ps_prochandle *, lwpid_t lwpid, 
 
 #else
   #ifndef PTRACE_GET_THREAD_AREA
-  #define PTRACE_GET_THREAD_AREA __ptrace_request(25)
+    #ifdef __ARM__
+      #define PTRACE_GET_THREAD_AREA __ptrace_request(22)
+    #else
+      #define PTRACE_GET_THREAD_AREA __ptrace_request(25)
+    #endif
   #endif
-    unsigned int desc[4];
-    if ( ptrace(PTRACE_GET_THREAD_AREA, lwpid, (void *)idx, (size_t)&desc) < 0 )
-      return PS_ERR;
+  unsigned int desc[4];
+  if ( qptrace(PTRACE_GET_THREAD_AREA, lwpid, (void *)idx, &desc) < 0 )
+    return PS_ERR;
 
-    *(int *)base = desc[1];
+  *(int *)base = desc[1];
 #endif
 
   return PS_OK;
@@ -690,9 +751,7 @@ bool linux_debmod_t::listen_thread_events(const td_thrinfo_t &info, const td_thr
   COMPLAIN_IF_FAILED("td_thr_event_enable", err);
   if ( err != TD_OK )
   {
-#ifdef TDEB
-    msg("%d: thread dead already? not adding to list.\n", info.ti_lid);
-#endif
+    ddeb(("%d: thread dead already? not adding to list.\n", info.ti_lid));
     return false;
   }
 
@@ -708,7 +767,7 @@ void linux_debmod_t::attach_to_thread(const td_thrinfo_t &info)
   ev.pid     = process_handle;
   ev.tid     = tid;
 #ifndef __ANDROID__
-  ev.ea      = (ea_t)info.ti_startfunc;
+  ev.ea      = (ea_t) (size_t) info.ti_startfunc;
 #endif
   ev.handled = true;
   add_thread(tid);
@@ -717,7 +776,7 @@ void linux_debmod_t::attach_to_thread(const td_thrinfo_t &info)
   if ( qptrace(PTRACE_ATTACH, tid, 0, 0) != 0 )
     INTERR(30197);
   int status;
-  int tid2 = check_for_signal(tid, &status, -1); // consume SIGSTOP
+  int tid2 = check_for_signal(&status, tid, -1); // consume SIGSTOP
   if ( tid2 != tid || !WIFSTOPPED(status) || WSTOPSIG(status) != SIGSTOP )
   {
     get_thread(tid)->waiting_sigstop = true;
@@ -732,9 +791,7 @@ void linux_debmod_t::dead_thread(int tid, thstate_t state)
   threads_t::iterator p = threads.find(tid);
   if ( p != threads.end() )
   {
-#ifdef TDEB
-    msg("thread %d died\n", tid);
-#endif
+    ddeb(("thread %d died\n", tid));
     set_thread_state(p->second, state);
     debug_event_t ev;
     ev.eid     = THREAD_EXIT;
@@ -791,7 +848,14 @@ bool linux_debmod_t::tdb_enable_event(td_event_e event, internal_bpt *bp)
   bool ok = add_internal_bp(*bp, size_t(notify.u.bptaddr));
   if ( !ok )
   {
-    dmsg("%a: failed to add thread_db breakpoint\n", ea_t(notify.u.bptaddr));
+    // Having the following cast inline in the 'dmsg' call causes
+    // the __X64__=0 && __EA64__=0 build on linux to report:
+    //   linux_threads.cpp:851:86: warning: format '%a' expects argument of
+    //   type 'double', but argument 3 has type 'size_t {aka unsigned int}'
+    // ...which AFAICT is a bug in gcc.
+    // Putting it on a separate line works fine, though.
+    ea_t bptaddr = ea_t(size_t(notify.u.bptaddr));
+    dmsg("%a: failed to add thread_db breakpoint\n", bptaddr);
     return false;
   }
   debdeb("%a: added BP for thread event %s\n", bp->bpt_addr, event == TD_CREATE ? "TD_CREATE" : "TD_DEATH");
@@ -814,7 +878,8 @@ bool linux_debmod_t::tdb_new(void)
     bool libc_loaded = false;
     for ( images_t::const_iterator p=dlls.begin(); p != dlls.end(); ++p )
     {
-      if ( p->second.fname == "/system/lib/libc.so" )
+      if ( p->second.fname == "/system/lib/libc.so"
+        || p->second.fname == "/system/lib64/libc.so" )
       {
         libc_loaded = true;
         break;
@@ -823,14 +888,14 @@ bool linux_debmod_t::tdb_new(void)
     if ( !libc_loaded )
       return false;
 #endif
-#ifdef TDEB
-    msg("checking pid %d with thread_db\n", process_handle);
-#endif
+    ddeb(("checking pid %d with thread_db\n", process_handle));
     prochandle.pid = process_handle;
     td_err_e err = td_ta_new(&prochandle, &ta);
     // the call might fail the first time if libc is not loaded yet
     // so don't show misleading message to the user
-    // COMPLAIN_IF_FAILED("td_ta_new", err);
+#ifdef TDEB
+    COMPLAIN_IF_FAILED("td_ta_new", err);
+#endif
     if ( err != TD_OK )
     {
       ta = NULL;
@@ -845,9 +910,7 @@ bool linux_debmod_t::tdb_new(void)
 
     if ( linux_supports_tracefork() )
     {
-#ifdef TDEB
-      msg("use PTRACE_O_TRACEFORK to follow the fork events\n");
-#endif
+      ddeb(("use PTRACE_O_TRACEFORK to follow the fork events\n"));
       linux_enable_event_reporting(process_handle);
       birth_bpt.bpt_addr = 0;
       death_bpt.bpt_addr = 0;
@@ -873,9 +936,7 @@ bool linux_debmod_t::tdb_new(void)
 #ifndef __ANDROID__
       tdb_enable_event(TD_DEATH, &death_bpt);
 #endif
-#ifdef TDEB
-      msg("thread support has been enabled, birth_bpt=%a death_bpt=%a\n", birth_bpt.bpt_addr, death_bpt.bpt_addr);
-#endif
+      ddeb(("thread support has been enabled, birth_bpt=%a death_bpt=%a\n", birth_bpt.bpt_addr, death_bpt.bpt_addr));
     }
 
     tdb_update_threads();
@@ -951,7 +1012,7 @@ static void linux_test_for_tracefork(void)
   }
 
   int status;
-  int ret = qwait(child_pid, &status, 0);
+  int ret = qwait(&status, child_pid, 0);
   if ( ret == -1 )
   {
     msg("waitpid: %s\n", winerr(errno));
@@ -978,7 +1039,7 @@ static void linux_test_for_tracefork(void)
       return;
     }
 
-    ret = qwait(child_pid, &status, 0);
+    ret = qwait(&status, child_pid, 0);
     if ( ret != child_pid )
       msg("linux_test_for_tracefork: failed to wait for killed child");
     else if ( !WIFSIGNALED(status) )
@@ -991,9 +1052,9 @@ static void linux_test_for_tracefork(void)
   if ( ret != 0 )
     msg("linux_test_for_tracefork: failed to resume child");
 
-  ret = qwait(child_pid, &status, 0);
+  ret = qwait(&status, child_pid, 0);
   if ( ret == child_pid
-    && WIFSTOPPED (status)
+    && WIFSTOPPED(status)
     && status >> 16 == PTRACE_EVENT_FORK )
   {
     long second_pid = 0;
@@ -1003,11 +1064,11 @@ static void linux_test_for_tracefork(void)
       int second_status;
 
       linux_supports_tracefork_flag = 1;
-      qwait(second_pid, &second_status, 0);
+      qwait(&second_status, second_pid, 0);
       ret = qptrace(PTRACE_KILL, second_pid, NULL, NULL);
       if ( ret != 0 )
         msg("linux_test_for_tracefork: failed to kill second child");
-       qwait(second_pid, &status, 0);
+       qwait(&status, second_pid, 0);
     }
   }
   else
@@ -1021,7 +1082,7 @@ static void linux_test_for_tracefork(void)
     ret = qptrace(PTRACE_KILL, child_pid, NULL, NULL);
     if ( ret != 0 )
         msg("linux_test_for_tracefork: failed to kill child");
-    qwait(child_pid, &status, 0);
+    qwait(&status, child_pid, 0);
   }
   while ( WIFSTOPPED(status) );
 
@@ -1066,9 +1127,7 @@ void linux_debmod_t::handle_extended_wait(bool *handled, const chk_signal_info_t
   {
     unsigned long new_pid;
     qptrace(PTRACE_GETEVENTMSG, csi.pid, NULL, &new_pid);
-#ifdef TDEB
-    msg("handle_extended_wait: PTRACE_EVENT_CLONE(signal_pid=%d, new_pid=%ld)\n", csi.pid, new_pid);
-#endif
+    ddeb(("handle_extended_wait: PTRACE_EVENT_CLONE(signal_pid=%d, new_pid=%ld)\n", csi.pid, new_pid));
     add_thread(new_pid);
 
     // If we haven't already seen the new PID stop, wait for it now
@@ -1077,10 +1136,8 @@ void linux_debmod_t::handle_extended_wait(bool *handled, const chk_signal_info_t
       // The new child has a pending SIGSTOP.  We can't affect it until it
       // hits the SIGSTOP, but we're already attached
       int status;
-      int tid2 = check_for_signal(new_pid, &status, -1);
-#ifdef TDEB
-      msg("handle_extended_wait: tid2=%d status=%s\n", tid2, status_dstr(status));
-#endif
+      int tid2 = check_for_signal(&status, new_pid, -1);
+      ddeb(("handle_extended_wait: tid2=%d status=%s\n", tid2, status_dstr(status)));
       if ( tid2 == -1 )
         INTERR(1200);    // waiting for new child
       if ( tid2 != new_pid || !WIFSTOPPED(status) || WSTOPSIG(status) != SIGSTOP )

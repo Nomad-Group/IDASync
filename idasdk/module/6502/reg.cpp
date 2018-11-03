@@ -13,42 +13,79 @@
 //--------------------------------------------------------------------------
 static const char *const RegNames[] =
 {
-  "A","X","Y","cs","ds"
+  "A", "X", "Y", "cs", "ds"
 };
 
 //----------------------------------------------------------------------
 int is_cmos = 0;
 
-static int idaapi notify(processor_t::idp_notify msgid, ...) // Various messages:
+static ssize_t idaapi notify(void *, int msgid, va_list va)
 {
-  va_list va;
-  va_start(va, msgid);
-
-// A well behaved processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
   switch ( msgid )
   {
-    case processor_t::newprc:
+    case processor_t::ev_newprc:
       is_cmos = va_arg(va, int);
       break;
-    case processor_t::newseg:
+
+    case processor_t::ev_creating_segm:
       {                  // default DS is equal to CS
         segment_t *sptr = va_arg(va, segment_t *);
-        sptr->defsr[rVds-ph.regFirstSreg] = sptr->sel;
+        sptr->defsr[rVds-ph.reg_first_sreg] = sptr->sel;
       }
       break;
+
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
     default:
       break;
   }
-  va_end(va);
-
-  return(1);
+  return 0;
 }
 
 //-----------------------------------------------------------------------
@@ -67,7 +104,6 @@ static const asm_t pseudosam =
   "PseudoSam by PseudoCode",
   0,
   ps_headers,
-  NULL,
   ".org",
   ".end",
 
@@ -90,10 +126,6 @@ static const asm_t pseudosam =
   ".rs %s",     // uninited arrays
   ".equ",       // equ
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -125,7 +157,6 @@ static const asm_t svasm =
   "SVENSON ELECTRONICS 6502/65C02 ASSEMBLER - V.1.0 - MAY, 1988",
   0,
   NULL,         // headers
-  NULL,
   "* = ",
   ".END",
 
@@ -149,7 +180,6 @@ static const asm_t tasm =
   "Table Driven Assembler (TASM) by Speech Technology Inc.",
   0,
   NULL,         // headers,
-  NULL,
   ".org",
   ".end",
 
@@ -172,10 +202,6 @@ static const asm_t tasm =
   ".block %s",  // uninited arrays
   ".equ",
   NULL,         // seg prefix
-  NULL,         // checkarg_preline
-  NULL,         // checkarg_atomprefix
-  NULL,         // checkarg_operations
-  NULL,         // XlatAsciiOutput
   NULL,         // curip
   NULL,         // func_header
   NULL,         // func_footer
@@ -207,7 +233,6 @@ static const asm_t avocet =
   "Avocet Systems 2500AD 6502 Assembler",
   0,
   NULL,         // headers,
-  NULL,
   ".org",
   ".end",
 
@@ -252,11 +277,15 @@ static const bytes_t retcodes[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,// version
-  PLFM_6502,            // id
-  PR_SEGS|PR_SEGTRANS,  // flags
-  8,                    // 8 bits in a byte for code segments
-  8,                    // 8 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_6502,              // id
+                          // flag
+    PR_SEGS
+  | PR_SEGTRANS,
+                          // flag2
+  0,
+  8,                      // 8 bits in a byte for code segments
+  8,                      // 8 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -265,40 +294,17 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
+  RegNames,             // Register names
+  qnumber(RegNames),    // Number of registers
 
-  segstart,
-  std_gen_segm_footer,
-
-  NULL,                 // assumes,
-
-  ana,
-  emu,
-
-  out,
-  outop,
-  intel_data,
-  NULL,                 // compare operands
-  NULL,                 // can have type
-
-  qnumber(RegNames),            // Number of registers
-  RegNames,                     // Register names
-  NULL,                         // get abstract register
-
-  0,                            // Number of register files
-  NULL,                         // Register file names
-  NULL,                         // Register descriptions
-  NULL,                         // Pointer to CPU registers
-
-  rVcs,                         // first
-  rVds,                         // last
-  0,                            // size of a segment register
+  rVcs,                 // first
+  rVds,                 // last
+  0,                    // size of a segment register
   rVcs,rVds,
 
-  NULL,                         // No known code start sequences
+  NULL,                 // No known code start sequences
   retcodes,
 
   0,M65_last,
-  Instructions
+  Instructions,         // instruc
 };

@@ -11,6 +11,7 @@
  */
 
 #include "../idaldr.h"
+#include "../../module/mc68xx/notify_codes.hpp"
 #include "os9.hpp"
 
 //----------------------------------------------------------------------
@@ -40,7 +41,7 @@ static uchar calc_os9_parity(os9_header_t &h)
 
 //----------------------------------------------------------------------
 static const char object_name[] = "OS9 object file for 6809";
-static bool is_os9_object_file(linput_t *li, char *fileformatname)
+static bool is_os9_object_file(qstring *fileformatname, linput_t *li)
 {
   os9_header_t h;
   qlseek(li, 0);
@@ -51,7 +52,7 @@ static bool is_os9_object_file(linput_t *li, char *fileformatname)
     && calc_os9_parity(h) == h.parity
     && (h.type_lang & OS9_LANG) == OS9_LANG_OBJ )
   {
-    qstrncpy(fileformatname, object_name, MAX_FILE_FORMAT_NAME);
+    *fileformatname = object_name;
     return true;
   }
   return false;
@@ -59,12 +60,12 @@ static bool is_os9_object_file(linput_t *li, char *fileformatname)
 
 //----------------------------------------------------------------------
 static const char flex_name[] = "FLEX STX file";
-static bool is_os9_flex_file(linput_t *li, char *fileformatname)
+static bool is_os9_flex_file(qstring *fileformatname, linput_t *li)
 {
   qlseek(li, 0);
-  int32 fsize = qlsize(li);
+  int64 fsize = qlsize(li);
   int nrec2 = 0;
-  int fpos = 0;
+  qoff64_t fpos = 0;
   while ( 1 )
   {
     if ( fpos > fsize )
@@ -102,17 +103,24 @@ static bool is_os9_flex_file(linput_t *li, char *fileformatname)
   }
   if ( nrec2 == 0 )
     return false;
-  qstrncpy(fileformatname, flex_name, MAX_FILE_FORMAT_NAME);
+  *fileformatname = flex_name;
   return true;
 }
 
 //----------------------------------------------------------------------
-int idaapi accept_file(linput_t *li,char fileformatname[MAX_FILE_FORMAT_NAME],int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
-  if ( n != 0 )
-    return 0;       // reject repeated calls
-  return is_os9_object_file(li,fileformatname)          // test for OS9
-      || is_os9_flex_file(li,fileformatname);           // test for FLEX
+  if ( is_os9_object_file(fileformatname, li) // OS9
+    || is_os9_flex_file(fileformatname, li) ) // FLEX
+  {
+    *processor = "6809";
+    return 1;
+  }
+  return 0;
 }
 
 //----------------------------------------------------------------------
@@ -142,7 +150,7 @@ static const char *get_os9_lang_name(uchar lang)
     case OS9_LANG_OBJ: return "6809 object code";
     case OS9_LANG_BAS: return "BASIC09 I-Code";
     case OS9_LANG_PAS: return "PASCAL P-Code";
-    case OS9_LANG_C  : return "C I-Code";
+    case OS9_LANG_C:   return "C I-Code";
     case OS9_LANG_CBL: return "COBOL I-Code";
     case OS9_LANG_FTN: return "FORTRAN I-Code";
     default:           return "unknown";
@@ -152,19 +160,19 @@ static const char *get_os9_lang_name(uchar lang)
 //--------------------------------------------------------------------------
 static void create32(
         sel_t sel,
-        ea_t startEA,
-        ea_t endEA,
+        ea_t start_ea,
+        ea_t end_ea,
         const char *name,
         const char *classname)
 {
   set_selector(sel, 0);
 
   segment_t s;
-  s.sel    = sel;
-  s.startEA= startEA;
-  s.endEA  = endEA;
-  s.align  = saRelByte;
-  s.comb   = scPub;
+  s.sel     = sel;
+  s.start_ea = start_ea;
+  s.end_ea   = end_ea;
+  s.align   = saRelByte;
+  s.comb    = scPub;
   if ( !add_segm_ex(&s, name, classname, ADDSEG_NOSREG|ADDSEG_SPARSE) )
     loader_failure();
 }
@@ -179,14 +187,13 @@ void load_obj_file(linput_t *li)
   lread(li, &h, sizeof(os9_header_t));
   swap_os9_header(h);
 
-  if ( ph.id != PLFM_6800 )
-    set_processor_type("6809", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("6809", SETPROC_LOADER);
   set_target_assembler(5);
 
-  uint32 fsize = qlsize(li);
-  uint32 fpos = qltell(li);
-  uint32 rest = fsize - fpos;
-  ea_t start = toEA(inf.baseaddr, LOADING_OFFSET);
+  uint64 fsize = qlsize(li);
+  qoff64_t fpos = qltell(li);
+  uint64 rest = fsize - fpos;
+  ea_t start = to_ea(inf.baseaddr, LOADING_OFFSET);
   ea_t end   = start + h.size;
   if ( end <= start || fsize < fpos || fsize-fpos < rest )
     loader_failure("Corrupted input file");
@@ -196,28 +203,59 @@ void load_obj_file(linput_t *li)
 
   create_filename_cmt();
   ea_t ea = start;
-           set_name(ea, "magic");      doWord(ea, 2); op_num(ea,0);
-  ea += 2; set_name(ea, "size");       doWord(ea, 2); op_num(ea,0);
-  ea += 2; set_name(ea, "name");       doWord(ea, 2); if ( h.name < h.size ) set_offset(ea,0, start);
-  ea += 2; set_name(ea, "type_lang");  doByte(ea, 1); op_num(ea,0);
-           append_cmt(ea, get_os9_type_name(h.type_lang & OS9_TYPE), 0);
-           append_cmt(ea, get_os9_lang_name(h.type_lang & OS9_LANG), 0);
-  ea += 1; set_name(ea, "attrib");     doByte(ea, 1); op_num(ea,0);
-           if ( h.attrib & OS9_SHARED ) append_cmt(ea, "Shared module", 0);
-  ea += 1; set_name(ea, "parity");     doByte(ea, 1); op_num(ea,0);
-  ea += 1; set_name(ea, "start_ptr");  doWord(ea, 2); set_offset(ea,0, start);
-  ea += 2; set_name(ea, "storage");    doWord(ea, 2); op_num(ea,0);
-  inf.startIP  = LOADING_OFFSET + h.start;
+  set_name(ea, "magic", SN_IDBENC);
+  create_word(ea, 2);
+  op_num(ea,0);
+
+  ea += 2;
+  set_name(ea, "size", SN_IDBENC);
+  create_word(ea, 2);
+  op_num(ea,0);
+
+  ea += 2;
+  set_name(ea, "name", SN_IDBENC);
+  create_word(ea, 2);
+  if ( h.name < h.size )
+    op_plain_offset(ea,0, start);
+
+  ea += 2;
+  set_name(ea, "type_lang", SN_IDBENC);
+  create_byte(ea, 1);
+  op_num(ea,0);
+  append_cmt(ea, get_os9_type_name(h.type_lang & OS9_TYPE), 0);
+  append_cmt(ea, get_os9_lang_name(h.type_lang & OS9_LANG), 0);
+
+  ea += 1;
+  set_name(ea, "attrib", SN_IDBENC);
+  create_byte(ea, 1);
+  op_num(ea,0);
+  if ( h.attrib & OS9_SHARED )
+    append_cmt(ea, "Shared module", 0);
+
+  ea += 1;
+  set_name(ea, "parity", SN_IDBENC);
+  create_byte(ea, 1);
+  op_num(ea,0);
+
+  ea += 1;
+  set_name(ea, "start_ptr", SN_IDBENC);
+  create_word(ea, 2);
+  op_plain_offset(ea,0, start);
+
+  ea += 2;
+  set_name(ea, "storage", SN_IDBENC);
+  create_word(ea, 2); op_num(ea,0);
+
+  inf.start_ip = LOADING_OFFSET + h.start;
   inf.start_cs = inf.baseaddr;
 }
 
 //----------------------------------------------------------------------
 void load_flex_file(linput_t *li)
 {
-  qlseek(li,0);
+  qlseek(li, 0);
 
-  if ( ph.id != PLFM_6800 )
-    set_processor_type("6809", SETPROC_ALL|SETPROC_FATAL);
+  set_processor_type("6809", SETPROC_LOADER);
   set_target_assembler(5);
 
   ea_t bottom = BADADDR;
@@ -236,7 +274,7 @@ void load_flex_file(linput_t *li)
           c = qlgetc(li);
           int adr = (c<<8) | qlgetc(li);
           c = qlgetc(li);        // number of bytes
-          ea_t start = toEA(inf.baseaddr, adr);
+          ea_t start = to_ea(inf.baseaddr, adr);
           ea_t end   = start + c;
           file2base(li, qltell(li), start, end, FILEREG_PATCHABLE);
           if ( bottom > start )
@@ -247,16 +285,16 @@ void load_flex_file(linput_t *li)
         break;
       case 0x16:
         c = qlgetc(li);
-        inf.startIP  = (c<<8) | qlgetc(li);
+        inf.start_ip = int(c<<8) | qlgetc(li);
         inf.start_cs = inf.baseaddr;
         break;
       default:
         INTERR(20065);
     }
   }
-  create32(inf.baseaddr,  bottom, top, "TEXT", "CODE");
+  create32(inf.baseaddr, bottom, top, "TEXT", "CODE");
   create_filename_cmt();
-  ph.notify(ph.loader);   // tell the module that the file has FLEX format
+  mc68xx_module_t::notify_flex_format();   // tell the module that the file has FLEX format
 }
 
 //----------------------------------------------------------------------
@@ -289,5 +327,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

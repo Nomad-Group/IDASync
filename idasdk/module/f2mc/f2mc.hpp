@@ -12,7 +12,7 @@
 
 #include "../idaidp.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include "ins.hpp"
 
 //------------------------------------------------------------------
@@ -63,10 +63,10 @@ enum regnum_t
 // specific processor records
 
 #define default_bank segpref
-#define prefix_bank auxpref_chars.high
-#define op_bank auxpref_chars.low
+#define prefix_bank auxpref_u8[1]
+#define op_bank auxpref_u8[0]
 // o_phrase = @reg+(index) (index if PHRASE_INDEX)
- #define at specflag1 // number of @ indirections (dtyp @ = op.dtyp)
+ #define at specflag1 // number of @ indirections (dtype @ = op.dtype)
  #define special_mode specflag2
   #define MODE_INC 1
   #define MODE_INDEX 2
@@ -80,8 +80,8 @@ enum regnum_t
 //------------------------------------------------------------------
 // specific device name
 
-extern char device[MAXSTR];
-extern char deviceparams[MAXSTR];
+extern qstring deviceparams;
+extern qstring device;
 
 //------------------------------------------------------------------
 // processor types
@@ -101,31 +101,26 @@ extern netnode helper;
 
 extern ushort idpflags;
 
-inline ea_t calc_code_mem(ea_t ea) { return toEA(cmd.cs, ea); }
-inline ea_t calc_data_mem(ea_t ea) { return (get_segreg(ea, DTB) << 16) | ea; }
+inline ea_t calc_code_mem(const insn_t &insn, ea_t ea) { return to_ea(insn.cs, ea); }
+inline ea_t calc_data_mem(ea_t ea) { return (get_sreg(ea, DTB) << 16) | ea; }
 
 int get_signed(int byte,int mask);
 
 const char *find_sym(ea_t address);
-const ioport_bit_t *find_bits(ea_t address);
 const char *find_bit(ea_t address, int bit);
 ea_t map_port(ea_t from);
 int calc_outf(const op_t &x);
 //------------------------------------------------------------------
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi f2mc_header(outctx_t &ctx);
+void idaapi f2mc_footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);         // function to produce assume directives
+void idaapi f2mc_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi f2mc_segend(outctx_t &ctx, segment_t *seg);
+void idaapi f2mc_assumes(outctx_t &ctx);         // function to produce assume directives
 
-void idaapi out(void);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi ana(insn_t *_insn);
+int  idaapi emu(const insn_t &insn);
 bool idaapi create_func_frame(func_t *pfn);
-int  idaapi is_sp_based(const op_t &x);
+int  idaapi is_sp_based(const insn_t &insn, const op_t &x);
 
 #endif // _F2MC_HPP

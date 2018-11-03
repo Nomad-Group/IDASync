@@ -20,6 +20,8 @@
 #include <pro.h>
 #include "../idaidp.hpp"
 #include <fpro.h>
+#include <ieee.h>
+
 #include "classfil.hpp"
 #include "ins.hpp"
 
@@ -50,7 +52,7 @@
 //----------------------------------------------------------------------
 struct TXS
 {
-  const char  *str;
+  const char *str;
   uchar size;
 };
 #define TXS_DECLARE(p) { p, (uchar)(sizeof(p)-1) }
@@ -150,7 +152,7 @@ struct SegInfo
 {
   _FMid_ id;             // for search procedure
   uint32 CodeSize;       // CODE size
-  ea_t   startEA;        // EA of Code (checker & slb)
+  ea_t   start_ea;        // EA of Code (checker & slb)
   ea_t   DataBase;       // EA of loc variable segment
   ushort DataSize;       // max locals (DATA size)
   ushort stacks;         // stack size
@@ -176,7 +178,7 @@ struct ClassInfo
   ushort MethodCnt;      // Method's Segment fot this Class
   ushort SourceName;     // Index of Utf8 Source File Name
   uval_t impNode;        // Node for Interfaces (fmt change!)
-  ea_t   startEA;        // для SearchFM
+  ea_t   start_ea;        // для SearchFM
   uint32 maxSMsize;      // optimize memory allocation (StackMap)
                          // ATT: JDK15 - previous errload
   ea_t   xtrnEA;         // beg header segment
@@ -274,42 +276,38 @@ struct SMinfo // for sm_getinfo
 {
   const uchar *pb;
   const uchar *pe;
-  uint    fcnt;
-  ea_t        ea;
+  uint fcnt;
+  ea_t ea;
 };
 
-typedef size_t (*_PRMPT_)(void);
-int         fmtString(ushort index, ssize_t size, fmt_t mode, _PRMPT_ pr=NULL);
 uchar       loadDialog(bool manual);
 bool        LoadOpis(ushort index, uchar type, const_desc_t *p);
 int         CmpString(ushort index1, ushort index2);
 void        myBase(const char *arg);
-segment_t   *getMySeg(ea_t ea);
-void        check_float_const(ea_t ea, void *m, char len);
+segment_t   *getMySeg(ea_t ea, segment_t *seg = NULL);
 void        mark_and_comment(ea_t ea, const char *cmt);
-int32       print_loader_messages(char str[MAXSTR], const char *cmt);
-ea_t        extract_name_ea(char buf[MAXSTR], const char *name, int pos,
-                            uchar clv);
-int         check_special_label(const char *buf, int len);
-size_t      make_locvar_cmt(char *buf, size_t bufsize);
+int32       print_loader_messages(char str[MAXSTR], const char *cmt, outctx_t *ctx);
+ea_t        extract_name_ea(
+        char buf[MAXSTR],
+        const char *name,
+        int pos,
+        uchar clv);
+ssize_t     check_special_label(const char *buf, size_t len);
+size_t      make_locvar_cmt(qstring *buf, const insn_t &insn);
 bool        fmtName(ushort index, char *buf, size_t bufsize, fmt_t fmt);
 bool        is_valid_string_index(ushort index);
 void        coagulate_unused_data(const SegInfo *ps);
-bool        sm_getinfo(SMinfo *pinf);
+bool        sm_getinfo(const insn_t &insn, SMinfo *pinf);
 const uchar *get_annotation(uval_t node, uint *plen);
 const TXS   *get_base_typename(uchar tag);
-NORETURN extern void  _destroyed(
+
 #ifdef __debug__
-                              const char *from
+NORETURN extern void _destroyed(const char *from);
+NORETURN extern void _faterr(uchar mode, const char *from);
 #else
-                              void
+NORETURN extern void _destroyed(void);
+NORETURN extern void _faterr(uchar mode);
 #endif
-                             );
-NORETURN extern void  _faterr(uchar mode
-#ifdef __debug__
-                           , const char *from
-#endif
-                          );
 
 #ifndef __debug__
 #define UNCOMPAT(p)   _faterr(1)
@@ -321,15 +319,15 @@ NORETURN extern void  _faterr(uchar mode
 #define DESTROYED(p)  _destroyed(p)
 #endif
 
-char *uniremap_init(char *pnmch);
+void  uniremap_init();
 uchar uni_remap(ushort w);
 uchar uni_remap_check(ushort w);
 uchar javaIdent(ushort v, uchar *isStart = NULL);
 
 struct UNIMAP
 {
-  uint  count;
-  ushort    uchars[0x80];
+  uint count;
+  ushort uchars[0x80];
 };
 extern UNIMAP unimap;
 void rename_uninames(int32 mode);
@@ -337,9 +335,9 @@ void rename_uninames(int32 mode);
 // information record of StackMap
 struct sm_info_t
 {
-  uint32    noff;   // start offset in blob
-  uint32    eoff;   // end offset in blob
-  uint  fcnt;   // locals at entry
+  uint32 noff;   // start offset in blob
+  uint32 eoff;   // end offset in blob
+  uint fcnt;     // locals at entry
 };
 
 //------------------------------------------------------------------------
@@ -353,25 +351,24 @@ struct sm_info_t
 enum j_registers { Rvars=0, Roptop, Rframe, rVcs, rVds };
 
 //------------------------------------------------------------------------
-void  idaapi header(void);
-void  idaapi footer(void);
+void  idaapi java_header(outctx_t &ctx);
+void  idaapi java_footer(outctx_t &ctx);
 
-void  idaapi segstart(ea_t ea);
-void  idaapi segend(ea_t ea);
+void  idaapi java_segstart(outctx_t &ctx, segment_t *seg);
+void  idaapi java_segend(outctx_t &ctx, segment_t *seg);
 
-int   idaapi ana(void);
-int   idaapi emu(void);
-void  idaapi out(void);
-bool  idaapi outop(op_t &op);
+int   idaapi ana(insn_t *_insn);
+int   idaapi emu(const insn_t &insn);
+int   idaapi j_realcvt(void *m, eNE e, ushort swt);
 
-void  idaapi java_data(ea_t ea);
+void  idaapi java_data(outctx_t &ctx, bool analyze_only);
 
 void  loader(FILE *fp, bool manualload);
 int32 idaapi gen_map_file(FILE *fp);
-ea_t  idaapi get_ref_addr(ea_t ea, const char *str, int pos);
+ea_t  idaapi get_ref_addr(ea_t ea, const char *str, size_t pos);
 
-int   cmp_opnd(op_t &op1, op_t &op2);
-bool  idaapi can_have_type(op_t &op);
+int   cmp_operands(op_t &op1, op_t &op2);
+bool  idaapi can_have_type(const op_t &op);
 void copy_const_to_opnd(op_t &x, const const_desc_t &co);
 
 
@@ -379,9 +376,6 @@ void copy_const_to_opnd(op_t &x, const const_desc_t &co);
 #define UAS_JASMIN   0x0001     // is jasmin assembler?
 
 inline bool jasmin(void) { return (ash.uflag & UAS_JASMIN) != 0; }
-
-//----------------------------------------------------------------------
-inline void out_zero(void)            { *get_output_ptr()  = '\0'; }
 
 //------------------------------------------------------------------------
 #define MLD_EXTREF    0x01
@@ -417,7 +411,7 @@ extern uint32 idpflags;
 #define IDM__REQMASK  ((~(IDM_REQUNK | IDM_WARNUNK | IDM_OUTASM)) >> 16)
 
 // curent modes
-#define IDFM__DEFAULT ( (IDF_MULTDEB|IDF_CONVERT|IDF_ENCODING) | IDM_WARNUNK )
+#define IDFM__DEFAULT ((IDF_MULTDEB|IDF_CONVERT|IDF_ENCODING) | IDM_WARNUNK)
 
 #pragma pack()
 #endif

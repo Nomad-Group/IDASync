@@ -7,22 +7,31 @@
 #pragma option -w-8061  // Initialization is only partially bracketed
 
 //-----------------
-static const unsigned int zinflate_lengthStarts[] = {
+static const unsigned int zinflate_lengthStarts[] =
+{
         3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
-        35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
-static const unsigned int zinflate_lengthExtraBits[] = {
+        35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258
+};
+static const unsigned int zinflate_lengthExtraBits[] =
+{
         0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
-        3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
-static const unsigned int zinflate_distanceStarts[] = {
+        3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0
+};
+static const unsigned int zinflate_distanceStarts[] =
+{
         1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
         257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
-        8193, 12289, 16385, 24577};
-static const unsigned int zinflate_distanceExtraBits[] = {
+        8193, 12289, 16385, 24577
+};
+static const unsigned int zinflate_distanceExtraBits[] =
+{
         0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
         7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
-        12, 12, 13, 13};
+        12, 12, 13, 13
+};
 //-----------------
-static const unsigned int zdeflate_lengthCodes[] = {
+static const unsigned int zdeflate_lengthCodes[] =
+{
         257, 258, 259, 260, 261, 262, 263, 264, 265, 265, 266, 266, 267, 267, 268, 268,
         269, 269, 269, 269, 270, 270, 270, 270, 271, 271, 271, 271, 272, 272, 272, 272,
         273, 273, 273, 273, 273, 273, 273, 273, 274, 274, 274, 274, 274, 274, 274, 274,
@@ -38,10 +47,12 @@ static const unsigned int zdeflate_lengthCodes[] = {
         283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283,
         283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283, 283,
         284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284,
-        284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 285};
+        284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 284, 285
+};
 
 //-----------------
-static const word64 Whirlpool_C0[256] = {
+static const word64 Whirlpool_C0[256] =
+{
         W64LIT(0x1818281878c0d878), W64LIT(0x23236523af0526af),
         W64LIT(0xc6c657c6f97eb8f9), W64LIT(0xe8e825e86f13fb6f),
         W64LIT(0x87879487a14ccba1), W64LIT(0xb8b8d5b862a91162),
@@ -172,7 +183,8 @@ static const word64 Whirlpool_C0[256] = {
         W64LIT(0xf8f815f83f936b3f), W64LIT(0x86869786a444c2a4),
 };
 
-static const word64 Whirlpool_C1[256] = {
+static const word64 Whirlpool_C1[256] =
+{
         W64LIT(0x781818281878c0d8), W64LIT(0xaf23236523af0526),
         W64LIT(0xf9c6c657c6f97eb8), W64LIT(0x6fe8e825e86f13fb),
         W64LIT(0xa187879487a14ccb), W64LIT(0x62b8b8d5b862a911),
@@ -303,7 +315,8 @@ static const word64 Whirlpool_C1[256] = {
         W64LIT(0x3ff8f815f83f936b), W64LIT(0xa486869786a444c2),
 };
 
-static const word64 Whirlpool_C2[256] = {
+static const word64 Whirlpool_C2[256] =
+{
         W64LIT(0xd8781818281878c0), W64LIT(0x26af23236523af05),
         W64LIT(0xb8f9c6c657c6f97e), W64LIT(0xfb6fe8e825e86f13),
         W64LIT(0xcba187879487a14c), W64LIT(0x1162b8b8d5b862a9),
@@ -434,7 +447,8 @@ static const word64 Whirlpool_C2[256] = {
         W64LIT(0x6b3ff8f815f83f93), W64LIT(0xc2a486869786a444),
 };
 
-static const word64 Whirlpool_C3[256] = {
+static const word64 Whirlpool_C3[256] =
+{
         W64LIT(0xc0d8781818281878), W64LIT(0x0526af23236523af),
         W64LIT(0x7eb8f9c6c657c6f9), W64LIT(0x13fb6fe8e825e86f),
         W64LIT(0x4ccba187879487a1), W64LIT(0xa91162b8b8d5b862),
@@ -565,7 +579,8 @@ static const word64 Whirlpool_C3[256] = {
         W64LIT(0x936b3ff8f815f83f), W64LIT(0x44c2a486869786a4),
 };
 
-static const word64 Whirlpool_rc[] = {
+static const word64 Whirlpool_rc[] =
+{
         W64LIT(0x1823c6e887b8014f),
         W64LIT(0x36a6d2f5796f9152),
         W64LIT(0x60bc9b8ea30c7b35),
@@ -578,7 +593,8 @@ static const word64 Whirlpool_rc[] = {
         W64LIT(0xca2dbf07ad5a8333)
 };
 //-----------------
-static const long WAKE_tt[10]= {
+static const long WAKE_tt[10]=
+{
         0x726a8f3bL,
         0xe69a3b5cL,
         0xd3c71fe5L,
@@ -586,7 +602,8 @@ static const long WAKE_tt[10]= {
         0x4d3a8eb3L,
         0x0396d6e8L,
         0x3d4c2f7aL,
-        0x9ee27cf3L, } ;
+        0x9ee27cf3L,
+};
 //-----------------
 static const word64 Tiger_table[4*256] =
 {
@@ -1105,7 +1122,8 @@ static const word64 Tiger_table[4*256] =
 };
 
 //-----------------
-static const byte Twofish_q[2*256] = {
+static const byte Twofish_q[2*256] =
+{
    0xA9, 0x67, 0xB3, 0xE8, 0x04, 0xFD, 0xA3, 0x76, 0x9A, 0x92, 0x80, 0x78,
    0xE4, 0xDD, 0xD1, 0x38, 0x0D, 0xC6, 0x35, 0x98, 0x18, 0xF7, 0xEC, 0x6C,
    0x43, 0x75, 0x37, 0x26, 0xFA, 0x13, 0x94, 0x48, 0xF2, 0xD0, 0x8B, 0x30,
@@ -1153,7 +1171,8 @@ static const byte Twofish_q[2*256] = {
    0x55, 0x09, 0xBE, 0x91
 };
 
-static const word32 Twofish_mds[4*256] = {
+static const word32 Twofish_mds[4*256] =
+{
         0xbcbc3275, 0xecec21f3, 0x202043c6, 0xb3b3c9f4,
         0xdada03db, 0x02028b7b, 0xe2e22bfb, 0x9e9efac8,
         0xc9c9ec4a, 0xd4d409d3, 0x18186be6, 0x1e1e9f6b,
@@ -1412,9 +1431,12 @@ static const word32 Twofish_mds[4*256] = {
         0x4c29ca4c, 0x141c1014, 0x73d72173, 0xccb4f0cc,
         0x09d4d309, 0x108a5d10, 0xe2510fe2, 0x00000000,
         0x9a196f9a, 0xe01a9de0, 0x8f94368f, 0xe6c742e6,
-        0xecc94aec, 0xfdd25efd, 0xab7fc1ab, 0xd8a8e0d8};
+        0xecc94aec, 0xfdd25efd, 0xab7fc1ab, 0xd8a8e0d8
+};
+
 //-----------------
-static const word32 Square_Te[4*256] = {
+static const word32 Square_Te[4*256] =
+{
 
 0x97b1b126UL, 0x69cecea7UL, 0x73c3c3b0UL, 0xdf95954aUL,
 0xb45a5aeeUL, 0xafadad02UL, 0x3be7e7dcUL, 0x04020206UL,
@@ -1683,8 +1705,8 @@ static const word32 Square_Te[4*256] = {
 0x5555ffaaUL, 0x4c4cd498UL, 0xf7f7ec1bUL, 0xe2e2d331UL,
 };
 
-static const word32 Square_Td[4*256] = {
-
+static const word32 Square_Td[4*256] =
+{
 0xe368bc02UL, 0x5585620cUL, 0x2a3f2331UL, 0x61ab13f7UL,
 0x98d46d72UL, 0x21cb9a19UL, 0x3c22a461UL, 0x459d3dcdUL,
 0x05fdb423UL, 0x2bc4075fUL, 0x9b2c01c0UL, 0x3dd9800fUL,
@@ -1952,7 +1974,8 @@ static const word32 Square_Td[4*256] = {
 0xcaa2fe8cUL, 0xd1b5e39eUL, 0xea76a41fUL, 0xb004ea73UL,
 };
 //-----------------
-static const byte SKIPJACK_fTable[256] = {
+static const byte SKIPJACK_fTable[256] =
+{
         0xa3,0xd7,0x09,0x83,0xf8,0x48,0xf6,0xf4,0xb3,0x21,0x15,0x78,0x99,0xb1,0xaf,0xf9,
         0xe7,0x2d,0x4d,0x8a,0xce,0x4c,0xca,0x2e,0x52,0x95,0xd9,0x1e,0x4e,0x38,0x44,0x28,
         0x0a,0xdf,0x02,0xa0,0x17,0xf1,0x60,0x68,0x12,0xb7,0x7a,0xc3,0xe9,0xfa,0x3d,0x53,
@@ -1971,7 +1994,8 @@ static const byte SKIPJACK_fTable[256] = {
         0x5e,0x6c,0xa9,0x13,0x57,0x25,0xb5,0xe3,0xbd,0xa8,0x3a,0x01,0x05,0x59,0x2a,0x46
 };
 //-----------------
-static const byte Square_Se_or_SHARK_enc_sbox[256] = {
+static const byte Square_Se_or_SHARK_enc_sbox[256] =
+{
 177, 206, 195, 149,  90, 173, 231,   2,  77,  68, 251, 145,  12, 135, 161,  80,
 203, 103,  84, 221,  70, 143, 225,  78, 240, 253, 252, 235, 249, 196,  26, 110,
  94, 245, 204, 141,  28,  86,  67, 254,   7,  97, 248, 117,  89, 255,   3,  34,
@@ -1990,7 +2014,8 @@ static const byte Square_Se_or_SHARK_enc_sbox[256] = {
 214, 120, 134, 250, 228,  43, 169,  30, 137,  96, 107, 234,  85,  76, 247, 226,
 };
 
-static const byte Square_Sd_or_SHARK_dec_sbox[256] = {
+static const byte Square_Sd_or_SHARK_dec_sbox[256] =
+{
  53, 190,   7,  46,  83, 105, 219,  40, 111, 183, 118, 107,  12, 125,  54, 139,
 146, 188, 169,  50, 172,  56, 156,  66,  99, 200,  30,  79,  36, 229, 247, 201,
  97, 141,  47,  63, 179, 101, 127, 112, 175, 154, 234, 245,  91, 152, 144, 177,
@@ -2009,7 +2034,8 @@ static const byte Square_Sd_or_SHARK_dec_sbox[256] = {
  24,  94, 106, 213, 166,  33, 222, 254,  42,  28, 243,  10,  26,  25,  39,  45,
 };
 
-static const word64 SHARK_enc_cbox[8*256] = {
+static const word64 SHARK_enc_cbox[8*256] =
+{
 /* box 0 */
 W64LIT(0x060d838f16f3a365),
 W64LIT(0xa68857ee5cae56f6),
@@ -4068,7 +4094,8 @@ W64LIT(0xf701ccd602959bab),
 W64LIT(0xe2665106cc5d26e5),
 };
 
-static const word64 SHARK_dec_cbox[8*256] = {
+static const word64 SHARK_dec_cbox[8*256] =
+{
 /* box 0 */
 W64LIT(0xe6126af05e55aff3),
 W64LIT(0x4b6c893f310b0835),
@@ -6127,7 +6154,8 @@ W64LIT(0x6e5a6802df1ff7df),
 W64LIT(0xfb2043685f73ab5f),
 };
 
-static const byte SHARK_iG[8*8] = {
+static const byte SHARK_iG[8*8] =
+{
         0xe7, 0x30, 0x90, 0x85, 0xd0, 0x4b, 0x91, 0x41,
         0x53, 0x95, 0x9b, 0xa5, 0x96, 0xbc, 0xa1, 0x68,
         0x02, 0x45, 0xf7, 0x65, 0x5c, 0x1f, 0xb6, 0x52,
@@ -6138,7 +6166,8 @@ static const byte SHARK_iG[8*8] = {
         0x56, 0xf4, 0xaf, 0x32, 0xd2, 0xa4, 0xdc, 0x71,
 };
 //-----------------
-static const word32 SHA256_K[64] = {
+static const word32 SHA256_K[64] =
+{
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
         0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
         0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -6157,7 +6186,8 @@ static const word32 SHA256_K[64] = {
         0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
 };
 
-static const word64 SHA512_K[80] = {
+static const word64 SHA512_K[80] =
+{
         W64LIT(0x428a2f98d728ae22), W64LIT(0x7137449123ef65cd),
         W64LIT(0xb5c0fbcfec4d3b2f), W64LIT(0xe9b5dba58189dbbc),
         W64LIT(0x3956c25bf348b538), W64LIT(0x59f111f1b605d019),
@@ -6202,7 +6232,8 @@ static const word64 SHA512_K[80] = {
 
 //-----------------
 static const byte SAFER_exp_tab[256] =
-        {1, 45, 226, 147, 190, 69, 21, 174, 120, 3, 135, 164, 184, 56, 207, 63,
+{
+        1, 45, 226, 147, 190, 69, 21, 174, 120, 3, 135, 164, 184, 56, 207, 63,
         8, 103, 9, 148, 235, 38, 168, 107, 189, 24, 52, 27, 187, 191, 114, 247,
         64, 53, 72, 156, 81, 47, 59, 85, 227, 192, 159, 216, 211, 243, 141, 177,
         255, 167, 62, 220, 134, 119, 215, 166, 17, 251, 244, 186, 146, 145, 100, 131,
@@ -6217,10 +6248,12 @@ static const byte SAFER_exp_tab[256] =
         16, 206, 18, 39, 213, 76, 79, 214, 121, 48, 104, 54, 117, 125, 228, 237,
         128, 106, 144, 55, 162, 94, 118, 170, 197, 127, 61, 175, 165, 229, 25, 97,
         253, 77, 124, 183, 11, 238, 173, 75, 34, 245, 231, 115, 35, 33, 200, 5,
-        225, 102, 221, 179, 88, 105, 99, 86, 15, 161, 49, 149, 23, 7, 58, 40};
+        225, 102, 221, 179, 88, 105, 99, 86, 15, 161, 49, 149, 23, 7, 58, 40
+};
 
 static const byte SAFER_log_tab[256] =
-        {128, 0, 176, 9, 96, 239, 185, 253, 16, 18, 159, 228, 105, 186, 173, 248,
+{
+        128, 0, 176, 9, 96, 239, 185, 253, 16, 18, 159, 228, 105, 186, 173, 248,
         192, 56, 194, 101, 79, 6, 148, 252, 25, 222, 106, 27, 93, 78, 168, 130,
         112, 237, 232, 236, 114, 179, 21, 195, 255, 171, 182, 71, 68, 1, 172, 37,
         201, 250, 142, 65, 26, 33, 203, 211, 13, 110, 254, 38, 88, 218, 50, 15,
@@ -6235,11 +6268,13 @@ static const byte SAFER_log_tab[256] =
         41, 160, 143, 178, 90, 216, 166, 126, 238, 141, 83, 75, 161, 154, 193, 14,
         122, 73, 165, 44, 129, 196, 199, 54, 43, 127, 67, 149, 51, 242, 108, 104,
         109, 240, 2, 40, 206, 221, 155, 234, 94, 153, 124, 20, 134, 207, 229, 66,
-        184, 64, 120, 45, 58, 233, 100, 31, 146, 144, 125, 57, 111, 224, 137, 48};
+        184, 64, 120, 45, 58, 233, 100, 31, 146, 144, 125, 57, 111, 224, 137, 48
+};
 
 
 //-----------------
-static const word32 Rijndael_Te0[256] = {
+static const word32 Rijndael_Te0[256] =
+{
     0xc66363a5U, 0xf87c7c84U, 0xee777799U, 0xf67b7b8dU,
     0xfff2f20dU, 0xd66b6bbdU, 0xde6f6fb1U, 0x91c5c554U,
     0x60303050U, 0x02010103U, 0xce6767a9U, 0x562b2b7dU,
@@ -6305,7 +6340,8 @@ static const word32 Rijndael_Te0[256] = {
     0x824141c3U, 0x299999b0U, 0x5a2d2d77U, 0x1e0f0f11U,
     0x7bb0b0cbU, 0xa85454fcU, 0x6dbbbbd6U, 0x2c16163aU,
 };
-static const word32 Rijndael_Te1[256] = {
+static const word32 Rijndael_Te1[256] =
+{
     0xa5c66363U, 0x84f87c7cU, 0x99ee7777U, 0x8df67b7bU,
     0x0dfff2f2U, 0xbdd66b6bU, 0xb1de6f6fU, 0x5491c5c5U,
     0x50603030U, 0x03020101U, 0xa9ce6767U, 0x7d562b2bU,
@@ -6371,7 +6407,8 @@ static const word32 Rijndael_Te1[256] = {
     0xc3824141U, 0xb0299999U, 0x775a2d2dU, 0x111e0f0fU,
     0xcb7bb0b0U, 0xfca85454U, 0xd66dbbbbU, 0x3a2c1616U,
 };
-static const word32 Rijndael_Te2[256] = {
+static const word32 Rijndael_Te2[256] =
+{
     0x63a5c663U, 0x7c84f87cU, 0x7799ee77U, 0x7b8df67bU,
     0xf20dfff2U, 0x6bbdd66bU, 0x6fb1de6fU, 0xc55491c5U,
     0x30506030U, 0x01030201U, 0x67a9ce67U, 0x2b7d562bU,
@@ -6438,7 +6475,8 @@ static const word32 Rijndael_Te2[256] = {
     0xb0cb7bb0U, 0x54fca854U, 0xbbd66dbbU, 0x163a2c16U,
 };
 
-static const word32 Rijndael_Te3[256] = {
+static const word32 Rijndael_Te3[256] =
+{
     0x6363a5c6U, 0x7c7c84f8U, 0x777799eeU, 0x7b7b8df6U,
     0xf2f20dffU, 0x6b6bbdd6U, 0x6f6fb1deU, 0xc5c55491U,
     0x30305060U, 0x01010302U, 0x6767a9ceU, 0x2b2b7d56U,
@@ -6505,7 +6543,8 @@ static const word32 Rijndael_Te3[256] = {
     0xb0b0cb7bU, 0x5454fca8U, 0xbbbbd66dU, 0x16163a2cU,
 };
 
-static const word32 Rijndael_Te4[256] = {
+static const word32 Rijndael_Te4[256] =
+{
     0x63636363U, 0x7c7c7c7cU, 0x77777777U, 0x7b7b7b7bU,
     0xf2f2f2f2U, 0x6b6b6b6bU, 0x6f6f6f6fU, 0xc5c5c5c5U,
     0x30303030U, 0x01010101U, 0x67676767U, 0x2b2b2b2bU,
@@ -6572,7 +6611,8 @@ static const word32 Rijndael_Te4[256] = {
     0xb0b0b0b0U, 0x54545454U, 0xbbbbbbbbU, 0x16161616U,
 };
 
-static const word32 Rijndael_Td0[256] = {
+static const word32 Rijndael_Td0[256] =
+{
     0x51f4a750U, 0x7e416553U, 0x1a17a4c3U, 0x3a275e96U,
     0x3bab6bcbU, 0x1f9d45f1U, 0xacfa58abU, 0x4be30393U,
     0x2030fa55U, 0xad766df6U, 0x88cc7691U, 0xf5024c25U,
@@ -6639,7 +6679,8 @@ static const word32 Rijndael_Td0[256] = {
     0x7bcb8461U, 0xd532b670U, 0x486c5c74U, 0xd0b85742U,
 };
 
-static const word32 Rijndael_Td1[256] = {
+static const word32 Rijndael_Td1[256] =
+{
     0x5051f4a7U, 0x537e4165U, 0xc31a17a4U, 0x963a275eU,
     0xcb3bab6bU, 0xf11f9d45U, 0xabacfa58U, 0x934be303U,
     0x552030faU, 0xf6ad766dU, 0x9188cc76U, 0x25f5024cU,
@@ -6706,7 +6747,8 @@ static const word32 Rijndael_Td1[256] = {
     0x617bcb84U, 0x70d532b6U, 0x74486c5cU, 0x42d0b857U,
 };
 
-static const word32 Rijndael_Td2[256] = {
+static const word32 Rijndael_Td2[256] =
+{
     0xa75051f4U, 0x65537e41U, 0xa4c31a17U, 0x5e963a27U,
     0x6bcb3babU, 0x45f11f9dU, 0x58abacfaU, 0x03934be3U,
     0xfa552030U, 0x6df6ad76U, 0x769188ccU, 0x4c25f502U,
@@ -6774,7 +6816,8 @@ static const word32 Rijndael_Td2[256] = {
     0x84617bcbU, 0xb670d532U, 0x5c74486cU, 0x5742d0b8U,
 };
 
-static const word32 Rijndael_Td3[256] = {
+static const word32 Rijndael_Td3[256] =
+{
     0xf4a75051U, 0x4165537eU, 0x17a4c31aU, 0x275e963aU,
     0xab6bcb3bU, 0x9d45f11fU, 0xfa58abacU, 0xe303934bU,
     0x30fa5520U, 0x766df6adU, 0xcc769188U, 0x024c25f5U,
@@ -6841,7 +6884,8 @@ static const word32 Rijndael_Td3[256] = {
     0xcb84617bU, 0x32b670d5U, 0x6c5c7448U, 0xb85742d0U,
 };
 
-static const word32 Rijndael_Td4[256] = {
+static const word32 Rijndael_Td4[256] =
+{
     0x52525252U, 0x09090909U, 0x6a6a6a6aU, 0xd5d5d5d5U,
     0x30303030U, 0x36363636U, 0xa5a5a5a5U, 0x38383838U,
     0xbfbfbfbfU, 0x40404040U, 0xa3a3a3a3U, 0x9e9e9e9eU,
@@ -6908,7 +6952,8 @@ static const word32 Rijndael_Td4[256] = {
     0x55555555U, 0x21212121U, 0x0c0c0c0cU, 0x7d7d7d7dU,
 };
 //-----------------------
-static const unsigned char rc2_PITABLE[256] = {
+static const unsigned char rc2_PITABLE[256] =
+{
         217,120,249,196, 25,221,181,237, 40,233,253,121, 74,160,216,157,
         198,126, 55,131, 43,118, 83,142, 98, 76,100,136, 68,139,251,162,
          23,154, 89,245,135,179, 79, 19, 97, 69,109,141,  9,129,125, 50,
@@ -6924,23 +6969,25 @@ static const unsigned char rc2_PITABLE[256] = {
          45, 93,250,152,227,138,146,174,  5,223, 41, 16,103,108,186,201,
         211,  0,230,207,225,158,168, 44, 99, 22,  1, 63, 88,226,137,169,
          13, 56, 52, 27,171, 51,255,176,187, 72, 12, 95,185,177,205, 46,
-        197,243,219, 71,229,165,156,119, 10,166, 32,104,254,127,193,173};
+        197,243,219, 71,229,165,156,119, 10,166, 32,104,254,127,193,173
+};
 //-----------------------
 
-static const byte PKCS_DigestDecoration_MD2[] = {0x30,0x20,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x02,0x05,0x00,0x04,0x10};
-static const byte PKCS_DigestDecoration_MD5[] = {0x30,0x20,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x04,0x10};
-static const byte PKCS_DigestDecoration_RIPEMD160[] = {0x30,0x21,0x30,0x09,0x06,0x05,0x2b,0x24,0x03,0x02,0x01,0x05,0x00,0x04,0x14};
-static const byte PKCS_DigestDecoration_Tiger[] = {0x30,0x29,0x30,0x0D,0x06,0x09,0x2B,0x06,0x01,0x04,0x01,0xDA,0x47,0x0C,0x02,0x05,0x00,0x04,0x18};
-static const byte PKCS_DigestDecoration_SHA256[] = {0x30,0x31,0x30,0x0d,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x02,0x01,0x05,0x00,0x04,0x20};
-static const byte PKCS_DigestDecoration_SHA384[] = {0x30,0x41,0x30,0x0d,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x02,0x02,0x05,0x00,0x04,0x30};
-static const byte PKCS_DigestDecoration_SHA512[] = {0x30,0x51,0x30,0x0d,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x02,0x03,0x05,0x00,0x04,0x40};
+static const byte PKCS_DigestDecoration_MD2[] = { 0x30,0x20,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x02,0x05,0x00,0x04,0x10 };
+static const byte PKCS_DigestDecoration_MD5[] = { 0x30,0x20,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x04,0x10 };
+static const byte PKCS_DigestDecoration_RIPEMD160[] = { 0x30,0x21,0x30,0x09,0x06,0x05,0x2b,0x24,0x03,0x02,0x01,0x05,0x00,0x04,0x14 };
+static const byte PKCS_DigestDecoration_Tiger[] = { 0x30,0x29,0x30,0x0D,0x06,0x09,0x2B,0x06,0x01,0x04,0x01,0xDA,0x47,0x0C,0x02,0x05,0x00,0x04,0x18 };
+static const byte PKCS_DigestDecoration_SHA256[] = { 0x30,0x31,0x30,0x0d,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x02,0x01,0x05,0x00,0x04,0x20 };
+static const byte PKCS_DigestDecoration_SHA384[] = { 0x30,0x41,0x30,0x0d,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x02,0x02,0x05,0x00,0x04,0x30 };
+static const byte PKCS_DigestDecoration_SHA512[] = { 0x30,0x51,0x30,0x0d,0x06,0x09,0x60,0x86,0x48,0x01,0x65,0x03,0x04,0x02,0x03,0x05,0x00,0x04,0x40 };
 //--------------------
 static const word32 MD5MAC_T[12] =
         { 0xac45ef97,0xcd430f29,0x551b7e45,0x3411801c,
           0x96ce77b1,0x7c8e722e,0x0aab5a5f,0x18be4336,
           0x21b4219d,0x4db987bc,0xbd279da2,0xc3d75bc7 };
 //-----------------
-static const byte MD2_S[256] = {
+static const byte MD2_S[256] =
+{
         41, 46, 67, 201, 162, 216, 124, 1, 61, 54, 84, 161, 236, 240, 6,
         19, 98, 167, 5, 243, 192, 199, 115, 140, 152, 147, 43, 217, 188,
         76, 130, 202, 30, 155, 87, 60, 253, 212, 224, 22, 103, 66, 111, 24,
@@ -6962,7 +7009,8 @@ static const byte MD2_S[256] = {
 };
 
 //-----------------
-static const word32 MARS_Sbox[512] = {
+static const word32 MARS_Sbox[512] =
+{
   0x09d0c479, 0x28c8ffe0, 0x84aa6c39, 0x9dad7287,
   0x7dff9be3, 0xd4268361, 0xc96da1d4, 0x7974cc93,
   0x85d0582e, 0x2a4b5705, 0x1ca16a62, 0xc3bd279d,
@@ -7094,37 +7142,46 @@ static const word32 MARS_Sbox[512] = {
 };
 //--------------
 
-static const unsigned int HAVAL_wi2[32] = { 5,14,26,18,11,28, 7,16, 0,23,20,22, 1,10, 4, 8,30, 3,21, 9,17,24,29, 6,19,12,15,13, 2,25,31,27};
-static const unsigned int HAVAL_wi3[32] = {19, 9, 4,20,28,17, 8,22,29,14,25,12,24,30,16,26,31,15, 7, 3, 1, 0,18,27,13, 6,21,10,23,11, 5, 2};
-static const unsigned int HAVAL_wi4[32] = {24, 4, 0,14, 2, 7,28,23,26, 6,30,20,18,25,19, 3,22,11,31,21, 8,27,12, 9, 1,29, 5,15,17,10,16,13};
-static const unsigned int HAVAL_wi5[32] = {27, 3,21,26,17,11,20,29,19, 0,12, 7,13, 8,31,10, 5, 9,14,30,18, 6,28,24, 2,23,16,22, 4, 1,25,15};
+static const unsigned int HAVAL_wi2[32] = {  5,14,26,18,11,28, 7,16, 0,23,20,22, 1,10, 4, 8,30, 3,21, 9,17,24,29, 6,19,12,15,13, 2,25,31,27 };
+static const unsigned int HAVAL_wi3[32] = { 19, 9, 4,20,28,17, 8,22,29,14,25,12,24,30,16,26,31,15, 7, 3, 1, 0,18,27,13, 6,21,10,23,11, 5, 2 };
+static const unsigned int HAVAL_wi4[32] = { 24, 4, 0,14, 2, 7,28,23,26, 6,30,20,18,25,19, 3,22,11,31,21, 8,27,12, 9, 1,29, 5,15,17,10,16,13 };
+static const unsigned int HAVAL_wi5[32] = { 27, 3,21,26,17,11,20,29,19, 0,12, 7,13, 8,31,10, 5, 9,14,30,18, 6,28,24, 2,23,16,22, 4, 1,25,15 };
 
-static const word32 HAVAL_mc2[32] = {
-  0x452821E6, 0x38D01377, 0xBE5466CF, 0x34E90C6C, 0xC0AC29B7, 0xC97C50DD, 0x3F84D5B5, 0xB5470917
-, 0x9216D5D9, 0x8979FB1B, 0xD1310BA6, 0x98DFB5AC, 0x2FFD72DB, 0xD01ADFB7, 0xB8E1AFED, 0x6A267E96
-, 0xBA7C9045, 0xF12C7F99, 0x24A19947, 0xB3916CF7, 0x0801F2E2, 0x858EFC16, 0x636920D8, 0x71574E69
-, 0xA458FEA3, 0xF4933D7E, 0x0D95748F, 0x728EB658, 0x718BCD58, 0x82154AEE, 0x7B54A41D, 0xC25A59B5};
+static const word32 HAVAL_mc2[32] =
+{
+  0x452821E6, 0x38D01377, 0xBE5466CF, 0x34E90C6C, 0xC0AC29B7, 0xC97C50DD, 0x3F84D5B5, 0xB5470917,
+  0x9216D5D9, 0x8979FB1B, 0xD1310BA6, 0x98DFB5AC, 0x2FFD72DB, 0xD01ADFB7, 0xB8E1AFED, 0x6A267E96,
+  0xBA7C9045, 0xF12C7F99, 0x24A19947, 0xB3916CF7, 0x0801F2E2, 0x858EFC16, 0x636920D8, 0x71574E69,
+  0xA458FEA3, 0xF4933D7E, 0x0D95748F, 0x728EB658, 0x718BCD58, 0x82154AEE, 0x7B54A41D, 0xC25A59B5
+};
 
-static const word32 HAVAL_mc3[32] = {
-0x9C30D539,0x2AF26013,0xC5D1B023,0x286085F0,0xCA417918,0xB8DB38EF,0x8E79DCB0,0x603A180E,
-0x6C9E0E8B,0xB01E8A3E,0xD71577C1,0xBD314B27,0x78AF2FDA,0x55605C60,0xE65525F3,0xAA55AB94,
-0x57489862,0x63E81440,0x55CA396A,0x2AAB10B6,0xB4CC5C34,0x1141E8CE,0xA15486AF,0x7C72E993,
-0xB3EE1411,0x636FBC2A,0x2BA9C55D,0x741831F6,0xCE5C3E16,0x9B87931E,0xAFD6BA33,0x6C24CF5C};
+static const word32 HAVAL_mc3[32] =
+{
+  0x9C30D539,0x2AF26013,0xC5D1B023,0x286085F0,0xCA417918,0xB8DB38EF,0x8E79DCB0,0x603A180E,
+  0x6C9E0E8B,0xB01E8A3E,0xD71577C1,0xBD314B27,0x78AF2FDA,0x55605C60,0xE65525F3,0xAA55AB94,
+  0x57489862,0x63E81440,0x55CA396A,0x2AAB10B6,0xB4CC5C34,0x1141E8CE,0xA15486AF,0x7C72E993,
+  0xB3EE1411,0x636FBC2A,0x2BA9C55D,0x741831F6,0xCE5C3E16,0x9B87931E,0xAFD6BA33,0x6C24CF5C
+};
 
-static const word32 HAVAL_mc4[32] = {
-0x7A325381,0x28958677,0x3B8F4898,0x6B4BB9AF,0xC4BFE81B,0x66282193,0x61D809CC,0xFB21A991,
-0x487CAC60,0x5DEC8032,0xEF845D5D,0xE98575B1,0xDC262302,0xEB651B88,0x23893E81,0xD396ACC5,
-0x0F6D6FF3,0x83F44239,0x2E0B4482,0xA4842004,0x69C8F04A,0x9E1F9B5E,0x21C66842,0xF6E96C9A,
-0x670C9C61,0xABD388F0,0x6A51A0D2,0xD8542F68,0x960FA728,0xAB5133A3,0x6EEF0B6C,0x137A3BE4};
+static const word32 HAVAL_mc4[32] =
+{
+  0x7A325381,0x28958677,0x3B8F4898,0x6B4BB9AF,0xC4BFE81B,0x66282193,0x61D809CC,0xFB21A991,
+  0x487CAC60,0x5DEC8032,0xEF845D5D,0xE98575B1,0xDC262302,0xEB651B88,0x23893E81,0xD396ACC5,
+  0x0F6D6FF3,0x83F44239,0x2E0B4482,0xA4842004,0x69C8F04A,0x9E1F9B5E,0x21C66842,0xF6E96C9A,
+  0x670C9C61,0xABD388F0,0x6A51A0D2,0xD8542F68,0x960FA728,0xAB5133A3,0x6EEF0B6C,0x137A3BE4
+};
 
-static const word32 HAVAL_mc5[32] = {
-0xBA3BF050,0x7EFB2A98,0xA1F1651D,0x39AF0176,0x66CA593E,0x82430E88,0x8CEE8619,0x456F9FB4,
-0x7D84A5C3,0x3B8B5EBE,0xE06F75D8,0x85C12073,0x401A449F,0x56C16AA6,0x4ED3AA62,0x363F7706,
-0x1BFEDF72,0x429B023D,0x37D0D724,0xD00A1248,0xDB0FEAD3,0x49F1C09B,0x075372C9,0x80991B7B,
-0x25D479D8,0xF6E8DEF7,0xE3FE501A,0xB6794C3B,0x976CE0BD,0x04C006BA,0xC1A94FB6,0x409F60C4};
+static const word32 HAVAL_mc5[32] =
+{
+  0xBA3BF050,0x7EFB2A98,0xA1F1651D,0x39AF0176,0x66CA593E,0x82430E88,0x8CEE8619,0x456F9FB4,
+  0x7D84A5C3,0x3B8B5EBE,0xE06F75D8,0x85C12073,0x401A449F,0x56C16AA6,0x4ED3AA62,0x363F7706,
+  0x1BFEDF72,0x429B023D,0x37D0D724,0xD00A1248,0xDB0FEAD3,0x49F1C09B,0x075372C9,0x80991B7B,
+  0x25D479D8,0xF6E8DEF7,0xE3FE501A,0xB6794C3B,0x976CE0BD,0x04C006BA,0xC1A94FB6,0x409F60C4
+};
 
 //----------------
-static const byte GOST_sBox[8*16]={
+static const byte GOST_sBox[8*16] =
+{
         4, 10, 9, 2, 13, 8, 0, 14, 6, 11, 1, 12, 7, 15, 5, 3,
         14, 11, 4, 12, 6, 13, 15, 10, 2, 3, 8, 1, 0, 7, 5, 9,
         5, 8, 1, 13, 10, 3, 4, 2, 14, 15, 12, 7, 6, 0, 9, 11,
@@ -7132,10 +7189,12 @@ static const byte GOST_sBox[8*16]={
         6, 12, 7, 1, 5, 15, 13, 8, 4, 10, 9, 14, 0, 3, 11, 2,
         4, 11, 10, 0, 7, 2, 1, 13, 3, 6, 8, 5, 9, 12, 15, 14,
         13, 11, 4, 1, 3, 15, 5, 9, 0, 10, 14, 7, 6, 8, 2, 12,
-        1, 15, 13, 0, 5, 7, 10, 4, 9, 2, 3, 14, 6, 11, 8, 12};
+        1, 15, 13, 0, 5, 7, 10, 4, 9, 2, 3, 14, 6, 11, 8, 12
+};
 
 //------------
-static const word32 RawDES_Spbox[8*64] = {
+static const word32 RawDES_Spbox[8*64] =
+{
 
 0x01010400,0x00000000,0x00010000,0x01010404, 0x01010004,0x00010404,0x00000004,0x00010000,
 0x00000400,0x01010400,0x01010404,0x00000400, 0x01000404,0x01010004,0x01000000,0x00000004,
@@ -7210,7 +7269,8 @@ static const word32 RawDES_Spbox[8*64] = {
 0x10041040,0x00041000,0x00041000,0x00001040, 0x00001040,0x00040040,0x10000000,0x10041000
 };
 //------------------
-static const byte DES_ip[] = {
+static const byte DES_ip[] =
+{
            58, 50, 42, 34, 26, 18, 10,  2,
            60, 52, 44, 36, 28, 20, 12,  4,
            62, 54, 46, 38, 30, 22, 14,  6,
@@ -7222,7 +7282,8 @@ static const byte DES_ip[] = {
 };
 
 /* final permutation IP^-1 */
-static const byte DES_fp[] = {
+static const byte DES_fp[] =
+{
            40,  8, 48, 16, 56, 24, 64, 32,
            39,  7, 47, 15, 55, 23, 63, 31,
            38,  6, 46, 14, 54, 22, 62, 30,
@@ -7233,10 +7294,11 @@ static const byte DES_fp[] = {
            33,  1, 41,  9, 49, 17, 57, 25
 };
 /* expansion operation matrix */
-static const byte DES_ei[] = {
+static const byte DES_ei[] =
+{
            32,  1,  2,  3,  4,  5,
-                4,  5,  6,  7,  8,  9,
-                8,  9, 10, 11, 12, 13,
+            4,  5,  6,  7,  8,  9,
+            8,  9, 10, 11, 12, 13,
            12, 13, 14, 15, 16, 17,
            16, 17, 18, 19, 20, 21,
            20, 21, 22, 23, 24, 25,
@@ -7244,7 +7306,8 @@ static const byte DES_ei[] = {
            28, 29, 30, 31, 32,  1
 };
 /* The (in)famous S-boxes */
-static const byte DES_sbox[8*64] = {
+static const byte DES_sbox[8*64] =
+{
            /* S1 */
            14,  4, 13,  1,  2, 15, 11,  8,  3, 10,  6, 12,  5,  9,  0,  7,
                 0, 15,  7,  4, 14,  2, 13,  1, 10,  6, 12, 11,  9,  5,  3,  8,
@@ -7295,7 +7358,8 @@ static const byte DES_sbox[8*64] = {
 };
 
 /* 32-bit permutation function P used on the output of the S-boxes */
-static const byte DES_p32i[] = {
+static const byte DES_p32i[] =
+{
            16,  7, 20, 21,
            29, 12, 28, 17,
                 1, 15, 23, 26,
@@ -7307,7 +7371,8 @@ static const byte DES_p32i[] = {
 };
 
 /* permuted choice table (key) */
-static const byte DES_pc1[] = {
+static const byte DES_pc1[] =
+{
            57, 49, 41, 33, 25, 17,  9,
                 1, 58, 50, 42, 34, 26, 18,
            10,  2, 59, 51, 43, 35, 27,
@@ -7320,9 +7385,10 @@ static const byte DES_pc1[] = {
 };
 
 /* permuted choice key (table) */
-static const byte DES_pc2[] = {
+static const byte DES_pc2[] =
+{
            14, 17, 11, 24,  1,  5,
-                3, 28, 15,  6, 21, 10,
+            3, 28, 15,  6, 21, 10,
            23, 19, 12,  4, 26,  8,
            16,  7, 27, 20, 13,  2,
            41, 52, 31, 37, 47, 55,
@@ -7331,7 +7397,8 @@ static const byte DES_pc2[] = {
            46, 42, 50, 36, 29, 32
 };
 //-----------------
-static const word32 CRC32_m_tab[] = {
+static const word32 CRC32_m_tab[] =
+{
 #ifdef IS_LITTLE_ENDIAN
         0x00000000L, 0x77073096L, 0xee0e612cL, 0x990951baL, 0x076dc419L,
         0x706af48fL, 0xe963a535L, 0x9e6495a3L, 0x0edb8832L, 0x79dcb8a4L,
@@ -7443,8 +7510,8 @@ static const word32 CRC32_m_tab[] = {
 
 //-----------------
 
-static const word32 CAST_S[8*256] = {
-
+static const word32 CAST_S[8*256] =
+{
         0x30FB40D4UL, 0x9FA0FF0BUL, 0x6BECCD2FUL, 0x3F258C7AUL,
         0x1E213F2FUL, 0x9C004DD3UL, 0x6003E540UL, 0xCF9FC949UL,
         0xBFD4AF27UL, 0x88BBBDB5UL, 0xE2034090UL, 0x98D09675UL,
@@ -7983,7 +8050,8 @@ static const word32 CAST_S[8*256] = {
 //-----------------
 // The following CAST-256 implementation was contributed by Leonard Janke
 
-static const word32 CAST256_t_m[8*24]={
+static const word32 CAST256_t_m[8*24] =
+{
         0x5a827999, 0xd151d6a1, 0x482133a9, 0xbef090b1, 0x35bfedb9, 0xac8f4ac1,
         0x235ea7c9, 0x9a2e04d1, 0x10fd61d9, 0x87ccbee1, 0xfe9c1be9, 0x756b78f1,
         0xec3ad5f9, 0x630a3301, 0xd9d99009, 0x50a8ed11, 0xc7784a19, 0x3e47a721,
@@ -8018,7 +8086,8 @@ static const word32 CAST256_t_m[8*24]={
         0xbd0c7590, 0x33dbd298, 0xaaab2fa0, 0x217a8ca8, 0x9849e9b0, 0x0f1946b8
 };
 
-static const unsigned int CAST256_t_r[8*24]={
+static const unsigned int CAST256_t_r[8*24] =
+{
         19, 27, 3, 11, 19, 27, 3, 11, 19, 27, 3, 11, 19, 27, 3, 11, 19, 27, 3, 11, 19, 27, 3, 11,
         4, 12, 20, 28, 4, 12, 20, 28, 4, 12, 20, 28, 4, 12, 20, 28, 4, 12, 20, 28, 4, 12, 20, 28,
         21, 29, 5, 13, 21, 29, 5, 13, 21, 29, 5, 13, 21, 29, 5, 13, 21, 29, 5, 13, 21, 29, 5, 13,
@@ -8119,9 +8188,10 @@ static const word32 Blowfish_p_init[] =
  1160258022U,  953160567U, 3193202383U,  887688300U,
  3232508343U, 3380367581U, 1065670069U, 3041331479U,
  2450970073U, 2306472731U
-} ;
+};
 
-static const word32 Blowfish_s_init[4*256] = {
+static const word32 Blowfish_s_init[4*256] =
+{
  3509652390U, 2564797868U,  805139163U, 3491422135U,
  3101798381U, 1780907670U, 3128725573U, 4046225305U,
   614570311U, 3012652279U,  134345442U, 2240740374U,

@@ -27,7 +27,7 @@ extern int pflag;
 //----------------------------------------------------------------------
 // Redefine temporary names
 //
-#define         bytecmd    auxpref_chars.low
+#define         bytecmd    auxpref_u8[0]
 
 #define         segval     specval_shorts.low
 #define         addr16     addr_shorts.low
@@ -44,17 +44,15 @@ enum pdp_registers
 };
 
 //------------------------------------------------------------------------
-void    idaapi header(void);
-void    idaapi footer(void);
+void    idaapi pdp_header(outctx_t &ctx);
+void    idaapi pdp_footer(outctx_t &ctx);
 
-void    idaapi segstart(ea_t ea);
+void    idaapi pdp_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi ana(void);
-int     idaapi emu(void);
-void    idaapi out(void);
-bool    idaapi outop(op_t &op);
+int     idaapi ana(insn_t *_insn);
+int     idaapi emu(const insn_t &insn);
 
-void    idaapi pdp_data(ea_t ea);
+void    idaapi pdp_data(outctx_t &ctx, bool analyze_only);
 
 extern netnode ovrtrans;
 

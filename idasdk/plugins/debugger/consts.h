@@ -6,8 +6,6 @@
 //
 //
 
-#include <expr.hpp>
-
 #define TIMEOUT         (1000/25)       // in milliseconds, timeout for polling
 #define TIMEOUT_INFINITY -1
 #define RECV_TIMEOUT_PERIOD (10000)     // in milliseconds, timeout for recv()
@@ -38,7 +36,7 @@ typedef struct idarpc_stream_struct_t idarpc_stream_t;
 // client->server codes
 #define RPC_INIT                      10
 #define RPC_TERM                      11
-#define RPC_GET_PROCESS_INFO          12
+#define RPC_GET_PROCESSES             12
 #define RPC_START_PROCESS             13
 #define RPC_EXIT_PROCESS              14
 #define RPC_ATTACH_PROCESS            15
@@ -71,6 +69,9 @@ typedef struct idarpc_stream_struct_t idarpc_stream_t;
 #define RPC_APPCALL                   41
 #define RPC_CLEANUP_APPCALL           42
 #define RPC_REXEC                     43
+#define RPC_GET_SCATTERED_IMAGE       44
+#define RPC_GET_IMAGE_UUID            45
+#define RPC_GET_SEGM_START            46
 
 // server->client codes
 #define RPC_SET_DEBUG_NAMES           50
@@ -108,18 +109,19 @@ AS_PRINTF(3, 0) ssize_t dvmsg(int code, rpc_engine_t *ud, const char *format, va
     va_end(va); \
   }
 
-error_t idaapi GetRegValue(idc_value_t *argv, idc_value_t *r);
-error_t idaapi SetRegValue(idc_value_t *argv, idc_value_t *r);
+class idc_value_t;
+error_t idaapi idc_get_reg_value(idc_value_t *argv, idc_value_t *r);
+error_t idaapi idc_set_reg_value(idc_value_t *argv, idc_value_t *r);
 void report_idc_error(rpc_engine_t *rpc, ea_t ea, error_t code, ssize_t errval, const char *errprm);
 
 // IDC function name that is exported by a debugger module
 // to allow scripts to send debugger commands
-#define IDC_SENDDBG_CMD "SendDbgCommand"
-#define IDC_READ_MSR    "ReadMsr"
-#define IDC_WRITE_MSR   "WriteMsr"
-#define IDC_STEP_BACK   "StepBack"
-#define IDC_SET_TEV     "SetCurrentTev"
-#define IDC_GET_TEV     "GetCurrentTev"
+#define IDC_SENDDBG_CMD "send_dbg_command"
+#define IDC_READ_MSR    "read_msr"
+#define IDC_WRITE_MSR   "write_msr"
+#define IDC_STEP_BACK   "step_back"
+#define IDC_SET_TEV     "set_current_tev"
+#define IDC_GET_TEV     "get_current_tev"
 
 // A macro to convert a pointer to ea_t without sign extension.
 #define EA_T(ptr) (ea_t)(size_t)(ptr)

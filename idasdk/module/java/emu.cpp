@@ -31,7 +31,7 @@ static uval_t SearchFM(ushort name, ushort dscr, char *naprN)
     pos = -(uval_t)curClass.MethodCnt;
     csz = sizeof(SegInfo);
   }
-  for ( void *p = buf; pos; pos -= napr)
+  for ( void *p = buf; pos; pos -= napr )
   {
     if ( ClassNode.supval(pos, p, sizeof(buf)) != csz )
       DESTROYED("SearchFM");
@@ -42,10 +42,10 @@ static uval_t SearchFM(ushort name, ushort dscr, char *naprN)
       continue;
     }
     if ( napr >= 0 )
-      return curClass.startEA + ((FieldInfo *)p)->id.Number;
+      return curClass.start_ea + ((FieldInfo *)p)->id.Number;
     if ( ((SegInfo *)p)->CodeSize )
       *naprN = 0;
-    return ((SegInfo *)p)->startEA;
+    return ((SegInfo *)p)->start_ea;
   }
   return BADADDR;
 }
@@ -55,14 +55,14 @@ void mark_and_comment(ea_t ea, const char *cmt)
 {
   if ( loadpass >= 0 )
   {
-    QueueSet(Q_att, ea);
-    if ( *cmt && (!has_cmt(get_flags_novalue(ea)) || ea == curClass.startEA) )
+    remember_problem(PR_ATTN, ea);
+    if ( *cmt && (!has_cmt(get_flags(ea)) || ea == curClass.start_ea) )
       append_cmt(ea, cmt, false);
   }
 }
 
 //------------------------------------------------------------------------
-static void TouchArg(op_t &x, bool isload)
+static void TouchArg(const insn_t &insn, const op_t &x, bool isload)
 {
   const char *p;
 
@@ -87,6 +87,7 @@ static void TouchArg(op_t &x, bool isload)
          {
            case CONSTANT_Fieldref:
             npr = 1;
+            // fallthrough
            case CONSTANT_InterfaceMethodref:
            case CONSTANT_Methodref:
              if ( !(x._subnam | x._name | x._class) )
@@ -99,43 +100,38 @@ static void TouchArg(op_t &x, bool isload)
              }
              else
              {
-               if ( !cmd.xtrn_ip )
+               if ( !insn.xtrn_ip )
                  break;
-               ea = cmd.xtrn_ip == 0xFFFF
-                  ? curClass.startEA
-                  : curClass.xtrnEA + cmd.xtrn_ip;
+               ea = insn.xtrn_ip == 0xFFFF
+                  ? curClass.start_ea
+                  : curClass.xtrnEA + insn.xtrn_ip;
                if ( npr < 0 )
                  npr = 0;
              }
              if ( npr <= 0 )
              {
-               ua_add_cref(x.offb, ea, fl_CF);
+               insn.add_cref(ea, x.offb, fl_CF);
                if ( !npr )
-                 autoCancel(ea, ea+1);
+                 auto_cancel(ea, ea+1);
              }
              else
              {
-               dref_t type = cmd.itype == j_putstatic || cmd.itype == j_putfield
+               dref_t type = insn.itype == j_putstatic || insn.itype == j_putfield
                            ? dr_W
                            : dr_R;
-               ua_add_dref(x.offb, ea, type);
+               insn.add_dref(ea, x.offb, type);
              }
              break;
 
            case CONSTANT_Class:
-             if ( cmd.xtrn_ip )
+             if ( insn.xtrn_ip )
              {
-               ea_t target = cmd.xtrn_ip == 0xFFFF
-                           ? curClass.startEA
-                           : curClass.xtrnEA + cmd.xtrn_ip;
-               ua_add_dref(x.offb, target, dr_I);
+               ea_t target = insn.xtrn_ip == 0xFFFF
+                           ? curClass.start_ea
+                           : curClass.xtrnEA + insn.xtrn_ip;
+               insn.add_dref(target, x.offb, dr_I);
              }
              break;
-
-           case CONSTANT_Float:
-             npr &= 1;
-           case CONSTANT_Double:
-             check_float_const(cmd.ea, &x.value, npr &= 3);
            default:
              break;
          }
@@ -152,7 +148,7 @@ static void TouchArg(op_t &x, bool isload)
 
     case o_imm:        //const (& #data)
       if ( x.ref < 2 )
-        doImmd(cmd.ea);
+        set_immd(insn.ea);
       break;
 
     case o_mem:        // local data pool
@@ -160,17 +156,17 @@ static void TouchArg(op_t &x, bool isload)
       {
         p = badlocvar;
 mark:
-        mark_and_comment(cmd.ea, p);
+        mark_and_comment(insn.ea, p);
       }
       else
       {
         dref_t ref = isload ? dr_R : dr_W;
         ea_t adr   = curSeg.DataBase + x.addr;
-        ua_add_dref(x.offb, adr, ref);
-        if ( (x.dtyp == dt_qword || x.dtyp == dt_double)
+        insn.add_dref(adr, x.offb, ref);
+        if ( (x.dtype == dt_qword || x.dtype == dt_double)
           && get_item_size(adr) <= 1 )
         {
-          ua_add_dref(x.offb, adr + 1, ref);
+          insn.add_dref(adr + 1, x.offb, ref);
         }
       }
       break;
@@ -181,83 +177,84 @@ mark:
         p = "Invalid jump address";
         goto mark;
       }
-      ua_add_cref(x.offb,
-                  curSeg.startEA + x.addr,
-                  (Feature & CF_CALL) ? fl_CN : fl_JN);
+      insn.add_cref(
+              curSeg.start_ea + x.addr,
+              x.offb,
+              (Feature & CF_CALL) != 0 ? fl_CN : fl_JN);
       break;
 
     default:
-      warning("%a: %s,%d: bad optype %d", cmd.ea, cmd.get_canon_mnem(), x.n,
+      warning("%a: %s,%d: bad optype %d", insn.ea, insn.get_canon_mnem(), x.n,
               x.type);
       break;
   }
 }
 
 //----------------------------------------------------------------------
-int idaapi emu(void)
+int idaapi emu(const insn_t &insn)
 {
-  Feature = cmd.get_canon_feature();
+  Feature = insn.get_canon_feature();
 
-  if ( cmd.wid > 1 )
-    mark_and_comment(cmd.ea, "Limited usage instruction");
+  if ( insn.wid > 1 )
+    mark_and_comment(insn.ea, "Limited usage instruction");
 
-  if ( cmd.itype >= j_a_software )
-    mark_and_comment(cmd.ea, "Undocumented instruction");
+  if ( insn.itype >= j_a_software )
+    mark_and_comment(insn.ea, "Undocumented instruction");
 
-  if ( cmd.Op1.type == o_void && cmd.Op1.ref )
+  if ( insn.Op1.type == o_void && insn.Op1.ref )
   {
-    if ( (char)cmd.Op1.ref < 0 )
+    if ( (char)insn.Op1.ref < 0 )
     {
-      mark_and_comment(cmd.ea, badlocvar);
+      mark_and_comment(insn.ea, badlocvar);
     }
     else
     {
-      dref_t ref = (cmd.itype >= j_istore_0) ? dr_W : dr_R;
-      ua_add_dref(0, cmd.Op1.addr, ref);
-      if ( (cmd.Op1.ref & 2) && get_item_size(cmd.Op1.addr) <= 1 )
-        ua_add_dref(0, cmd.Op1.addr + 1, ref);
+      dref_t ref = (insn.itype >= j_istore_0) ? dr_W : dr_R;
+      insn.add_dref(insn.Op1.addr, 0, ref);
+      if ( (insn.Op1.ref & 2) && get_item_size(insn.Op1.addr) <= 1 )
+        insn.add_dref(insn.Op1.addr + 1, 0, ref);
     }
   }
 
   if ( Feature & CF_USE1 )
-    TouchArg(cmd.Op1, true);
+    TouchArg(insn, insn.Op1, true);
   if ( Feature & CF_USE2 )
-    TouchArg(cmd.Op2, true);
+    TouchArg(insn, insn.Op2, true);
   if ( Feature & CF_USE3 )
-    TouchArg(cmd.Op3, true);
+    TouchArg(insn, insn.Op3, true);
 
   if ( Feature & CF_CHG1 )
-    TouchArg(cmd.Op1, false);
+    TouchArg(insn, insn.Op1, false);
 
-  if ( cmd.swit )  // tableswitch OR lookupswitch
+  if ( insn.swit )  // tableswitch OR lookupswitch
   {
     uval_t count, addr, rnum;
 
-    if ( cmd.swit & 0200 )
-      mark_and_comment(cmd.ea, badlocvar);
-    if ( cmd.swit & 0100 )
-      mark_and_comment(cmd.ea, "Nonzero filler (warning)");
+    if ( insn.swit & 0200 )
+      mark_and_comment(insn.ea, badlocvar);
+    if ( insn.swit & 0100 )
+      mark_and_comment(insn.ea, "Nonzero filler (warning)");
 
-    rnum = cmd.Op2.value - 1;   // for lookupswtitch
-    for ( addr=cmd.Op2.addr, count=cmd.Op3.value; count; addr +=4, count--)
+    rnum = insn.Op2.value - 1;   // for lookupswtitch
+    for ( addr=insn.Op2.addr, count=insn.Op3.value; count; addr +=4, count-- )
     {
       uval_t refa;
 
-      if ( cmd.itype != j_lookupswitch )
+      if ( insn.itype != j_lookupswitch )
       {
         ++rnum;
       }
       else
       {
-        rnum = get_long(curSeg.startEA + addr); // skip pairs
+        rnum = get_dword(curSeg.start_ea + addr); // skip pairs
         addr += 4;
       }
-      refa = cmd.ip + get_long(curSeg.startEA + addr);
+      refa = insn.ip + get_dword(curSeg.start_ea + addr);
 
       if ( refa < curSeg.CodeSize )
       {
-        ua_add_cref(0, (refa += curSeg.startEA), fl_JN);
-        if ( !has_cmt(get_flags_novalue(refa)) )
+        add_cref(insn.ea, (refa += curSeg.start_ea), fl_JN);
+        if ( !has_cmt(get_flags(refa)) )
         {
           char str[32];
           qsnprintf(str, sizeof(str), "case %" FMT_EA "u", rnum);
@@ -267,27 +264,27 @@ int idaapi emu(void)
     }
   }
 
-  if ( !(Feature&CF_STOP) && (!(Feature&CF_CALL) || func_does_return(cmd.ea)) )
-    ua_add_cref(0, cmd.ea + cmd.size, fl_F);
+  if ( !(Feature&CF_STOP) && (!(Feature&CF_CALL) || func_does_return(insn.ea)) )
+    add_cref(insn.ea, insn.ea + insn.size, fl_F);
 
   return 1;
 }
 
 //----------------------------------------------------------------------
-size_t make_locvar_cmt(char *buf, size_t bufsize)
+size_t make_locvar_cmt(qstring *buf, const insn_t &insn)
 {
   LocVar lv;
 
   if ( curSeg.varNode )
   {
     const char *p = NULL;
-    uval_t idx = cmd.Op1.addr;
+    uval_t idx = insn.Op1.addr;
 
-    if ( cmd.Op1.type == o_mem )
+    if ( insn.Op1.type == o_mem )
     {
-      if ( !cmd.Op1.ref )
+      if ( !insn.Op1.ref )
       {
-        switch ( cmd.itype )
+        switch ( insn.itype )
         {
           case j_ret:
             p = "Return";
@@ -297,22 +294,22 @@ size_t make_locvar_cmt(char *buf, size_t bufsize)
             break;
           default:
             p = "Push";
-            if ( cmd.get_canon_feature() & CF_CHG1 )
+            if ( insn.get_canon_feature() & CF_CHG1 )
               p = "Pop";
             break;
         }
       }
     }
-    else if ( cmd.Op1.type == o_void
-           && (char)cmd.Op1.ref >= 0
+    else if ( insn.Op1.type == o_void
+           && (char)insn.Op1.ref >= 0
            && (int32)(idx -= curSeg.DataBase) >= 0 )
     {
       p = "Push";
-      if ( cmd.itype >= j_istore_0 )
+      if ( insn.itype >= j_istore_0 )
         p = "Pop";
     }
 
-    if ( p != NULL && netnode(curSeg.varNode).supval(idx,&lv,sizeof(lv))==sizeof(lv) )
+    if ( p != NULL && netnode(curSeg.varNode).supval(idx,&lv,sizeof(lv)) == sizeof(lv) )
     {
       // Normally static buffers of MAX_NODENAME_SIZE are forbidden but since
       // 'name' is defined only in the java module, it is acceptable. To avoid
@@ -320,7 +317,7 @@ size_t make_locvar_cmt(char *buf, size_t bufsize)
       #define JAVA_BUFSIZE MAX_NODENAME_SIZE
       static char name[JAVA_BUFSIZE];
       if ( fmtName(lv.var.Name, name, sizeof(name), fmt_name) )
-        return qsnprintf(buf, bufsize, "%s %s", p, name);
+        return buf->sprnt("%s %s", p, name).length();
     }
   }
   return 0;

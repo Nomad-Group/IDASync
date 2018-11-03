@@ -16,7 +16,8 @@ class myplugin_t
   }
   run(arg)
   {
-    Message("Hello world\n");
+    msg("Hello world\n");
+    return 0;
   }
   term()
   {

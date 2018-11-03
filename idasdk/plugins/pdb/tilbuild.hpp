@@ -23,7 +23,7 @@ public:
     tinfo_t type;
     til_t *ti;  // FIXME: do we need this?
     tpinfo_t(void) : cvt_code(cvt_ok), is_notype(false), ti(NULL) {}
-    tpinfo_t(til_t *_ti, const tinfo_t &t) : cvt_code(cvt_ok), type(t), ti(_ti) {}
+    tpinfo_t(til_t *_ti, const tinfo_t &t) : cvt_code(cvt_ok), is_notype(false), type(t), ti(_ti) {}
     const char *dstr(void) const
     {
       if ( cvt_code == cvt_failed )
@@ -120,10 +120,11 @@ public:
   cvt_code_t handle_overlapping_members(udt_type_data_t *udt) const;
   // Will iterate on children, and call handle_function_child()
   HRESULT handle_symbols(pdb_sym_t &pGlobal);
+  HRESULT handle_globals(pdb_sym_t &pGlobal);
   HRESULT handle_publics(pdb_sym_t &pGlobal);
   HRESULT handle_types(pdb_sym_t &pGlobal);
   HRESULT build(pdb_sym_t &pGlobal);
-  ea_t  get_load_address() const { return pdb_access->get_base_address(); };
+  ea_t get_load_address() const { return pdb_access->get_base_address(); }
   HRESULT handle_symbol(pdb_sym_t &sym);
   size_t get_symbol_type_length(pdb_sym_t &sym) const;
 

@@ -49,17 +49,16 @@ static struct
 // Structure to keep all information about the our sample view
 struct sample_info_t
 {
-  TForm *form;
-  TCustomControl *cv;
+  TWidget *cv;
   strvec_t sv;
-  sample_info_t(TForm *f) : form(f), cv(NULL) {}
+  sample_info_t() : cv(NULL) {}
 };
 
 static const sample_info_t *last_si = NULL;
 
 //---------------------------------------------------------------------------
 // get the word under the (keyboard or mouse) cursor
-static bool get_current_word(TCustomControl *v, bool mouse, qstring &word)
+static bool get_current_word(TWidget *v, bool mouse, qstring &word)
 {
   // query the cursor position
   int x, y;
@@ -67,20 +66,19 @@ static bool get_current_word(TCustomControl *v, bool mouse, qstring &word)
     return false;
 
   // query the line at the cursor
-  char buf[MAXSTR];
-  const char *line = get_custom_viewer_curline(v, mouse);
-  tag_remove(line, buf, sizeof(buf));
-  if ( x >= (int)strlen(buf) )
+  qstring buf;
+  tag_remove(&buf, get_custom_viewer_curline(v, mouse));
+  if ( x >= buf.length() )
     return false;
 
   // find the beginning of the word
-  char *ptr = buf + x;
-  while ( ptr > buf && !qisspace(ptr[-1]) )
+  char *ptr = buf.begin() + x;
+  while ( ptr > buf.begin() && !qisspace(ptr[-1]) )
     ptr--;
 
   // find the end of the word
   char *begin = ptr;
-  ptr = buf + x;
+  ptr = buf.begin() + x;
   while ( !qisspace(*ptr) && *ptr != '\0' )
     ptr++;
 
@@ -90,7 +88,7 @@ static bool get_current_word(TCustomControl *v, bool mouse, qstring &word)
 
 //---------------------------------------------------------------------------
 // Keyboard callback
-static bool idaapi ct_keyboard(TCustomControl * /*v*/, int key, int shift, void *ud)
+static bool idaapi ct_keyboard(TWidget * /*v*/, int key, int shift, void *ud)
 {
   if ( shift == 0 )
   {
@@ -101,7 +99,7 @@ static bool idaapi ct_keyboard(TCustomControl * /*v*/, int key, int shift, void 
         warning("The hotkey 'N' has been pressed");
         return true;
       case IK_ESCAPE:
-        close_tform(si->form, FORM_SAVE | FORM_CLOSE_LATER);
+        close_widget(si->cv, WCLS_SAVE | WCLS_CLOSE_LATER);
         return true;
     }
   }
@@ -111,7 +109,7 @@ static bool idaapi ct_keyboard(TCustomControl * /*v*/, int key, int shift, void 
 //---------------------------------------------------------------------------
 // This callback will be called each time the keyboard cursor position
 // is changed
-static void idaapi ct_curpos(TCustomControl *v, void *)
+static void idaapi ct_curpos(TWidget *v, void *)
 {
   qstring word;
   if ( get_current_word(v, false, word) )
@@ -119,7 +117,7 @@ static void idaapi ct_curpos(TCustomControl *v, void *)
 }
 
 //--------------------------------------------------------------------------
-int idaapi ui_callback(void *ud, int code, va_list va)
+ssize_t idaapi ui_callback(void *ud, int code, va_list va)
 {
   sample_info_t *si = (sample_info_t *)ud;
   switch ( code )
@@ -127,35 +125,35 @@ int idaapi ui_callback(void *ud, int code, va_list va)
     // how to implement a simple hint callback
     case ui_get_custom_viewer_hint:
       {
-        TCustomControl *viewer = va_arg(va, TCustomControl *);
-        place_t *place         = va_arg(va, place_t *);
-        int *important_lines   = va_arg(va, int *);
-        qstring &hint          = *va_arg(va, qstring *);
+        qstring &hint = *va_arg(va, qstring *);
+        TWidget *viewer = va_arg(va, TWidget *);
+        place_t *place = va_arg(va, place_t *);
+        int *important_lines = va_arg(va, int *);
         if ( si->cv == viewer ) // our viewer
         {
           if ( place == NULL )
             return 0;
           simpleline_place_t *spl = (simpleline_place_t *)place;
-          hint.sprnt("Hint for line %ld", spl->n);
+          hint.sprnt("Hint for line %u", spl->n);
           *important_lines = 1;
           return 1;
         }
         break;
       }
-    case ui_tform_invisible:
+    case ui_widget_invisible:
       {
-        TForm *f = va_arg(va, TForm *);
-        if ( f == si->form )
+        TWidget *f = va_arg(va, TWidget *);
+        if ( f == si->cv )
         {
           delete si;
-          unhook_from_notification_point(HT_UI, ui_callback, NULL);
+          unhook_from_notification_point(HT_UI, ui_callback);
         }
       }
       break;
-    case ui_populating_tform_popup:
+    case ui_populating_widget_popup:
       {
-        TForm *f = va_arg(va, TForm *);
-        if ( f == (Forms::TForm*) si->cv )
+        TWidget *f = va_arg(va, TWidget *);
+        if ( f == si->cv )
         {
           TPopupMenu *p = va_arg(va, TPopupMenu *);
           // Create right-click menu on the fly
@@ -194,24 +192,31 @@ static const action_desc_t sample_action = ACTION_DESC_LITERAL(
         NULL,
         -1);
 
+//-------------------------------------------------------------------------
+static const custom_viewer_handlers_t handlers(
+        ct_keyboard,
+        NULL, // popup
+        NULL, // mouse_moved
+        NULL, // click
+        NULL, // dblclick
+        ct_curpos,
+        NULL, // close
+        NULL, // help
+        NULL);// adjust_place
+
 //---------------------------------------------------------------------------
 // Create a custom view window
-void idaapi run(int)
+bool idaapi run(size_t)
 {
-  HWND hwnd = NULL;
-  TForm *form = create_tform("Sample custom view", &hwnd);
-  if ( hwnd == NULL )
+  TWidget *widget = find_widget("Sample custom view");
+  if ( widget != NULL )
   {
-    warning("Could not create custom view window\n"
-            "perhaps it is open?\n"
-            "Switching to it.");
-    form = find_tform("Sample custom view");
-    if ( form != NULL )
-      switchto_tform(form, true);
-    return;
+    activate_widget(widget, true);
+    return true;
   }
+
   // allocate block to hold info about our sample view
-  sample_info_t *si = new sample_info_t(form);
+  sample_info_t *si = new sample_info_t();
   last_si = si;
   // prepare the data to display. we could prepare it on the fly too.
   // but for that we have to use our own custom place_t class decendant.
@@ -225,18 +230,17 @@ void idaapi run(int)
   simpleline_place_t s1;
   simpleline_place_t s2(si->sv.size()-1);
   // create a custom viewer
-  si->cv = create_custom_viewer("", (TWinControl *)form, &s1, &s2, &s1, 0, &si->sv);
-  // set the handlers so we can communicate with it
-  set_custom_viewer_handlers(si->cv, ct_keyboard, NULL, NULL, NULL, ct_curpos, NULL, si);
+  si->cv = create_custom_viewer("Sample custom view", &s1, &s2, &s1, NULL, &si->sv, &handlers, si);
   // also set the ui event callback
   hook_to_notification_point(HT_UI, ui_callback, si);
   // finally display the form on the screen
-  open_tform(form, FORM_TAB|FORM_MENU|FORM_RESTORE|FORM_QWIDGET);
+  display_widget(si->cv, WOPN_TAB|WOPN_MENU|WOPN_RESTORE);
   //lint -esym(429,si) not freed. will be freed upon window destruction
 
   // Register the action. This one will be attached
   // live, to the popup menu.
   register_action(sample_action);
+  return true;
 }
 
 //--------------------------------------------------------------------------

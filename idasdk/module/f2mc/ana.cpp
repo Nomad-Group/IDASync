@@ -9,22 +9,11 @@
  */
 
 #include "f2mc.hpp"
-#include <srarea.hpp>
-
-//--------------------------------------------------------------------------
-static int ana(ea_t ea, insn_t *insn)
-{
-  insn_t saved = cmd;
-  int len = decode_insn(ea);
-  if ( len != 0 )
-    *insn = cmd;
-  cmd = saved;
-  return len;
-}
+#include <segregs.hpp>
 
 //--------------------------------------------------------------------------
 // function to generate an operand
-typedef void (*func_op_t)(const struct map_t *, int offset, op_t &op);
+typedef void (*func_op_t)(const struct map_t *, int offset, op_t &op, insn_t &insn);
 
 struct map_t
 {
@@ -50,52 +39,65 @@ struct map_t
 #define OP_3_2(SIZE3) 3, SIZE3, 2, 0, 0, 0
 
 
+//--------------------------------------------------------------------------
 // analyze code by processing map
-static const map_t *process_map(int code,const map_t *map,int itype_null)
+
+static const map_t *process_map(insn_t &insn, int code, const map_t *map, int itype_null)
 {
   // search for the good opcode range
   const map_t *p = map;
-  while ( ( (p+1)->code != 0 || (p+1)->itype != 0 )
-    && code >= (p+1)->code ) p++; // loop until p->code <= code < (p+1)->code
-  if ( cmd.itype == itype_null ) cmd.itype = p->itype; // define itype if not already defined
+  while ( ((p+1)->code != 0 || (p+1)->itype != 0)
+       && code >= (p+1)->code )
+  {
+    p++; // loop until p->code <= code < (p+1)->code
+  }
+  if ( insn.itype == itype_null )
+    insn.itype = p->itype; // define itype if not already defined
 
   // compute operand offsets
   int offset = code - p->code, offsets[3];
-  for (int i=0; i<3; i++) offsets[i] = offset;
+  for ( int i=0; i < 3; i++ )
+    offsets[i] = offset;
   if ( p->priority1 )
   {
-    if ( p->size1 ) offsets[p->priority1 - 1] = offset % p->size1;
+    if ( p->size1 )
+      offsets[p->priority1 - 1] = offset % p->size1;
     if ( p->priority2 )
     {
       offset /= p->size1;
       offsets[p->priority2 - 1] = offset;
-      if ( p->size2 ) offsets[p->priority2 - 1] = offset % p->size2;
+      if ( p->size2 )
+        offsets[p->priority2 - 1] = offset % p->size2;
       if ( p->priority3 )
       {
         offset /= p->size2;
         offsets[p->priority3 - 1] = offset;
-        if ( p->size3 ) offsets[p->priority3 - 1] = offset % p->size3;
+        if ( p->size3 )
+          offsets[p->priority3 - 1] = offset % p->size3;
       }
     }
   }
 
   // process operands
-  if ( p->op1) p->op1(p, offsets[0], cmd.Op1 );
-  if ( p->op2) p->op2(p, offsets[1], cmd.Op2 );
-  if ( p->op3) p->op3(p, offsets[2], cmd.Op3 );
+  if ( p->op1 != NULL )
+    p->op1(p, offsets[0], insn.Op1, insn);
+  if ( p->op2 != NULL )
+    p->op2(p, offsets[1], insn.Op2, insn);
+  if ( p->op3 != NULL )
+    p->op3(p, offsets[2], insn.Op3, insn);
   return p->next;
 }
 
-
+//--------------------------------------------------------------------------
 // analyze code by processing all necessary maps
-static void process_maps(const map_t *map,uint16 itype_null)
+static void process_maps(insn_t &insn, const map_t *map,uint16 itype_null)
 {
-  cmd.itype = itype_null;
-  cmd.size  = 0;
+  insn.itype = itype_null;
+  insn.size  = 0;
   while ( map ) // while we must analyze a new map
   {
-    int code = ua_next_byte();
-    map = process_map(code, map, itype_null); // analyze this byte
+    int code = insn.get_next_byte();
+    map = process_map(insn, code, map, itype_null); // analyze this byte
   }
 }
 
@@ -104,17 +106,17 @@ static void process_maps(const map_t *map,uint16 itype_null)
 #define CMDS_SIZE 3 // maximum cache size (maximum number of instructions)
 class cmds_t
 {
-  private:
-    insn_t insns[CMDS_SIZE];
-    int size;
-    int i;
-  public:
-    void reset(void) { i = 0; }
-    //lint -sem(cmds_t::reload,initializer)
-    void reload(void) { insns[0] = cmd; size = 1; reset(); }
-    cmds_t(void) { reload(); }
-    const insn_t *get_next(void);
-    const insn_t *get(int j) const;
+private:
+  insn_t insns[CMDS_SIZE];
+  int size;
+  int i;
+public:
+  void reset(void) { i = 0; }
+  //lint -sem(cmds_t::reload,initializer)
+  void reload(const insn_t &insn) { insns[0] = insn; size = 1; reset(); }
+  cmds_t(const insn_t &insn) { reload(insn); }
+  const insn_t *get_next(void);
+  const insn_t *get(int j) const;
 };
 
 // get the next instruction
@@ -127,13 +129,14 @@ const insn_t *cmds_t::get_next(void)
     if ( size <= 0 )
       return NULL;
     ea_t ea = insns[size-1].ea + insns[size-1].size;
-    if ( !ana(ea, &insns[size]) )
+    if ( decode_insn(&insns[size], ea) < 1 )
       return NULL;
     size++;
   }
   return &insns[i++];
 }
 
+//--------------------------------------------------------------------------
 // get an instruction already in the cache
 const insn_t *cmds_t::get(int j) const
 {
@@ -168,11 +171,12 @@ struct macro_t
 #define OP_CMD(CMD,OP) CMD, OP
 
 
+//--------------------------------------------------------------------------
 // build a macro and return true, or return cmd and return false
-bool build_macro(const macro_t *macros,int itype_null,insn_t &build)
+static bool build_macro(const macro_t *macros, int itype_null, insn_t &build, const insn_t &insn)
 {
-  build = cmd;
-  cmds_t cmds;
+  build = insn;
+  cmds_t cmds(insn);
   const macro_t *macro = macros;
   while ( macro->itype != itype_null ) // loop into macros array
   {
@@ -182,21 +186,27 @@ bool build_macro(const macro_t *macros,int itype_null,insn_t &build)
     while ( mdef->itype != itype_null ) // loop into instructions of the macro
     {
       const insn_t *pcmds = cmds.get_next(); // get the instruction
-      if ( pcmds == NULL ) break;
+      if ( pcmds == NULL )
+        break;
       size += pcmds->size;
       // check if instructions and operands correspond
-      if ( pcmds->itype != mdef->itype ) break;
-      if ( mdef->op1 && !mdef->op1(pcmds,pcmds->Op1) ) break;
-      if ( mdef->op2 && !mdef->op2(pcmds,pcmds->Op2) ) break;
-      if ( mdef->op3 && !mdef->op2(pcmds,pcmds->Op3) ) break;
+      if ( pcmds->itype != mdef->itype )
+        break;
+      if ( mdef->op1 && !mdef->op1(pcmds, pcmds->Op1) )
+        break;
+      if ( mdef->op2 && !mdef->op2(pcmds, pcmds->Op2) )
+        break;
+      if ( mdef->op3 && !mdef->op2(pcmds, pcmds->Op3) )
+        break;
       if ( (mdef+1)->itype == itype_null ) // macro founded
       {
         ea_t ea = cmds.get(0)->ea;
         // check if an external Xrefs exists
         xrefblk_t xb;
-        for (ea_t i = ea; i < ea+size; i++)
-          for (int ok = xb.first_to(i,XREF_FAR); ok; ok=xb.next_to() )
-            if ( xb.from < ea || xb.from >= ea+size ) return false; // external Xref founded
+        for ( ea_t i = ea; i < ea+size; i++ )
+          for ( int ok = xb.first_to(i,XREF_FAR); ok; ok=xb.next_to() )
+            if ( xb.from < ea || xb.from >= ea+size )
+              return false; // external Xref founded
 
         // fill resulting insn_t
         build = *cmds.get(macro->cmd-1);
@@ -204,16 +214,19 @@ bool build_macro(const macro_t *macros,int itype_null,insn_t &build)
         build.size  = (uint16)size;
         build.itype = macro->itype;
         if ( macro->op1_cmd )
-          build.Op1 = cmds.get(macro->op1_cmd-1)->Operands[macro->op1_cmd_op-1];
-        else build.Op1.type = o_void;
+          build.Op1 = cmds.get(macro->op1_cmd-1)->ops[macro->op1_cmd_op-1];
+        else
+          build.Op1.type = o_void;
         build.Op1.n = 1;
         if ( macro->op2_cmd )
-          build.Op2 = cmds.get(macro->op2_cmd-1)->Operands[macro->op2_cmd_op-1];
-        else build.Op2.type = o_void;
+          build.Op2 = cmds.get(macro->op2_cmd-1)->ops[macro->op2_cmd_op-1];
+        else
+          build.Op2.type = o_void;
         build.Op2.n = 2;
         if ( macro->op3_cmd )
-          build.Op3 = cmds.get(macro->op3_cmd-1)->Operands[macro->op3_cmd_op-1];
-        else build.Op3.type = o_void;
+          build.Op3 = cmds.get(macro->op3_cmd-1)->ops[macro->op3_cmd_op-1];
+        else
+          build.Op3.type = o_void;
         build.Op3.n = 3;
         return true;
       }
@@ -224,64 +237,75 @@ bool build_macro(const macro_t *macros,int itype_null,insn_t &build)
   return false;
 }
 
+//--------------------------------------------------------------------------
 // analyze cmd and next instructions to eventually detect a macro and update database
-static void process_macros(const macro_t *macros,int itype_null,bool macro_on)
+static void process_macros(insn_t &insn, const macro_t *macros, int itype_null, bool macro_on)
 {
   if ( macro_on ) // try to build a macro
   {
     insn_t macro;
-    if ( build_macro(macros, itype_null, macro) ) cmd = macro; // a macro can be built
+    if ( build_macro(macros, itype_null, macro, insn) )
+      insn = macro; // a macro can be built
   }
-  if ( isHead(get_flags_novalue(cmd.ea) ) // if not the first analyze
-    && cmd.size != get_item_size(cmd.ea)) // and the size of the instruction just changed
+  if ( is_head(get_flags(insn.ea))   // if not the first analyze
+    && insn.size != get_item_size(insn.ea) ) // and the size of the instruction just changed
   {
     // reanalyze
-    ea_t saved = cmd.ea;
-    do_unknown_range(cmd.ea, cmd.size, DOUNK_SIMPLE); // undefine preceding instructions
-    cmd.ea = saved;
-    auto_make_code(cmd.ea);
+    del_items(insn.ea, DELIT_SIMPLE, insn.size); // undefine preceding instructions
+    auto_make_code(insn.ea);
   }
 }
 
 //--------------------------------------------------------------------------
 // get the value of a bank
-sel_t get_bank_value(int bank)
+static sel_t get_bank_value(const insn_t &insn, int bank)
 {
   sel_t sel;
   if ( bank != PCB )
   {
     if ( bank == SPB )
     {
-      sel_t ccr = get_segreg(cmd.ea, CCR);
-      if ( ccr == BADSEL ) ccr = 0;
-      if ( ccr & 0x20 ) bank = SSB;
-      else bank = USB;
+      sel_t ccr = get_sreg(insn.ea, CCR);
+      if ( ccr == BADSEL )
+        ccr = 0;
+      if ( ccr & 0x20 )
+        bank = SSB;
+      else
+        bank = USB;
     }
 
-    sel = get_segreg(cmd.ea, bank);
-    if ( sel == BADSEL ) sel = 0;
+    sel = get_sreg(insn.ea, bank);
+    if ( sel == BADSEL )
+      sel = 0;
   }
-  else sel = cmd.cs;
-  return (sel&0xFF);
-}
-
-// get the value of the bank used by the instruction (eventually with a prefix)
-sel_t get_insn_bank_value()
-{
-  int bank = 0;
-  if ( cmd.prefix_bank ) bank = cmd.prefix_bank;
-  else if ( cmd.default_bank ) bank = cmd.default_bank;
-  else error("interr: emu: get_insn_bank_value()");
-  return get_bank_value(bank);
+  else
+  {
+    sel = insn.cs;
+  }
+  return sel & 0xFF;
 }
 
 //--------------------------------------------------------------------------
-#define op_reg(REG,DTYP)                             \
-  static void op_##REG(const map_t *, int, op_t &op) \
+// get the value of the bank used by the instruction (eventually with a prefix)
+static sel_t get_insn_bank_value(const insn_t &insn)
+{
+  int bank = 0;
+  if ( insn.prefix_bank )
+    bank = insn.prefix_bank;
+  else if ( insn.default_bank )
+    bank = insn.default_bank;
+  else
+    error("interr: emu: get_insn_bank_value()");
+  return get_bank_value(insn, bank);
+}
+
+//--------------------------------------------------------------------------
+#define op_reg(REG,DTYP) \
+  static void op_##REG(const map_t *, int, op_t &op, insn_t &) \
   {                                                  \
     op.type = o_reg;                                 \
     op.reg  = REG;                                   \
-    op.dtyp = dt_##DTYP;                             \
+    op.dtype = dt_##DTYP;                             \
   }
 op_reg(A,dword)  // op_A
 op_reg(AH,word)  // op_AH
@@ -301,32 +325,33 @@ op_reg(RP,byte)  // op_RP
 op_reg(CCR,byte) // op_CCR
 
 #define op_regi(NAME,REG,DTYP)                               \
-  static void op_##NAME(const map_t *, int offset, op_t &op) \
+  static void op_##NAME(const map_t *, int offset, op_t &op, insn_t &) \
   {                                                          \
-    op.type = o_reg;                                         \
-    op.reg  = uint16(REG + offset);                          \
-    op.dtyp = dt_##DTYP;                                     \
+    op.type  = o_reg;                                         \
+    op.reg   = uint16(REG + offset);                          \
+    op.dtype = dt_##DTYP;                                     \
   }
 op_regi(Ri,R0,byte)    // op_Ri
 op_regi(RWi,RW0,word)  // op_RWi
 op_regi(RLi,RL0,dword) // op_RLi
 // special for EA RLi adressing mode
-static void op_RLi2(const map_t *, int offset, op_t &op) \
-{                                                        \
-    op.type = o_reg;                                     \
-    op.reg  = uint16(RL0 + (offset>>1));                 \
-    op.dtyp = dt_dword;                                  \
+
+static void op_RLi2(const map_t *, int offset, op_t &op, insn_t &)
+{
+  op.type = o_reg;
+  op.reg  = uint16(RL0 + (offset>>1));
+  op.dtype = dt_dword;
 }
 
-#define op_at(OP,DEFAULT_BANK,DTYP)                                       \
-  static void op_##DTYP##_at_##OP(const map_t *map, int offset, op_t &op) \
+#define op_at(OP,DEFAULT_BANK,DTYP) \
+   static void op_##DTYP##_at_##OP(const map_t *map, int offset, op_t &op, insn_t &insn) \
    {                                                                      \
-      op_##OP(map,offset,op);                                             \
-      cmd.default_bank = DEFAULT_BANK;                                    \
-      cmd.op_bank = op.n;                                                 \
+      op_##OP(map,offset,op,insn);                                        \
+      insn.default_bank = DEFAULT_BANK;                                   \
+      insn.op_bank = op.n;                                                \
       op.type = o_phrase;                                                 \
       op.at++;                                                            \
-      op.dtyp = dt_##DTYP;                                                \
+      op.dtype = dt_##DTYP;                                                \
     }
 op_at(A,DTB,byte)   // op_byte_at_A
 op_at(A,DTB,word)   // op_word_at_A
@@ -341,96 +366,97 @@ op_at(PC,PCB,byte)  // op_byte_at_PC
 op_at(PC,PCB,word)  // op_word_at_PC
 op_at(PC,PCB,dword) // op_dword_at_PC
 
-#define op_at_RWi(DTYP)                                                  \
-  static void op_##DTYP##_at_RWi(const map_t *map, int offset, op_t &op) \
+#define op_at_RWi(DTYP) \
+  static void op_##DTYP##_at_RWi(const map_t *map, int offset, op_t &op, insn_t &insn) \
   {                                                                      \
-    op_RWi(map,offset,op);                                               \
+    op_RWi(map,offset,op,insn);                                          \
     op.type = o_phrase;                                                  \
     op.at++;                                                             \
-    op.dtyp = dt_##DTYP;                                                 \
+    op.dtype = dt_##DTYP;                                                 \
     switch ( offset )                                                    \
     {                                                                    \
       case 0:                                                            \
       case 1:                                                            \
       case 4:                                                            \
       case 5:                                                            \
-        cmd.default_bank = DTB;                                          \
+        insn.default_bank = DTB;                                          \
         break;                                                           \
       case 3:                                                            \
       case 7:                                                            \
-        cmd.default_bank = SPB;                                          \
+        insn.default_bank = SPB;                                          \
         break;                                                           \
       case 2:                                                            \
       case 6:                                                            \
-        cmd.default_bank = ADB;                                          \
+        insn.default_bank = ADB;                                          \
         break;                                                           \
     }                                                                    \
-    cmd.op_bank = op.n;                                                  \
+    insn.op_bank = op.n;                                                  \
   }
 op_at_RWi(byte)
 op_at_RWi(word)
 op_at_RWi(dword)
 
-#define op_imm(NAME,VALUE,DTYP)                              \
-  static void op_##NAME(const map_t *, int offset, op_t &op) \
+#define op_imm(NAME,VALUE,DTYP,IN) \
+  static void op_##NAME(const map_t *, int offset, op_t &op, insn_t &IN) \
   {                                                          \
     op.type  = o_imm;                                        \
     op.value = VALUE;                                        \
-    op.dtyp  = dt_##DTYP;                                    \
+    op.dtype = dt_##DTYP;                                    \
   }
-op_imm(imm4,offset,byte)           // op_imm4
+op_imm(imm4,offset,byte, /*insn*/) // op_imm4
 #define offset
-op_imm(imm8,ua_next_byte(),byte)   // op_imm8
-op_imm(imm16,ua_next_word(),word)  // op_imm16
-op_imm(imm32,ua_next_long(),dword) // op_imm32
+op_imm(imm8,insn.get_next_byte(),byte,insn)   // op_imm8
+op_imm(imm16,insn.get_next_word(),word,insn)  // op_imm16
+op_imm(imm32,insn.get_next_dword(),dword,insn) // op_imm32
 #undef offset
 
 #define op_dir(DTYP)                                                              \
-  static void op_dir_##DTYP(const map_t *, int, op_t &op)                         \
+  static void op_dir_##DTYP(const map_t *, int, op_t &op, insn_t &insn)           \
   {                                                                               \
-    cmd.default_bank = DTB;                                                       \
-    cmd.op_bank = op.n;                                                           \
+    insn.default_bank = DTB;                                                      \
+    insn.op_bank = op.n;                                                          \
     op.type = o_mem;                                                              \
-    op.dtyp = dt_##DTYP;                                                          \
-    sel_t dpr = get_segreg(cmd.ea, DPR);                                               \
-    if ( dpr == BADSEL ) dpr = 0;                                                 \
-    op.addr = (get_insn_bank_value() << 16) | ((dpr&0xFF) << 8) | ua_next_byte(); \
-    op.addr_dtyp = 's';                                                           \
+    op.dtype = dt_##DTYP;                                                         \
+    sel_t dpr = get_sreg(insn.ea, DPR);                                           \
+    if ( dpr == BADSEL )                                                          \
+      dpr = 0;                                                                    \
+    op.addr = (get_insn_bank_value(insn) << 16) | ((dpr&0xFF) << 8) | insn.get_next_byte(); \
+    op.addr_dtyp = 's'; \
   }
 op_dir(byte)  // op_dir_byte
 op_dir(word)  // op_dir_word
 //op_dir(dword) // op_dir_dword
 
-#define op_io(DTYP)                                      \
-  static void op_io_##DTYP(const map_t *, int, op_t &op) \
+#define op_io(DTYP) \
+  static void op_io_##DTYP(const map_t *, int, op_t &op, insn_t &insn) \
   {                                                      \
     op.type      = o_mem;                                \
-    op.dtyp      = dt_##DTYP;                            \
-    op.addr      = ua_next_byte();                       \
+    op.dtype     = dt_##DTYP;                            \
+    op.addr      = insn.get_next_byte();                       \
     op.addr_dtyp = 'i';                                  \
   }
 op_io(byte)  // op_io_byte
 op_io(word)  // op_io_word
 //op_io(dword) // op_io_dword
 
-#define op_addr16(DEFAULT_BANK,TYPE,DTYP)                           \
-  static void op_addr16_##DTYP(const map_t *, int, op_t &op)        \
+#define op_addr16(DEFAULT_BANK,TYPE,DTYP) \
+  static void op_addr16_##DTYP(const map_t *, int, op_t &op, insn_t &insn) \
   {                                                                 \
-    cmd.default_bank = DEFAULT_BANK;                                \
-    cmd.op_bank = op.n;                                             \
+    insn.default_bank = DEFAULT_BANK;                                \
+    insn.op_bank = op.n;                                             \
     op.type = o_##TYPE;                                             \
-    op.addr = (get_insn_bank_value() << 16) | ua_next_word();       \
-    op.dtyp = dt_##DTYP;                                            \
+    op.addr = (get_insn_bank_value(insn) << 16) | insn.get_next_word();       \
+    op.dtype = dt_##DTYP;                                            \
   }
-op_addr16(PCB,near,code) // op_addr16_code
-op_addr16(DTB,mem,byte)  // op_addr16_byte
-op_addr16(DTB,mem,word)  // op_addr16_word
-op_addr16(DTB,mem,dword) // op_addr16_dword
+op_addr16(PCB, near, code) // op_addr16_code
+op_addr16(DTB, mem, byte)  // op_addr16_byte
+op_addr16(DTB, mem, word)  // op_addr16_word
+op_addr16(DTB, mem, dword) // op_addr16_dword
 
-#define op_bp(NAME,OP)                                             \
-  static void op_bp_##NAME(const map_t *map, int offset, op_t &op) \
+#define op_bp(NAME,OP) \
+  static void op_bp_##NAME(const map_t *map, int offset, op_t &op, insn_t &insn) \
   {                                                                \
-    op_##OP(map,offset,op);                                        \
+    op_##OP(map,offset,op,insn);                                   \
     op.special_mode = MODE_BIT;                                    \
     op.byte_bit     = uchar(offset);                               \
   }
@@ -438,108 +464,122 @@ op_bp(io,io_byte)         // op_bp_io
 op_bp(dir,dir_byte)       // op_bp_dir
 op_bp(addr16,addr16_byte) // op_bp_addr16
 
-#define op_at_RWi_inc(DTYP)                                                  \
-  static void op_##DTYP##_at_RWi_inc(const map_t *map, int offset, op_t &op) \
+#define op_at_RWi_inc(DTYP) \
+  static void op_##DTYP##_at_RWi_inc(const map_t *map, int offset, op_t &op, insn_t &insn) \
   {                                                                          \
-    op_##DTYP##_at_RWi(map,offset,op);                                       \
+    op_##DTYP##_at_RWi(map, offset, op, insn);                               \
     op.special_mode = MODE_INC;                                              \
   }
 op_at_RWi_inc(byte)  // op_byte_at_RWi_inc
 op_at_RWi_inc(word)  // op_word_at_RWi_inc
 op_at_RWi_inc(dword) // op_dword_at_RWi_inc
 
-#define op_at_reg_displ(NAME,REG,VALUE,VALUE_DTYP,DTYP)                             \
-  static void op_##DTYP##_at_##REG##_##NAME(const map_t *map, int offset, op_t &op) \
+#define op_at_reg_displ(NAME,REG,VALUE,VALUE_DTYP,DTYP) \
+  static void op_##DTYP##_at_##REG##_##NAME(const map_t *map, int offset, op_t &op, insn_t &insn) \
   {                                                                                 \
-    op_##DTYP##_at_##REG(map,offset,op);                                            \
+    op_##DTYP##_at_##REG(map,offset,op,insn);                                       \
     op.type       = o_displ;                                                        \
     op.addr       = VALUE;                                                          \
     op.addr_dtyp  = dt_##VALUE_DTYP;                                                \
   }
-op_at_reg_displ(disp8,RWi,get_signed(ua_next_byte(),0xFF),byte,byte)     // op_byte_at_RWi_disp8
-op_at_reg_displ(disp8,RWi,get_signed(ua_next_byte(),0xFF),byte,word)     // op_word_at_RWi_disp8
-op_at_reg_displ(disp8,RWi,get_signed(ua_next_byte(),0xFF),byte,dword)    // op_dword_at_RWi_disp8
-op_at_reg_displ(disp16,RWi,get_signed(ua_next_word(),0xFFFF),word,byte)  // op_byte_at_RWi_disp16
-op_at_reg_displ(disp16,RWi,get_signed(ua_next_word(),0xFFFF),word,word)  // op_word_at_RWi_disp16
-op_at_reg_displ(disp16,RWi,get_signed(ua_next_word(),0xFFFF),word,dword) // op_dword_at_RWi_disp16
-op_at_reg_displ(disp8,RLi,get_signed(ua_next_byte(),0xFF),byte,byte)     // op_byte_at_RLi_disp8
-op_at_reg_displ(disp8,RLi,get_signed(ua_next_byte(),0xFF),byte,word)     // op_word_at_RLi_disp8
-//op_at_reg_displ(disp8,RLi,get_signed(ua_next_byte(),0xFF),byte,dword)    // op_dword_at_RLi_disp8
-op_at_reg_displ(disp16,PC,get_signed(ua_next_word(),0xFFFF),word,byte)   // op_byte_at_PC_disp16
-op_at_reg_displ(disp16,PC,get_signed(ua_next_word(),0xFFFF),word,word)   // op_word_at_PC_disp16
-op_at_reg_displ(disp16,PC,get_signed(ua_next_word(),0xFFFF),word,dword)  // op_dword_at_PC_disp16
+op_at_reg_displ(disp8,RWi,get_signed(insn.get_next_byte(),0xFF),byte,byte)     // op_byte_at_RWi_disp8
+op_at_reg_displ(disp8,RWi,get_signed(insn.get_next_byte(),0xFF),byte,word)     // op_word_at_RWi_disp8
+op_at_reg_displ(disp8,RWi,get_signed(insn.get_next_byte(),0xFF),byte,dword)    // op_dword_at_RWi_disp8
+op_at_reg_displ(disp16,RWi,get_signed(insn.get_next_word(),0xFFFF),word,byte)  // op_byte_at_RWi_disp16
+op_at_reg_displ(disp16,RWi,get_signed(insn.get_next_word(),0xFFFF),word,word)  // op_word_at_RWi_disp16
+op_at_reg_displ(disp16,RWi,get_signed(insn.get_next_word(),0xFFFF),word,dword) // op_dword_at_RWi_disp16
+op_at_reg_displ(disp8,RLi,get_signed(insn.get_next_byte(),0xFF),byte,byte)     // op_byte_at_RLi_disp8
+op_at_reg_displ(disp8,RLi,get_signed(insn.get_next_byte(),0xFF),byte,word)     // op_word_at_RLi_disp8
+//op_at_reg_displ(disp8,RLi,get_signed(insn.get_next_byte(),0xFF),byte,dword)    // op_dword_at_RLi_disp8
+op_at_reg_displ(disp16,PC,get_signed(insn.get_next_word(),0xFFFF),word,byte)   // op_byte_at_PC_disp16
+op_at_reg_displ(disp16,PC,get_signed(insn.get_next_word(),0xFFFF),word,word)   // op_word_at_PC_disp16
+op_at_reg_displ(disp16,PC,get_signed(insn.get_next_word(),0xFFFF),word,dword)  // op_dword_at_PC_disp16
 
-#define op_ea(REG,DTYP)                                                      \
-  static void op_ea_##DTYP(const map_t *map, int offset, op_t &op)           \
-  {                                                                          \
-    if ( offset < 8 ) op_##REG(map,offset,op);                               \
-    else if ( offset < 0x0C ) op_##DTYP##_at_RWi(map,offset-0x08,op);        \
-    else if ( offset < 0x10 ) op_##DTYP##_at_RWi_inc(map,offset-0x0C,op);    \
-    else if ( offset < 0x18 ) op_##DTYP##_at_RWi_disp8(map,offset-0x10,op);  \
-    else if ( offset < 0x1C ) op_##DTYP##_at_RWi_disp16(map,offset-0x18,op); \
-    else if ( offset < 0x1E )                                                \
-    {                                                                        \
-      op_##DTYP##_at_RWi(map,offset-0x1C,op);                                \
-      op.special_mode = MODE_INDEX;                                          \
-      op.index        = RW7;                                                 \
-    }                                                                        \
-    else if ( offset == 0x1E ) op_##DTYP##_at_PC_disp16(map,offset-0x18,op); \
-    else op_addr16_##DTYP(map,offset-0x1F,op);                               \
-  }
+#define op_ea(REG,DTYP) \
+static void op_ea_##DTYP(const map_t *map, int offset, op_t &op, insn_t &insn) \
+{                                                                \
+  if ( offset < 8 )                                              \
+    op_##REG(map, offset, op, insn);                             \
+  else if ( offset < 0x0C )                                      \
+    op_##DTYP##_at_RWi(map, offset-0x08, op, insn);              \
+  else if ( offset < 0x10 )                                      \
+    op_##DTYP##_at_RWi_inc(map, offset-0x0C, op, insn);          \
+  else if ( offset < 0x18 )                                      \
+    op_##DTYP##_at_RWi_disp8(map, offset-0x10, op, insn);        \
+  else if ( offset < 0x1C )                                      \
+    op_##DTYP##_at_RWi_disp16(map, offset-0x18, op, insn);       \
+  else if ( offset < 0x1E )                                      \
+  {                                                              \
+    op_##DTYP##_at_RWi(map, offset-0x1C, op, insn);              \
+    op.special_mode = MODE_INDEX;                                \
+    op.index        = RW7;                                       \
+  }                                                              \
+  else if ( offset == 0x1E )                                     \
+    op_##DTYP##_at_PC_disp16(map, offset-0x18, op, insn);        \
+  else                                                           \
+    op_addr16_##DTYP(map, offset-0x1F, op, insn);                \
+}
+
 op_ea(Ri,byte)    // op_ea_byte
 op_ea(RWi,word)   // op_ea_word
 op_ea(RLi2,dword) // op_ea_dword
 
-#define op_code_at_ea(DEFAULT_BANK,DTYP)                                   \
-  static void op_code_at_ea_##DTYP(const map_t *map, int offset, op_t &op) \
+#define op_code_at_ea(DEFAULT_BANK,DTYP) \
+  static void op_code_at_ea_##DTYP(const map_t *map, int offset, op_t &op, insn_t &insn) \
   {                                                                        \
-    op_ea_##DTYP(map,offset,op);                                           \
-    cmd.default_bank = DEFAULT_BANK;                                       \
-    cmd.op_bank = op.n;                                                    \
+    op_ea_##DTYP(map,offset,op, insn);                                     \
+    insn.default_bank = DEFAULT_BANK;                                      \
+    insn.op_bank = op.n;                                                   \
     op.at++;                                                               \
-    op.dtyp = dt_code;                                                     \
+    op.dtype = dt_code;                                                    \
   }
 op_code_at_ea(PCB,word) // op_code_at_ea_word
 op_code_at_ea(0,dword)  // op_code_at_ea_dword
 
 
-static void op_addr24(const map_t *, int, op_t &op)
+//--------------------------------------------------------------------------
+static void op_addr24(const map_t *, int, op_t &op, insn_t &insn)
 {
   op.type = o_far;
-  op.addr = ua_next_word() | ( ua_next_byte() << 16 );
-  op.dtyp = dt_code;
+  op.addr = insn.get_next_word();
+  op.addr |= insn.get_next_byte() << 16;
+  op.dtype = dt_code;
 }
 
-static void op_rel(const map_t *, int, op_t &op)
+//--------------------------------------------------------------------------
+static void op_rel(const map_t *, int, op_t &op, insn_t &insn)
 {
-  int offset = get_signed(ua_next_byte(), 0xFF);
-  op.type = o_near;
-  op.addr = (cmd.ip & ~0xFFFF) | ((cmd.ip + cmd.size + offset) & 0xFFFF);
-  op.dtyp = dt_code;
+  int offset = get_signed(insn.get_next_byte(), 0xFF);
+  op.type  = o_near;
+  op.addr  = (insn.ip & ~0xFFFF) | ((insn.ip + insn.size + offset) & 0xFFFF);
+  op.dtype = dt_code;
 }
 
-static void op_rlst(const map_t *, int, op_t &op)
+//-------------------------------------------------------------------------
+static void op_rlst(const map_t *, int, op_t &op, insn_t &insn)
 {
-  op.type = o_reglist;
-  op.reg  = ua_next_byte();
-  op.dtyp = dt_byte;
+  op.type  = o_reglist;
+  op.reg   = insn.get_next_byte();
+  op.dtype = dt_byte;
 }
 
+//--------------------------------------------------------------------------
 // used for string instructions
-static void op_PCB_DTB_ADB_SPB(const map_t *map, int offset, op_t &op)
+static void op_PCB_DTB_ADB_SPB(const map_t *map, int offset, op_t &op, insn_t &insn)
 {
   static const func_op_t banks[4] = { op_PCB, op_DTB, op_ADB, op_SPB };
-  banks[offset&3](map,offset,op);
+  banks[offset&3](map, offset, op, insn);
 }
 
+//--------------------------------------------------------------------------
 // used for writing/reading values to/from bank registers
-static void op_DTB_ADB_SSB_USB_DPR(const map_t *map, int offset, op_t &op)
+static void op_DTB_ADB_SSB_USB_DPR(const map_t *map, int offset, op_t &op, insn_t &insn)
 {
   static const func_op_t banks[5] = { op_DTB, op_ADB, op_SSB, op_USB, op_DPR };
-  banks[offset%5](map,offset,op);
+  banks[offset%5](map, offset, op, insn);
 }
 
-
+//--------------------------------------------------------------------------
 static const map_t bitop_map[] = // bit operations
 {
   { NULL, 0x00, F2MC_movb, op_A,         op_bp_io,     0, OP_NULL },
@@ -938,32 +978,52 @@ static const map_t basic_map[] =
 };
 
 //--------------------------------------------------------------------------
-bool is_A(const insn_t *, const op_t &op)
-{ if ( op.type == o_reg && op.reg == A ) return true; else return false; }
+static bool is_A(const insn_t *, const op_t &op)
+{
+  return op.type == o_reg && op.reg == A;
+}
 
-bool is_1(const insn_t *, const op_t &op)
-{ if ( op.type == o_imm && op.value == 1 ) return true; else return false; }
+//--------------------------------------------------------------------------
+static bool is_1(const insn_t *, const op_t &op)
+{
+  return op.type == o_imm && op.value == 1;
+}
 
-#define is_rel(REL)                                                                           \
-  bool is_rel##REL(const insn_t *insn, const op_t &op)                                        \
-    { if ( (op.type == o_near) && (op.addr == insn->ea+REL) ) return true; else return false; }
+//--------------------------------------------------------------------------
+#define is_rel(REL)                                         \
+static bool is_rel##REL(const insn_t *insn, const op_t &op) \
+{                                                           \
+  return op.type == o_near && op.addr == insn->ea + REL;    \
+}
 is_rel(5) // is_rel5
 is_rel(7) // is_rel7
 
-bool is_imm(const insn_t *, const op_t &op)
-{ if ( op.type == o_imm ) return true; else return false; }
+//--------------------------------------------------------------------------
+static bool is_imm(const insn_t *, const op_t &op)
+{
+  return op.type == o_imm;
+}
 
+//--------------------------------------------------------------------------
 // can't be A (if A then this is a dec/decw MACRO)
-bool is_ea_and_not_A(const insn_t *, const op_t &op)
-{ if ( (op.type != o_reg) || (op.type == o_reg && op.reg != A) ) return true; else return false; }
+static bool is_ea_and_not_A(const insn_t *, const op_t &op)
+{
+  return op.type != o_reg || op.reg != A;
+}
 
-bool is_bp(const insn_t *, const op_t &op)
-{ if ( op.special_mode == MODE_BIT ) return true; else return false; }
+//--------------------------------------------------------------------------
+static bool is_bp(const insn_t *, const op_t &op)
+{
+  return op.special_mode == MODE_BIT;
+}
 
-bool is_bp_addr16(const insn_t *insn, const op_t &op)
-{ if ( op.type == o_mem && op.dtyp == dt_byte && is_bp(insn,op) ) return true; else return false; }
+//--------------------------------------------------------------------------
+static bool is_bp_addr16(const insn_t *insn, const op_t &op)
+{
+  return op.type == o_mem && op.dtype == dt_byte && is_bp(insn, op);
+}
 
-
+//--------------------------------------------------------------------------
 #define macro_incdec(ITYPE)             \
   static const macro_insn_t macro_##ITYPE[] = \
   {                                     \
@@ -1075,13 +1135,13 @@ static const macro_t macros[] =
 };
 
 //--------------------------------------------------------------------------
-void ana_F2MC16LX(void)
+static void ana_F2MC16LX(insn_t &insn)
 {
-  process_maps(basic_map, F2MC_null); // analyze opcode
+  process_maps(insn, basic_map, F2MC_null); // analyze opcode
 
   // analyze prefix
   char prefix;
-  switch( cmd.itype )
+  switch ( insn.itype )
   {
     case F2MC_pcb: prefix = PCB; break;
     case F2MC_dtb: prefix = DTB; break;
@@ -1092,28 +1152,31 @@ void ana_F2MC16LX(void)
   if ( prefix )
   {
     insn_t next;
-    if ( ana(cmd.ea+cmd.size, &next ) && next.default_bank
-      && (prefix != next.default_bank)) // if next instruction need prefix
+    if ( decode_insn(&next, insn.ea + insn.size) > 0 && next.default_bank
+      && (prefix != next.default_bank) ) // if next instruction need prefix
     {
-      next.ea          = cmd.ea;
-      next.size       += cmd.size;
+      next.ea = insn.ea;
+      next.size += insn.size;
       next.prefix_bank = prefix;
-      cmd = next;
+      insn = next;
     }
   }
 
-  process_macros(macros, F2MC_null, (idpflags & F2MC_MACRO) != 0);
+  process_macros(insn, macros, F2MC_null, (idpflags & F2MC_MACRO) != 0);
 }
 
-
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
+  if ( _insn == NULL )
+    return 0;
+  insn_t &insn = *_insn;
+
   switch ( ptype )
   {
     case F2MC16L:
-      ana_F2MC16LX();
-      switch ( cmd.itype )
+      ana_F2MC16LX(insn);
+      switch ( insn.itype )
       {
         case F2MC_div1:
         case F2MC_div2:
@@ -1122,23 +1185,24 @@ int idaapi ana(void)
         case F2MC_mul2:
         case F2MC_mulw1:
         case F2MC_mulw2:
-          cmd.itype = F2MC_null;
+          insn.itype = F2MC_null;
           break;
       }
       break;
     case F2MC16LX:
-      ana_F2MC16LX();
+      ana_F2MC16LX(insn);
       break;
     default:
       error("interr: ana: ana()");
       break;
   }
-  if ( cmd.itype == F2MC_null ) return 0;
-  return cmd.size;
+  if ( insn.itype == F2MC_null )
+    return 0;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
-int get_signed(int byte,int mask)
+int get_signed(int byte, int mask)
 {
   int bits = mask >> 1;
   int sign = bits + 1;

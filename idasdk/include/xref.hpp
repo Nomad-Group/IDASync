@@ -7,7 +7,6 @@
 
 #ifndef _XREF_HPP
 #define _XREF_HPP
-#pragma pack(push, 1)           // IDA uses 1 byte alignments!
 
 /*! \file xref.hpp
 
@@ -16,7 +15,10 @@
   There are 2 types of xrefs: CODE and DATA references.
   All xrefs are kept in the bTree except ordinary execution flow
   to the next instruction. Ordinary execution flow to
-  the next instruction is kept in flags (see bytes.hpp).
+  the next instruction is kept in flags (see bytes.hpp)
+
+  The source address of a cross-reference must be an item head (is_head)
+  or a structure member id.
 
   Cross-references are automatically sorted.
 */
@@ -249,10 +251,10 @@ struct xrefblk_t
 
 //-------------------------------------------------------------------------
 
-/// This variable will contains type of the last xref returned
-/// by the following functions. It is not exported, so if you need to know
-/// the cross reference type, please use the ::xrefblk_t structure to enumerate
-/// the cross references.
+/// This variable contains the type of the last xref returned by the
+/// following functions. It is not exported, so if you need to know
+/// the cross reference type, please use the ::xrefblk_t structure to
+/// enumerate the cross references.
 
 extern char lastXR;
 
@@ -275,7 +277,7 @@ idaman ea_t ida_export get_first_dref_from(ea_t from);
 /// \return linear address of next data or #BADADDR.
 ///         The ::lastXR variable contains type of the reference
 
-idaman ea_t ida_export get_next_dref_from(ea_t from,ea_t current);
+idaman ea_t ida_export get_next_dref_from(ea_t from, ea_t current);
 
 
 /// Get address of instruction/data referencing to the specified data.
@@ -294,7 +296,7 @@ idaman ea_t ida_export get_first_dref_to(ea_t to);
 /// \return #BADADDR if nobody refers to the specified data.
 ///         The #lastXR variable contains type of the reference.
 
-idaman ea_t ida_export get_next_dref_to(ea_t to,ea_t current);
+idaman ea_t ida_export get_next_dref_to(ea_t to, ea_t current);
 
 
 /// Get first instruction referenced from the specified instruction.
@@ -318,7 +320,7 @@ idaman ea_t ida_export get_first_cref_from(ea_t from);
 /// \return next referenced address or #BADADDR.
 ///         The #lastXR variable contains type of the reference.
 
-idaman ea_t ida_export get_next_cref_from(ea_t from,ea_t current);
+idaman ea_t ida_export get_next_cref_from(ea_t from, ea_t current);
 
 
 /// Get first instruction referencing to the specified instruction.
@@ -341,7 +343,7 @@ idaman ea_t ida_export get_first_cref_to(ea_t to);
 /// \return linear address of the next referencing instruction or #BADADDR.
 ///         The #lastXR variable contains type of the reference.
 
-idaman ea_t ida_export get_next_cref_to(ea_t to,ea_t current);
+idaman ea_t ida_export get_next_cref_to(ea_t to, ea_t current);
 
 
 /// \name Far code references
@@ -351,9 +353,9 @@ idaman ea_t ida_export get_next_cref_to(ea_t to,ea_t current);
 /// (fcref means "far code reference")
 //@{
 idaman ea_t ida_export get_first_fcref_from(ea_t from);
-idaman ea_t ida_export get_next_fcref_from (ea_t from,ea_t current);
-idaman ea_t ida_export get_first_fcref_to  (ea_t to);
-idaman ea_t ida_export get_next_fcref_to   (ea_t to,ea_t current);
+idaman ea_t ida_export get_next_fcref_from(ea_t from, ea_t current);
+idaman ea_t ida_export get_first_fcref_to(ea_t to);
+idaman ea_t ida_export get_next_fcref_to(ea_t to, ea_t current);
 //@}
 
 
@@ -363,7 +365,7 @@ idaman bool ida_export has_external_refs(func_t *pfn, ea_t ea);
 
 
 //-------------------------------------------------------------------------
-//      S W I T C H  T A B L E  F U N C T I O N S
+//      S W I T C H   T A B L E   F U N C T I O N S
 //-------------------------------------------------------------------------
 #ifdef NALT_HPP
 
@@ -372,10 +374,11 @@ idaman bool ida_export has_external_refs(func_t *pfn, ea_t ea);
 /// will call it for the result of \ph{is_switch()}.
 /// \param insn_ea  address of the 'indirect jump' instruction
 /// \param si       switch information
+/// \return success
 
-idaman void ida_export create_switch_table(
+idaman bool ida_export create_switch_table(
         ea_t insn_ea,
-        const switch_info_ex_t *si);
+        const switch_info_t &si);
 
 
 /// Create code xrefs for the switch table.
@@ -387,7 +390,7 @@ idaman void ida_export create_switch_table(
 
 idaman void ida_export create_switch_xrefs(
         ea_t insn_ea,
-        const switch_info_ex_t *si);
+        const switch_info_t &si);
 
 
 /// Vector of case values - see calc_switch_cases()
@@ -395,17 +398,17 @@ typedef qvector<svalvec_t> casevec_t;
 
 
 /// Get detailed information about the switch table cases.
-/// \param insn_ea  address of the 'indirect jump' instruction
-/// \param si       switch information
 /// \param casevec  vector of case values...
 /// \param targets  ...and corresponding target addresses
+/// \param insn_ea  address of the 'indirect jump' instruction
+/// \param si       switch information
 /// \return success
 
 idaman bool ida_export calc_switch_cases(
-        ea_t insn_ea,
-        const switch_info_ex_t *si,
         casevec_t *casevec,
-        eavec_t *targets);
+        eavec_t *targets,
+        ea_t insn_ea,
+        const switch_info_t &si);
 
 #endif
 
@@ -420,5 +423,4 @@ idaman void ida_export delete_all_xrefs_from(ea_t ea, bool expand);
 
 //------------------------------------------------------------------------
 
-#pragma pack(pop)
 #endif // _XREF_HPP

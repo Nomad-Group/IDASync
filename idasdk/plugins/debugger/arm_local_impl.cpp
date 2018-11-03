@@ -3,12 +3,13 @@
 #include <idp.hpp>
 #include <dbg.hpp>
 #include <loader.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <segment.hpp>
 
 #include "deb_arm.hpp"
 
 #include "arm_regs.cpp"
+#include "../../module/arm/notify_codes.hpp"
 
 //--------------------------------------------------------------------------
 int idaapi arm_read_registers(thid_t thread_id, int clsmask, regval_t *values)
@@ -65,18 +66,15 @@ int is_arm_valid_bpt(bpttype_t type, ea_t ea, int len)
 static void handle_arm_thumb_modes(ea_t ea)
 {
   bool should_be_thumb = (ea & 1) != 0;
-  bool is_thumb = get_segreg(ea, ARM_T) != 0;
+  bool is_thumb = arm_module_t::get_thumb_mode(ea);
   if ( should_be_thumb != is_thumb )
-  {
-    int code = processor_t::loader + (should_be_thumb ? 0 : 1);
-    ph.notify(processor_t::idp_notify(code), ea & ~1);
-  }
+    arm_module_t::set_thumb_mode(ea, should_be_thumb);
 }
 
 //--------------------------------------------------------------------------
 static easet_t pending_addresses;
 
-static int idaapi dbg_callback(void *, int code, va_list)
+static ssize_t idaapi dbg_callback(void *, int code, va_list)
 {
   // we apply thumb/arm switches when the process is suspended.
   // it is quite late (normally we should do it as soon as the corresponding
@@ -118,12 +116,12 @@ void set_arm_thumb_modes(ea_t *addrs, int qty)
 //--------------------------------------------------------------------------
 void processor_specific_init(void)
 {
-  hook_to_notification_point(HT_DBG, dbg_callback, NULL);
+  hook_to_notification_point(HT_DBG, dbg_callback);
 }
 
 //--------------------------------------------------------------------------
 void processor_specific_term(void)
 {
-  unhook_from_notification_point(HT_DBG, dbg_callback, NULL);
+  unhook_from_notification_point(HT_DBG, dbg_callback);
   pending_addresses.clear();
 }

@@ -12,6 +12,7 @@
 #ifndef __BOCHSYS_DLL__
 #define __BOCHSYS_DLL__
 
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 #define BX_CALLCONV WINAPI
@@ -24,6 +25,8 @@ typedef wchar_t wchar16_t;
 // to the SDK documentation for more information on how to use them.
 extern FARPROC        WINAPI BxGetProcAddress(HMODULE hMod, LPCSTR ProcName);
 extern HMODULE        WINAPI BxGetModuleHandleA(LPCSTR ModuleFileName);
+extern DWORD          WINAPI BxGetModuleFileNameA(HINSTANCE hModule, LPCSTR lpFilename, DWORD nSize);
+extern DWORD          WINAPI BxGetModuleFileNameW(HINSTANCE hModule, LPWSTR lpFilename, DWORD nSize);
 extern HMODULE        WINAPI BxLoadLibraryA(LPCTSTR lpFileName);
 extern LPVOID         WINAPI BxVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
 extern BOOL           WINAPI BxVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
@@ -32,12 +35,15 @@ extern DWORD          WINAPI BxGetTickCount(VOID);
 extern BOOL           WINAPI BxVirtualProtect(LPVOID lpAddress, SIZE_T dwSize, DWORD flNewProtect, PDWORD lpflOldProtect);
 extern DWORD          WINAPI BxWin32SetLastError(DWORD ErrorCode);
 extern DWORD          WINAPI BxWin32GetLastError(VOID);
-extern DWORD          WINAPI BxWin32GetCommandLineA(VOID);
-extern DWORD          WINAPI BxWin32GetCommandLineW(VOID);
+extern LPCSTR         WINAPI BxWin32GetCommandLineA(VOID);
+extern LPWSTR         WINAPI BxWin32GetCommandLineW(VOID);
+extern LPCSTR         WINAPI BxWin32GetEnvironmentStringsA(VOID);
+extern LPWSTR         WINAPI BxWin32GetEnvironmentStringsW(VOID);
 extern LPVOID         WINAPI BxWin32TlsGetValue(DWORD dwTlsIndex);
 extern BOOL           WINAPI BxWin32TlsSetValue(DWORD dwTlsIndex,LPVOID lpTlsValue);
 extern BOOL           WINAPI BxWin32TlsFree(DWORD dwTlsIndex);
 extern DWORD          WINAPI BxWin32TlsAlloc(VOID);
+extern DWORD          WINAPI BxWin32FlsAlloc(VOID);
 extern char *         WINAPI BxStrCpyA(char *Dst, char *Src);
 extern wchar16_t *    WINAPI BxStrCpyW(wchar16_t *Dst, wchar16_t *Src);
 extern char *         WINAPI BxStrCatA(char *Dst, char *Src);

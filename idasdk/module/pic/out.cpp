@@ -9,28 +9,36 @@
 
 #include "pic.hpp"
 #include <frame.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <struct.hpp>
 
 //----------------------------------------------------------------------
-static void out_bad_address(ea_t addr)
+class out_pic_t : public outctx_t
+{
+  out_pic_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(int r) { out_register(ph.reg_names[r]); }
+  void out_bad_address(ea_t addr);
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_pic_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_pic_t)
+
+//----------------------------------------------------------------------
+void out_pic_t::out_bad_address(ea_t addr)
 {
   out_tagon(COLOR_ERROR);
-  OutLong(addr, 16);
+  out_btoa(addr, 16);
   out_tagoff(COLOR_ERROR);
-  QueueSet(Q_noName, cmd.ea);
+  remember_problem(PR_NONAME, insn.ea);
 }
 
 //----------------------------------------------------------------------
-inline void outreg(int r)
+ea_t calc_code_mem(const insn_t &insn, ea_t ea)
 {
-  out_register(ph.regNames[r]);
-}
-
-//----------------------------------------------------------------------
-ea_t calc_code_mem(ea_t ea)
-{
-  return toEA(cmd.cs, ea);
+  return to_ea(insn.cs, ea);
 }
 
 //----------------------------------------------------------------------
@@ -40,9 +48,9 @@ ea_t calc_data_mem(ea_t ea)
 }
 
 //----------------------------------------------------------------------
-int calc_outf(op_t &x)
+int calc_outf(const op_t &x)
 {
-  switch ( x.dtyp )
+  switch ( x.dtype )
   {
     default:
       INTERR(249);
@@ -52,7 +60,7 @@ int calc_outf(op_t &x)
 }
 
 //----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_pic_t::out_operand(const op_t &x)
 {
   ea_t ea;
   switch ( x.type )
@@ -66,23 +74,24 @@ bool idaapi outop(op_t &x)
       break;
 
     case o_imm:
-      if ( is_bit_insn() )
+      if ( is_bit_insn(insn) )
       {
-        const char *name = find_bit(cmd.Op1.addr, (int)x.value);
-        if ( name != NULL )
+        const char *name = find_bit(insn.Op1.addr, (int)x.value);
+        if ( name != NULL && name[0] != '\0' )
         {
           out_line(name, COLOR_IMPNAME);
           break;
         }
       }
-      OutValue(x, calc_outf(x));
+      out_value(x, calc_outf(x));
       break;
 
     case o_mem:
       {
         ea = calc_data_mem(x.addr);
         const char *name = find_sym(x.addr);
-        if ( name == NULL ) goto OUTNAME;
+        if ( name == NULL || name[0] == '\0' )
+          goto OUTNAME;
         out_addr_tag(ea);
         out_line(name, COLOR_IMPNAME);
       }
@@ -90,7 +99,7 @@ bool idaapi outop(op_t &x)
 
     case o_near:
       {
-        ea = calc_code_mem(x.addr);
+        ea = calc_code_mem(insn, x.addr);
 OUTNAME:
         if ( !out_name_expr(x, ea, x.addr) )
           out_bad_address(x.addr);
@@ -105,29 +114,37 @@ OUTNAME:
 }
 
 //----------------------------------------------------------------------
-bool conditional_insn(void)
+bool conditional_insn(const insn_t &insn, flags_t flags)
 {
-  if ( isFlow(uFlag) )
+  if ( is_flow(flags) )
   {
     int code;
     switch ( ptype )
     {
       case PIC12:
-        code = get_full_byte(cmd.ea-1);
-        if ( (code & 0xFC0) == 0x2C0 ) return true;        // 0010 11df ffff DECFSZ  f, d           Decrement f, Skip if 0
-        else if ( (code & 0xFC0) == 0x3C0 ) return true;   // 0011 11df ffff INCFSZ  f, d           Increment f, Skip if 0
-        else if ( (code & 0xF00) == 0x600 ) return true;   // 0110 bbbf ffff BTFSC   f, b           Bit Test f, Skip if Clear
-        else if ( (code & 0xF00) == 0x700 ) return true;   // 0111 bbbf ffff BTFSS   f, b           Bit Test f, Skip if Set
+        code = get_wide_byte(insn.ea-1);
+        if ( (code & 0xFC0) == 0x2C0 )
+          return true;  // 0010 11df ffff DECFSZ  f, d           Decrement f, Skip if 0
+        else if ( (code & 0xFC0) == 0x3C0 )
+          return true;  // 0011 11df ffff INCFSZ  f, d           Increment f, Skip if 0
+        else if ( (code & 0xF00) == 0x600 )
+          return true;  // 0110 bbbf ffff BTFSC   f, b           Bit Test f, Skip if Clear
+        else if ( (code & 0xF00) == 0x700 )
+          return true;  // 0111 bbbf ffff BTFSS   f, b           Bit Test f, Skip if Set
         break;
       case PIC14:
-        code = get_full_byte(cmd.ea-1);
-        if ( (code & 0x3F00) == 0x0B00 ) return true;      // 00 1011 dfff ffff DECFSZ  f, d        Decrement f, Skip if 0
-        else if ( (code & 0x3F00) == 0x0F00 ) return true; // 00 1111 dfff ffff INCFSZ  f, d        Increment f, Skip if 0
-        else if ( (code & 0x3C00) == 0x1800 ) return true; // 01 10bb bfff ffff BTFSC   f, b        Bit Test f, Skip if Clear
-        else if ( (code & 0x3C00) == 0x1C00 ) return true; // 01 11bb bfff ffff BTFSS   f, b        Bit Test f, Skip if Set
+        code = get_wide_byte(insn.ea-1);
+        if ( (code & 0x3F00) == 0x0B00 )
+          return true;  // 00 1011 dfff ffff DECFSZ  f, d        Decrement f, Skip if 0
+        else if ( (code & 0x3F00) == 0x0F00 )
+          return true;  // 00 1111 dfff ffff INCFSZ  f, d        Increment f, Skip if 0
+        else if ( (code & 0x3C00) == 0x1800 )
+          return true;  // 01 10bb bfff ffff BTFSC   f, b        Bit Test f, Skip if Clear
+        else if ( (code & 0x3C00) == 0x1C00 )
+          return true;  // 01 11bb bfff ffff BTFSS   f, b        Bit Test f, Skip if Set
         break;
       case PIC16:
-        code = get_word(cmd.ea-2);
+        code = get_word(insn.ea-2);
         code >>= 10;
         // 1010 bbba ffff ffff BTFSS  f, b, a    Bit Test f, Skip if Set
         // 1011 bbba ffff ffff BTFSC  f, b, a    Bit Test f, Skip if Clear
@@ -152,205 +169,204 @@ bool conditional_insn(void)
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_pic_t::out_insn(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  if ( conditional_insn() ) OutChar(' ');
-  OutMnem();
+  if ( conditional_insn(insn, F) )
+    out_char(' ');
+  out_mnemonic();
 
   out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
     out_one_operand(1);
-    if ( cmd.Op3.type != o_void )
+    if ( insn.Op3.type != o_void )
     {
       out_symbol(',');
-      OutChar(' ');
+      out_char(' ');
       out_one_operand(2);
     }
   }
 
-  if ( ( cmd.Op1.type == o_mem && cmd.Op1.addr == PIC16_INDF2 )
-    || ( cmd.Op2.type == o_mem && cmd.Op2.addr == PIC16_INDF2 ) )
+  if ( ( insn.Op1.type == o_mem && insn.Op1.addr == PIC16_INDF2 )
+    || ( insn.Op2.type == o_mem && insn.Op2.addr == PIC16_INDF2 ) )
   {
-    func_t *pfn  = get_func(cmd.ea);
-    struc_t *sptr  = get_frame(pfn);
+    func_t *pfn = get_func(insn.ea);
+    struc_t *sptr = get_frame(pfn);
     if ( pfn != NULL && sptr != NULL )
     {
       member_t *mptr = get_member(sptr, pfn->frregs + pfn->frsize);
       if ( mptr != NULL )
       {
         qstring name;
-        if ( get_member_name2(&name, mptr->id) > 0 )
+        if ( get_member_name(&name, mptr->id) > 0 )
         {
-          OutChar(' ');
+          out_char(' ');
           out_line(ash.cmnt, COLOR_AUTOCMT);
-          OutChar(' ');
+          out_char(' ');
           out_line(name.c_str(), COLOR_LOCNAME);
         }
       }
     }
   }
 
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea, uFlag, 2) ) OutImmChar(cmd.Op3);
-
-  term_output_buffer();
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-static void print_segment_register(int reg, sel_t value)
+static void print_segment_register(outctx_t &ctx, int reg, sel_t value)
 {
-  if ( reg == ph.regDataSreg ) return;
+  if ( reg == ph.reg_data_sreg )
+    return;
   if ( value != BADSEL )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), value);
-    gen_cmt_line("assume %s = %s", ph.regNames[reg], buf);
+    ctx.gen_cmt_line("assume %s = %s", ph.reg_names[reg], buf);
   }
   else
   {
-    gen_cmt_line("drop %s", ph.regNames[reg]);
+    ctx.gen_cmt_line("drop %s", ph.reg_names[reg]);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi assumes(ea_t ea)         // function to produce assume directives
+//lint -esym(1764, ctx) could be made const
+void idaapi pic_assumes(outctx_t &ctx)         // function to produce assume directives
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( !inf.s_assume || seg == NULL )
+  if ( (inf.outflags & OFLG_GEN_ASSUME) == 0 || seg == NULL )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
-  for ( int i = ph.regFirstSreg; i <= ph.regLastSreg; ++i )
+  for ( int i = ph.reg_first_sreg; i <= ph.reg_last_sreg; ++i )
   {
-    if ( i == ph.regCodeSreg )
+    if ( i == ph.reg_code_sreg )
       continue;
-    segreg_area_t sra;
-    if ( !get_srarea2(&sra, ea, i) )
+    sreg_range_t sra;
+    if ( !get_sreg_range(&sra, ea, i) )
       continue;
-    if ( seg_started || sra.startEA == ea )
+    if ( seg_started || sra.start_ea == ea )
     {
-      sel_t now  = get_segreg(ea, i);
-      segreg_area_t prev;
-      bool prev_exists = get_srarea2(&prev, ea-1, i);
-      if ( seg_started || (prev_exists && get_segreg(prev.startEA, i) != now) )
-        print_segment_register(i, now);
+      sel_t now = get_sreg(ea, i);
+      sreg_range_t prev;
+      bool prev_exists = get_sreg_range(&prev, ea-1, i);
+      if ( seg_started || (prev_exists && get_sreg(prev.start_ea, i) != now) )
+        print_segment_register(ctx, i, now);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Srange) could be made const
+void idaapi pic_segstart(outctx_t &ctx, segment_t *Srange)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  if ( is_spec_segm(Srange->type) )
+    return;
 
-  char sname[MAXNAMELEN];
-  char sclas[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sname;
+  qstring sclas;
+  get_visible_segm_name(&sname, Srange);
+  get_segm_class(&sclas, Srange);
 
-  printf_line(inf.indent, COLSTR("%s %s (%s)", SCOLOR_AUTOCMT),
-                  ash.cmnt,
-                 strcmp(sclas,"CODE") == 0
-                    ? ".text"
-                    : strcmp(sclas,"BSS") == 0
-                         ? ".bss"
-                         : ".data",
-                 sname);
-  if ( Sarea->orgbase != 0 )
+  ctx.gen_printf(inf.indent, COLSTR("%s %s (%s)", SCOLOR_AUTOCMT),
+                 ash.cmnt,
+                 sclas == "CODE" ? ".text" :
+                 sclas == "BSS" ? ".bss" :
+                 ".data",
+                 sname.c_str());
+  if ( Srange->orgbase != 0 )
   {
     char buf[MAX_NUMBUF];
-    btoa(buf, sizeof(buf), Sarea->orgbase);
-    printf_line(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
+    btoa(buf, sizeof(buf), Srange->orgbase);
+    ctx.gen_printf(inf.indent, COLSTR("%s %s", SCOLOR_ASMDIR), ash.origin, buf);
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t) {
+void idaapi pic_segend(outctx_t &, segment_t *)
+{
 #if 0
   segment_t *s = getseg(ea-1);
-  if ( is_spec_segm(s->type) ) return;
-  printf_line(0,COLSTR(";%-*s ends",SCOLOR_AUTOCMT),inf.indent-2,get_segm_name(s));
+  if ( !is_spec_segm(s->type) )
+    gen_printf(0,COLSTR(";%-*s ends",SCOLOR_AUTOCMT),inf.indent-2,get_visible_segm_name(s));
 #endif
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi pic_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_PROC_AND_ASM);
-  printf_line(0,COLSTR("include \"P%s.INC\"",SCOLOR_ASMDIR),device);
-  gen_header_extra();
-  MakeNull();
+  ctx.gen_header(GH_PRINT_PROC_AND_ASM);
+  ctx.gen_printf(0, COLSTR("include \"P%s.INC\"", SCOLOR_ASMDIR), device.c_str());
+  ctx.gen_header_extra();
+  ctx.gen_empty_line();
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi pic_footer(outctx_t &ctx)
 {
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
   const char *end = ash.end;
   if ( end == NULL )
-    printf_line(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
+    ctx.gen_printf(inf.indent, COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
   else
-    printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR)
-                  " "
-                  COLSTR("%s %s",SCOLOR_AUTOCMT), ash.end, ash.cmnt, name);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                   ash.end, ash.cmnt, name);
 }
 
 //--------------------------------------------------------------------------
-static void out_equ(bool indent, const char *name, uval_t off)
+static void out_equ(outctx_t &ctx, bool indent, const char *name, uval_t off)
 {
-  if ( name != NULL )
+  if ( name != NULL && name[0] != '\0' )
   {
-    gl_name = 0;
-    char buf[MAXSTR];
-    char *const end = buf + sizeof(buf);
-    char *p = buf;
-    if ( indent ) APPCHAR(p, end, ' ');
-    APPEND(p, end, name);
-    p = add_spaces(buf, sizeof(buf), inf.indent-1);
-    APPCHAR(p, end, ' ');
-    p = tag_addstr(p, end, COLOR_KEYWORD, ash.a_equ);
-    APPCHAR(p, end, ' ');
-    p = tag_on(p, end, COLOR_NUMBER);
-    p += btoa(p, end-p, off);
-    tag_off(p, end, COLOR_NUMBER);
-    MakeLine(buf, 0);
+    if ( indent )
+      ctx.out_char(' ');
+    ctx.out_line(name);
+    ctx.out_spaces(inf.indent-1);
+    ctx.out_char(' ');
+    ctx.out_line(ash.a_equ, COLOR_KEYWORD);
+    ctx.out_char(' ');
+    ctx.out_tagon(COLOR_NUMBER);
+    ctx.out_btoa(off);
+    ctx.out_tagoff(COLOR_NUMBER);
+    ctx.set_gen_label();
+    ctx.flush_outbuf(0x80000000);
   }
 }
 
 //--------------------------------------------------------------------------
 // output "equ" directive(s) if necessary
-static int out_equ(ea_t ea)
+static int out_equ(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *s = getseg(ea);
   if ( s != NULL && s->type == SEG_IMEM && ash.a_equ != NULL )
   {
     qstring name;
     if ( get_visible_name(&name, ea) > 0 )
     {
+      ctx.ctxflags |= CTXF_LABEL_OK;
       uval_t off = ea - get_segm_base(s);
-      out_equ(false, name.begin(), off);
-      const ioport_bit_t *bits = find_bits(off);
-      if ( bits != NULL )
+      out_equ(ctx, false, name.begin(), off);
+      const ioport_bits_t *_bits = find_bits(off);
+      if ( _bits != NULL )
       {
-        for ( int i=0; i < 8; i++ )
-          out_equ(true, bits[i].name, i);
-        MakeNull();
+        const ioport_bits_t &bits = *_bits;
+        for ( int i=0; i < bits.size(); i++ )
+          out_equ(ctx, true, bits[i].name.c_str(), i);
+        if ( !bits.empty() )
+          ctx.gen_empty_line();
       }
     }
     else
     {
-      MakeLine("");
+      ctx.flush_buf("");
     }
     return true;
   }
@@ -358,17 +374,15 @@ static int out_equ(ea_t ea)
 }
 
 //--------------------------------------------------------------------------
-void idaapi data(ea_t ea)
+void idaapi pic_data(outctx_t &ctx, bool analyze_only)
 {
-  gl_name = 1;
-
   // the kernel's standard routine which outputs the data knows nothing
   // about "equ" directives. So we do the following:
   //    - try to output an "equ" directive
   //    - if we succeed, then ok
-  //    - otherwise let the standard data output routine, intel_data()
+  //    - otherwise let the standard data output routine, out_data()
   //        do all the job
 
-  if ( !out_equ(ea) )
-    intel_data(ea);
+  if ( !out_equ(ctx) )
+    ctx.out_data(analyze_only);
 }

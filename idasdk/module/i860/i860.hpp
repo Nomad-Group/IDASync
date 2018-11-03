@@ -14,7 +14,7 @@
 #include "../idaidp.hpp"
 #include "ins.hpp"
 
-                                // Intel 860 cmd.auxpref bits:
+                                // Intel 860 insn.auxpref bits:
 #define aux_dual        0x1     // is dual
 #define aux_sdbl        0x2     // source double
 #define aux_rdbl        0x4     // result double
@@ -23,7 +23,7 @@
 #define _PT_860XP       0x02                    // Intel 860 XP
 
 #define PT_860XP         _PT_860XP
-#define PT_860XR        ( PT_860XP | _PT_860XR )
+#define PT_860XR        (PT_860XP | _PT_860XR)
 
 extern int pflag;
 
@@ -31,7 +31,8 @@ inline int is860XP(void) { return (pflag & PT_860XP) != 0; }
 
 //------------------------------------------------------------------------
 
-enum i860RegNo {
+enum i860RegNo
+{
   R_r0,  R_r1,  R_r2,  R_r3,  R_r4,  R_r5,  R_r6,  R_r7,
   R_r8,  R_r9,  R_r10, R_r11, R_r12, R_r13, R_r14, R_r15,
   R_r16, R_r17, R_r18, R_r19, R_r20, R_r21, R_r22, R_r23,
@@ -95,14 +96,12 @@ enum i860RegNo {
 #define Dbit    bit9            // Dual Instruction
 #define Pbit    bit10           // Pipelining
 
-void    idaapi i860_header(void);
-void    idaapi i860_footer(void);
+void    idaapi i860_header(outctx_t &ctx);
+void    idaapi i860_footer(outctx_t &ctx);
 
-void    idaapi i860_segstart(ea_t ea);
+void    idaapi i860_segstart(outctx_t &ctx, segment_t *seg);
 
-int     idaapi i860_ana(void);
-int     idaapi i860_emu(void);
-void    idaapi i860_out(void);
-bool    idaapi i860_outop(op_t &op);
+int     idaapi i860_ana(insn_t *_insn);
+int     idaapi i860_emu(const insn_t &insn);
 
 #endif

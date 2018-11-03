@@ -33,14 +33,15 @@ static ea_t ea; // current address within the instruction
 
 enum nec_insn_type_t
 {
-  NEC_add4s = CUSTOM_CMD_ITYPE,
+  NEC_add4s = CUSTOM_INSN_ITYPE,
   NEC_clear1,
 };
 
 //----------------------------------------------------------------------
-static int get_dataseg(int defseg)
+static int get_dataseg(insn_t &insn, int defseg)
 {
-  if ( defseg == R_ss ) cmd.auxpref |= aux_basess;
+  if ( defseg == R_ss )
+    insn.auxpref |= aux_basess;
   return defseg;
 }
 
@@ -48,13 +49,14 @@ static int get_dataseg(int defseg)
 //
 //              process r/m byte of the instruction
 //
-static void process_rm(op_t &x, uchar postbyte)
+static void process_rm(insn_t &insn, op_t &x, uchar postbyte)
 {
   int Mod = (postbyte >> 6) & 3;
   x.reg = postbyte & 7;
   if ( Mod == 3 )               // register
   {
-    if ( x.dtyp == dt_byte ) x.reg += 8;
+    if ( x.dtype == dt_byte )
+      x.reg += 8;
     x.type = o_reg;
   }
   else                          // memory
@@ -62,24 +64,24 @@ static void process_rm(op_t &x, uchar postbyte)
     if ( Mod == 0 && x.reg == 6 )
     {
       x.type = o_mem;
-      x.offb = uchar(ea-cmd.ea);
+      x.offb = uchar(ea-insn.ea);
       x.addr = get_word(ea); ea+=2;
-      x.segrg = (uint16)get_dataseg(R_ds);
+      x.segrg = (uint16)get_dataseg(insn, R_ds);
     }
     else
     {
       x.type = o_phrase;      // See reg for phrase
       x.addr = 0;
-      x.segrg = (uint16)get_dataseg((x.phrase == 2 || x.phrase == 3 || x.phrase == 6) ? R_ss : R_ds);
+      x.segrg = (uint16)get_dataseg(insn, (x.phrase == 2 || x.phrase == 3 || x.phrase == 6) ? R_ss : R_ds);
                               // [bp+si],[bp+di],[bp] by SS
       if ( Mod != 0 )
       {
         x.type = o_displ;     // i.e. phrase + offset
-        x.offb = uchar(ea-cmd.ea);
+        x.offb = uchar(ea-insn.ea);
         if ( Mod == 1 )
         {
           x.addr = char(get_byte(ea++));
-          cmd.auxpref |= aux_short;
+          insn.auxpref |= aux_short;
         }
         else
         {
@@ -91,25 +93,26 @@ static void process_rm(op_t &x, uchar postbyte)
 }
 
 //--------------------------------------------------------------------------
-// Analyze an instruction and fill the 'cmd' structure
-size_t ana(void)
+// Analyze an instruction and fill the 'insn' structure
+size_t ana(insn_t &insn)
 {
   int code = get_byte(ea++);
-  if ( code != 0x0F ) return 0;
+  if ( code != 0x0F )
+    return 0;
   code = get_byte(ea++);
   switch ( code )
   {
     case 0x20:
-      cmd.itype = NEC_add4s;
-      return 1;
+      insn.itype = NEC_add4s;
+      return 2;
     case 0x12:
-      cmd.itype = NEC_clear1;
+      insn.itype = NEC_clear1;
       {
         uchar postbyte = get_byte(ea++);
-        process_rm(cmd.Op1, postbyte);
-        cmd.Op2.type = o_reg;
-        cmd.Op2.reg  = 9; // 9 is CL for IBM PC
-        return size_t(ea - cmd.ea);
+        process_rm(insn, insn.Op1, postbyte);
+        insn.Op2.type = o_reg;
+        insn.Op2.reg  = 9; // 9 is CL for IBM PC
+        return size_t(ea - insn.ea);
       }
     default:
       return 0;
@@ -118,9 +121,9 @@ size_t ana(void)
 
 //--------------------------------------------------------------------------
 // Return the instruction mnemonics
-const char *get_insn_mnem(void)
+const char *get_insn_mnem(const insn_t &insn)
 {
-  if ( cmd.itype == NEC_add4s )
+  if ( insn.itype == NEC_add4s )
     return "add4s";
   return "clear1";
 }
@@ -131,46 +134,49 @@ const char *get_insn_mnem(void)
 // (This is a hypothetical example)
 // There are 2 approaches for the extensions:
 //  A. Quick & dirty
-//       you implemented custom_ana and custom_out
+//       you implemented ana_insn and out_insn
 //       The first checks if the instruction is valid
 //       The second generates its text
 //  B. Thourough and clean
 //       you implement all callbacks
-//       custom_ana fills the 'cmd' structure
-//       custom_emu creates all xrefs using ua_add_[cd]ref functions
-//       custom_out generates the instruction representation
+//       ana_insn fills the 'insn' structure
+//       emu_insn creates all xrefs using ua_add_[cd]ref functions
+//       out_insn generates the instruction representation
 //         (only if the instruction requires special processing
 //          or the processor module can't handle the custom instruction for any reason)
-//       custom_outop generates the operand representation (only if the operand requires special processing)
-//       custom_mnem returns the instruction mnemonics (without the operands)
+//       out_operand generates the operand representation (only if the operand requires special processing)
+//       out_mnem generates the instruction mnemonics
 // The main difference between these 2 approaches is in the presence of cross-references
 // and the amount of special processing required by the new instructions
 
 // The quick & dirty approach
 // We just produce the instruction mnemonics along with its operands
 // No cross-references are created. No special processing.
-static int idaapi dirty_extension_callback(void * /*user_data*/, int event_id, va_list va)
+static ssize_t idaapi dirty_extension_callback(void * /*user_data*/, int event_id, va_list va)
 {
   switch ( event_id )
   {
-    case processor_t::custom_ana:
+    case processor_t::ev_ana_insn:
       {
-        ea = cmd.ea;
-        size_t length = ana();
+        insn_t *insn = va_arg(va, insn_t *);
+        ea = insn->ea;
+        size_t length = ana(*insn);
         if ( length )
         {
-          cmd.size = (uint16)length;
-          return 2;       // event processed
+          insn->size = (uint16)length;
+          return insn->size;       // event processed
         }
       }
       break;
-    case processor_t::custom_mnem:
-      if ( cmd.itype >= CUSTOM_CMD_ITYPE )
+    case processor_t::ev_out_mnem:
       {
-        char *buf   = va_arg(va, char *);
-        size_t size = va_arg(va, size_t);
-        qstrncpy(buf, get_insn_mnem(), size);
-        return 2;
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const insn_t &insn = ctx->insn;
+        if ( insn.itype >= CUSTOM_INSN_ITYPE )
+        {
+          ctx->out_line(get_insn_mnem(insn), COLOR_INSN);
+          return 1;
+        }
       }
       break;
   }
@@ -210,7 +216,7 @@ int idaapi init(void)
   hooked = nec_node.altval(0) != 0;
   if ( hooked )
   {
-    hook_to_notification_point(HT_IDP, dirty_extension_callback, NULL);
+    hook_to_notification_point(HT_IDP, dirty_extension_callback);
     msg("NEC V20 processor extender is enabled\n");
     return PLUGIN_KEEP;
   }
@@ -244,17 +250,18 @@ void idaapi term(void)
 //
 //
 
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
   if ( hooked )
     unhook_from_notification_point(HT_IDP, dirty_extension_callback);
   else
-    hook_to_notification_point(HT_IDP, dirty_extension_callback, NULL);
+    hook_to_notification_point(HT_IDP, dirty_extension_callback);
   hooked = !hooked;
   nec_node.create(node_name);
   nec_node.altset(0, hooked);
   info("AUTOHIDE NONE\n"
        "NEC V20 processor extender now is %s", hooked ? "enabled" : "disabled");
+  return true;
 }
 
 //--------------------------------------------------------------------------

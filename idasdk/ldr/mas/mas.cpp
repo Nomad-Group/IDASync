@@ -117,7 +117,7 @@ static bool mas_set_cpu(uchar cpu_type)
       mas_error("only one processor record is allowed");
 
     set_proc = proc;
-    set_processor_type(proc, SETPROC_ALL|SETPROC_FATAL);
+    set_processor_type(proc, SETPROC_LOADER);
 #if defined(DEBUG)
     msg("MAS: detected processor %s\n", proc);
 #endif
@@ -166,11 +166,12 @@ static void mas_write_comments(void)
 
 //-----------------------------------------------------------------------------
 // detect macro assembler files using the start sequence.
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *, // too difficult to determine the processor
+        linput_t *li,
+        const char *)
 {
-  if ( n )
-    return 0;
-
   // read the first word
   uint16 word = 0;
   if ( qlread(li, &word, 2) != 2 )
@@ -184,7 +185,7 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
   if ( word != START_SEQUENCE )
     return 0;
 
-  qstrncpy(fileformatname, "Macro Assembler by Alfred Arnold", MAX_FILE_FORMAT_NAME);
+  *fileformatname = "Macro Assembler by Alfred Arnold";
 #if defined(DEBUG)
   msg("MAS: detected mas binary file !\n");
 #endif
@@ -196,8 +197,8 @@ static void load_bytes(linput_t *li, ea_t ea, asize_t size, const char *segname)
 {
   // validate the segment size
   ea_t end = ea + size;
-  uint64 curpos = qltell(li);
-  uint64 endpos = curpos + size;
+  qoff64_t curpos = qltell(li);
+  qoff64_t endpos = curpos + size;
   if ( ea == BADADDR || end < ea || endpos < curpos || endpos > qlsize(li) )
     mas_error("wrong or too big segment %a..%a", ea, end);
 
@@ -209,6 +210,13 @@ static void load_bytes(linput_t *li, ea_t ea, asize_t size, const char *segname)
 
   // create data segment
   add_segm(selector, ea, end, segname, segname);
+}
+
+//-----------------------------------------------------------------------------
+static void check_target_processor()
+{
+  if ( ph.id == -1 )
+    loader_failure("Failed to determine the target processor, please specify it manually");
 }
 
 //-----------------------------------------------------------------------------
@@ -236,7 +244,7 @@ static bool process_record(linput_t *li, const uchar record_type, bool load)
 
         // read the header
         if ( qlread(li, &header, sizeof(header)) != sizeof(header) )
-          mas_error("unable to read header (%"FMT_Z" bytes)", sizeof(header));
+          mas_error("unable to read header (%" FMT_Z " bytes)", sizeof(header));
 
         // granularities that differ from 1 are rare and mostly appear
         // in DSP CPU's that are not designed for byte processing.
@@ -280,11 +288,11 @@ static bool process_record(linput_t *li, const uchar record_type, bool load)
         msg("MAS: creator length : %ld bytes\n", length);
 #endif
         if ( length >= sizeof(creator) )
-          mas_error("creator length is too large (%u >= %"FMT_Z,
-                length, sizeof(creator));
+          mas_error("creator length is too large (%u >= %" FMT_Z,
+                    length, sizeof(creator));
         ssize_t tmp = qlread(li, creator, length);
         if ( tmp != length )
-          mas_error("unable to read creator string (i read %ld)", tmp);
+          mas_error("unable to read creator string (i read %" FMT_ZS")", tmp);
         creator[length] = '\0';
       }
       finished = true;
@@ -300,7 +308,7 @@ static bool process_record(linput_t *li, const uchar record_type, bool load)
 #if defined(DEBUG)
           msg("MAS: detected entry point : 0x%X\n", entry_point);
 #endif
-          inf.startIP = entry_point;      // entry point
+          inf.start_ip = entry_point;      // entry point
           segment_t *s = getseg(entry_point);
           inf.start_cs = s ? s->sel : 0;  // selector of code
         }
@@ -313,6 +321,8 @@ static bool process_record(linput_t *li, const uchar record_type, bool load)
       // data        : length bytes
       if ( record_type >= 0x01 && record_type <= 0x7F )
       {
+        check_target_processor();
+
         struct
         {
           int start_addr;
@@ -323,7 +333,7 @@ static bool process_record(linput_t *li, const uchar record_type, bool load)
 
         // read the header
         if ( qlread(li, &header, sizeof(header)) != sizeof(header) )
-          mas_error("unable to read header (%"FMT_Z" bytes)", sizeof(header));
+          mas_error("unable to read header (%" FMT_Z " bytes)", sizeof(header));
 
         if ( load )
           load_bytes(li, header.start_addr, header.length, "DATA");
@@ -365,6 +375,8 @@ void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformat
   msg("MAS: reading complete\n");
 #endif
 
+  check_target_processor();
+
   mas_write_comments();
 }
 
@@ -390,5 +402,6 @@ loader_t LDSC =
 //
   NULL,
 //      take care of a moved segment (fix up relocations, for example)
-  NULL
+  NULL,
+  NULL,
 };

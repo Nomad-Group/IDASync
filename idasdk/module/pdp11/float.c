@@ -34,7 +34,8 @@ int idaapi realcvt(void *m, eNE e, unsigned short swt)
       r = swt & 3;
       if(!x[E]) goto clear;
       exp = (long )x[E] - (EXONE - 0201);
-      if(!emdnorm(x, 0, 0, exp, 56) || x[E] >= 0377) return(-2); // overfloat
+      if(!emdnorm(x, 0, 0, exp, 56) || x[E] >= 0377)
+        return REAL_ERROR_RANGE; // overfloat
       if(!x[E]) {
 clear:
         memset(p, 0, (r + 1)*sizeof(unsigned short));
@@ -48,8 +49,8 @@ clear:
       break;
 
     default:
-      return(-1);
+      return REAL_ERROR_FORMAT;
   }
 
-  return(0);
+  return 0;
 }

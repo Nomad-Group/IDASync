@@ -5,7 +5,6 @@
 #include <list>
 #include <pro.h>
 #include <fpro.h>
-#include <area.hpp>
 #include <idd.hpp>
 #include <ida.hpp>
 #include <algorithm>
@@ -52,6 +51,7 @@ enum NEC850_Registers
   rR21,  rR22,  rR23,  rR24,
   rR25,  rR26,  rR27,  rR28,
   rR29,  rEP,   rR31,
+  rLP = rR31,
   // system registers start here
   rEIPC,  rEIPSW,  rFEPC,  rFEPSW,
   rECR,   rPSW,    rSR6,   rSR7,
@@ -73,29 +73,32 @@ enum NEC850_Registers
 // Prototypes
 
 // prototypes -- out.cpp
-void idaapi nec850_header(void);
-void idaapi nec850_segstart(ea_t ea);
-void idaapi nec850_segend(ea_t ea);
-void idaapi nec850_footer(void);
-void idaapi nec850_out(void);
-bool idaapi nec850_outop(op_t &x);
+void idaapi nec850_header(outctx_t &ctx);
+void idaapi nec850_footer(outctx_t &ctx);
+void idaapi nec850_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi nec850_segend(outctx_t &ctx, segment_t *seg);
+
+bool reg_in_list12(uint16 reg, uint32 L);
 
 // prototypes -- ana.cpp
-int  idaapi nec850_ana(void);
+int  idaapi nec850_ana(insn_t *out_insn);
 int  detect_inst_len(uint16 w);
 int  fetch_instruction(uint32 *w);
-bool decode_instruction(uint32 w, insn_t &cmd);
+bool decode_instruction(uint32 w, insn_t &ins);
 
 // prototypes -- emu.cpp
-int  idaapi nec850_emu(void);
-bool idaapi nec850_is_switch ( switch_info_ex_t *si );
+int  idaapi nec850_emu(const insn_t &insn);
+bool idaapi nec850_is_switch(switch_info_t *si, const insn_t &insn);
 bool idaapi nec850_create_func_frame(func_t *pfn);
-int  idaapi nec850_get_frame_retsize(func_t *pfn);
-int  idaapi nec850_is_sp_based(const op_t &x);
-int  nec850_is_sane_insn(int no_crefs);
+int  idaapi nec850_get_frame_retsize(const func_t *pfn);
+int  idaapi nec850_is_sp_based(const insn_t &insn, const op_t &x);
+int  nec850_is_sane_insn(const insn_t &insn, int no_crefs);
+int  nec850_may_be_func(const insn_t &insn);
+bool nec850_is_return(const insn_t &insn, bool strict);
 
 extern const char *RegNames[];
 extern bool is_v850e;
 extern ea_t g_gp_ea;
+extern ea_t g_ctbp_ea;
 
 #endif

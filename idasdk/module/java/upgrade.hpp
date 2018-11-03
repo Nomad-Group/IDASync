@@ -32,7 +32,6 @@ int upgrade_db_format(int, netnode);
 
 ushort *append_tmp_buffer(uint size);
 uchar  set_exception_xref(SegInfo *ps, Exception const & exc, ea_t ea);
-void   trunc_name(uint num, uchar type = 0);
 char   *convert_clsname(char *buf);
 uint32 upgrade_ResW(uint32 opstr);
 

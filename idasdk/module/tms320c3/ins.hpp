@@ -106,8 +106,8 @@ TMS320C3X_RETScond,             // Return from subroutine conditionally
 TMS320C3X_RETIU,                // Return from interrupt unconditionally
 TMS320C3X_RETSU,                // Return from subroutine unconditionally
 
-TMS320C3X_NONE,                 // Pseudo cmd (more accurate definition need)
-TMS320C3X_MV_IDX,               // Pseudo cmd (move to next index need)
+TMS320C3X_NONE,                 // Pseudo insn (more accurate definition need)
+TMS320C3X_MV_IDX,               // Pseudo insn (move to next index need)
 TMS320C3X_last,                 // last ID
 
 };

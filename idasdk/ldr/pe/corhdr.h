@@ -88,7 +88,7 @@ typedef enum ReplacesGeneralNumericDefines
 {
 // Directory entry macro for CLR data.
 #ifndef IMAGE_DIRECTORY_ENTRY_COMHEADER
-    IMAGE_DIRECTORY_ENTRY_COMHEADER     =14,
+    IMAGE_DIRECTORY_ENTRY_COMHEADER = 14,
 #endif // IMAGE_DIRECTORY_ENTRY_COMHEADER
 } ReplacesGeneralNumericDefines;
 
@@ -174,10 +174,10 @@ typedef struct IMAGE_COR20_HEADER
     IMAGE_DATA_DIRECTORY    MetaData;
     DWORD                   Flags;
 
-	// The main program if it is an EXE (not used if a DLL?)
+    // The main program if it is an EXE (not used if a DLL?)
     // If COMIMAGE_FLAGS_NATIVE_ENTRYPOINT is not set, EntryPointToken represents a managed entrypoint.
-	// If COMIMAGE_FLAGS_NATIVE_ENTRYPOINT is set, EntryPointRVA represents an RVA to a native entrypoint
-	// (depricated for DLLs, use modules constructors intead).
+    // If COMIMAGE_FLAGS_NATIVE_ENTRYPOINT is set, EntryPointRVA represents an RVA to a native entrypoint
+    // (depricated for DLLs, use modules constructors intead).
     union {
         DWORD               EntryPointToken;
         DWORD               EntryPointRVA;
@@ -185,19 +185,19 @@ typedef struct IMAGE_COR20_HEADER
 
     // This is the blob of managed resources. Fetched using code:AssemblyNative.GetResource and
     // code:PEFile.GetResource and accessible from managed code from
-	// System.Assembly.GetManifestResourceStream.  The meta data has a table that maps names to offsets into
-	// this blob, so logically the blob is a set of resources.
+    // System.Assembly.GetManifestResourceStream.  The meta data has a table that maps names to offsets into
+    // this blob, so logically the blob is a set of resources.
     IMAGE_DATA_DIRECTORY    Resources;
-	// IL assemblies can be signed with a public-private key to validate who created it.  The signature goes
-	// here if this feature is used.
+    // IL assemblies can be signed with a public-private key to validate who created it.  The signature goes
+    // here if this feature is used.
     IMAGE_DATA_DIRECTORY    StrongNameSignature;
 
-    IMAGE_DATA_DIRECTORY    CodeManagerTable;			// Depricated, not used
-	// Used for manged codee that has unmaanaged code inside it (or exports methods as unmanaged entry points)
+    IMAGE_DATA_DIRECTORY    CodeManagerTable; // Depricated, not used
+    // Used for manged codee that has unmaanaged code inside it (or exports methods as unmanaged entry points)
     IMAGE_DATA_DIRECTORY    VTableFixups;
     IMAGE_DATA_DIRECTORY    ExportAddressTableJumps;
 
-	// null for ordinary IL images.  NGEN images it points at a code:CORCOMPILE_HEADER structure
+    // null for ordinary IL images.  NGEN images it points at a code:CORCOMPILE_HEADER structure
     IMAGE_DATA_DIRECTORY    ManagedNativeHeader;
 
 } IMAGE_COR20_HEADER, *PIMAGE_COR20_HEADER;
@@ -559,17 +559,16 @@ typedef enum CorDeclSecurity
 #define IsDclActionNil(x)                   (((x) & dclActionMask) == dclActionNil)
 
 // Is this a demand that can trigger a stackwalk?
-#define IsDclActionAnyStackModifier(x)              ((((x) & dclActionMask) == dclAssert) || \
-                                                    (((x) & dclActionMask) == dclDeny)  || \
-                                                    (((x) & dclActionMask) == dclPermitOnly))
+#define IsDclActionAnyStackModifier(x)       \
+     ((((x) & dclActionMask) == dclAssert)   \
+  || (((x) & dclActionMask) == dclDeny)      \
+  || (((x) & dclActionMask) == dclPermitOnly))
 
 // Is this an assembly level attribute (i.e. not applicable on Type/Member)?
-#define IsAssemblyDclAction(x)              (((x) >= dclRequestMinimum)  && \
-                                             ((x) <= dclRequestRefuse))
+#define IsAssemblyDclAction(x) (((x) >= dclRequestMinimum) && ((x) <= dclRequestRefuse))
 
 // Is this an NGen only attribute?
-#define IsNGenOnlyDclAction(x)              (((x) == dclPrejitGrant)  || \
-                                             ((x) == dclPrejitDenied))
+#define IsNGenOnlyDclAction(x) (((x) == dclPrejitGrant) || ((x) == dclPrejitDenied))
 
 
 // MethodImpl attr bits, used by DefineMethodImpl.
@@ -620,7 +619,7 @@ typedef enum CorMethodImpl
 #define IsMiNoOptimization(x)               ((x) & miNoOptimization)
 
 // PinvokeMap attr bits, used by DefinePinvokeMap.
-typedef enum  CorPinvokeMap
+typedef enum CorPinvokeMap
 {
     pmNoMangle          = 0x0001,   // Pinvoke is to use the member name as specified.
 
@@ -682,24 +681,24 @@ typedef enum  CorPinvokeMap
 // Assembly attr bits, used by DefineAssembly.
 typedef enum CorAssemblyFlags
 {
-    afPublicKey             =   0x0001,     // The assembly ref holds the full (unhashed) public key.
+    afPublicKey                  =   0x0001,     // The assembly ref holds the full (unhashed) public key.
 
-    afPA_None               =   0x0000,     // Processor Architecture unspecified
-    afPA_MSIL               =   0x0010,     // Processor Architecture: neutral (PE32)
-    afPA_x86                =   0x0020,     // Processor Architecture: x86 (PE32)
-    afPA_IA64               =   0x0030,     // Processor Architecture: Itanium (PE32+)
-    afPA_AMD64              =   0x0040,     // Processor Architecture: AMD X64 (PE32+)
-    afPA_NoPlatform         =   0x0070,      // applies to any platform but cannot run on any (e.g. reference assembly), should not have "specified" set
-    afPA_Specified          =   0x0080,     // Propagate PA flags to AssemblyRef record
-    afPA_Mask               =   0x0070,     // Bits describing the processor architecture
-    afPA_FullMask           =   0x00F0,     // Bits describing the PA incl. Specified
-    afPA_Shift              =   0x0004,     // NOT A FLAG, shift count in PA flags <--> index conversion
+    afPA_None                    =   0x0000,     // Processor Architecture unspecified
+    afPA_MSIL                    =   0x0010,     // Processor Architecture: neutral (PE32)
+    afPA_x86                     =   0x0020,     // Processor Architecture: x86 (PE32)
+    afPA_IA64                    =   0x0030,     // Processor Architecture: Itanium (PE32+)
+    afPA_AMD64                   =   0x0040,     // Processor Architecture: AMD X64 (PE32+)
+    afPA_NoPlatform              =   0x0070,     // applies to any platform but cannot run on any (e.g. reference assembly), should not have "specified" set
+    afPA_Specified               =   0x0080,     // Propagate PA flags to AssemblyRef record
+    afPA_Mask                    =   0x0070,     // Bits describing the processor architecture
+    afPA_FullMask                =   0x00F0,     // Bits describing the PA incl. Specified
+    afPA_Shift                   =   0x0004,     // NOT A FLAG, shift count in PA flags <--> index conversion
 
-    afEnableJITcompileTracking  =   0x8000, // From "DebuggableAttribute".
-    afDisableJITcompileOptimizer=   0x4000, // From "DebuggableAttribute".
+    afEnableJITcompileTracking   =   0x8000, // From "DebuggableAttribute".
+    afDisableJITcompileOptimizer =   0x4000, // From "DebuggableAttribute".
 
-    afRetargetable          =   0x0100,     // The assembly can be retargeted (at runtime) to an
-                                            //  assembly from a different publisher.
+    afRetargetable               =   0x0100,     // The assembly can be retargeted (at runtime) to an
+                                                 //  assembly from a different publisher.
 } CorAssemblyFlags;
 
 // Macros for accessing the members of CorAssemblyFlags.
@@ -751,11 +750,11 @@ typedef enum CorFileFlags
 // PE file kind bits, returned by IMetaDataImport2::GetPEKind()
 typedef enum CorPEKind
 {
-    peNot       = 0x00000000,   // not a PE file
-    peILonly    = 0x00000001,   // flag IL_ONLY is set in COR header
-    pe32BitRequired=0x00000002,  // flag 32BIT_REQUIRED is set in COR header
-    pe32Plus    = 0x00000004,   // PE32+ file (64 bit)
-    pe32Unmanaged=0x00000008    // PE32 without COR header
+    peNot          = 0x00000000,  // not a PE file
+    peILonly       = 0x00000001,  // flag IL_ONLY is set in COR header
+    pe32BitRequired= 0x00000002,  // flag 32BIT_REQUIRED is set in COR header
+    pe32Plus       = 0x00000004,  // PE32+ file (64 bit)
+    pe32Unmanaged  = 0x00000008   // PE32 without COR header
 } CorPEKind;
 
 
@@ -773,7 +772,7 @@ typedef enum CorGenericParamAttr
     gpSpecialConstraintMask =  0x001C,
     gpNoSpecialConstraint   =   0x0000,
     gpReferenceTypeConstraint = 0x0004,      // type argument must be a reference type
-    gpNotNullableValueTypeConstraint   =   0x0008,      // type argument must be a value type but not Nullable
+    gpNotNullableValueTypeConstraint = 0x0008, // type argument must be a value type but not Nullable
     gpDefaultConstructorConstraint = 0x0010, // type argument must have a public default constructor
 } CorGenericParamAttr;
 
@@ -905,7 +904,7 @@ typedef enum CorCallingConvention
     IMAGE_CEE_CS_CALLCONV_MASK      = 0x0f,  // Calling convention is bottom 4 bits
     IMAGE_CEE_CS_CALLCONV_HASTHIS   = 0x20,  // Top bit indicates a 'this' parameter
     IMAGE_CEE_CS_CALLCONV_EXPLICITTHIS = 0x40,  // This parameter is explicitly in the signature
-    IMAGE_CEE_CS_CALLCONV_GENERIC   = 0x10,  // Generic method sig with explicit number of type arguments (precedes ordinary parameter count)
+    IMAGE_CEE_CS_CALLCONV_GENERIC = 0x10,  // Generic method sig with explicit number of type arguments (precedes ordinary parameter count)
     // 0x80 is reserved for internal use
 } CorCallingConvention;
 
@@ -974,7 +973,7 @@ typedef enum CorNativeType
     NATIVE_TYPE_LPSTR       = 0x14,
     NATIVE_TYPE_LPWSTR      = 0x15,
     NATIVE_TYPE_LPTSTR      = 0x16,
-    NATIVE_TYPE_FIXEDSYSSTRING  = 0x17,
+    NATIVE_TYPE_FIXEDSYSSTRING = 0x17,
     NATIVE_TYPE_OBJECTREF   = 0x18,   //DEPRECATED
     NATIVE_TYPE_IUNKNOWN    = 0x19,   //COMINTEROP
     NATIVE_TYPE_IDISPATCH   = 0x1a,   //COMINTEROP
@@ -1094,7 +1093,7 @@ typedef struct IMAGE_COR_ILMETHOD_SECT_EH_CLAUSE_FAT
 
 typedef struct IMAGE_COR_ILMETHOD_SECT_EH_FAT
 {
-    IMAGE_COR_ILMETHOD_SECT_FAT   SectFat;
+    IMAGE_COR_ILMETHOD_SECT_FAT SectFat;
     IMAGE_COR_ILMETHOD_SECT_EH_CLAUSE_FAT Clauses[1];     // actually variable size
 } IMAGE_COR_ILMETHOD_SECT_EH_FAT;
 
@@ -1167,11 +1166,11 @@ typedef struct IMAGE_COR_ILMETHOD_TINY
 // Note that this structure can be added on at the end, thus making it extensible
 typedef struct IMAGE_COR_ILMETHOD_FAT
 {
-    unsigned Flags    : 12;     // Flags see code:CorILMethodFlags
-    unsigned Size     :  4;     // size in DWords of this structure (currently 3)
-    unsigned MaxStack : 16;     // maximum number of items (I4, I, I8, obj ...), on the operand stack
-    DWORD   CodeSize;           // size of the code
-    mdSignature   LocalVarSigTok;     // token that indicates the signature of the local vars (0 means none)
+    unsigned Flags    :12;     // Flags see code:CorILMethodFlags
+    unsigned Size     :4;      // size in DWords of this structure (currently 3)
+    unsigned MaxStack :16;     // maximum number of items (I4, I, I8, obj ...), on the operand stack
+    DWORD CodeSize;             // size of the code
+    mdSignature LocalVarSigTok; // token that indicates the signature of the local vars (0 means none)
 
 } IMAGE_COR_ILMETHOD_FAT;
 
@@ -1341,7 +1340,7 @@ typedef enum CorImportOptions
     MDImportOptionAllProperties = 0x00000008,   // all of the properties including the deleted ones
     MDImportOptionAllEvents     = 0x00000010,   // all of the events including the deleted ones
     MDImportOptionAllCustomAttributes = 0x00000020, // all of the custom attributes including the deleted ones
-    MDImportOptionAllExportedTypes  = 0x00000040,   // all of the ExportedTypes including the deleted ones
+    MDImportOptionAllExportedTypes = 0x00000040,   // all of the ExportedTypes including the deleted ones
 
 } CorImportOptions;
 
@@ -1542,9 +1541,9 @@ typedef enum CorAttributeTargets
     catDelegate      = 0x1000,
     catGenericParameter = 0x4000,
 
-    catAll           = catAssembly | catModule | catClass | catStruct | catEnum | catConstructor |
-                    catMethod | catProperty | catField | catEvent | catInterface | catParameter | catDelegate | catGenericParameter,
-    catClassMembers  = catClass | catStruct | catEnum | catConstructor | catMethod | catProperty | catField | catEvent | catDelegate | catInterface,
+    catAll = catAssembly | catModule | catClass | catStruct | catEnum | catConstructor |
+             catMethod | catProperty | catField | catEvent | catInterface | catParameter | catDelegate | catGenericParameter,
+    catClassMembers = catClass | catStruct | catEnum | catConstructor | catMethod | catProperty | catField | catEvent | catDelegate | catInterface,
 
 } CorAttributeTargets;
 
@@ -1747,7 +1746,7 @@ typedef enum CorAttributeTargets
 // Keep in sync with CompilationRelaxations.cs
 typedef enum CompilationRelaxationsEnum
 {
-    CompilationRelaxations_NoStringInterning       = 0x0008,
+    CompilationRelaxations_NoStringInterning = 0x0008,
 
 } CompilationRelaxationEnum;
 

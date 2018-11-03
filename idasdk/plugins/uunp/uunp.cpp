@@ -11,8 +11,8 @@
 //        A call to GetProcAddress() most likely means that the program has been
 //        unpacked in the memory and now it setting up its import table
 //     4. trace the program in the single step mode until we jump to
-//        the area with the original entry point.
-//     5. as soon as the current ip belongs OEP area, suspend the execution and
+//        the range with the original entry point.
+//     5. as soon as the current ip belongs OEP range, suspend the execution and
 //        inform the user
 //
 //  So, in short, we allow the unpacker to do its job full speed until
@@ -27,6 +27,10 @@
 
 #include <windows.h>
 
+#ifdef _MSC_VER
+#  pragma warning(disable: 4996) // GetVersion was declared deprecated
+#endif
+
 #include <ida.hpp>
 #include <idp.hpp>
 #include <dbg.hpp>
@@ -39,43 +43,44 @@
 #include <name.hpp>
 #include "uunp.hpp"
 
-#ifdef __EA64__
-#define REGNAME_EAX "rax"
-#define REGNAME_ESP "rsp"
-#define REGNAME_ECX "rcx"
-#else
-#define REGNAME_EAX "eax"
-#define REGNAME_ESP "esp"
-#define REGNAME_ECX "ecx"
-#endif
-
+#define REGNAME_EAX (inf.is_64bit() ? "rax" : "eax")
+#define REGNAME_ECX (inf.is_64bit() ? "rcx" : "ecx")
+#define REGVALUE_MASK (inf.is_64bit() ? ea_t(-1) : ea_t(0xffffffffu))
 //--------------------------------------------------------------------------
 ea_t bp_gpa = BADADDR;  // address of GetProcAddress()
-area_t curmod;       // current module area
+range_t curmod;       // current module range
 static bool wait_box_visible = false;
-static area_t oep_area; // original entry point area
-static char resfile[QMAXPATH]; // resource file name
+static range_t oep_range; // original entry point range
+static char resfile[QMAXPATH] = ""; // resource file name
 static ea_t an_imported_func = BADADDR; // an imported function
 static bool success = false;
-#ifdef __X64__
-const  bool is_9x = false;
-#else
 static bool is_9x = false;
-#endif
 static ea_t bpt_ea = BADADDR;     // our bpt address
-static size_t ptrSz = sizeof(ea_t);
+
+//--------------------------------------------------------------------------
+static size_t get_ptrsize(void)
+{
+#ifndef __EA64__
+  return sizeof(ea_t);
+#else
+  static size_t ptr_sz = 0;
+  if ( ptr_sz == 0 )
+    ptr_sz = inf.is_64bit() ? 8 : 4;
+  return ptr_sz;
+#endif
+}
 
 //--------------------------------------------------------------------------
 bool doPtr(ea_t ea)
 {
-  bool ok = ptrSz == 4 ? doDwrd(ea, 4) : doQwrd(ea, 8);
-  return ok && set_offset(ea, 0, 0);
+  bool ok = get_ptrsize() == 4 ? create_dword(ea, 4) : create_qword(ea, 8);
+  return ok && op_plain_offset(ea, 0, 0);
 }
 
 //--------------------------------------------------------------------------
 ea_t getPtr(ea_t ea)
 {
-  return ptrSz == 4 ? get_long(ea) : get_qword(ea);
+  return get_ptrsize() == 4 ? get_dword(ea) : get_qword(ea);
 }
 
 //--------------------------------------------------------------------------
@@ -120,11 +125,11 @@ inline void set_wait_box(const char *mesg)
 static void move_entry(ea_t rstart)
 {
   // remove old start
-  set_name(inf.beginEA, "");
+  set_name(inf.start_ea, "");
 
   // patch inf struct
-  inf.beginEA = rstart;
-  inf.startIP = rstart;
+  inf.start_ea = rstart;
+  inf.start_ip = rstart;
 
   // add new entry point
   add_entry(rstart, rstart, "start", true);
@@ -145,7 +150,7 @@ static void move_entry(ea_t rstart)
 static bool ignore_win32_api(const char *name)
 {
   static const char *const ignore_names[] = { "VirtualAlloc", "VirtualFree" };
-  for ( size_t i=0; i<qnumber(ignore_names); i++ )
+  for ( size_t i=0; i < qnumber(ignore_names); i++ )
   {
     if ( strcmp(name, ignore_names[i]) == 0 )
       return true;
@@ -165,52 +170,57 @@ static bool find_module(ea_t ea, module_info_t *mi)
   bool ok;
   for ( ok=get_first_module(mi); ok; ok=get_next_module(mi) )
   {
-    if ( area_t(mi->base, mi->base+mi->size).contains(ea) )
+    if ( range_t(mi->base, mi->base+mi->size).contains(ea) )
       break;
   }
   return ok;
 }
 
 //--------------------------------------------------------------------------
-static bool create_idata_segm(const area_t &impdir)
+static bool create_idata_segm(const range_t &impdir)
 {
   segment_t ns;
-  segment_t *s = getseg(impdir.startEA);
+  segment_t *s = getseg(impdir.start_ea);
   if ( s != NULL )
     ns = *s;
   else
     ns.sel = setup_selector(0);
 
-  ns.startEA = impdir.startEA;
-  ns.endEA   = impdir.endEA;
-  ns.type    = SEG_XTRN;
+  ns.start_ea = impdir.start_ea;
+  ns.end_ea   = impdir.end_ea;
+  ns.type     = SEG_XTRN;
   ns.set_loader_segm(true);
   bool ok = add_segm_ex(&ns, ".idata", "XTRN", ADDSEG_NOSREG) != 0;
   if ( !ok )
-    ok = askyn_c(0, "HIDECANCEL\nCan not create the import segment. Continue anyway?") == 1;
+    ok = ask_yn(ASKBTN_NO,
+                "HIDECANCEL\n"
+                "Can not create the import segment. Continue anyway?") > ASKBTN_NO;
 
   return ok;
 }
 
 //--------------------------------------------------------------------------
-static bool find_impdir(area_t *impdir)
+static bool find_impdir(range_t *impdir)
 {
-  impdir->startEA = impdir->endEA = 0;
+  impdir->start_ea = impdir->end_ea = 0;
 
   uint32 ea32 = uint32(an_imported_func);
-  for ( ea_t pos = curmod.startEA;
-        pos <= curmod.endEA
-        && (pos = bin_search(pos, curmod.endEA, (uchar *)&ea32, NULL, 4, BIN_SEARCH_FORWARD,
-                             BIN_SEARCH_NOBREAK|BIN_SEARCH_CASE)) != BADADDR;
+  for ( ea_t pos = curmod.start_ea;
+        pos <= curmod.end_ea;
         pos += sizeof(DWORD) )
   {
+    pos = bin_search(pos, curmod.end_ea, (uchar *)&ea32, NULL, 4, BIN_SEARCH_FORWARD,
+                     BIN_SEARCH_NOBREAK|BIN_SEARCH_CASE);
+    if ( pos == BADADDR )
+      break;
+
     // skip unaligned matches
     if ( (pos & 3) != 0 )
       continue;
 
     // cool, we found a pointer to an imported function
     // now try to determine the impdir bounds
-    ea_t bounds[2] = {pos, pos};
+    ea_t bounds[2] = { pos, pos };
 
     for ( int k=0; k < 2; k++ )
     {
@@ -218,15 +228,15 @@ static bool find_impdir(area_t *impdir)
       while ( true )
       {
         if ( k == 1 )
-          ea += ptrSz;
+          ea += get_ptrsize();
         else
-          ea -= ptrSz;
+          ea -= get_ptrsize();
 
         ea_t func = is_9x ? win9x_find_thunk(ea) : getPtr(ea);
         if ( func == 0 )
           continue;
 
-        if ( !isEnabled(func) )
+        if ( !is_mapped(func) )
           break;
 
         if ( curmod.contains(func) )
@@ -240,20 +250,20 @@ static bool find_impdir(area_t *impdir)
       }
     }
 
-    bounds[1] += ptrSz;
+    bounds[1] += get_ptrsize();
 
     asize_t bsize = bounds[1] - bounds[0];
     if ( bsize > impdir->size() )
-      *impdir = area_t(bounds[0], bounds[1]);
+      *impdir = range_t(bounds[0], bounds[1]);
   }
-  return impdir->startEA != 0;
+  return impdir->start_ea != 0;
 }
 
 //--------------------------------------------------------------------------
-static bool create_impdir(const area_t &impdir)
+static bool create_impdir(const range_t &impdir)
 {
   // now rename all entries in impdir
-  do_unknown_range(impdir.startEA, impdir.size(), DOUNK_EXPAND);
+  del_items(impdir.start_ea, DELIT_EXPAND, impdir.size());
   if ( !create_idata_segm(impdir) )
     return false;
 
@@ -264,26 +274,28 @@ static bool create_impdir(const area_t &impdir)
   mi.base = BADADDR;
   mi.size = 0;
   size_t len = 0;
-  for ( ea_t ea=impdir.startEA; ea < impdir.endEA; ea += ptrSz )
+  for ( ea_t ea=impdir.start_ea; ea < impdir.end_ea; ea += get_ptrsize() )
   {
     doPtr(ea);
     ea_t func = is_9x ? win9x_find_thunk(ea) : getPtr(ea);
-    if ( get_true_name(&buf, func) <= 0 )
+    if ( get_name(&buf, func) <= 0 )
       continue;
 
-    if ( !area_t(mi.base, mi.base+mi.size).contains(func) )
+    if ( !range_t(mi.base, mi.base+mi.size).contains(func) )
     {
       find_module(func, &mi);
       qstrncpy(dll, qbasename(mi.name), sizeof(dll));
       char *ptr = strrchr(dll, '.');
       if ( ptr != NULL )
         *ptr = '\0';
+      if ( streq(dll, "ntdll32") ) // ntdll32 -> ntdll
+        dll[5] = '\0';
       len = strlen(dll);
     }
     const char *name = buf.begin();
     if ( strnicmp(dll, name, len) == 0 && name[len] == '_' )
       name += len + 1;
-    if ( !do_name_anyway(ea, name) )
+    if ( !force_name(ea, name, SN_IDBENC) )
       msg("%a: can not rename to imported name '%s'\n", ea, name);
   }
 
@@ -300,11 +312,11 @@ static void create_impdir(void)
   invalidate_dbgmem_config();
 
   // found impdir?
-  area_t impdir;
+  range_t impdir;
   if ( !find_impdir(&impdir) )
     return;
 
-  msg("Uunp: Import directory bounds %a..%a\n", impdir.startEA, impdir.endEA);
+  msg("Uunp: Import directory bounds %a..%a\n", impdir.start_ea, impdir.end_ea);
   create_impdir(impdir);
 }
 
@@ -316,10 +328,10 @@ static void tell_about_failure(void)
 }
 
 //--------------------------------------------------------------------------
-static int idaapi callback(
-    void * /*user_data*/,
-    int notification_code,
-    va_list va)
+static ssize_t idaapi callback(
+        void * /*user_data*/,
+        int notification_code,
+        va_list va)
 {
   static int stage = 0;
   static bool is_dll;
@@ -341,11 +353,11 @@ static int idaapi callback(
           is_dll = true;
         // remember the current module bounds
         if ( pev->modinfo.rebase_to != BADADDR )
-          curmod.startEA = pev->modinfo.rebase_to;
+          curmod.start_ea = pev->modinfo.rebase_to;
         else
-          curmod.startEA = pev->modinfo.base;
-        curmod.endEA = curmod.startEA + pev->modinfo.size;
-        deb(IDA_DEBUG_PLUGIN, "UUNP: module space %a-%a\n", curmod.startEA, curmod.endEA);
+          curmod.start_ea = pev->modinfo.base;
+        curmod.end_ea = curmod.start_ea + pev->modinfo.size;
+        deb(IDA_DEBUG_PLUGIN, "UUNP: module space %a-%a\n", curmod.start_ea, curmod.end_ea);
         ++stage;
       }
       break;
@@ -354,15 +366,15 @@ static int idaapi callback(
       if ( stage != 0 && is_dll )
       {
         const debug_event_t *pev = va_arg(va, const debug_event_t *);
-        if ( curmod.startEA == pev->modinfo.base
-          || curmod.startEA == pev->modinfo.rebase_to )
+        if ( curmod.start_ea == pev->modinfo.base
+          || curmod.start_ea == pev->modinfo.rebase_to )
         {
           deb(IDA_DEBUG_PLUGIN, "UUNP: unload unpacked module\n");
           if ( stage > 2 )
             enable_step_trace(false);
           stage = 0;
-          curmod.startEA = 0;
-          curmod.endEA = 0;
+          curmod.start_ea = 0;
+          curmod.end_ea = 0;
           _hide_wait_box();
         }
       }
@@ -371,13 +383,11 @@ static int idaapi callback(
     case dbg_run_to:   // Parameters: const debug_event_t *event
       dbg->stopped_at_debug_event(true);
       bp_gpa = get_name_ea(BADADDR, "kernel32_GetProcAddress");
-#ifndef __X64__
-      if( (LONG)GetVersion() < 0 )  // win9x mode -- use thunk's
+      if ( (LONG)GetVersion() < 0 )  // win9x mode -- use thunk's
       {
         is_9x = true;
         win9x_resolve_gpa_thunk();
       }
-#endif
       if ( bp_gpa == BADADDR )
       {
         bring_debugger_to_front();
@@ -389,7 +399,7 @@ FORCE_STOP:
         run_requests();
         break;
       }
-      else if( !my_add_bpt(bp_gpa) )
+      else if ( !my_add_bpt(bp_gpa) )
       {
         bring_debugger_to_front();
         warning("Sorry, can not set bpt to kernel32.GetProcAddress");
@@ -414,38 +424,38 @@ FORCE_STOP:
                        //               1 - to always display a breakpoint warning dialog.
       {
         thid_t tid = va_arg(va, thid_t); qnotused(tid);
-        ea_t ea   = va_arg(va, ea_t);
+        ea_t ea    = va_arg(va, ea_t);
+        ea &= REGVALUE_MASK;
         //int *warn = va_arg(va, int*);
         if ( stage == 2 )
         {
           if ( ea == bp_gpa )
           {
-            regval_t rv;
-            if ( get_reg_val(REGNAME_ESP, &rv) )
+            ea_t esp;
+            if ( get_sp_val(&esp) )
             {
-              ea_t esp = ea_t(rv.ival);
               invalidate_dbgmem_contents(esp, 1024);
               ea_t gpa_caller = getPtr(esp);
               if ( !is_library_entry(gpa_caller) )
               {
                 ea_t nameaddr;
-                if ( ptrSz == 4 )
+                if ( get_ptrsize() == 4 )
                 {
-                  nameaddr = get_long(esp+8);
+                  nameaddr = get_dword(esp+8);
                 }
                 else
                 {
+                  regval_t rv;
                   get_reg_val(REGNAME_ECX, &rv);
-                  nameaddr = ea_t(rv.ival);
+                  nameaddr = ea_t(rv.ival) & REGVALUE_MASK;
                 }
                 invalidate_dbgmem_contents(nameaddr, 1024);
-                char name[MAXSTR];
-                size_t len = get_max_ascii_length(nameaddr, ASCSTR_C, ALOPT_IGNHEADS);
-                name[0] = '\0';
-                get_ascii_contents2(nameaddr, len, ASCSTR_C, name, sizeof(name));
-                if ( !ignore_win32_api(name) )
+                qstring name;
+                size_t len = get_max_strlit_length(nameaddr, STRTYPE_C, ALOPT_IGNHEADS);
+                get_strlit_contents(&name, nameaddr, len, STRTYPE_C);
+                if ( !ignore_win32_api(name.c_str()) )
                 {
-                  deb(IDA_DEBUG_PLUGIN, "%a: found a call to GetProcAddress(%s)\n", gpa_caller, name);
+                  deb(IDA_DEBUG_PLUGIN, "%a: found a call to GetProcAddress(%s)\n", gpa_caller, name.c_str());
                   if ( !my_del_bpt(bp_gpa) || !my_add_bpt(gpa_caller) )
                     error("Can not modify breakpoint");
                 }
@@ -460,9 +470,9 @@ FORCE_STOP:
               msg("Uunp: reached unpacker code at %a, switching to trace mode\n", ea);
               enable_step_trace(true);
               ++stage;
-              uint64 eax;
+              uint64 eax = 0;
               if ( get_reg_val(REGNAME_EAX, &eax) )
-                an_imported_func = ea_t(eax);
+                an_imported_func = ea_t(eax) & REGVALUE_MASK;
               set_wait_box("Waiting for the unpacker to finish");
             }
             else
@@ -492,10 +502,11 @@ FORCE_STOP:
       if ( stage == 3 )
       {
         thid_t tid = va_arg(va, thid_t); qnotused(tid);
-        ea_t ip   = va_arg(va, ea_t);
+        ea_t ip    = va_arg(va, ea_t);
+        ip &= REGVALUE_MASK;
 
         // ip reached the OEP range?
-        if ( oep_area.contains(ip) )
+        if ( oep_range.contains(ip) )
         {
           // stop the trace mode
           enable_step_trace(false);
@@ -503,21 +514,21 @@ FORCE_STOP:
           set_wait_box("Reanalyzing the unpacked code");
 
           // reanalyze the unpacked code
-          do_unknown_range(oep_area.startEA, oep_area.size(), DOUNK_EXPAND);
+          del_items(oep_range.start_ea, DELIT_EXPAND, oep_range.size());
           auto_make_code(ip); // plan to make code
-          noUsed(oep_area.startEA, oep_area.endEA); // plan to reanalyze
-          auto_mark_range(oep_area.startEA, oep_area.endEA, AU_FINAL); // plan to analyze
+          plan_range(oep_range.start_ea, oep_range.end_ea); // plan to reanalyze
+          auto_mark_range(oep_range.start_ea, oep_range.end_ea, AU_FINAL); // plan to analyze
           move_entry(ip); // mark the program's entry point
 
           _hide_wait_box();
 
           // inform the user
           bring_debugger_to_front();
-          if ( askyn_c(1,
-                       "HIDECANCEL\n"
-                       "The universal unpacker has finished its work.\n"
-                       "Do you want to take a memory snapshot and stop now?\n"
-                       "(you can do it yourself if you want)\n") > 0 )
+          if ( ask_yn(ASKBTN_YES,
+                     "HIDECANCEL\n"
+                     "The universal unpacker has finished its work.\n"
+                     "Do you want to take a memory snapshot and stop now?\n"
+                     "(you can do it yourself if you want)\n") > ASKBTN_NO )
           {
             set_wait_box("Recreating the import table");
             invalidate_dbgmem_config();
@@ -527,7 +538,7 @@ FORCE_STOP:
 
             create_impdir();
 
-            set_wait_box("Storing resources to 'resource.res'");
+            set_wait_box("Extracting resources");
             if ( resfile[0] != '\0' )
               extract_resource(resfile);
 
@@ -536,7 +547,7 @@ FORCE_STOP:
               goto FORCE_STOP;
           }
           suspend_process();
-          unhook_from_notification_point(HT_DBG, callback, NULL);
+          unhook_from_notification_point(HT_DBG, callback);
         }
       }
       break;
@@ -546,9 +557,9 @@ FORCE_STOP:
         stage = 0;
         // stop the tracing
         _hide_wait_box();
-        unhook_from_notification_point(HT_DBG, callback, NULL);
+        unhook_from_notification_point(HT_DBG, callback);
         if ( success )
-          jumpto(inf.beginEA, -1);
+          jumpto(inf.start_ea, -1);
         else
           tell_about_failure();
       }
@@ -566,13 +577,13 @@ FORCE_STOP:
 //      const debug_event_t *event = va_arg(va, const debug_event_t *);
 //      int *warn = va_arg(va, int *);
       // FIXME: handle code which uses SEH to unpack itself
-      if ( askyn_c(1,
-                   "AUTOHIDE DATABASE\n"
-                   "HIDECANCEL\n"
-                   "An exception occurred in the program.\n"
-                   "UUNP does not support exceptions yet.\n"
-                   "The execution has been suspended.\n"
-                   "Do you want to continue the unpacking?") <= 0 )
+      if ( ask_yn(ASKBTN_YES,
+                  "AUTOHIDE DATABASE\n"
+                  "HIDECANCEL\n"
+                  "An exception occurred in the program.\n"
+                  "UUNP does not support exceptions yet.\n"
+                  "The execution has been suspended.\n"
+                  "Do you want to continue the unpacking?") <= ASKBTN_NO )
       {
         _hide_wait_box();
         stage = 0;
@@ -607,11 +618,11 @@ FORCE_STOP:
 // 0 - run uunp interactively
 // 1 - run without questions
 // 2 - run manual reconstruction
-void idaapi run(int arg)
+bool idaapi run(size_t arg)
 {
   if ( arg == 2 )
   {
-    area_t impdir = area_t(0, 0);
+    range_t impdir = range_t(0, 0);
     ea_t oep;
 
     netnode n;
@@ -624,79 +635,78 @@ void idaapi run(int arg)
       segment_t *s = getseg(oep);
       if ( s != NULL )
       {
-        oep_area.startEA = s->startEA;
-        oep_area.endEA = s->endEA;
+        oep_range.start_ea = s->start_ea;
+        oep_range.end_ea = s->end_ea;
       }
     }
     else
     {
       // Restore previous settings
-      oep              = n.altval(0);
-      oep_area.startEA = n.altval(1);
-      oep_area.endEA   = n.altval(2);
-      impdir.startEA   = n.altval(3);
-      impdir.endEA     = n.altval(4);
+      oep                = n.altval(0);
+      oep_range.start_ea = n.altval(1);
+      oep_range.end_ea   = n.altval(2);
+      impdir.start_ea    = n.altval(3);
+      impdir.end_ea      = n.altval(4);
     }
-    if ( !AskUsingForm_c(
-      "Reconstruction parameters\n"
-      "\n"
-      "  <~O~riginal entrypoint:N:128:32::>\n"
-      "  <Code ~s~tart address:N:128:32::>\n"
-      "  <Code ~e~nd address  :N:128:32::>\n"
-      "\n"
-      "  <IAT s~t~art address:N:128:32::>\n"
-      "  <IAT e~n~d address:N:128:32::>\n"
-      "\n",
-      &oep,
-      &oep_area.startEA, &oep_area.endEA,
-      &impdir.startEA, &impdir.endEA) )
+    if ( !ask_form("Reconstruction parameters\n"
+                   "\n"
+                   "  <~O~riginal entrypoint:N:128:32::>\n"
+                   "  <Code ~s~tart address:N:128:32::>\n"
+                   "  <Code ~e~nd address  :N:128:32::>\n"
+                   "\n"
+                   "  <IAT s~t~art address:N:128:32::>\n"
+                   "  <IAT e~n~d address:N:128:32::>\n"
+                   "\n",
+                   &oep,
+                   &oep_range.start_ea, &oep_range.end_ea,
+                   &impdir.start_ea, &impdir.end_ea) )
     {
       // Cancelled?
-      return;
+      return true;
     }
 
     // Invalid settings?
-    if ( impdir.startEA == 0 || impdir.endEA == 0 )
+    if ( impdir.start_ea == 0 || impdir.end_ea == 0 )
     {
       msg("Invalid import address table boundaries");
-      return;
+      return true;
     }
 
     // Store settings
     n.altset(0, oep);
-    n.altset(1, oep_area.startEA);
-    n.altset(2, oep_area.endEA);
-    n.altset(3, impdir.startEA);
-    n.altset(4, impdir.endEA);
+    n.altset(1, oep_range.start_ea);
+    n.altset(2, oep_range.end_ea);
+    n.altset(3, impdir.start_ea);
+    n.altset(4, impdir.end_ea);
 
     if ( !create_impdir(impdir) )
-      return;
+      return false;
 
     // reanalyze the unpacked code
-    do_unknown_range(oep_area.startEA, oep_area.size(), DOUNK_EXPAND);
+    del_items(oep_range.start_ea, DELIT_EXPAND, oep_range.size());
     auto_make_code(oep);
-    noUsed(oep_area.startEA, oep_area.endEA);
-    auto_mark_range(oep_area.startEA, oep_area.endEA, AU_FINAL);
+    plan_range(oep_range.start_ea, oep_range.end_ea);
+    auto_mark_range(oep_range.start_ea, oep_range.end_ea, AU_FINAL);
 
     // mark the program's entry point
     move_entry(oep);
 
     take_memory_snapshot(true);
-    return;
+    return true;
   }
 
-  // Determine the original entry point area
-  for ( segment_t *s = get_first_seg(); s != NULL; s=get_next_seg(s->startEA) )
+  // Determine the original entry point range
+  for ( segment_t *s = get_first_seg(); s != NULL; s=get_next_seg(s->start_ea) )
   {
     if ( s->type != SEG_GRP )
     {
-      oep_area = *s;
+      oep_range = *s;
       break;
     }
   }
 
-  if (    arg == 0
-       && askyn_c(0,
+  if ( arg == 0
+    && ask_yn(ASKBTN_NO,
               "HIDECANCEL\n"
               "AUTOHIDE REGISTRY\n"
               "Universal PE unpacker\n"
@@ -711,48 +721,48 @@ void idaapi run(int arg)
               "\n"
               "Do you really want to launch the program?\n") <= 0 )
     {
-      return;
+      return true;
     }
 
   success = false;
 
-  set_file_ext(resfile, sizeof(resfile), database_idb, "res");
+  set_file_ext(resfile, sizeof(resfile), get_path(PATH_TYPE_IDB), "res");
   if ( arg == 0
-    && !AskUsingForm_c(
-        "Uunp parameters\n"
-        "IDA will suspend the program when the execution reaches\n"
-        "the original entry point area. The default values are in\n"
-        "this dialog box. Please verify them and correct if you wish.\n"
-        "\n"
-        "ORIGINAL ENTRY POINT AREA\n"
-        "  <~S~tart address:N:128:32::>\n"
-        "  <~E~nd address  :N:128:32::>\n"
-        "\n"
-        "OUTPUT RESOURCE FILE NAME\n"
-        "  <~R~esource file:A:256:32::>\n"
-        "\n",
-        &oep_area.startEA,
-        &oep_area.endEA,
-        resfile) )
+    && !ask_form("Uunp parameters\n"
+                 "IDA will suspend the program when the execution reaches\n"
+                 "the original entry point range. The default values are in\n"
+                 "this dialog box. Please verify them and correct if you wish.\n"
+                 "\n"
+                 "ORIGINAL ENTRY POINT AREA\n"
+                 "  <~S~tart address:N:128:32::>\n"
+                 "  <~E~nd address  :N:128:32::>\n"
+                 "\n"
+                 "OUTPUT RESOURCE FILE NAME\n"
+                 "  <~R~esource file:f:1:32::>\n"
+                 "\n",
+                 &oep_range.start_ea,
+                 &oep_range.end_ea,
+                 resfile) )
   {
-    return;
+    return true;
   }
 
-  if ( !hook_to_notification_point(HT_DBG, callback, NULL) )
+  if ( !hook_to_notification_point(HT_DBG, callback) )
   {
-    warning("Could not hook to notification point\n");
-    return;
+    warning("Could not hook to notification point");
+    return true;
   }
 
   if ( dbg == NULL )
     load_debugger("win32", false);
 
   // Let's start the debugger
-  if ( !run_to(inf.beginEA) )
+  if ( !run_to(inf.start_ea) )
   {
     warning("Sorry, could not start the process");
-    unhook_from_notification_point(HT_DBG, callback, NULL);
+    unhook_from_notification_point(HT_DBG, callback);
   }
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -762,7 +772,6 @@ int idaapi init(void)
   if ( ph.id != PLFM_386 || inf.filetype != f_PE )
     return PLUGIN_SKIP;
 
-  ptrSz = inf.is_64bit() ? 8 : 4;
   return PLUGIN_OK;
 }
 
@@ -770,7 +779,7 @@ int idaapi init(void)
 void idaapi term(void)
 {
   // just to be safe
-  unhook_from_notification_point(HT_DBG, callback, NULL);
+  unhook_from_notification_point(HT_DBG, callback);
   _hide_wait_box();
 }
 

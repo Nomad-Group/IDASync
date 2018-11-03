@@ -10,13 +10,21 @@
 #include "i860.hpp"
 
 //----------------------------------------------------------------------
-inline void OutReg(int rgnum)
+class out_i860_t : public outctx_t
 {
-  out_register(ph.regNames[rgnum]);
-}
+  out_i860_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void OutReg(int rgnum) { out_register(ph.reg_names[rgnum]); }
+
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_i860_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_i860_t)
 
 //----------------------------------------------------------------------
-bool idaapi i860_outop(op_t &x)
+bool out_i860_t::out_operand(const op_t &x)
 {
   switch ( x.type )
   {
@@ -24,18 +32,20 @@ bool idaapi i860_outop(op_t &x)
       OutReg(x.reg);
       break;
     case o_displ:
-      OutValue(x,OOF_ADDR|OOFW_32);
+      out_value(x, OOF_ADDR|OOFW_32);
       goto common;
     case o_phrase:
       OutReg(int(x.addr));
 common:
       {
         int s2 = char(x.reg);
-        if ( s2 != 0 ) {
+        if ( s2 != 0 )
+        {
           out_symbol('(');
           OutReg(s2 < 0 ? -s2 : s2);
           out_symbol(')');
-          if ( char(x.reg) < 0 ) {
+          if ( char(x.reg) < 0 )
+          {
             out_symbol('+');
             out_symbol('+');
           }
@@ -43,47 +53,44 @@ common:
       }
       break;
     case o_imm:
-      OutValue(x,OOF_SIGNED|OOFW_32);
+      out_value(x, OOF_SIGNED|OOFW_32);
       break;
     case o_mem:
     case o_near:
       if ( !out_name_expr(x, x.addr, x.addr) )
       {
-        OutValue(x,OOF_ADDR|OOF_NUMBER|OOFS_NOSIGN|OOFW_32);
-        QueueSet(Q_noName,cmd.ea);
+        out_value(x, OOF_ADDR|OOF_NUMBER|OOFS_NOSIGN|OOFW_32);
+        remember_problem(PR_NONAME, insn.ea);
       }
       break;
     case o_void:
       return 0;
     default:
-      warning("out: %a: bad optype %d", cmd.ea, x.type);
+      warning("out: %a: bad optype %d", insn.ea, x.type);
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-void idaapi i860_out(void)
+void out_i860_t::out_insn(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
   {
     out_tagon(COLOR_INSN);
-    const char *cname = cmd.get_canon_mnem();
+    const char *cname = insn.get_canon_mnem();
     int i = 16 - (inf.indent & 7);
-    if ( cmd.auxpref & Dbit )
+    if ( insn.auxpref & Dbit )
     {
-      OutChar('d');
-      OutChar('.');
+      out_char('d');
+      out_char('.');
       i -= 2;
     }
     while ( *cname != 0 )
     {
-      OutChar(*cname++);
+      out_char(*cname++);
       i--;
     }
-    switch ( cmd.itype )
+    switch ( insn.itype )
     {
       case I860_fadd:
       case I860_pfadd:
@@ -168,9 +175,9 @@ void idaapi i860_out(void)
       case I860_mimt1s2:
       case I860_mm12tsm:
       case I860_mim1s2:
-        OutChar('.');
-        OutChar( (cmd.auxpref & Sbit) ? 'd' : 's');
-        OutChar( (cmd.auxpref & Rbit) ? 'd' : 's');
+        out_char('.');
+        out_char( (insn.auxpref & Sbit) ? 'd' : 's');
+        out_char( (insn.auxpref & Rbit) ? 'd' : 's');
         i -= 3;
         break;
       case I860_fld:
@@ -182,14 +189,14 @@ void idaapi i860_out(void)
       case I860_scyc:
       case I860_st:
       case I860_stio:
-        OutChar('.');
-        switch ( cmd.Op1.dtyp )
+        out_char('.');
+        switch ( insn.Op1.dtype )
         {
-          case dt_byte:         OutChar('b');   break;
-          case dt_word:         OutChar('s');   break;
-          case dt_dword:        OutChar('l');   break;
-          case dt_qword:        OutChar('d');   break;
-          case dt_byte16:       OutChar('q');   break;
+          case dt_byte:         out_char('b');   break;
+          case dt_word:         out_char('s');   break;
+          case dt_dword:        out_char('l');   break;
+          case dt_qword:        out_char('d');   break;
+          case dt_byte16:       out_char('q');   break;
         }
         i -= 2;
         break;
@@ -197,55 +204,47 @@ void idaapi i860_out(void)
     out_tagoff(COLOR_INSN);
     do
     {
-      OutChar(' ');
+      out_char(' ');
       i--;
     } while ( i > 0 );
   }
 
   bool comma = out_one_operand(0);
 
-  if ( comma && cmd.Op2.shown() && cmd.Op2.type != o_void )
+  if ( comma && insn.Op2.shown() && insn.Op2.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
   }
 
   out_one_operand(1);
 
-  if ( comma && cmd.Op3.shown() && cmd.Op3.type != o_void )
+  if ( comma && insn.Op3.shown() && insn.Op3.type != o_void )
   {
     out_symbol(',');
-    OutChar(' ');
+    out_char(' ');
   }
 
   out_one_operand(2);
 
-  if ( isVoid(cmd.ea,uFlag,0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea,uFlag,1) )
-  {
-    OutImmChar(cmd.Op2);
-    OutImmChar(cmd.Op3);
-  }
-
-  term_output_buffer();
-
-  gl_comm = 1;
-  MakeLine(buf);
+  out_immchar_cmts();
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi i860_header(void)
+void idaapi i860_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_PROC);
+  ctx.gen_header(GH_PRINT_PROC);
 }
 
 //--------------------------------------------------------------------------
-void idaapi i860_segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Sarea) could be made const
+void idaapi i860_segstart(outctx_t &ctx, segment_t *Sarea)
 {
-  segment_t *Sarea = getseg(ea);
-  char sname[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
-  printf_line(inf.indent, COLSTR(".text %s %s",SCOLOR_ASMDIR), ash.cmnt, sname);
+  qstring sname;
+  get_segm_name(&sname, Sarea);
+  ctx.gen_printf(inf.indent, COLSTR(".text %s %s",SCOLOR_ASMDIR), ash.cmnt, sname.c_str());
 
   const char *p = ".byte";
   switch ( Sarea->align )
@@ -254,41 +253,42 @@ void idaapi i860_segstart(ea_t ea)
     case saRelWord:   p = ".word";    break;
     case saRelPara:   p = ".float";   break;
   }
-  printf_line(inf.indent, COLSTR(".align %s", SCOLOR_ASMDIR), p);
+  ctx.gen_printf(inf.indent, COLSTR(".align %s", SCOLOR_ASMDIR), p);
 
-  if ( inf.s_org )
+  if ( (inf.outflags & OFLG_GEN_ORG) != 0 )
   {
-    ea_t org = ea - get_segm_base(Sarea);
+    ea_t org = ctx.insn_ea - get_segm_base(Sarea);
     if ( org != 0 )
     {
       char buf[MAX_NUMBUF];
       btoa(buf, sizeof(buf), org);
-      printf_line(inf.indent, COLSTR("%s%s %s",SCOLOR_AUTOCMT), ash.cmnt,
-                              ash.origin, buf);
+      ctx.gen_printf(inf.indent,
+                     COLSTR("%s%s %s",SCOLOR_AUTOCMT),
+                     ash.cmnt, ash.origin, buf);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi i860_footer(void)
+void idaapi i860_footer(outctx_t &ctx)
 {
   char buf[MAXSTR];
   if ( ash.end != NULL )
   {
-    MakeNull();
+    ctx.gen_empty_line();
     char *ptr = buf;
     char *end = buf + sizeof(buf);
     APPEND(ptr, end, ash.end);
     qstring name;
-    if ( get_colored_name(&name, inf.beginEA) > 0 )
+    if ( get_colored_name(&name, inf.start_ea) > 0 )
     {
       APPCHAR(ptr, end, ' ');
       APPEND(ptr, end, name.begin());
     }
-    MakeLine(buf, inf.indent);
+    ctx.flush_buf(buf, inf.indent);
   }
   else
   {
-    gen_cmt_line("end of file");
+    ctx.gen_cmt_line("end of file");
   }
 }

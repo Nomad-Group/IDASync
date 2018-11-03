@@ -1,23 +1,23 @@
 
 #include "oakdsp.hpp"
 #include <diskio.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 
 
 //--------------------------------------------------------------------------
 static const char *const register_names[] =
 {
-  "r0",  "r1",   "r2",   "r3",  "r4",  "r5",    //DAAU Registers
+  "r0", "r1", "r2", "r3", "r4", "r5",           //DAAU Registers
   "rb",                                         //Base Register
   "y",                                          //Input Register
-  "st0", "st1",  "st2",                         //Status Registers
+  "st0", "st1", "st2",                          //Status Registers
   "p",                                          //Output Register
   "pc",                                         //Program Counter
   "sp",                                         //Software Stack Pointer
   "cfgi", "cfgj",                               //DAAU Configuration Registers
   "b0h", "b1h",  "b0l",  "b1l",                 //Accumulator B
   "ext0","ext1", "ext2", "ext3",                //External registers
-  "a0",  "a1",   "a0l",  "a1l", "a0h", "a1h",   //Accumulator A
+  "a0", "a1", "a0l", "a1l", "a0h", "a1h",       //Accumulator A
   "lc",                                         //Loop Counter
   "sv",                                         //Shift Value Register
   "x",                                          //Input Register
@@ -52,7 +52,6 @@ static bytes_t retcodes[] =
 //-----------------------------------------------------------------------
 static const asm_t oakasm =
 {
-//   AS_ASCIIC
    ASH_HEXF4    // $34
   |ASD_DECF0    // 34
   |ASB_BINF2    // %01010
@@ -65,7 +64,6 @@ static const asm_t oakasm =
   "Dsp Group OAK DSP Assembler",
   0,
   NULL,         // header lines
-  NULL,         // bad instructions
   "org",        // org
   "end",        // end
 
@@ -88,10 +86,6 @@ static const asm_t oakasm =
   "ds %s",      // uninited arrays
   "equ",        // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   "*",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -132,7 +126,6 @@ static const asm_t gas =
   "GNU-like hypothetical assembler",
   0,
   NULL,         // header lines
-  NULL,         // bad instructions
   ".org",       // org
   NULL,         // end
 
@@ -155,10 +148,6 @@ static const asm_t gas =
   ".space %s",  // uninited arrays
   "=",          // equ
   NULL,         // 'seg' prefix (example: push seg seg001)
-  NULL,         // Pointer to checkarg_preline() function.
-  NULL,         // char *(*checkarg_atomprefix)(char *operand,void *res); // if !NULL, is called before each atom
-  NULL,         // const char **checkarg_operations;
-  NULL,         // translation to use in character and string constants.
   ".",          // current IP (instruction pointer)
   NULL,         // func_header
   NULL,         // func_footer
@@ -193,48 +182,46 @@ static const asm_t *const asms[] = { &oakasm, &gas, NULL };
 static ea_t AdditionalSegment(size_t size, int offset, const char *name)
 {
   segment_t s;
-  s.startEA = freechunk(0x1000000, size, 0xF);
-  s.endEA   = s.startEA + size;
-  s.sel     = allocate_selector((s.startEA-offset) >> 4);
+  s.start_ea = free_chunk(0x1000000, size, 0xF);
+  s.end_ea   = s.start_ea + size;
+  s.sel     = allocate_selector((s.start_ea-offset) >> 4);
   s.type    = SEG_DATA;
   s.bitness = ph.dnbits > 16;
   add_segm_ex(&s, name, "DATA", ADDSEG_NOSREG|ADDSEG_OR_DIE);
-  return s.startEA - offset;
+  return s.start_ea - offset;
 }
 
 inline ea_t get_start(const segment_t *s)
-{  return s ? s->startEA : BADADDR; }
+{  return s ? s->start_ea : BADADDR; }
 
 //--------------------------------------------------------------------------
-static ioport_t *ports = NULL;
-static size_t numports = 0;
-char device[MAXSTR];
+static ioports_t ports;
+qstring device;
 ea_t xmem = BADADDR;
 static int xmemsize = 0x1000;
 
 
-static const char *idaapi oakdsp_callback(const ioport_t *lports, size_t lnumports, const char *line);
+static const char *idaapi oakdsp_callback(const ioports_t &lports, const char *line);
 #define callback oakdsp_callback
 
 #include "../iocommon.cpp"
 
 //lint -esym(528,oakdsp_callback)
-static const char *idaapi oakdsp_callback(const ioport_t *lports, size_t lnumports, const char *line)
+static const char *idaapi oakdsp_callback(const ioports_t &lports, const char *line)
 {
   int size;
   if ( qsscanf(line, "XMEMSIZE = %i", &size) == 1 )
   {
     xmemsize = size;
-    qsnprintf(deviceparams, sizeof(deviceparams), "XMEM=0x%X", xmemsize);
+    deviceparams.sprnt("XMEM=0x%X", xmemsize);
     return NULL;
   }
-  return standard_callback(lports, lnumports, line);
+  return standard_callback(lports, line);
 }
 
-const char *find_port(ea_t address)
+const ioport_t *find_port(ea_t address)
 {
-  const ioport_t *port = find_ioport(ports, numports, address);
-  return port ? port->name : NULL;
+  return find_ioport(ports, address);
 }
 
 //--------------------------------------------------------------------------
@@ -251,16 +238,16 @@ void select_device(const char *dname, int lrespect_info)
 
   create_xmem();
 
-  for ( int i=0; i < numports; i++ )
+  for ( int i=0; i < ports.size(); i++ )
   {
-    ioport_t *p = ports + i;
-    ea_t ea = xmem + p->address;
-    const char *name = p->name;
+    const ioport_t &p = ports[i];
+    ea_t ea = xmem + p.address;
+    const char *name = p.name.c_str();
     ea_t nameea = get_name_ea(BADADDR, name);
     if ( nameea != ea )
     {
       set_name(nameea, "");
-      if ( !set_name(ea, name, SN_NOWARN) )
+      if ( !set_name(ea, name, SN_NOCHECK|SN_NOWARN) )
         set_cmt(ea, name, 0);
     }
   }
@@ -269,67 +256,81 @@ void select_device(const char *dname, int lrespect_info)
 //--------------------------------------------------------------------------
 const char *idaapi set_idp_options(const char *keyword,int /*value_type*/,const void * /*value*/)
 {
-  if ( keyword != NULL ) return IDPOPT_BADKEY;
+  if ( keyword != NULL )
+    return IDPOPT_BADKEY;
   char cfgfile[QMAXFILE];
   get_cfg_filename(cfgfile, sizeof(cfgfile));
-  if ( choose_ioport_device(cfgfile, device, sizeof(device), NULL) )
-    select_device(device, IORESP_INT);
+  if ( choose_ioport_device(&device, cfgfile) )
+    select_device(device.c_str(), IORESP_INT);
   return IDPOPT_OK;
+}
+
+//-----------------------------------------------------------------------
+// We always return "yes" because of the messy problem that
+// there are additional operands with a wrong operand number (always 1)
+static bool idaapi can_have_type(const op_t &)
+{
+  return true;
 }
 
 //--------------------------------------------------------------------------
 int procnum = -1;
 netnode helper;
 
-static int idaapi notify(processor_t::idp_notify msgid, ...)
+//--------------------------------------------------------------------------
+static ssize_t idaapi idb_callback(void *, int code, va_list /*va*/)
 {
-  va_list va;
-  va_start(va, msgid);
+  switch ( code )
+  {
+    case idb_event::savebase:
+    case idb_event::closebase:
+      helper.supset(0, device.c_str());
+      break;
+  }
+  return 0;
+}
 
-// A well behaving processor module should call invoke_callbacks()
-// in his notify() function. If this function returns 0, then
-// the processor module should process the notification itself
-// Otherwise the code should be returned to the caller:
-
-  int code = invoke_callbacks(HT_IDP, msgid, va);
-  if ( code ) return code;
-
+//--------------------------------------------------------------------------
+static ssize_t idaapi notify(void *, int msgid, va_list va)
+{
+  int code = 0;
   switch ( msgid )
   {
-    case processor_t::init:
+    case processor_t::ev_init:
+      hook_to_notification_point(HT_IDB, idb_callback);
       helper.create("$ oakdsp");
       init_analyzer();
       init_emu();
       break;
 
-    case processor_t::term:
-      free_ioports(ports, numports);
-    default:
+    case processor_t::ev_term:
+      ports.clear();
+      unhook_from_notification_point(HT_IDB, idb_callback);
       break;
 
-    case processor_t::newfile:      // new file loaded
+    case processor_t::ev_newfile:      // new file loaded
       {
         char cfgfile[QMAXFILE];
         get_cfg_filename(cfgfile, sizeof(cfgfile));
-        if ( choose_ioport_device(cfgfile, device, sizeof(device), parse_area_line0) )
-          select_device(device, IORESP_AREA|IORESP_INT);
+        if ( choose_ioport_device(&device, cfgfile, parse_area_line0) )
+          select_device(device.c_str(), IORESP_AREA|IORESP_INT);
         else
           create_xmem();
 
         segment_t *s0 = get_first_seg();
         if ( s0 != NULL )
         {
-          segment_t *s1 = get_next_seg(s0->startEA);
-          for (int i = PAGE; i <= vDS; i++)
+          segment_t *s1 = get_next_seg(s0->start_ea);
+          for ( int i = PAGE; i <= vDS; i++ )
           {
-            set_default_segreg_value(s0, i, BADSEL);
-            set_default_segreg_value(s1, i, BADSEL);
+            set_default_sreg_value(s0, i, BADSEL);
+            set_default_sreg_value(s1, i, BADSEL);
           }
         }
       }
       break;
 
-    case processor_t::oldfile:      // old file loaded
+    case processor_t::ev_oldfile:      // old file loaded
       xmem = get_start(get_segm_by_name("XMEM"));
       {
         char dev[MAXSTR];
@@ -338,14 +339,10 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
       }
       break;
 
-    case processor_t::savebase:
-    case processor_t::closebase:
-      helper.supset(0, device);
-      break;
-
-    case processor_t::newprc:    // new processor type
+    case processor_t::ev_newprc:    // new processor type
       {
         int n = va_arg(va, int);
+        // bool keep_cfg = va_argi(va, bool);
         if ( procnum == -1 )
         {
           procnum = n;
@@ -353,33 +350,155 @@ static int idaapi notify(processor_t::idp_notify msgid, ...)
         else if ( procnum != n )  // can't change the processor type
         {                         // after the initial set up
           warning("Sorry, processor type can not be changed after loading");
-          return 0;
+          code = -1;
+          break;
         }
-
       }
       break;
 
-    case processor_t::is_sane_insn:
-      return is_sane_insn(va_arg(va, int));
 
-    case processor_t::may_be_func:
+    case processor_t::ev_is_sane_insn:
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        int nocrefs = va_arg(va, int);
+        return is_sane_insn(*insn, nocrefs) == 1 ? 1 : -1;
+      }
+
+    case processor_t::ev_may_be_func:
                                 // can a function start here?
-                                // arg: none, the instruction is in 'cmd'
+                                // arg: instruction
                                 // returns: probability 0..100
-                                // 'cmd' structure is filled upon the entrace
-                                // the idp module is allowed to modify 'cmd'
-      return may_be_func();
-  }
-  va_end(va);
-  return 1;
-}
+      {
+        const insn_t *insn = va_arg(va, insn_t *);
+        return may_be_func(*insn);
+      }
 
-//-----------------------------------------------------------------------
-// We always return "yes" because of the messy problem that
-// there are additional operands with a wrong operand number (always 1)
-static bool idaapi can_have_type(op_t &)
-{
-  return true;
+    case processor_t::ev_out_header:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        oakdsp_header(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_footer:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        oakdsp_footer(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_segstart:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        oakdsp_segstart(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_segend:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        segment_t *seg = va_arg(va, segment_t *);
+        oakdsp_segend(*ctx, seg);
+        return 1;
+      }
+
+    case processor_t::ev_out_assumes:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        oakdsp_assumes(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_ana_insn:
+      {
+        insn_t *out = va_arg(va, insn_t *);
+        return ana(out);
+      }
+
+    case processor_t::ev_emu_insn:
+      {
+        const insn_t *insn = va_arg(va, const insn_t *);
+        return emu(*insn) ? 1 : -1;
+      }
+
+    case processor_t::ev_out_insn:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        out_insn(*ctx);
+        return 1;
+      }
+
+    case processor_t::ev_out_operand:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        return out_opnd(*ctx, *op) ? 1 : -1;
+      }
+
+    case processor_t::ev_can_have_type:
+      {
+        const op_t *op = va_arg(va, const op_t *);
+        return can_have_type(*op) ? 1 : -1;
+      }
+
+    case processor_t::ev_is_sp_based:
+      {
+        int *mode = va_arg(va, int *);
+        const insn_t *insn = va_arg(va, const insn_t *);
+        const op_t *op = va_arg(va, const op_t *);
+        *mode = is_sp_based(*insn, *op);
+        return 1;
+      }
+
+    case processor_t::ev_create_func_frame:
+      {
+        func_t *pfn = va_arg(va, func_t *);
+        create_func_frame(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_get_frame_retsize:
+      {
+        int *frsize = va_arg(va, int *);
+        const func_t *pfn = va_arg(va, const func_t *);
+        *frsize = OAK_get_frame_retsize(pfn);
+        return 1;
+      }
+
+    case processor_t::ev_gen_stkvar_def:
+      {
+        outctx_t *ctx = va_arg(va, outctx_t *);
+        const member_t *mptr = va_arg(va, const member_t *);
+        sval_t v = va_arg(va, sval_t);
+        gen_stkvar_def(*ctx, mptr, v);
+        return 1;
+      }
+
+    case processor_t::ev_set_idp_options:
+      {
+        const char *keyword = va_arg(va, const char *);
+        int value_type = va_arg(va, int);
+        const char *value = va_arg(va, const char *);
+        const char *ret = set_idp_options(keyword, value_type, value);
+        if ( ret == IDPOPT_OK )
+          return 1;
+        const char **errmsg = va_arg(va, const char **);
+        if ( errmsg != NULL )
+          *errmsg = ret;
+        return -1;
+      }
+
+    case processor_t::ev_is_align_insn:
+      {
+        ea_t ea = va_arg(va, ea_t);
+        return is_align_insn(ea);
+      }
+
+    default:
+      break;
+  }
+  return code;
 }
 
 //-----------------------------------------------------------------------
@@ -402,16 +521,18 @@ static const char *const lnames[] =
 //-----------------------------------------------------------------------
 processor_t LPH =
 {
-  IDP_INTERFACE_VERSION,        // version
-  PLFM_OAKDSP,                  // id
-  PRN_HEX
-  | PR_SEGS                     // has segment registers
-  | PR_ALIGN                    // data items must be aligned
-  | PR_BINMEM                   // module knows about memory organization
-  | PR_ALIGN_INSN,              // allow align instructions
-
-  16,                           // 16 bits in a byte for code segments
-  16,                           // 16 bits in a byte for other segments
+  IDP_INTERFACE_VERSION,  // version
+  PLFM_OAKDSP,            // id
+                          // flag
+    PRN_HEX
+  | PR_SEGS               // has segment registers
+  | PR_ALIGN              // data items must be aligned
+  | PR_BINMEM             // module knows about memory organization
+  | PR_ALIGN_INSN,        // allow align instructions
+                          // flag2
+  PR2_IDP_OPTS,         // the module has processor-specific configuration options
+  16,                     // 16 bits in a byte for code segments
+  16,                     // 16 bits in a byte for other segments
 
   shnames,
   lnames,
@@ -420,31 +541,8 @@ processor_t LPH =
 
   notify,
 
-  header,
-  footer,
-
-  segstart,
-  segend,
-
-  assumes,              // generate "assume" directives
-
-  ana,                  // analyze instruction
-  emu,                  // emulate instruction
-
-  out,                  // generate text representation of instruction
-  outop,                // generate ...                    operand
-  oakdsp_data,          // generate ...                    data directive
-  NULL,                 // compare operands
-  can_have_type,        // can_have_type
-
-  qnumber(register_names), // Number of registers
   register_names,       // Register names
-  NULL,                 // get abstract register
-
-  0,                    // Number of register files
-  NULL,                 // Register file names
-  NULL,                 // Register descriptions
-  NULL,                 // Pointer to CPU registers
+  qnumber(register_names), // Number of registers
 
   PAGE,                 // first
   vDS,                  // last
@@ -456,28 +554,13 @@ processor_t LPH =
 
   OAK_Dsp_null,
   OAK_Dsp_last,
-  Instructions,
-
-  NULL,                 // int  (*is_far_jump)(int icode);
-  NULL,                 // Translation function for offsets
+  Instructions,         // instruc
   0,                    // int tbyte_size;  -- doesn't exist
-  NULL,                 // int (*realcvt)(void *m, ushort *e, ushort swt);
   { 0, 7, 15, 0 },      // char real_width[4];
                         // number of symbols after decimal point
                         // 2byte float (0-does not exist)
                         // normal float
                         // normal double
                         // long double
-  NULL,                 // int (*is_switch)(switch_info_t *si);
-  NULL,                 // int32 (*gen_map_file)(FILE *fp);
-  NULL,                 // ea_t (*extract_address)(ea_t ea,const char *string,int x);
-  is_sp_based,          // int (*is_sp_based)(op_t &x);
-  create_func_frame,    // int (*create_func_frame)(func_t *pfn);
-  OAK_get_frame_retsize,// int (*get_frame_retsize(func_t *pfn)
-  gen_stkvar_def,       // void (*gen_stkvar_def)(char *buf,const member_t *mptr,int32 v);
-  gen_spcdef,           // Generate text representation of an item in a special segment
   OAK_Dsp_ret,          // Icode of return instruction. It is ok to give any of possible return instructions
-  set_idp_options,      // const char *(*set_idp_options)(const char *keyword,int value_type,const void *value);
-  is_align_insn,        // int (*is_align_insn)(ea_t ea);
-  NULL,                 // mvm_t *mvm;
 };

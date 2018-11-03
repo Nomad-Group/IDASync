@@ -182,12 +182,12 @@
 //      command: the command you want to send
 // Returns: output string or empty string if it failed
 //
-// string SendDbgCommand(string command)
+// string send_dbg_command(string command)
 //
 
 //
 // Retrieves the parameter value passed to an IDC script that is implementing a given API.
-// This same function can be implemented with this expression: #define BX_GETPARAM(n) Dword(esp+4*(n+1))
+// This same function can be implemented with this expression: #define BX_GETPARAM(n) get_wide_dword(esp+4*(n+1))
 //      arg_num: the argument number (starting by one)
 // Returns: the value or zero in case it fails
 //
@@ -222,7 +222,7 @@ static BochsPatchDbgDword(ea, dv)
   auto i;
   for (i=0;i<4;i++)
   {
-    PatchDbgByte(ea, dv & 0xFF);
+    patch_dbg_byte(ea, dv & 0xFF);
     ea = ea + 1;
     dv = dv >> 8;
   }
@@ -233,7 +233,7 @@ static BochsPatchDbgDword(ea, dv)
 // in order to skip to the next instruction w/o suspending IDA
 static bochs_skipnext()
 {
-  Eip = NextHead(eip, BADADDR);
+  Eip = next_head(eip, BADADDR);
   return 0;
 }
 
@@ -242,7 +242,7 @@ static bochs_skipnext()
 // in order to execute the contents of the comments at the bp location
 static bochs_execidc_comments()
 {
-  ExecIDC(Comment(eip));
+  exec_idc(Comment(eip));
   return 0;
 }
 
@@ -251,20 +251,20 @@ static bochs_execidc_comments()
 // with the bochs_execidc_comments() bp condition
 static bochs_dump_registers()
 {
-  Message("eax=0x%x;ebx=0x%x;ecx=0x%x;edx=0x%x;esi=0x%x;edi=0x%x;ebp=0x%x;", eax, ebx, ecx, edx, esi, edi, ebp);
+  msg("eax=0x%x;ebx=0x%x;ecx=0x%x;edx=0x%x;esi=0x%x;edi=0x%x;ebp=0x%x;", eax, ebx, ecx, edx, esi, edi, ebp);
 }
 
 // ----------------------------------------------------------------------------
 static bochs_startup()
 {
-  Message("Bochs debugger has been initialized.\n");
+  msg("Bochs debugger has been initialized.\n");
   return 0;
 }
 
 // ----------------------------------------------------------------------------
 static bochs_exit()
 {
-  Message("Bochs debugger has been terminated.\n");
+  msg("Bochs debugger has been terminated.\n");
   return 0;
 }
 

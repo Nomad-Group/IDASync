@@ -14,7 +14,7 @@ AS_PRINTF(1, 2) inline void pe_failure(const char *format, ...)
   qstring question("AUTOHIDE REGISTRY\n");
   question.cat_vsprnt(format, va);
   question.append("\nDo you wish to continue?");
-  if ( askyn_c(ASKBTN_YES, "%s", question.c_str()) != ASKBTN_YES )
+  if ( ask_yn(ASKBTN_YES, "%s", question.c_str()) != ASKBTN_YES )
   {
     loader_failure(NULL);
   }
@@ -69,8 +69,8 @@ inline bool pe64_to_pe(peheader_t &pe, const peheader64_t &pe64, bool silent, bo
   // Do various checks
   if ( !pe.is_efi()
     && (pe.objalign < pe.filealign
-    || pe.filealign !=0 && (pe.filealign & (pe.filealign-1) ) != 0   // check for power of 2
-    || pe.objalign  !=0 && (pe.objalign  & (pe.objalign -1) ) != 0) ) // check for power of 2
+     || pe.filealign != 0 && (pe.filealign & (pe.filealign-1)) != 0    // check for power of 2
+     || pe.objalign  != 0 && (pe.objalign  & (pe.objalign -1)) != 0) ) // check for power of 2
   {
     if ( !silent )
       pe_failure("Invalid file: bad alignment value specified (section alignment: %08X, file alignment: %08X)", pe.objalign, pe.filealign);
@@ -125,7 +125,7 @@ inline bool pe_loader_t::read_header(linput_t *li, off_t _peoff, bool silent, bo
          && size <= sizeof(pe64)
          && (pe64.signature == PEEXE_ID || pe64.signature == BPEEXE_ID || pe64.signature == PLEXE_ID)
     && pe64_to_pe(pe, pe64, silent, zero_bad_data);
-  if ( ok  )
+  if ( ok )
   {
     //initialize imagebase for loading
     set_imagebase((ea_t)pe.imagebase());
@@ -148,7 +148,7 @@ inline bool pe_loader_t::read_header(linput_t *li, bool silent, bool zero_bad_da
       qlseek(li, hdroff);
       lread(li, &te, sizeof(te));
       bool ok = te_to_pe(pe, te);
-      if ( ok  )
+      if ( ok )
       {
         //initialize imagebase for loading
         set_imagebase((ea_t)pe.imagebase());
@@ -184,7 +184,7 @@ inline bool pe_loader_t::read_header(linput_t *li, bool silent, bool zero_bad_da
 //
 inline ea_t pe_loader_t::map_ea(ea_t rva, const transl_t **tl)
 {
-  for ( ssize_t i=transvec.size()-1; i >= 0 ; i-- )
+  for ( ssize_t i=transvec.size()-1; i >= 0; i-- )
   {
     const transl_t &trans = transvec[i];
     if ( trans.start <= rva && trans.end > rva )
@@ -213,10 +213,26 @@ inline bool pe_loader_t::vseek(linput_t *li, uint32 rva)
 //------------------------------------------------------------------------
 inline char *pe_loader_t::asciiz(linput_t *li, uint32 rva, char *buf, size_t bufsize, bool *ok)
 {
-  bool _ok = vseek(li, rva);
-  if ( !_ok && ok != NULL )
+  vseek(li, rva);
+  buf[0] = '\0';
+  char *ret = qlgetz(li, -1, buf, bufsize);
+  *ok = buf[0] != '\0';
+  return ret;
+}
+
+//------------------------------------------------------------------------
+// same as asciiz() but don't set ok to false for successfully read empty strings
+inline char *pe_loader_t::asciiz2(linput_t *li, uint32 rva, char *buf, size_t bufsize, bool *ok)
+{
+  vseek(li, rva);
+  buf[0] = '\0';
+  //do not use qlgetz() here because we won't distinguish empty strings from read errors
+  ssize_t readsize = qlread(li, buf, bufsize-1);
+  if ( readsize < 0 || readsize >= bufsize )
     *ok = false;
-  return qlgetz(li, -1, buf, bufsize);
+  else
+    buf[readsize] = '\0';
+  return buf;
 }
 
 //------------------------------------------------------------------------
@@ -301,6 +317,17 @@ inline int pe_loader_t::process_sections(linput_t *li)
   return process_sections(li, v);
 }
 
+//-------------------------------------------------------------------------
+inline void to_utf8(char *buf, size_t bufsz, bool force=false)
+{
+  if ( force || !is_valid_utf8(buf) )
+  {
+    qstring qbuf;
+    if ( idb_utf8(&qbuf, buf) )
+      qstrncpy(buf, qbuf.c_str(), bufsz);
+  }
+}
+
 //------------------------------------------------------------------------
 // process import table for one dll
 inline int pe_loader_t::process_import_table(
@@ -324,18 +351,17 @@ inline int pe_loader_t::process_import_table(
     uint64 entry = is_pe_plus ? vaint64(li, fof, &ok) : valong(li, fof, &ok);
     if ( entry == 0 )
       break;
-    showAddr(atable);
+    show_addr(atable);
 
     int code;
-    if( (entry & mask) == 0 )   // by name
+    if ( (entry & mask) == 0 )   // by name
     {
       ea_t nrva = (uval_t)entry + sizeof(short);
       if ( piv.withbase )
         nrva -= (uval_t)pe.imagebase();
       fof = uint32(nrva);
-      asciiz(li, fof, buf, sizeof(buf), &ok);
-      if ( !win_utf2idb(buf) )
-        ansi2idb(buf);
+      asciiz2(li, fof, buf, sizeof(buf), &ok);
+      to_utf8(buf, sizeof(buf));
       code = piv.visit_import(atable, entry, buf);
     }
     else
@@ -435,9 +461,9 @@ inline int pe_loader_t::process_imports(linput_t *li, pe_import_visitor_t &piv)
     bool ok = true;
     char dll[MAXSTR];
     asciiz(li, id.dllname, dll, sizeof(dll), &ok);
-    if ( !ok || dll[0] == '\0' )
+    if ( !ok )
       break;
-    ansi2idb(dll);
+    to_utf8(dll, sizeof(dll), /*force=*/ true);
     if ( map_ea(ltable) == BADADDR
       || ltable < pe.allhdrsize
       || pe.imagesize != 0 && ltable >= pe.imagesize )
@@ -485,7 +511,7 @@ inline int pe_loader_t::process_delayed_imports(linput_t *li, pe_import_visitor_
     asciiz(li, off, dll, sizeof(dll), &ok);
     if ( !ok )
       break;
-    ansi2idb(dll);
+    to_utf8(dll, sizeof(dll), /*force=*/ true);
     code = il.visit_module(dll, atable, ltable);
     if ( code != 0 )
       break;
@@ -511,19 +537,19 @@ inline int pe_loader_t::process_exports(linput_t *li, pe_export_visitor_t &pev)
     return -2;
 
   // process export directory
-  bool ok = true;
+  bool fok = true;
   char buf[MAXSTR];
   peexpdir_t ed;
   lread(li, &ed, sizeof(ed));
-  asciiz(li, ed.dllname, buf, sizeof(buf), &ok);
-  ansi2idb(buf);
+  asciiz2(li, ed.dllname, buf, sizeof(buf), &fok);
+  to_utf8(buf, sizeof(buf), /*force=*/ true);
   int code = pev.visit_expdir(ed, buf);
   if ( code != 0 )
     return code;
 
   // I'd like to have a better validation
-  asize_t maxsize = qlsize(li) + 4096;
-  if ( maxsize > pe.expdir.size )
+  uint64 maxsize = qlsize(li) + 4096;
+  if ( maxsize > pe.expdir.size && pe.expdir.size != 0 )
     maxsize = pe.expdir.size;
   validate_array_count(NULL, &ed.nnames, 6, "Number of exported names",
                        pe.expdir.rva, pe.expdir.rva+maxsize);
@@ -533,30 +559,45 @@ inline int pe_loader_t::process_exports(linput_t *li, pe_export_visitor_t &pev)
   // gather name information
   typedef std::map<int, qstring> names_t;
   names_t names;
-  for ( uint32 i=0; i < ed.nnames && ok; i++ )
+  int rcode = fok ? 0 : -1;
+  for ( uint32 i=0; i < ed.nnames; i++ )
   {
-    uint32 ordidx = vashort(li, ed.ordtab + i*sizeof(ushort), &ok);
-    if ( !ok )
-      break;
+    fok = true;
+    uint32 ordidx = vashort(li, ed.ordtab + i*sizeof(ushort), &fok);
+    if ( !fok )
+    {
+      if ( rcode == 0 )
+        rcode = -1;
+      continue;
+    }
     ushort ord = ushort(ordidx + ed.ordbase);
-    uint32 rva = valong(li, ed.namtab + i*sizeof(uint32), &ok);
-    if ( !ok )
-      break;
-    asciiz(li, rva, buf, sizeof(buf), &ok);
-    if ( !ok )
-      break;
-    if ( !win_utf2idb(buf) )
-      ansi2idb(buf);
+    uint32 rva = valong(li, ed.namtab + i*sizeof(uint32), &fok);
+    if ( !fok )
+    {
+      if ( rcode == 0 )
+        rcode = -1;
+      continue;
+    }
+    asciiz2(li, rva, buf, sizeof(buf), &fok);
+    if ( !fok )
+    {
+      if ( rcode == 0 )
+        rcode = -1;
+      continue;
+    }
+    to_utf8(buf, sizeof(buf));
     names[ord] = buf;
   }
 
   // visit all exports
   uint32 expdir_start_rva = pe.expdir.rva;
   uint32 expdir_end_rva   = pe.expdir.rva + maxsize;
-  for ( uint32 i=0; i < ed.naddrs && ok; i++ )
+
+  for ( uint32 i = 0; i < ed.naddrs; i++ )
   {
-    uint32 rva = valong(li, ed.adrtab + i*sizeof(uint32), &ok);
-    if ( rva != 0 && ok )
+    fok = true;
+    uint32 rva = valong(li, ed.adrtab + i*sizeof(uint32), &fok);
+    if ( rva != 0 && fok )
     {
       uint32 ord = i + ed.ordbase;
       names_t::iterator p = names.find(ord);
@@ -564,27 +605,44 @@ inline int pe_loader_t::process_exports(linput_t *li, pe_export_visitor_t &pev)
       const char *forwarder = NULL;
       if ( rva >= expdir_start_rva && rva < expdir_end_rva )
       {
-        asciiz(li, rva, buf, sizeof(buf), &ok);
-        if ( !ok )
-          break;
-        char* dot = strrchr(buf, '.');
-        if ( dot != NULL )
-          *dot = '\0';
-        ansi2idb(buf);
+        // string inside export directory: this is a forwarded export
+        asciiz(li, rva, buf, sizeof(buf), &fok);
+        if ( !fok )
+        {
+          if ( rcode == 0 )
+            rcode = -1;
+          continue;
+        }
+        char *dot = strrchr(buf, '.');
         if ( dot != NULL )
         {
-          *dot++ = '.';
-          if ( !win_utf2idb(dot) )
-            ansi2idb(dot);
+          char before_dot[MAXSTR];
+          char after_dot[MAXSTR];
+          *dot = '\0';
+          qstrncpy(before_dot, buf, sizeof(before_dot));
+          qstrncpy(after_dot, dot+1, sizeof(after_dot));
+          to_utf8(before_dot, sizeof(before_dot), /*force=*/ true);
+          to_utf8(after_dot, sizeof(after_dot), /*force=*/ false);
+          qsnprintf(buf, sizeof(buf), "%s.%s", before_dot, after_dot);
+        }
+        else
+        {
+          to_utf8(buf, sizeof(buf), /*force=*/ true);
         }
         forwarder = buf;
       }
       code = pev.visit_export(rva, ord, name, forwarder);
       if ( code != 0 )
-        return code;
+      {
+        if ( rcode == 0 )
+          rcode = code;
+      }
     }
+    else if ( !fok )
+      rcode = -1;
   }
-  return ok ? 0 : -1;
+
+  return rcode;
 }
 
 //------------------------------------------------------------------------

@@ -136,12 +136,12 @@ static int for_all_serial_ports(serial_port_visitor_t &v)
   typedef HDEVINFO (__stdcall SETUPDIGETCLASSDEVS)(LPGUID, LPCTSTR, HWND, DWORD);
   typedef BOOL (__stdcall SETUPDIGETDEVICEREGISTRYPROPERTY)(HDEVINFO, PSP_DEVINFO_DATA, DWORD, PDWORD, PBYTE, DWORD, PDWORD);
 
-  SETUPDIOPENDEVREGKEY* lpfnLPSETUPDIOPENDEVREGKEY;
-  SETUPDICLASSGUIDSFROMNAME* lpfnSETUPDICLASSGUIDSFROMNAME;
-  SETUPDIGETCLASSDEVS* lpfnSETUPDIGETCLASSDEVS;
-  SETUPDIGETDEVICEREGISTRYPROPERTY* lpfnSETUPDIGETDEVICEREGISTRYPROPERTY;
-  SETUPDIDESTROYDEVICEINFOLIST* lpfnSETUPDIDESTROYDEVICEINFOLIST;
-  SETUPDIENUMDEVICEINFO* lpfnSETUPDIENUMDEVICEINFO;
+  SETUPDIOPENDEVREGKEY *lpfnLPSETUPDIOPENDEVREGKEY;
+  SETUPDICLASSGUIDSFROMNAME *lpfnSETUPDICLASSGUIDSFROMNAME;
+  SETUPDIGETCLASSDEVS *lpfnSETUPDIGETCLASSDEVS;
+  SETUPDIGETDEVICEREGISTRYPROPERTY *lpfnSETUPDIGETDEVICEREGISTRYPROPERTY;
+  SETUPDIDESTROYDEVICEINFOLIST *lpfnSETUPDIDESTROYDEVICEINFOLIST;
+  SETUPDIENUMDEVICEINFO *lpfnSETUPDIENUMDEVICEINFO;
 
   *(FARPROC*)&lpfnLPSETUPDIOPENDEVREGKEY = GetProcAddress(hSetupAPI, "SetupDiOpenDevRegKey");
   *(FARPROC*)&lpfnSETUPDICLASSGUIDSFROMNAME = GetProcAddress(hSetupAPI, "SetupDiClassGuidsFromNameA");
@@ -305,10 +305,11 @@ bool metrotrk_t::init(int port)
   qstring friendly_name;
   if ( !is_serial_port_present(port, &friendly_name) )
   {
-      if ( askyn_c(0,
-                   "HIDECANCEL\n"
-                   "Serial port COM%d seems to be unavailable. Do you want to proceed?",
-                   port ) <= 0 )
+      if ( ask_yn(ASKBTN_NO,
+                  "HIDECANCEL\n"
+                  "Serial port COM%d seems to be unavailable.\n"
+                  "Do you want to proceed?",
+                  port) <= 0 )
       {
         SetLastError(ERROR_DEVICE_NOT_CONNECTED);
         return false;
@@ -580,7 +581,7 @@ bool metrotrk_t::recv_packet(uchar *seq, int timeout)
 //      type, errcode, data...
 bool metrotrk_t::process_packet(size_t minsize, bool allow_extra_bytes)
 {
-  int cmd = pkt[1];
+  int cmnd = pkt[1];
   if ( !send_packet() )
     return false;
 
@@ -600,7 +601,7 @@ GOTPKT:
     {
       if ( seq == uchar(expected_seq) )
         break;
-      if ( cmd == TrkPing )
+      if ( cmnd == TrkPing )
       {
         msg("wrong sequence number %x (expected %x)\n", seq, expected_seq);
         return false;
@@ -667,21 +668,21 @@ bool metrotrk_t::disconnect(void)
 
 //-------------------------------------------------------------------------
 // TRK command: Get support mask
-bool metrotrk_t::support_mask(uchar mask[32], uchar *protocol_level)
+bool metrotrk_t::support_mask(uchar mask[SUPPORT_MASK_SZ], uchar *protocol_level)
 {
   init_packet(TrkSupportMask);
   if ( !process_packet(33) )
     return false;
   if ( mask != NULL )
-    memcpy(mask, &pkt[2], sizeof(mask));
+    memcpy(mask, &pkt[2], SUPPORT_MASK_SZ);
   if ( protocol_level != NULL )
-    *protocol_level = pkt[2+sizeof(mask)];
+    *protocol_level = pkt[2+SUPPORT_MASK_SZ];
   if ( debug_debugger )
   {
     if ( mask != NULL )
     {
       msg("    MASK:");
-      for ( int i=0; i < sizeof(mask); i++ )
+      for ( int i=0; i < SUPPORT_MASK_SZ; i++ )
         msg("%s%02X", i == 16 ? "\n          " : " ", mask[i]);
     }
     if ( protocol_level != NULL )
@@ -695,7 +696,7 @@ bool metrotrk_t::support_mask(uchar mask[32], uchar *protocol_level)
 bool metrotrk_t::cpu_type(trk_cpuinfo_t *cpuinfo)
 {
   init_packet(TrkCPUType);
-  if ( !process_packet(sizeof(cpuinfo)) )
+  if ( !process_packet(sizeof(*cpuinfo)) )
     return false;
   memcpy(cpuinfo, &pkt[2], sizeof(*cpuinfo));
   if ( debug_debugger )
@@ -889,7 +890,8 @@ bool metrotrk_t::install_sis_file(const char *local_sis_fname, char drive)
 
   static const char remote_sis_fname[] = "c:\\temporary.sis";
   int mode = TrkFileOpenCreate|TrkFileOpenRead|TrkFileOpenBinary;
-  int h = open_file(remote_sis_fname, mode);   QASSERT(30108, h > 0);
+  int h = open_file(remote_sis_fname, mode);
+  QASSERT(30108, h > 0);
   ssize_t written = write_file(h, body.begin(), body.size());
   QASSERT(30109, written == body.size()); qnotused(written);
   if ( !close_file(h, 0) )

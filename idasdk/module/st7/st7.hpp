@@ -62,30 +62,25 @@ enum regnum_t ENUM8BIT
 //------------------------------------------------------------------
 extern netnode helper;
 
-ea_t calc_mem(ea_t ea);         // map virtual to physical ea
+ea_t calc_mem(const insn_t &insn, ea_t ea); // map virtual to physical ea
 const ioport_t *find_sym(ea_t address);
 //------------------------------------------------------------------
-void interr(const char *module);
+void interr(const insn_t &insn, const char *module);
 
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi st7_header(outctx_t &ctx);
+void idaapi st7_footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);         // function to produce assume directives
+void idaapi st7_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi st7_segend(outctx_t &ctx, segment_t *seg);
+void idaapi st7_assumes(outctx_t &ctx);         // function to produce assume directives
 
-void idaapi out(void);
-int  idaapi outspec(ea_t ea,uchar segtype);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi st7_ana(insn_t *insn);
+int  idaapi st7_emu(const insn_t &insn);
 
 int  idaapi is_align_insn(ea_t ea);
 
 int is_jump_func(const func_t *pfn, ea_t *jump_target);
-int is_sane_insn(int nocrefs);
-int may_be_func(void);           // can a function start here?
+int is_sane_insn(const insn_t &insn, int nocrefs);
+int may_be_func(const insn_t &insn);  // can a function start here?
 
 #endif // _ST7_HPP

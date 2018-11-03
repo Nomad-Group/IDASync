@@ -5,13 +5,13 @@
 //lint -esym(749, S_11) not referenced
 enum
 {
-    S_0,
-    S_4,        // 4 bits
-    S_5,        // 5 bits
-    S_8,        // 8 bits
-    S_11,       // 11 bits
-    S_12,       // 12 bits
-    S_16        // 16 bits
+  S_0,
+  S_4,        // 4 bits
+  S_5,        // 5 bits
+  S_8,        // 8 bits
+  S_11,       // 11 bits
+  S_12,       // 12 bits
+  S_16        // 16 bits
 };
 
 // bits numbers for sizes :
@@ -52,43 +52,44 @@ const char dtypes[] =
 // distinct operands :
 enum
 {
-    O_null,         // null opcode
-    O_gr,           // general register                         Ri
-    O_gri,          // general register indirect                @Ri
-    O_grip,         // general register indirect post-increment @Ri+
-    O_r13_gr_i,     // indirect r13 + general register          @(R13, Ri)
-    O_r14_imm8_i,   // indirect r14 + 8 bits immediate value    @(R14, imm)
-    O_r15_imm4_i,   // indirect r15 + 4 bits immediate value    @(R15, imm)
-    O_r15ip,        // indirect r15 post-increment              @R15+
-    O_r15im,        // indirect r15 pre-decrement               @-R15
-    O_r13,          // register r13                             R13
-    O_r13ip,        // indirect r13 post-increment              @R13+
-    O_dr,           // dedicated register                       Rs
-    O_ps,           // program status register (PS)             PS
-    O_imm,          // immediate value                          #i
-    O_diri,         // indirect direct value                    @i
-    O_rel,          // relative value                           label5
-    O_reglist       // register list                            (R0, R1, R2, ...)
+  O_null,         // null opcode
+  O_gr,           // general register                         Ri
+  O_gri,          // general register indirect                @Ri
+  O_grip,         // general register indirect post-increment @Ri+
+  O_r13_gr_i,     // indirect r13 + general register          @(R13, Ri)
+  O_r14_imm8_i,   // indirect r14 + 8 bits immediate value    @(R14, imm)
+  O_r15_imm4_i,   // indirect r15 + 4 bits immediate value    @(R15, imm)
+  O_r15ip,        // indirect r15 post-increment              @R15+
+  O_r15im,        // indirect r15 pre-decrement               @-R15
+  O_r13,          // register r13                             R13
+  O_r13ip,        // indirect r13 post-increment              @R13+
+  O_dr,           // dedicated register                       Rs
+  O_ps,           // program status register (PS)             PS
+  O_imm,          // immediate value                          #i
+  O_diri,         // indirect direct value                    @i
+  O_rel,          // relative value                           label5
+  O_reglist       // register list                            (R0, R1, R2, ...)
 };
 
-static int invert_word(int word) {
-    int new_word = 0;
+static int invert_word(int word)
+{
+  int new_word = 0;
 
-    new_word |= (word & 0x000F) >> 0;
-    new_word <<= 4;
-    new_word |= (word & 0x00F0) >> 4;
-    new_word <<= 4;
-    new_word |= (word & 0x0F00) >> 8;
-    new_word <<= 4;
-    new_word |= (word & 0xF000) >> 12;
+  new_word |= (word & 0x000F) >> 0;
+  new_word <<= 4;
+  new_word |= (word & 0x00F0) >> 4;
+  new_word <<= 4;
+  new_word |= (word & 0x0F00) >> 8;
+  new_word <<= 4;
+  new_word |= (word & 0xF000) >> 12;
 
-    return new_word;
+  return new_word;
 }
 
 // structure of an opcode :
 struct opcode_t
 {
-  int insn;
+  int itype;
   int opcode;
   int opcode_size;
 
@@ -112,13 +113,15 @@ struct opcode_t
   int size(void) const
   {
     int n = bits[opcode_size];
-    if ( op1 != O_null )   n += bits[op1_size];
-    if ( op2 != O_null )   n += bits[op2_size];
+    if ( op1 != O_null )
+      n += bits[op1_size];
+    if ( op2 != O_null )
+      n += bits[op2_size];
     return n;
   }
 
   static void check(void);
-  static const struct opcode_t * find(int *_data);
+  static const struct opcode_t *find(insn_t &insn, int *_data);
 };
 
 // FR opcodes :
@@ -291,7 +294,7 @@ static const struct opcode_t opcodes[] =
 
 void opcode_t::check(void)
 {
-  for (int i = 0; i < qnumber(opcodes); i++)
+  for ( int i = 0; i < qnumber(opcodes); i++ )
   {
     int n = opcodes[i].size();
 //  if ( n != 16 && n != 32 )
@@ -300,11 +303,11 @@ void opcode_t::check(void)
   }
 }
 
-const struct opcode_t * opcode_t::find(int *_data)
+const struct opcode_t * opcode_t::find(insn_t &insn, int *_data)
 {
   QASSERT(10002, _data != NULL);
 
-  int data = (*_data << 8) | get_byte(cmd.ip + cmd.size);
+  int data = (*_data << 8) | get_byte(insn.ip + insn.size);
   for ( int i = 0; i < qnumber(opcodes); i++ )
   {
     int mask;
@@ -321,7 +324,7 @@ const struct opcode_t * opcode_t::find(int *_data)
     if ( ((data & mask) >> shift) != opcodes[i].opcode )
       continue;
 
-    cmd.size++;
+    insn.size++;
     *_data = invert_word(data);
     return &opcodes[i];
   }
@@ -373,7 +376,7 @@ static void set_reg(op_t &op, int reg, char d_typ)
 {
   op.type = o_reg;
   op.reg = (uint16)reg;
-  op.dtyp = d_typ;
+  op.dtype = d_typ;
 }
 
 // fill an operand as an immediate value.
@@ -387,7 +390,7 @@ static void set_imm(op_t &op, int imm, char d_typ)
     case dt_dword: op.value = imm; break;
     default:       INTERR(10013);
   }
-  op.dtyp = d_typ;
+  op.dtype = d_typ;
 }
 
 // fill an operand as a phrase.
@@ -411,11 +414,11 @@ static void set_phrase(op_t &op, int type, int val, char d_typ)
   }
   op.type = o_phrase;
   op.specflag2 = (char)type;
-  op.dtyp = d_typ;
+  op.dtype = d_typ;
 }
 
 // fill an operand as a relative address.
-static void set_rel(op_t &op, int addr, char d_typ)
+static void set_rel(const insn_t &insn, op_t &op, int addr, char d_typ)
 {
   op.type = o_near;
   int raddr;
@@ -432,11 +435,11 @@ static void set_rel(op_t &op, int addr, char d_typ)
     default:
       INTERR(10015);
   }
-  op.addr = cmd.ip + 2 + (raddr * 2);
+  op.addr = insn.ip + 2 + (raddr * 2);
 #if defined(__DEBUG__)
-  msg("0x%a = 0x%a + 2 + ((signed) 0x%X) * 2)\n", op.addr, cmd.ip, addr);
+  msg("0x%a = 0x%a + 2 + ((signed) 0x%X) * 2)\n", op.addr, insn.ip, addr);
 #endif /* __DEBUG__ */
-  op.dtyp = dt_code;
+  op.dtype = dt_code;
 }
 
 // fill an operand as a reglist
@@ -444,21 +447,24 @@ static void set_reglist(op_t &op, int list)
 {
   op.type = o_reglist;
   op.value = list;
-  op.dtyp = dt_byte;  // list is coded in a byte
+  op.dtype = dt_byte;  // list is coded in a byte
 }
 
 static void set_displ(op_t &op, int reg, int imm, int flag, int local_flag)
 {
   op.type = o_displ;
-  if ( reg != -1) op.reg = (uint16)get_gr(reg );
+  if ( reg != -1 )
+    op.reg = (uint16)get_gr(reg);
   if ( imm != -1 )
   {
     int mul = 1;
-    if ( local_flag & I_IMM_2 ) mul = 2;
-    if ( local_flag & I_IMM_4 ) mul = 4;
+    if ( local_flag & I_IMM_2 )
+      mul = 2;
+    if ( local_flag & I_IMM_4 )
+      mul = 4;
     op.value = ((unsigned) imm) * mul;
   }
-  op.dtyp = dt_byte;
+  op.dtype = dt_byte;
   op.specflag1 |= flag;
 }
 
@@ -534,17 +540,17 @@ static void prepare_data(int size, int *data) {
 #define __set_cr(op, reg)               set_reg(op, reg, dt_word)
 #define set_cr(op, reg)                 __set_cr(op, get_cr(reg))
 
-#define set_gri(op, reg)                set_phrase(op, fIGR, get_gr(reg), dt_byte)
-#define set_grip(op, reg)               set_phrase(op, fIGRP, get_gr(reg), dt_byte)
-#define set_grim(op, reg)               set_phrase(op, fIGRM, get_gr(reg), dt_byte)
-#define set_diri(op, addr)              set_phrase(op, fIRA, addr, dt_word)
-#define set_r13_gr_i(op, reg)           set_phrase(op, fR13RI, get_gr(reg), dt_byte)
-#define fill_op1(data, opc)             fill_op(data, cmd.Op1, opc->op1, opc->op1_size, opc->flags)
-#define fill_op2(data, opc)             fill_op(data, cmd.Op2, opc->op2, opc->op2_size, opc->flags)
+#define set_gri(insn, op, reg)          set_phrase(op, fIGR, get_gr(reg), dt_byte)
+#define set_grip(insn, op, reg)         set_phrase(op, fIGRP, get_gr(reg), dt_byte)
+#define set_grim(insn, op, reg)         set_phrase(op, fIGRM, get_gr(reg), dt_byte)
+#define set_diri(insn, op, addr)        set_phrase(op, fIRA, addr, dt_word)
+#define set_r13_gr_i(insn, op, reg)     set_phrase(op, fR13RI, get_gr(reg), dt_byte)
+#define fill_op1(insn, data, opc)       fill_op(insn, data, insn.Op1, opc->op1, opc->op1_size, opc->flags)
+#define fill_op2(insn, data, opc)       fill_op(insn, data, insn.Op2, opc->op2, opc->op2_size, opc->flags)
 //#define set_displ_gr(op, gr, f1)        set_displ(op, gr, -1, f1, 0)
 #define set_displ_imm(op, imm, f1, f2)  set_displ(op, -1, imm, f1, f2)
 
-static void fill_op(int data, op_t &op, int operand, int operand_size, int flags)
+static void fill_op(const insn_t &insn, int data, op_t &op, int operand, int operand_size, int flags)
 {
   data &= masks[operand_size];
   //prepare_data(operand_size, &data);
@@ -557,16 +563,16 @@ static void fill_op(int data, op_t &op, int operand, int operand_size, int flags
 
     case O_gri:          // general register indirect                @Ri
       QASSERT(10010, operand_size == S_4);
-      set_gri(op, data);
+      set_gri(insn, op, data);
       break;
 
     case O_grip:          // general register indirect                @Ri
       QASSERT(10011, operand_size == S_4);
-      set_grip(op, data);
+      set_grip(insn, op, data);
       break;
 
     case O_r13_gr_i:     // indirect r13 + general register          @(R13, Ri)
-      set_r13_gr_i(op, data);
+      set_r13_gr_i(insn, op, data);
       break;
 
     case O_r14_imm8_i:   // indirect r14 + 8 bits immediate value    @(R14, imm)
@@ -580,11 +586,11 @@ static void fill_op(int data, op_t &op, int operand, int operand_size, int flags
       break;
 
     case O_r15ip:        // indirect r15 post-increment              @R15+
-      set_grip(op, rR15);
+      set_grip(insn, op, rR15);
       break;
 
     case O_r15im:        // indirect r15 pre-decrement               @-R15
-      set_grim(op, rR15);
+      set_grim(insn, op, rR15);
       break;
 
     case O_r13:          // register r13                             R13
@@ -592,7 +598,7 @@ static void fill_op(int data, op_t &op, int operand, int operand_size, int flags
       break;
 
     case O_r13ip:        // indirect r13 post-increment              @R13+
-      set_grip(op, rR13);
+      set_grip(insn, op, rR13);
       break;
 
     case O_dr:           // dedicated register                       Rs
@@ -605,24 +611,26 @@ static void fill_op(int data, op_t &op, int operand, int operand_size, int flags
 
     case O_imm:          // immediate value                          #i
       SWAP_IF_BYTE(data);
-      if ( cmd.itype == fr_enter )
+      if ( insn.itype == fr_enter )
         data *= 4;
-      if ( cmd.itype == fr_addsp )
+      if ( insn.itype == fr_addsp )
         data = ((signed) data) * 4;
       set_imm(op, data, dtypes[operand_size]);
       break;
 
     case O_diri:         // indirect direct value                    @i
       SWAP_IF_BYTE(data);
-      if ( cmd.itype == fr_dmov )   data *= 4;
-      if ( cmd.itype == fr_dmovh )  data *= 2;
-      set_diri(op, data);
+      if ( insn.itype == fr_dmov )
+        data *= 4;
+      if ( insn.itype == fr_dmovh )
+        data *= 2;
+      set_diri(insn, op, data);
       op.specflag1 |= flags;
       break;
 
     case O_rel:          // relative value                           label5
       SWAP_IF_BYTE(data);
-      set_rel(op, data, dtypes[operand_size]);
+      set_rel(insn, op, data, dtypes[operand_size]);
       break;
 
     case O_reglist:      // register list                            (R0, R1, R2, ...)
@@ -636,14 +644,14 @@ static void fill_op(int data, op_t &op, int operand, int operand_size, int flags
 }
 
 // analyze a "common" instruction (those which are listed in the opcodes[] array).
-static bool ana_common(int data)
+static bool ana_common(insn_t &insn, int data)
 {
-  const struct opcode_t *op = opcode_t::find(&data);
+  const struct opcode_t *op = opcode_t::find(insn, &data);
   if ( op == NULL )
     return false;
 
   // fill instruction type
-  cmd.itype = (uint16)op->insn;
+  insn.itype = (uint16)op->itype;
 
   // if instruction is implied, our job is finished!
   if ( op->implied() )
@@ -654,53 +662,53 @@ static bool ana_common(int data)
   // fill operand 1
   if ( op->op1 != O_null )
   {
-    fill_op1(data, op);
+    fill_op1(insn, data, op);
     adjust_data(op->op1_size, &data);
   }
 
   // fill operand 2
   if ( op->op2 != O_null )
   {
-    fill_op2(data, op);
+    fill_op2(insn, data, op);
     adjust_data(op->op2_size, &data);
   }
 
   // swap opcodes if needed
   if ( op->swap_ops() )
-    swap_ops(cmd.Op1, cmd.Op2);
+    swap_ops(insn.Op1, insn.Op2);
 
 ana_finished:
-  cmd.auxpref = 0;
+  insn.auxpref = 0;
 
   // is insn delay shot ?
   if ( op->delay_shot() )
-    cmd.auxpref |= INSN_DELAY_SHOT;
+    insn.auxpref |= INSN_DELAY_SHOT;
 
   return true;
 }
 
 // analyze a "special" instruction (those which are NOT listed in the opcodes[] array).
-static bool ana_special(int data)
+static bool ana_special(insn_t &insn, int data)
 {
   // detect ldi:20 instructions
   if ( data == 0x9B )
   {
-    cmd.itype = fr_ldi_20;
-    data = (data << 8) | ua_next_byte();
-    set_gr(cmd.Op2, data & 0x000F);
-    set_imm(cmd.Op1, ua_next_word() | ((data & 0x00F0) << 12), dt_dword);
+    insn.itype = fr_ldi_20;
+    data = (data << 8) | insn.get_next_byte();
+    set_gr(insn.Op2, data & 0x000F);
+    set_imm(insn.Op1, insn.get_next_word() | ((data & 0x00F0) << 12), dt_dword);
     return true;
   }
 
-  data = (data << 8) | get_byte(cmd.ea + cmd.size);
+  data = (data << 8) | get_byte(insn.ea + insn.size);
 
   // detect ldi:32 instructions
   if ( (data & 0xFFF0) == 0x9F80 )
   {
-    cmd.size++;
-    cmd.itype = fr_ldi_32;
-    set_gr(cmd.Op2, data & 0x000F);
-    set_imm(cmd.Op1, ua_next_long(), dt_dword);
+    insn.size++;
+    insn.itype = fr_ldi_32;
+    set_gr(insn.Op2, data & 0x000F);
+    set_imm(insn.Op1, insn.get_next_dword(), dt_dword);
     return true;
   }
 
@@ -708,59 +716,59 @@ static bool ana_special(int data)
   int tmp = (data & 0xF800) >> 11;
   if ( tmp == 0x1A || tmp == 0x1B )
   {
-    cmd.itype = fr_call;
-    cmd.size++;
+    insn.itype = fr_call;
+    insn.size++;
     // extend sign
     if ( data & 0x400 )
       data |= ~0x07FF;
     else
       data &= 0x07FF;
-    set_rel(cmd.Op1, data, dt_word);
+    set_rel(insn, insn.Op1, data, dt_word);
     if ( tmp == 0x1B )
-        cmd.auxpref |= INSN_DELAY_SHOT;
+        insn.auxpref |= INSN_DELAY_SHOT;
     return true;
   }
 
   // detect copop/copld/copst/copsv instructions
   if ( ((data & 0xFF00) >> 8) == 0x9F )
   {
-    int word = get_word(cmd.ea + cmd.size + 1);
-    cmd.itype = fr_null;
+    int word = get_word(insn.ea + insn.size + 1);
+    insn.itype = fr_null;
     switch ( (data & 0x00F0) >> 4 )
     {
       // copop
       case 0xC:
-        cmd.itype = fr_copop;
-        set_cr(cmd.Op3, (word & 0x00F0) >> 4);
-        set_cr(cmd.Op4, word & 0x000F);
+        insn.itype = fr_copop;
+        set_cr(insn.Op3, (word & 0x00F0) >> 4);
+        set_cr(insn.Op4, word & 0x000F);
         break;
 
       // copld
       case 0xD:
-        cmd.itype = fr_copld;
-        set_gr(cmd.Op3, (word & 0x00F0) >> 4);
-        set_cr(cmd.Op4, word & 0x000F);
+        insn.itype = fr_copld;
+        set_gr(insn.Op3, (word & 0x00F0) >> 4);
+        set_cr(insn.Op4, word & 0x000F);
         break;
 
       // copst
       case 0xE:
-        cmd.itype = fr_copst;
-        set_cr(cmd.Op3, (word & 0x00F0) >> 4);
-        set_gr(cmd.Op4, word & 0x000F);
+        insn.itype = fr_copst;
+        set_cr(insn.Op3, (word & 0x00F0) >> 4);
+        set_gr(insn.Op4, word & 0x000F);
         break;
 
       // copsv
       case 0xF:
-        cmd.itype = fr_copsv;
-        set_cr(cmd.Op3, (word & 0x00F0) >> 4);
-        set_gr(cmd.Op4, word & 0x000F);
+        insn.itype = fr_copsv;
+        set_cr(insn.Op3, (word & 0x00F0) >> 4);
+        set_gr(insn.Op4, word & 0x000F);
         break;
     }
-    if ( cmd.itype != fr_null )
+    if ( insn.itype != fr_null )
     {
-      set_imm(cmd.Op1, data & 0x000F, dt_byte);
-      set_imm(cmd.Op2, (word & 0xFF00) >> 8, dt_byte);
-      cmd.size += 3;
+      set_imm(insn.Op1, data & 0x000F, dt_byte);
+      set_imm(insn.Op2, (word & 0xFF00) >> 8, dt_byte);
+      insn.size += 3;
       return true;
     }
   }
@@ -769,17 +777,19 @@ static bool ana_special(int data)
 }
 
 // analyze an instruction.
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
+  insn_t &insn = *_insn;
+
 #if defined(__DEBUG__)
   opcode_t::check();
 #endif /* __DEBUG__ */
 
-  int byte = ua_next_byte();
+  int byte = insn.get_next_byte();
 
-  bool ok = ana_special(byte);
+  bool ok = ana_special(insn, byte);
   if ( !ok )
-    ok = ana_common(byte);
+    ok = ana_common(insn, byte);
 
-  return ok ? cmd.size : 0;
+  return ok ? insn.size : 0;
 }

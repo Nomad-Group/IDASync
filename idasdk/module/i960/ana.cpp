@@ -13,7 +13,7 @@ struct tabent_t
 {
   ushort itype;
   char opnum;
-  char dtyp;
+  char dtype;
 };
 
 struct sparse_tabent_t
@@ -24,10 +24,10 @@ struct sparse_tabent_t
 };
 
 //--------------------------------------------------------------------------
-inline void opimm(op_t &x, uval_t value, char dtyp)
+inline void opimm(op_t &x, uval_t value, char dtype)
 {
   x.type = o_imm;
-  x.dtyp = dtyp;
+  x.dtype = dtype;
   x.value = value;
 }
 
@@ -35,23 +35,23 @@ inline void opimm(op_t &x, uval_t value, char dtyp)
 inline void opreg(op_t &x, int reg)
 {
   x.type = o_reg;
-  x.dtyp = dt_dword;
-  x.reg  = (uchar)reg;
+  x.dtype = dt_dword;
+  x.reg = (uchar)reg;
 }
 
 //--------------------------------------------------------------------------
-inline void opmem(op_t &x, uval_t addr, char dtyp)
+inline void opmem(op_t &x, uval_t addr, char dtype)
 {
-  x.type = o_mem;
-  x.dtyp = dtyp;
-  x.addr = addr;
+  x.type  = o_mem;
+  x.dtype = dtype;
+  x.addr  = addr;
 }
 
 //--------------------------------------------------------------------------
-inline void opdsp(op_t &x, int base, int idx, int scale, uval_t disp, char dtyp)
+inline void opdsp(op_t &x, int base, int idx, int scale, uval_t disp, char dtype)
 {
   x.type  = o_displ;
-  x.dtyp  = dtyp;
+  x.dtype = dtype;
   x.addr  = disp;
   x.reg   = (uint16)base;
   x.index = (uchar)idx;
@@ -59,10 +59,10 @@ inline void opdsp(op_t &x, int base, int idx, int scale, uval_t disp, char dtyp)
 }
 
 //--------------------------------------------------------------------------
-inline void opphr(op_t &x, int base, int idx, int scale, char dtyp)
+inline void opphr(op_t &x, int base, int idx, int scale, char dtype)
 {
   x.type  = o_phrase;
-  x.dtyp  = dtyp;
+  x.dtype = dtype;
   x.reg   = (uint16)base;
   x.index = (uchar)idx;
   x.scale = (uchar)scale;
@@ -72,12 +72,12 @@ inline void opphr(op_t &x, int base, int idx, int scale, char dtyp)
 inline void opnear(op_t &x, uval_t addr)
 {
   x.type = o_near;
-  x.dtyp = dt_code;
+  x.dtype = dt_code;
   x.addr = addr;
 }
 
 //--------------------------------------------------------------------------
-static bool ctrl(uint32 code)
+static bool ctrl(insn_t &insn, uint32 code)
 {
   static const ushort itypes[] =
   {
@@ -119,23 +119,24 @@ static bool ctrl(uint32 code)
     return false;
   if ( is_strict() && (code & 1) != 0 )
     return false;
-  cmd.itype = itypes[opcode];
+  insn.itype = itypes[opcode];
   if ( opcode >= 0x10 )         // .t or .f are allowed
   {
-    cmd.auxpref |= (code & 2) ? aux_f : aux_t;
+    insn.auxpref |= (code & 2) ? aux_f : aux_t;
   }
   // has operand?
-  if ( Instructions[cmd.itype].feature & CF_USE1 )
+  if ( Instructions[insn.itype].feature & CF_USE1 )
   {
     sval_t disp = code & 0xFFFFFC;
-    if ( disp & 0x800000 ) disp |= ~uval_t(0xFFFFFF); // sign extend
-    opnear(cmd.Op1, cmd.ip+disp);
+    if ( disp & 0x800000 )
+      disp |= ~uval_t(0xFFFFFF); // sign extend
+    opnear(insn.Op1, insn.ip+disp);
   }
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool cobr(uint32 code)
+static bool cobr(insn_t &insn, uint32 code)
 {
   static const ushort itypes[] =
   {
@@ -173,9 +174,10 @@ static bool cobr(uint32 code)
     I960_cmpibo,        /* 0x3f */
   };
   uint32 opcode = (code >> 24) - 0x20;
-  if ( opcode >= qnumber(itypes) ) return false;
-  cmd.itype = itypes[opcode];
-  cmd.auxpref |= (code & 2) ? aux_f : aux_t;
+  if ( opcode >= qnumber(itypes) )
+    return false;
+  insn.itype = itypes[opcode];
+  insn.auxpref |= (code & 2) ? aux_f : aux_t;
 
   int src1 = (code >> 19) & 0x1F;
   int src2 = (code >> 14) & 0x1F;
@@ -183,35 +185,39 @@ static bool cobr(uint32 code)
   // operand 1
   if ( code & 0x2000 ) // M1
   {
-    opimm(cmd.Op1, src1, dt_byte);
-    if ( opcode < 8 ) return false;  // test instructions can't have imm
+    opimm(insn.Op1, src1, dt_byte);
+    if ( opcode < 8 )
+      return false;  // test instructions can't have imm
   }
   else
   {
-    opreg(cmd.Op1, src1);
+    opreg(insn.Op1, src1);
   }
 
-  if ( Instructions[cmd.itype].feature & (CF_USE2|CF_CHG2) )
+  if ( Instructions[insn.itype].feature & (CF_USE2|CF_CHG2) )
   {
     // instruction has at least 3 operands
-    if ( code & 1 ) src2 += SF0; // S2
-    opreg(cmd.Op2, src2);
+    if ( code & 1 )
+      src2 += SF0; // S2
+    opreg(insn.Op2, src2);
     sval_t disp = code & 0x1FFC;
-    if ( disp & 0x1000 ) disp |= ~uval_t(0x1FFF); // sign extend
-    opnear(cmd.Op3, cmd.ip+disp);
+    if ( disp & 0x1000 )
+      disp |= ~uval_t(0x1FFF); // sign extend
+    opnear(insn.Op3, insn.ip+disp);
   }
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool opmemory(op_t &x, uint32 code, char dtyp)
+static bool opmemory(insn_t &insn, op_t &x, uint32 code, char dtype)
 {
   int reg2 = (code >> 14) & 0x1F;
   int mode = (code >> 10) & 0xF;
   if ( mode & 4 )                     /* MEMB FORMAT */
   {
     int scale = (code >> 7) & 0x07;
-    if ( (scale > 4) ) return false;
+    if ( (scale > 4) )
+      return false;
     bool badscale = ((code >> 5) & 0x03) != 0;
     static const int scale_tab[] = { 1, 2, 4, 8, 16 };
     scale = scale_tab[scale];
@@ -221,40 +227,43 @@ static bool opmemory(op_t &x, uint32 code, char dtyp)
     switch ( mode )
     {
       case 4:                                   /* (reg) */
-        opphr(x, reg2, -1, 1, dtyp);
+        opphr(x, reg2, -1, 1, dtype);
         break;
       case 5:                                   /* displ+8(ip) */
-        x.offb = (uchar)cmd.size;
-        disp = ua_next_long();
-        opdsp(x, IP, -1, 1, disp, dtyp);
-//        opmem(x, cmd.ip+8+disp, dtyp);
-//        cmd.auxpref |= aux_ip;
+        x.offb = (uchar)insn.size;
+        disp = insn.get_next_dword();
+        opdsp(x, IP, -1, 1, disp, dtype);
+//        opmem(x, insn.ip+8+disp, dtype);
+//        insn.auxpref |= aux_ip;
         break;
       case 7:                                   /* (reg)[index*scale] */
-        if ( is_strict() && badscale ) return false;
-        opphr(x, reg2, reg3, scale, dtyp);
+        if ( is_strict() && badscale )
+          return false;
+        opphr(x, reg2, reg3, scale, dtype);
         break;
       case 12:                                  /* displacement */
-        x.offb = (uchar)cmd.size;
-        disp = ua_next_long();
-        opmem(x, disp, dtyp);
+        x.offb = (uchar)insn.size;
+        disp = insn.get_next_dword();
+        opmem(x, disp, dtype);
         break;
       case 13:                                  /* displ(reg) */
-        x.offb = (uchar)cmd.size;
-        disp = ua_next_long();
-        opdsp(x, reg2, -1, 1, disp, dtyp);
+        x.offb = (uchar)insn.size;
+        disp = insn.get_next_dword();
+        opdsp(x, reg2, -1, 1, disp, dtype);
         break;
       case 14:                                  /* displ[index*scale] */
-        if ( is_strict() && badscale ) return false;
-        x.offb = (uchar)cmd.size;
-        disp = ua_next_long();
-        opdsp(x, -1, reg3, scale, disp, dtyp);
+        if ( is_strict() && badscale )
+          return false;
+        x.offb = (uchar)insn.size;
+        disp = insn.get_next_dword();
+        opdsp(x, -1, reg3, scale, disp, dtype);
         break;
       case 15:                                  /* displ(reg)[index*scale] */
-        if ( is_strict() && badscale ) return false;
-        x.offb = (uchar)cmd.size;
-        disp = ua_next_long();
-        opdsp(x, reg2, reg3, scale, disp, dtyp);
+        if ( is_strict() && badscale )
+          return false;
+        x.offb = (uchar)insn.size;
+        disp = insn.get_next_dword();
+        opdsp(x, reg2, reg3, scale, disp, dtype);
         break;
       default:
         return false;
@@ -264,17 +273,17 @@ static bool opmemory(op_t &x, uint32 code, char dtyp)
   {
     int offset = code & 0xFFF;
     if ( mode & 8 )
-      opdsp(x, reg2, -1, 1, offset, dtyp);
+      opdsp(x, reg2, -1, 1, offset, dtype);
     else
-      opmem(x, offset, dtyp);
+      opmem(x, offset, dtype);
   }
-  if ( x.type == o_mem && dtyp == dt_code )
+  if ( x.type == o_mem && dtype == dt_code )
     x.type = o_near;
   return true;
 }
 
 //--------------------------------------------------------------------------
-static bool mem(uint32 code)
+static bool mem(insn_t &insn, uint32 code)
 {
   static const tabent_t itypes[] =
   {
@@ -356,27 +365,30 @@ static bool mem(uint32 code)
   };
 
   uint32 opcode = (code >> 24) - 0x80;
-  if ( opcode >= qnumber(itypes) ) return false;
-  cmd.itype = itypes[opcode].itype;
+  if ( opcode >= qnumber(itypes) )
+    return false;
+  insn.itype = itypes[opcode].itype;
 
   int reg1 = (code >> 19) & 0x1F;
   switch ( itypes[opcode].opnum )
   {
     case -2: /* STORE INSTRUCTION */
-      opreg(cmd.Op1, reg1);
-      if ( !opmemory(cmd.Op2, code, itypes[opcode].dtyp) ) return false;
+      opreg(insn.Op1, reg1);
+      if ( !opmemory(insn, insn.Op2, code, itypes[opcode].dtype) )
+        return false;
       break;
 
     case 2: /* LOAD INSTRUCTION */
-      opreg(cmd.Op2, reg1);
+      opreg(insn.Op2, reg1);
       // no break
 
     case 1: /* BX/CALLX INSTRUCTION */
-      if ( !opmemory(cmd.Op1, code, itypes[opcode].dtyp) ) return false;
+      if ( !opmemory(insn, insn.Op1, code, itypes[opcode].dtype) )
+        return false;
       break;
   }
-  if ( cmd.itype == I960_lda && cmd.Op1.type == o_mem )
-    opimm(cmd.Op1, cmd.Op1.addr, dt_dword);
+  if ( insn.itype == I960_lda && insn.Op1.type == o_mem )
+    opimm(insn.Op1, insn.Op1.addr, dt_dword);
   return true;
 }
 
@@ -443,7 +455,7 @@ static void dstop(op_t &x, bool mode, int reg, bool fp)
 }
 
 //--------------------------------------------------------------------------
-static bool reg(uint32 code)
+static bool reg(insn_t &insn, uint32 code)
 {
   static const sparse_tabent_t reg_init[] =
   {
@@ -650,7 +662,7 @@ static bool reg(uint32 code)
     for ( int i = 0; i < qnumber(reg_init); i++ )
     {
       int j = reg_init[i].code - REG_MIN;
-      QASSERT(10086, j>=0 && j < qnumber(reg_tab_buf));
+      QASSERT(10086, j >= 0 && j < qnumber(reg_tab_buf));
       reg_tab[j].itype = reg_init[i].itype;
       reg_tab[j].opnum = reg_init[i].opnum;
     }
@@ -661,8 +673,8 @@ static bool reg(uint32 code)
     return false;
 
   int i = opcode - REG_MIN;
-  cmd.itype = reg_tab[i].itype;
-  bool fp = cmd.itype >= I960_fp_first && cmd.itype <= I960_fp_last;
+  insn.itype = reg_tab[i].itype;
+  bool fp = insn.itype >= I960_fp_first && insn.itype <= I960_fp_last;
 
   bool s1   = ((code >> 5)  & 1) != 0;
   bool s2   = ((code >> 6)  & 1) != 0;
@@ -676,69 +688,73 @@ static bool reg(uint32 code)
   switch ( reg_tab[i].opnum )
   {
     case 1:
-      regop(cmd.Op1, m1, s1, src, fp);
+      regop(insn.Op1, m1, s1, src, fp);
       break;
     case -1:
-      dstop(cmd.Op1, m3, dst, fp);
+      dstop(insn.Op1, m3, dst, fp);
       break;
     case 2:
-      regop(cmd.Op1, m1, s1, src, fp);
-      regop(cmd.Op2, m2, s2, src2, fp);
+      regop(insn.Op1, m1, s1, src, fp);
+      regop(insn.Op2, m2, s2, src2, fp);
       break;
     case -2:
-      regop(cmd.Op1, m1, s1, src, fp);
-      dstop(cmd.Op2, m3, dst, fp);
+      regop(insn.Op1, m1, s1, src, fp);
+      dstop(insn.Op2, m3, dst, fp);
       break;
     case 3:
-      regop(cmd.Op1, m1, s1, src, fp);
-      regop(cmd.Op2, m2, s2, src2, fp);
-      dstop(cmd.Op3, m3, dst, fp);
+      regop(insn.Op1, m1, s1, src, fp);
+      regop(insn.Op2, m2, s2, src2, fp);
+      dstop(insn.Op3, m3, dst, fp);
       break;
   }
   return true;
 }
 
 //--------------------------------------------------------------------------
-int idaapi ana(void)
+int idaapi i960_ana(insn_t *_insn)
 {
-  if ( cmd.ip & 3 ) return 0;   // alignment error
-  uint32 code = ua_next_long();
+  insn_t &insn = *_insn;
+  if ( insn.ip & 3 )
+    return 0;   // alignment error
+  uint32 code = insn.get_next_dword();
   switch ( code >> 28 )
   {
     case 0x0:
     case 0x1:
-      if ( !ctrl(code) ) return 0;
+      if ( !ctrl(insn, code) )
+        return 0;
       break;
     case 0x2:
     case 0x3:
-      if ( !cobr(code) ) return 0;
+      if ( !cobr(insn, code) )
+        return 0;
       break;
     case 0x5:
     case 0x6:
     case 0x7:
-      if ( !reg(code) ) return 0;
+      if ( !reg(insn, code) )
+        return 0;
       break;
     case 0x8:
     case 0x9:
     case 0xA:
     case 0xB:
     case 0xC:
-      if ( !mem(code) ) return 0;
+      if ( !mem(insn, code) )
+        return 0;
       break;
     default:
       return 0;
   }
-  return cmd.itype == I960_null ? 0 : cmd.size;
+  return insn.itype == I960_null ? 0 : insn.size;
 }
 
 //--------------------------------------------------------------------------
-void interr(const char *module)
+void interr(const insn_t &insn, const char *module)
 {
   const char *name = NULL;
-  if ( cmd.itype < ph.instruc_end )
-    name = Instructions[cmd.itype].name;
-  else
-    cmd.itype = uint16(ph.instruc_start);
-  warning("%a(%s): internal error in %s", cmd.ea, name, module);
+  if ( insn.itype < ph.instruc_end )
+    name = Instructions[insn.itype].name;
+  warning("%a(%s): internal error in %s", insn.ea, name, module);
 }
 

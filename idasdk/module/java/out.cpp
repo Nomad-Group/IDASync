@@ -16,20 +16,24 @@
 // support for jasmin reserved word's
 #define QS(f) (fmt_t)(f | FMT_ENC_RESERVED)
 
+DECLARE_OUT_FUNCS(out_java_t)
+
 //----------------------------------------------------------------------
-static bool out_sm_end(void)
+bool out_java_t::out_sm_end(void)
 {
   return block_close(4, "stack");
 }
 
 //----------------------------------------------------------------------
-static bool out_deprecated(uchar pos)
+bool out_java_t::out_deprecated(uchar pos)
 {
-  return MakeLine(COLSTR(".deprecated", SCOLOR_KEYWORD), pos);
+  return flush_buf(COLSTR(".deprecated", SCOLOR_KEYWORD), pos);
 }
 
 //----------------------------------------------------------------------
-static bool out_sm_start(int same)
+//lint -e719 too many arguments for format
+// no idea why lint complains, everything looks corrrect
+bool out_java_t::out_sm_start(int same)
 {
   char samestr[80];
 
@@ -44,16 +48,16 @@ static bool out_sm_start(int same)
   }
 
   if ( jasmin() )
-    return printf_line(4, COLSTR(".stack%s", SCOLOR_KEYWORD), samestr);
+    return gen_printf(4, COLSTR(".stack%s", SCOLOR_KEYWORD), samestr);
 
-  return printf_line(4,
-                     COLSTR("%s %s StackMap%s", SCOLOR_AUTOCMT),
-                     COLSTR("{", SCOLOR_SYMBOL),
-                     ash.cmnt, samestr);
+  return gen_printf(4,
+                    COLSTR("%s %s StackMap%s", SCOLOR_AUTOCMT),
+                    COLSTR("{", SCOLOR_SYMBOL),
+                    ash.cmnt, samestr);
 }
 
 //----------------------------------------------------------------------
-static bool out_stackmap(const SMinfo *pinf)
+bool out_java_t::out_stackmap(const SMinfo *pinf)
 {
   static char const *const verif[ITEM_BADOBJECT] =
   {
@@ -103,10 +107,10 @@ static bool out_stackmap(const SMinfo *pinf)
       goto STOP_NOW;
   }
 
-  if ( pinf->ea != cmd.ea )
-    if ( printf_line(6, COLSTR("%s %u", SCOLOR_ERROR),
+  if ( pinf->ea != insn.ea )
+    if ( gen_printf(6, COLSTR("%s %u", SCOLOR_ERROR),
                     COLSTR("offset", SCOLOR_KEYWORD),
-                    (uint)(pinf->ea - curSeg.startEA)) )
+                    (uint)(pinf->ea - curSeg.start_ea)) )
       goto STOP_NOW;
 
 
@@ -140,8 +144,10 @@ repeat_stage:
         goto BADIDB;
       curpos = 6;
       out_tagon(COLOR_KEYWORD);
-      outcnt = out_snprintf("%s %s", *stage,
-                            verif[tag < ITEM_BADOBJECT ? tag : ITEM_Object]);
+      size_t inplen = outbuf.length();
+      out_printf("%s %s", *stage,
+                   verif[tag < ITEM_BADOBJECT ? tag : ITEM_Object]);
+      outcnt = outbuf.length() - inplen;
       out_tagoff(COLOR_KEYWORD);
       CASSERT((ITEM_Object+1) == ITEM_Uninitialized
            && (ITEM_Uninitialized+1) == ITEM_BADOBJECT
@@ -151,7 +157,8 @@ repeat_stage:
         ushort var = *p2++;
         if ( p1 > pinf->pe )
           goto BADIDB;
-        switch ( tag ) {
+        switch ( tag )
+        {
           case ITEM_BADOBJECT:
             if ( putShort(var) )
               goto STOP_NOW;
@@ -186,7 +193,7 @@ STOP_NOW:
 }
 
 //----------------------------------------------------------------------
-static uchar OutModes(uint32 mode)
+uchar out_java_t::OutModes(uint32 mode)
 #define OA_THIS   0
 #define OA_FIELD  1
 #define OA_METHOD 2
@@ -242,7 +249,7 @@ static uchar OutModes(uint32 mode)
     case OA_THIS:
       flg = curClass.extflg;
       access_mode = curClass.AccessFlag & ACC_THIS_MASK;
-      off    = 0;
+      off = 0;
       break;
     default:  // OA_NEST
       flg = 0;
@@ -330,7 +337,7 @@ BADIDB:
 }
 
 //----------------------------------------------------------------------
-static uchar sign_out(ushort utsign, char mode)
+uchar out_java_t::sign_out(ushort utsign, char mode)
 {
   fmt_t fmt = fmt_string;
 
@@ -375,12 +382,12 @@ BADIDB:
 }
 
 //----------------------------------------------------------------------
-static void out_switch(void)
+void out_java_t::out_switch(void)
 {
   op_t x;
   x.n     = 0;
   x.flags = OF_SHOW;
-  x.dtyp  = dt_dword; //???  ’Ž   ???
+  x.dtype = dt_dword; //???  ’Ž   ???
   x.type  = o_imm;    //???  €„Ž  ???
 
   if ( !jasmin() && block_begin(4) )
@@ -389,12 +396,12 @@ static void out_switch(void)
   uchar nwarns = 0;
   uval_t count;
   ea_t addr;
-  for ( addr = cmd.Op2.addr, count = cmd.Op3.value; count; addr += 4, count-- )
+  for ( addr = insn.Op2.addr, count = insn.Op3.value; count; addr += 4, count-- )
   {
     curpos = 8;
-    if ( cmd.itype == j_lookupswitch )
+    if ( insn.itype == j_lookupswitch )
     {
-      x.value = get_long(curSeg.startEA + addr); // pairs
+      x.value = get_dword(curSeg.start_ea + addr); // pairs
       addr += 4;
       if ( !putVal(x, OOFW_IMM | OOF_NUMBER | OOF_SIGNED | OOFW_32, 0)
         || chkOutSpace()
@@ -408,17 +415,17 @@ static void out_switch(void)
       if ( idx != 0 )
       {
         static const char seven_spaces[] = "       ";
-        OutLine(&seven_spaces[idx-1]);
+        out_line(&seven_spaces[idx-1]);
       }
     }
-    x.value = cmd.ip + get_long(curSeg.startEA + addr);
+    x.value = insn.ip + get_dword(curSeg.start_ea + addr);
     if ( x.value >= curSeg.CodeSize )
     {
       ++nwarns;
     }
     else
     {
-      if ( outName(curSeg.startEA + addr, x.n, curSeg.startEA, x.value, &nwarns) )
+      if ( outName(curSeg.start_ea + addr, x.n, curSeg.start_ea, x.value, &nwarns) )
         goto doneswitch;
       if ( nwarns )
         return;
@@ -431,60 +438,63 @@ doneswitch:
   }
   curpos = 6;
   OUT_KEYWORD("default ");
-  if ( chkOutSymSpace(':') || !outop(cmd.Op3) || change_line() )
+  if ( chkOutSymSpace(':') || !out_operand(insn.Op3) || change_line() )
     return;
   if ( !jasmin() )
     block_end(4);
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_java_t::out_proc_mnem(void)
 {
-  char str[MAXSTR*2];
   static const char *const addonce[] = { "", "_w", "_quick", "2_quick", "_quick_w" };
+  out_mnem(2, addonce[uchar(insn.wid)]);
+}
 
-  getMySeg(cmd.ea); // set curSeg (for special strings)
-  gl_xref = 0;
+//----------------------------------------------------------------------
+void out_java_t::out_insn(void)
+{
+  getMySeg(insn.ea); // set curSeg (for special strings)
+  set_gen_xrefs(false);
 
   if ( curSeg.smNode && !(idpflags & IDF_HIDESM) )
   {
     SMinfo smi;
     smi.ea = BADADDR;
-    if ( sm_getinfo(&smi) )
+    if ( sm_getinfo(insn, &smi) )
     {
-      init_prompted_output(str, 4);
+      init_prompted_output(4);
       do
-        if ( out_stackmap(&smi))
+        if ( out_stackmap(&smi) )
           goto STOP_NOW;
-      while ( sm_getinfo(&smi) );
+      while ( sm_getinfo(insn, &smi) );
     }
   }
 
-  init_prompted_output(str, 4);
-  OutMnem(2, addonce[uchar(cmd.wid)]);
-  out_zero();
-  outcnt = tag_strlen(str);
+  init_prompted_output(4);
+  out_mnemonic();
+  outcnt = tag_strlen(outbuf.c_str());
 
-  if ( cmd.Op1.type != o_void )
+  if ( insn.Op1.type != o_void )
   {
     if ( !out_one_operand(0) )
       goto STOP_NOW;
   }
   else
   {
-    if ( (char)cmd.Op1.ref > 0 && inf.s_showbads )
+    if ( (char)insn.Op1.ref > 0 )
     {
       qstring nbuf;
-      if ( get_visible_name(&nbuf, cmd.Op1.addr) > 0 )
+      if ( get_visible_name(&nbuf, insn.Op1.addr) > 0 )
         outcnt += out_commented(nbuf.begin(), COLOR_REGCMT);
     }
   }
 
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
     if ( chkOutSpace() )
       goto STOP_NOW;
-    if ( cmd.itype == j_tableswitch && !jasmin() )
+    if ( insn.itype == j_tableswitch && !jasmin() )
     {
       if ( CHK_OUT_KEYWORD("to ") )
         goto STOP_NOW;
@@ -493,16 +503,17 @@ void idaapi out(void)
       goto STOP_NOW;
   }
 
-  if ( cmd.Op3.type != o_void && !cmd.swit ) // ! lookupswitch/tablesswitch
+  if ( insn.Op3.type != o_void && !insn.swit ) // ! lookupswitch/tablesswitch
   {
     if ( chkOutSpace() || !out_one_operand(2) )
       goto STOP_NOW;
   }
 
-  gl_xref = gl_comm = 1;
+  set_gen_xrefs(true);
+  set_gen_cmt(true);
   if ( !change_line(true) )
   {
-    if ( cmd.swit & 2 )
+    if ( insn.swit & 2 )
       out_switch();  // normal tableswitch/lookupswitch
   }
 STOP_NOW:
@@ -510,16 +521,13 @@ STOP_NOW:
 }
 
 //--------------------------------------------------------------------------
-static bool close_annotation(uint32 pos)
+bool out_java_t::close_annotation(uint32 pos)
 {
   return block_close(pos, "annotation");
 }
 
 //--------------------------------------------------------------------------
-static const ushort *annotation_element(const ushort *ptr, uint *plen,
-                                        uint pos, ushort name);
-
-static const ushort *annotation(const ushort *p, uint *plen, uint pos)
+const ushort *out_java_t::annotation(const ushort *p, uint *plen, uint pos)
 {
   if ( *plen < sizeof(ushort) )
     return NULL;
@@ -549,7 +557,7 @@ STOP_NOW:
 }
 
 //--------------------------------------------------------------------------
-static const ushort *annotation_element(
+const ushort *out_java_t::annotation_element(
         const ushort *p,
         uint *plen,
         uint pos,
@@ -563,8 +571,8 @@ static const ushort *annotation_element(
   const_desc_t co;
 
   op_t x;
-  x.flags = 0;  // output flags, will be used by OutValue()
-  x.n = 0;      // operand number, will be used by OutValue()
+  x.flags = 0;  // output flags, will be used by out_value()
+  x.n = 0;      // operand number, will be used by out_value()
   do // array-values-loop
   {
 arentry:
@@ -631,26 +639,26 @@ arentry:
 
       case j_float:
         type    = CONSTANT_Float;
-        x.dtyp  = dt_float;
+        x.dtype = dt_float;
         break;
       case j_long:
         type    = CONSTANT_Long;
-        x.dtyp  = dt_qword;
+        x.dtype = dt_qword;
         break;
       case j_double:
         type    = CONSTANT_Double;
-        x.dtyp  = dt_double;
+        x.dtype = dt_double;
         break;
       case j_bool:
       case j_byte:
       case j_char:
-        x.dtyp = dt_byte;
+        x.dtype = dt_byte;
         goto do_int;
       case j_short:
-        x.dtyp = dt_word;
+        x.dtype = dt_word;
         goto do_int;
       case j_int:
-        x.dtyp = dt_dword;
+        x.dtype = dt_dword;
 do_int:
         type = CONSTANT_Integer;
         break;
@@ -668,7 +676,7 @@ do_int:
       {
         if ( !checkLine(2) )
           goto STOP_NOW;
-        OutChar(j_array);
+        out_char(j_array);
       }
       if ( chkOutChar(tag) )
         goto STOP_NOW;
@@ -734,9 +742,9 @@ do_int:
     } // jasmin
     alev = -alev;  // 0 = 0
 /*
-    if ( chkOutSpace() )
+    if ( chkOutSpace(insn) )
       goto STOP_NOW;
-    if ( (name || jasmin()) && chkOutSymSpace('=') )
+    if ( (name || jasmin()) && chkOutSymSpace(insn, '=') )
       goto STOP_NOW;
 */
     if ( chkOutSpace() || chkOutSymSpace('=') )
@@ -763,7 +771,7 @@ do_value:
         curpos = pos;
         if ( jasmin() )
         {
-          OutLine(COLSTR(".end annotation", SCOLOR_KEYWORD));
+          out_line(COLSTR(".end annotation", SCOLOR_KEYWORD));
         }
         else
         {
@@ -801,7 +809,7 @@ BADIDB:
       goto BADIDB;
     if ( !jasmin() )
     {
-      switch(tag )
+      switch ( tag )
       {
         case j_bool:
           {
@@ -821,7 +829,7 @@ BADIDB:
             break;
           if ( !checkLine(3) )
             goto STOP_NOW;
-          out_snprintf(COLSTR("'%c'", SCOLOR_CHAR), char(co.value));
+          out_printf(COLSTR("'%c'", SCOLOR_CHAR), char(co.value));
           outcnt += 3;
           continue;
 
@@ -839,12 +847,12 @@ done:
 }
 
 //--------------------------------------------------------------------------
-static uchar annotation_loop(const uval_t *pnodes, uint nodecnt)
+uchar out_java_t::annotation_loop(const uval_t *pnodes, uint nodecnt)
 {
   uchar result = 1;
   uint32 pos = curpos;
 
-  if ( MakeNull() )
+  if ( gen_empty_line() )
     goto STOP_NOW;
 
   for ( uint n = 0; n < nodecnt; n++ )
@@ -884,7 +892,7 @@ static uchar annotation_loop(const uval_t *pnodes, uint nodecnt)
       {
         if ( !jasmin() )
           qstrncpy(&hdr[hdrpos], COLSTR(" {", SCOLOR_SYMBOL), sizeof(hdr)-hdrpos);
-        if ( MakeLine(hdr, pos) )
+        if ( flush_buf(hdr, pos) )
           goto STOP_NOW;
         curpos = pos + 2;
         p = annotation_element(p, &len, pos+2, 0);
@@ -938,7 +946,7 @@ checkans:
             goto BADIDB;
           len -= sizeof(ushort);
           curpos = pos;
-          OutLine(hdr);
+          out_line(hdr);
           outcnt = hdrlen;
           if ( OutUtf8(*p, jasmin() ? fmt_signature : fmt_dscr) )
             goto STOP_NOW;
@@ -970,45 +978,45 @@ BADIDB:
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void out_java_t::java_header(void)
 {
   char str[MAXSTR*2];
 
   if ( !jasmin() )
-    MakeLine(COLSTR("/*", SCOLOR_AUTOCMT), 0 );
+    flush_buf(COLSTR("/*", SCOLOR_AUTOCMT), 0 );
   const char *prefix = jasmin() ? ash.cmnt : "";
 
 #ifdef __debug__
-  printf_line(0, COLSTR("%sDisassembler mode: %s", SCOLOR_AUTOCMT),
+  gen_printf(0, COLSTR("%sDisassembler mode: %s", SCOLOR_AUTOCMT),
               prefix, debugmode ? "DEBUG" : "Normal");
 #endif
-  printf_line(0,
-              COLSTR("%sJava Virtual Machine (JDK 1.%u)", SCOLOR_AUTOCMT),
-              prefix, curClass.JDKsubver);
+  gen_printf(0,
+             COLSTR("%sJava Virtual Machine (JDK 1.%u)", SCOLOR_AUTOCMT),
+             prefix, curClass.JDKsubver);
   {
     char sv = inf.indent;
     inf.indent = 0;
     if ( !jasmin() )
     {
-      printf_line(-1,
-                  COLSTR("%sClassFile version: %u.%u", SCOLOR_AUTOCMT),
-                  prefix, curClass.MajVers, curClass.MinVers);
+      gen_printf(-1,
+                 COLSTR("%sClassFile version: %u.%u", SCOLOR_AUTOCMT),
+                 prefix, curClass.MajVers, curClass.MinVers);
     }
     else
     {
       if ( out_problems(str, prefix) )
         return;
-      MakeNull();
-      printf_line(-1, COLSTR("%s %u.%u", SCOLOR_NUMBER),
-                  COLSTR(".bytecode", SCOLOR_KEYWORD),
-                  curClass.MajVers, curClass.MinVers);
+      gen_empty_line();
+      gen_printf(-1, COLSTR("%s %u.%u", SCOLOR_NUMBER),
+                 COLSTR(".bytecode", SCOLOR_KEYWORD),
+                 curClass.MajVers, curClass.MinVers);
     }
     inf.indent = sv;
   }
 
   if ( curClass.SourceName )
   {
-    init_prompted_output(str);
+    init_prompted_output();
     if ( jasmin() )
     {
       OUT_KEYWORD(".source ");
@@ -1028,13 +1036,12 @@ void idaapi header(void)
     }
     if ( !stp )
       out_tagoff(jasmin() ? COLOR_STRING : COLOR_AUTOCMT);
-    term_output_buffer();
-    if ( stp || MakeLine(str, 0) )
+    if ( stp || flush_outbuf(0) )
       return;
   }
   else
   {
-    MakeNull();
+    gen_empty_line();
   }
 
   if ( !jasmin() )
@@ -1047,14 +1054,22 @@ void idaapi header(void)
 }
 
 //--------------------------------------------------------------------------
-static uchar enclose_out(void)
+void idaapi java_header(outctx_t &ctx)
+{
+  out_java_t *pctx = (out_java_t *)&ctx;
+  pctx->java_header();
+}
+
+//--------------------------------------------------------------------------
+uchar out_java_t::enclose_out(void)
 {
   if ( !jasmin() )
   {
     out_tagon(COLOR_AUTOCMT);
-    outcnt += out_snprintf("%sEnclosing %s: ", ash.cmnt,
-                           curClass.encMethod ? "method" : "class");
-    out_tagon(COLOR_REGCMT);
+    size_t inplen = outbuf.length();
+    out_printf("%sEnclosing %s: ", ash.cmnt,
+                 curClass.encMethod ? "method" : "class");
+    outcnt += outbuf.length() - inplen;
   }
   else
   {
@@ -1088,7 +1103,7 @@ static uchar enclose_out(void)
 
 //--------------------------------------------------------------------------
 // output the method return type
-static inline uchar out_seg_type(fmt_t fmt)
+uchar out_java_t::out_seg_type(fmt_t fmt)
 {
   return out_index(curSeg.id.dscr,
                    fmt,
@@ -1098,7 +1113,7 @@ static inline uchar out_seg_type(fmt_t fmt)
 
 //--------------------------------------------------------------------------
 // output the field type
-static inline uchar out_field_type(void)
+uchar out_java_t::out_field_type(void)
 {
   return out_index(curField.id.dscr,
                    fmt_dscr,
@@ -1106,18 +1121,8 @@ static inline uchar out_field_type(void)
                    curField.id.extflg & EFL_TYPE);
 }
 
-//--------------------------------------------------------------------------
-size_t putDeb(uchar next)
-{
-  OUT_KEYWORD(".debug ");
-  out_tagon(COLOR_STRING);
-  if ( next )
-    OutChar('"');
-  return maxpos - outcnt;
-}
-
 //----------------------------------------------------------------------
-static uchar out_includes(uval_t node, uchar pos)
+uchar out_java_t::out_includes(uval_t node, uchar pos)
 {
   netnode temp(node);
   uint32 len, vid, cnt = (uint32)temp.altval(0);
@@ -1127,7 +1132,8 @@ static uchar out_includes(uval_t node, uchar pos)
   if ( !cnt )
     goto BADIDB;
   fnm[0] = '"';
-  do {
+  do
+  {
     curpos = pos;
 
     len = (uint32)temp.supstr(cnt, &fnm[1], sizeof(fnm)-3);
@@ -1184,13 +1190,13 @@ STOP_NOW:
 }
 
 //----------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+void out_java_t::java_segstart(segment_t *)
 {
-  char str[MAXSTR*2];
+  ea_t ea = insn_ea;
 
-  init_prompted_output(str, 2);
+  init_prompted_output(2);
 
-  gl_comm = 1;
+  set_gen_cmt(true);
   switch ( getMySeg(ea)->type ) // also set curSeg
   {
     case SEG_CODE:
@@ -1198,14 +1204,11 @@ void idaapi segstart(ea_t ea)
         func_t *pfn = get_func(ea);
         if ( pfn != NULL )
         {
-          char *cmt = get_func_cmt(pfn, false);
-          if ( cmt != NULL )
-            cmt = get_func_cmt(pfn, true);
-          if ( cmt != NULL )
+          qstring qbuf;
+          if ( get_func_cmt(&qbuf, pfn, false) > 0
+            || get_func_cmt(&qbuf, pfn, true) > 0 )
           {
-            bool ret = generate_big_comment(cmt, COLOR_REGCMT);
-            qfree(cmt);
-            if ( ret )
+            if ( gen_block_cmt(qbuf.c_str(), COLOR_REGCMT) )
               break;
           }
         }
@@ -1266,22 +1269,24 @@ do_dscid:
       if ( curSeg.genNodes[0] && out_includes(curSeg.genNodes[0], 2) )
         break;
 
-      if ( curSeg.stacks
-        && printf_line(2,
+      if ( curSeg.stacks )
+      {
+        int over = gen_printf(2,
                        jasmin() ? COLSTR(".limit stack %u", SCOLOR_ASMDIR) :
                                   COLSTR("max_stack %u", SCOLOR_ASMDIR),
-                       curSeg.stacks) )
-      {
-        break;
+                       curSeg.stacks);
+        if ( over )
+          break;
       }
 
-      if ( curSeg.DataSize
-        && printf_line(2,
+      if ( curSeg.DataSize )
+      {
+        int over = gen_printf(2,
                        jasmin() ? COLSTR(".limit locals %u", SCOLOR_ASMDIR) :
                                   COLSTR("max_locals %u", SCOLOR_ASMDIR),
-                       curSeg.DataSize) )
-      {
-        break;
+                       curSeg.DataSize);
+        if ( over )
+          break;
       }
       if ( (curSeg.id.extflg & XFL_M_EMPTYSM) && (out_sm_start(-1) || out_sm_end()) )
         break;
@@ -1297,7 +1302,7 @@ do_dscid:
       if ( OutModes(OA_THIS) )
         break;
       if ( out_index(curClass.This.Name, QS(fmt_fullname), COLOR_DNAME,
-                   (uchar)!curClass.This.Dscr) )
+                     (uchar)!curClass.This.Dscr) )
         break;
 
       if ( jasmin() )
@@ -1339,7 +1344,7 @@ nosuper:
           {
             if ( curClass.super.Ref
               && !(curClass.extflg&XFL_C_SUPEROBJ)
-              && chkOutSymSpace(','))
+              && chkOutSymSpace(',') )
             {
               break;
             }
@@ -1368,7 +1373,7 @@ noparents:
       if ( curClass.genNode && out_includes(curClass.genNode, 0) )
         break;
       if ( (curClass.extflg & XFL_C_DEBEXT)
-        && fmtString((ushort)-1, putDeb(0), fmt_debug, debLine) >= 0 )
+        && fmtString((ushort)-1, putDeb(0), fmt_debug, &out_java_t::debLine) >= 0 )
       {
         out_tagoff(COLOR_STRING);
         change_line();
@@ -1378,7 +1383,7 @@ noparents:
     case SEG_XTRN:
     case SEG_BSS:
       if ( !jasmin() )
-        MakeLine(COLSTR("/*", SCOLOR_AUTOCMT), 0);
+        flush_buf(COLSTR("/*", SCOLOR_AUTOCMT), 0);
     default:
       break;
   }
@@ -1386,17 +1391,22 @@ noparents:
   no_prim = false;
 }
 
-//--------------------------------------------------------------------------
-void idaapi segend(ea_t ea)
+//----------------------------------------------------------------------
+void idaapi java_segstart(outctx_t &ctx, segment_t *seg)
 {
-  char str[MAXSTR*2];
+  out_java_t *pctx = (out_java_t *)&ctx;
+  pctx->java_segstart(seg);
+}
 
-  init_prompted_output(str, 4);
-  str[0] = getMySeg(ea-1)->type; // also set curSeg
-  switch ( str[0] )
+//--------------------------------------------------------------------------
+void out_java_t::java_segend(segment_t *seg)
+{
+  init_prompted_output(4);
+  uchar t = getMySeg(BADADDR, seg)->type; // also set curSeg
+  switch ( t )
   {
     case SEG_CODE:
-      gl_name = 0;              // for empty method's
+      clr_gen_label(); // for empty method's
       if ( curSeg.id.extflg & XFL_M_LABEND )
         out_method_label(1);
       if ( curSeg.excNode )
@@ -1406,10 +1416,10 @@ void idaapi segend(ea_t ea)
         if ( j == 0 )
           DESTROYED("out::segend" );
 
-        if ( !jasmin())
-          MakeLine(COLSTR("/*", SCOLOR_AUTOCMT), 0); /*"*///  makedep BUG!!!
+        if ( !jasmin() )
+          flush_buf(COLSTR("/*", SCOLOR_AUTOCMT), 0); /*"*///  makedep BUG!!!
         else
-          MakeNull();
+          gen_empty_line();
         uint i = 0;
         do
         {
@@ -1469,7 +1479,7 @@ void idaapi segend(ea_t ea)
               }
               CASSERT(offsetof(Exception,end_pc)-offsetof(Exception,start_pc) == sizeof(ushort)
                    && offsetof(Exception,handler_pc)-offsetof(Exception,end_pc) == sizeof(ushort));
-              ushort off;
+              ushort off = 0;
               switch ( n )
               {
                 case 0: off = ex.start_pc;   break;
@@ -1488,20 +1498,20 @@ void idaapi segend(ea_t ea)
         if ( !jasmin() )
           close_comment();
         else
-          MakeNull();
+          gen_empty_line();
       }
       if ( curSeg.genNodes[1] && out_includes(curSeg.genNodes[1], 2) )
         goto STOP_NOW;
       if ( curSeg.DataSize )
         goto STOP_NOW;
 close_method:
-      for(int i = 0; i < qnumber(curSeg.annNodes); i++)
+      for ( int i = 0; i < qnumber(curSeg.annNodes); i++ )
       {
         if ( curSeg.annNodes[i] )
         {
           if ( annotation_loop(curSeg.annNodes, qnumber(curSeg.annNodes)) )
             goto STOP_NOW;
-          MakeNull();
+          gen_empty_line();
           break;
         }
       }
@@ -1516,7 +1526,7 @@ close_method:
     case SEG_BSS:
       if ( !jasmin() )
         close_comment();
-      if ( str[0] == SEG_BSS )
+      if ( t == SEG_BSS )
         goto close_method;
       break;
   }
@@ -1526,46 +1536,71 @@ STOP_NOW:
 }
 
 //--------------------------------------------------------------------------
-void idaapi java_data(ea_t ea)
+void idaapi java_segend(outctx_t &ctx, segment_t *seg)
 {
-  char str[MAXSTR*2];
+  out_java_t *pctx = (out_java_t *)&ctx;
+  pctx->java_segend(seg);
+}
+
+//----------------------------------------------------------------------
+static void check_float_const(ea_t ea, void *m, char len)
+{
+  if ( !has_cmt(get_flags(ea)) && j_realcvt(m, NULL, (uchar)len) < 0 )
+  {
+    char cmt[2+5*5+2], *p = cmt;
+
+    *p++ = '0';
+    *p++ = 'x';
+    do
+      p += qsnprintf(p, 5, "%04X", ((ushort *)m)[uchar(len)]);
+    while ( --len >= 0 );
+    remember_problem(PR_ATTN, ea);
+    append_cmt(ea, cmt, false);
+  }
+}
+
+//--------------------------------------------------------------------------
+void out_java_t::java_data(bool /*analyze_only*/)
+{
   char nbuf[MAXSTR];
   qstring name;
   op_t x;
   uint32 off;
   uint32 lvc;
+  ea_t ea = insn_ea;
 
-  gl_name = 1;
-  init_prompted_output(str);
+  init_prompted_output();
   char stype = getMySeg(ea)->type; // also set curSeg
-  ea_t ip = ea - curSeg.startEA;
+  ea_t ip = ea - curSeg.start_ea;
   asize_t sz = get_item_size(ea) - 1;
   switch ( stype )
   {
     case SEG_CODE:
       if ( ip >= curSeg.CodeSize )
         goto STOP_NOW;
-      if ( get_true_name(NULL, ea) > 0 )
-        MakeLine(" ");  //for string delimeter
+      if ( get_name(NULL, ea) > 0 )
+        flush_buf(" ");  //for string delimeter
       if ( sz != 0 )
       {
 illcall:
-        OutLine(COLSTR("!!!_UNSUPPORTED_OUTPUT_MODE_!!!", SCOLOR_ERROR));
+        out_line(COLSTR("!!!_UNSUPPORTED_OUTPUT_MODE_!!!", SCOLOR_ERROR));
       }
       else
       {
         curpos = 2;
         uchar c = get_byte(ea);
-        out_snprintf(COLSTR("%3u %s 0x%02X", SCOLOR_ERROR),
+        out_printf(COLSTR("%3u %s 0x%02X", SCOLOR_ERROR),
                      c, ash.cmnt, c);
       }
     default:
       break;
 
     case SEG_BSS:
-      if ( isAlign(get_flags_novalue(ea)) )
+      if ( is_align(F) )
       {
-        gl_name = gl_comm = gl_xref = 0;
+        clr_gen_label();
+        set_gen_cmt(false);
+        set_gen_xrefs(false);
         goto STOP_NOW;
       }
       lvc = 0;  // unification
@@ -1591,17 +1626,18 @@ illcall:
       }
       if ( jasmin() )
         out_line(ash.cmnt, COLOR_AUTOCMT);
-      gl_name = 0;
+      clr_gen_label();
       if ( off == (uint32)-1 )
         goto STOP_NOW;
       if ( sz )
         goto illcall;
       if ( get_visible_name(&name, ea) > 0 )
-        out_snprintf(COLSTR("%s", SCOLOR_AUTOCMT), name.begin());
+        out_printf(COLSTR("%s", SCOLOR_AUTOCMT), name.begin());
       if ( lvc == 0 )
         break;
-      gl_xref = gl_comm = 1;
-      if ( change_line() )
+      set_gen_cmt(true);
+      set_gen_xrefs(true);
+      if ( change_line(true) )
         goto STOP_NOW;
       if ( netnode(curSeg.varNode).supval(off, nbuf, lvc+1) != lvc )
         goto BADIDB;
@@ -1613,7 +1649,9 @@ illcall:
           curpos = 4;
           OUT_KEYWORD(".var ");
           out_tagon(COLOR_NUMBER);
-          outcnt += out_snprintf("%u", off);
+          size_t inplen = outbuf.length();
+          out_printf("%u", off);
+          outcnt += outbuf.length() - inplen;
           out_tagoff(COLOR_NUMBER);
           OUT_KEYWORD(" is ");
         }
@@ -1673,17 +1711,19 @@ illcall:
         goto illcall;
       if ( !ip )
       {
-        printf_line(0, COLSTR("%s Importing prototypes", SCOLOR_AUTOCMT),
+        gen_printf(0, COLSTR("%s Importing prototypes", SCOLOR_AUTOCMT),
                     jasmin() ? ash.cmnt : "");
-        break; // equivalence - MakeNull(); with comment
+        break; // equivalence - gen_empty_line(); with comment
       }
 
       if ( jasmin() )
       {
-        out_snprintf(COLSTR("%s", SCOLOR_AUTOCMT), ash.cmnt);
+        out_printf(COLSTR("%s", SCOLOR_AUTOCMT), ash.cmnt);
         outcnt = strlen(ash.cmnt);
       }
-      gl_name = gl_xref = gl_comm = 0;
+      clr_gen_label();
+      set_gen_cmt(false);
+      set_gen_xrefs(false);
       {
         const_desc_t co;
         {
@@ -1704,7 +1744,7 @@ illcall:
           case CONSTANT_Class:
             if ( !jasmin() )
             {
-              set_output_ptr(str);
+              outbuf.qclear();
               outcnt = 0;
             }
             {
@@ -1757,7 +1797,9 @@ no_space_check:
         goto STOP_NOW;
       if ( sz )
         goto illcall;
-      gl_name = gl_comm = gl_xref = 0;
+      clr_gen_label();
+      set_gen_cmt(false);
+      set_gen_xrefs(false);
       if ( !ip )
       {
         if ( curClass.annNodes[0] | curClass.annNodes[1] )
@@ -1768,7 +1810,7 @@ no_space_check:
         if ( !jasmin() )
           block_begin(0);
         else
-          MakeNull();
+          gen_empty_line();
 
         if ( curClass.innerNode )
         {
@@ -1835,7 +1877,7 @@ no_space_check:
           }
           while ( i < j );
           if ( curClass.FieldCnt )
-            MakeNull();
+            gen_empty_line();
         }
         goto STOP_NOW;
       } // first entry (zero offset)
@@ -1873,7 +1915,7 @@ no_space_check:
 
         if ( chkOutSymSpace('=') )
           goto STOP_NOW;
-        for ( uint i = 1; ; i++)
+        for ( uint i = 1; ; i++ )
         {
           uchar flen;
 
@@ -1886,42 +1928,46 @@ no_space_check:
             if ( putShort(ushort(ip >> 16)) )
               goto STOP_NOW;
           }
-          else switch ( co.type )
+          else
           {
-            case CONSTANT_Long:
-              x.dtyp = dt_qword;
-              goto two_w;
-            case CONSTANT_Double:
-              x.dtyp = dt_double;
-two_w:
-              copy_const_to_opnd(x, co);
-              flen = 3;
-              goto chk_flt;
-            case CONSTANT_Float:
-              x.dtyp = dt_float;
-              x.value = co.value;
-              flen = 1;
+            switch ( co.type )
+            {
+              case CONSTANT_Long:
+                x.dtype = dt_qword;
+                copy_const_to_opnd(x, co);
+                flen = 3;
+                goto chk_flt;
+              case CONSTANT_Double:
+                x.dtype = dt_double;
+                check_float_const(ea, &co.value, 3);
+                copy_const_to_opnd(x, co);
+                goto one_w;
+              case CONSTANT_Float:
+                x.dtype = dt_float;
+                x.value = co.value;
+                flen = 1;
 chk_flt:
-              check_float_const(ea, &x.value, flen);
-              goto one_w;
-            case CONSTANT_Integer:
-              x.dtyp = dt_dword;
-              x.value = co.value;
+                check_float_const(ea, &x.value, flen);
+                goto one_w;
+              case CONSTANT_Integer:
+                x.dtype = dt_dword;
+                x.value = co.value;
 one_w:
-              if ( !putVal(x, OOF_NUMBER | OOF_SIGNED | OOFW_IMM, 0) )
-                goto STOP_NOW;
-              break;
+                if ( !putVal(x, OOF_NUMBER | OOF_SIGNED | OOFW_IMM, 0) )
+                  goto STOP_NOW;
+                break;
 
-            case CONSTANT_String:
-              if ( !checkLine(2) )
-                goto STOP_NOW;
-              if ( OutUtf8(co._name, fmt_string, COLOR_STRING) )
-                goto STOP_NOW;
-              break;
+              case CONSTANT_String:
+                if ( !checkLine(2) )
+                  goto STOP_NOW;
+                if ( OutUtf8(co._name, fmt_string, COLOR_STRING) )
+                  goto STOP_NOW;
+                break;
 
-            default:
-              UNCOMPAT("out::data");
-              break;
+              default:
+                UNCOMPAT("out::data");
+                break;
+            }
           }
 
           if ( i >= valcnt )
@@ -1930,7 +1976,8 @@ one_w:
             goto STOP_NOW;
         } // for(...) (value)
       } // if ( valNode )
-      gl_xref = gl_comm = 1;
+      set_gen_cmt(true);
+      set_gen_xrefs(true);
       if ( !change_line(curpos != 0) )
       {
         uchar addonce = 0;
@@ -1974,8 +2021,8 @@ one_w:
       goto STOP_NOW;
   }
 
-  gl_xref = gl_comm = 1;
-  out_zero();
+  set_gen_cmt(true);
+  set_gen_xrefs(true);
   change_line(curpos != 0);
 STOP_NOW:
   term_prompted_output();
@@ -1985,3 +2032,9 @@ BADIDB:
   DESTROYED("out::data");
 }
 
+//--------------------------------------------------------------------------
+void idaapi java_data(outctx_t &ctx, bool analyze_only)
+{
+  out_java_t *pctx = (out_java_t *)&ctx;
+  pctx->java_data(analyze_only);
+}

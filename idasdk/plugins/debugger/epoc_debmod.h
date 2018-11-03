@@ -64,45 +64,42 @@ public:
   void add_dll(const image_info_t &ii);
   void del_dll(const char *name);
 
-  virtual int idaapi dbg_init(bool _debug_debugger);
+  virtual void idaapi dbg_set_debugging(bool _debug_debugger);
+  virtual int idaapi dbg_init(void);
   virtual void idaapi dbg_term(void);
-  virtual int  idaapi dbg_process_get_info(int n,
-    const char *input,
-    process_info_t *info);
-  virtual int  idaapi dbg_detach_process(void);
-  virtual int  idaapi dbg_start_process(const char *path,
+  virtual int idaapi dbg_get_processes(procinfo_vec_t *info);
+  virtual int idaapi dbg_detach_process(void);
+  virtual int idaapi dbg_start_process(const char *path,
     const char *args,
     const char *startdir,
     int flags,
     const char *input_path,
     uint32 input_file_crc32);
   virtual gdecode_t idaapi dbg_get_debug_event(debug_event_t *event, int timeout_ms);
-  virtual int  idaapi dbg_attach_process(pid_t process_id, int event_id);
-  virtual int  idaapi dbg_prepare_to_pause_process(void);
-  virtual int  idaapi dbg_exit_process(void);
-  virtual int  idaapi dbg_continue_after_event(const debug_event_t *event);
+  virtual int idaapi dbg_attach_process(pid_t process_id, int event_id, int flags);
+  virtual int idaapi dbg_prepare_to_pause_process(void);
+  virtual int idaapi dbg_exit_process(void);
+  virtual int idaapi dbg_continue_after_event(const debug_event_t *event);
   virtual void idaapi dbg_stopped_at_debug_event(void);
-  virtual int  idaapi dbg_thread_suspend(thid_t thread_id);
-  virtual int  idaapi dbg_thread_continue(thid_t thread_id);
-  virtual int  idaapi dbg_set_resume_mode(thid_t thread_id, resume_mode_t resmod);
-  virtual int  idaapi dbg_read_registers(thid_t thread_id,
+  virtual int idaapi dbg_thread_suspend(thid_t thread_id);
+  virtual int idaapi dbg_thread_continue(thid_t thread_id);
+  virtual int idaapi dbg_set_resume_mode(thid_t thread_id, resume_mode_t resmod);
+  virtual int idaapi dbg_read_registers(thid_t thread_id,
     int clsmask,
     regval_t *values);
-  virtual int  idaapi dbg_write_register(thid_t thread_id,
+  virtual int idaapi dbg_write_register(thid_t thread_id,
     int reg_idx,
     const regval_t *value);
-  virtual int  idaapi dbg_thread_get_sreg_base(thid_t thread_id,
-    int sreg_value,
-    ea_t *ea);
-  virtual int  idaapi dbg_get_memory_info(meminfo_vec_t &areas);
+  virtual int idaapi dbg_thread_get_sreg_base(ea_t *ea, thid_t thread_id, int sreg_value);
+  virtual int idaapi dbg_get_memory_info(meminfo_vec_t &ranges);
   virtual ssize_t idaapi dbg_read_memory(ea_t ea, void *buffer, size_t size);
   virtual ssize_t idaapi dbg_write_memory(ea_t ea, const void *buffer, size_t size);
-  virtual int  idaapi dbg_add_bpt(bpttype_t type, ea_t ea, int len);
-  virtual int  idaapi dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_bytes, int len);
-  virtual int  idaapi dbg_open_file(const char *file, uint32 *fsize, bool readonly);
+  virtual int idaapi dbg_add_bpt(bpttype_t type, ea_t ea, int len);
+  virtual int idaapi dbg_del_bpt(bpttype_t type, ea_t ea, const uchar *orig_bytes, int len);
+  virtual int idaapi dbg_open_file(const char *file, uint64 *fsize, bool readonly);
   virtual void idaapi dbg_close_file(int fn);
-  virtual ssize_t idaapi dbg_read_file(int fn, uint32 off, void *buf, size_t size);
-  virtual ssize_t idaapi dbg_write_file(int fn, uint32 off, const void *buf, size_t size);
+  virtual ssize_t idaapi dbg_read_file(int fn, qoff64_t off, void *buf, size_t size);
+  virtual ssize_t idaapi dbg_write_file(int fn, qoff64_t off, const void *buf, size_t size);
   virtual int idaapi dbg_is_ok_bpt(bpttype_t type, ea_t ea, int len);
 
   bool idaapi close_remote(void);

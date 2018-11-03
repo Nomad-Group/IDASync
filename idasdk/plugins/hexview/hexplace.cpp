@@ -1,15 +1,13 @@
 //--------------------------------------------------------------------------
 // hex place methods
 
-typedef hex_place_t   hp_t;
+typedef hex_place_t hp_t;
 
 //--------------------------------------------------------------------------
 // Short information about the current location.
 // It will be displayed in the status line
-void ida_export hex_place_t__print(const hp_t *, void *, char *buf, size_t bufsize)
+void ida_export hex_place_t__print(const hp_t *, qstring *, void *)
 {
-  if ( bufsize != 0 )
-    buf[0] = 0;
 }
 
 //--------------------------------------------------------------------------
@@ -23,11 +21,7 @@ uval_t ida_export hex_place_t__touval(const hp_t *ths, void *)
 // Make a copy
 place_t *ida_export hex_place_t__clone(const hp_t *ths)
 {
-  hp_t *p = qnew(hp_t);
-  if ( p == NULL )
-    nomem("simpleline_place");
-  memcpy(p, ths, sizeof(*ths));
-  return p;
+  return new hp_t(*ths);
 }
 
 //--------------------------------------------------------------------------
@@ -43,7 +37,7 @@ void ida_export hex_place_t__copyfrom(hp_t *ths, const place_t *from)
 //--------------------------------------------------------------------------
 // Create a hex_place_t object at the specified address
 // with the specified data
-place_t *ida_export hex_place_t__makeplace(const hp_t *ths, void *, uval_t x, short lnnum)
+place_t *ida_export hex_place_t__makeplace(const hp_t *ths, void *, uval_t x, int lnnum)
 {
   static hex_place_t p;
   p.d     = ths->d;
@@ -58,7 +52,7 @@ place_t *ida_export hex_place_t__makeplace(const hp_t *ths, void *, uval_t x, sh
 int ida_export hex_place_t__compare(const hp_t *ths, const place_t *t2)
 {
   hp_t *s = (hp_t *)t2;
-  return ths->n - s->n;
+  return compare(ths->n, s->n);
 }
 
 //--------------------------------------------------------------------------
@@ -110,12 +104,12 @@ bool ida_export hex_place_t__ending(const hp_t *ths, void *)
 // Generate text for the current location
 int ida_export hex_place_t__generate(
         const hp_t *ths,
-        void * /*ud*/,
-        char *lines[],
-        int maxsize,
+        qstrvec_t *out,
         int *default_lnnum,
-        color_t * /*prefix_color*/,
-        bgcolor_t * /*bg_color*/)
+        color_t *,
+        bgcolor_t *,
+        void *,
+        int maxsize)
 {
   int idx = ths->n;
   if ( idx > ths->d->maxline() || maxsize <= 0 )
@@ -150,16 +144,78 @@ int ida_export hex_place_t__generate(
   pos += HEX_ASCII_SEP;
 
   // add ascii values
-  char *end = tag_on(str + pos, str + bufsize, COLOR_NUMBER);
-  pos = (size_t)(end - str);
+  char *ptr = str + pos;
+  char *end = str + bufsize;
+  APPCHAR(ptr, end, COLOR_ON);
+  APPCHAR(ptr, end, COLOR_NUMBER);
   for ( uint i = 0; i < alignment; i++ )
-    str[pos++] = qisprint(data[i]) ? (char)data[i] : '.';
-  end = tag_off(str + pos, str + bufsize, COLOR_NUMBER);
-  *end = 0;
+    APPCHAR(ptr, end, qisprint(data[i]) ? (char)data[i] : '.');
+  APPCHAR(ptr, end, COLOR_OFF);
+  APPCHAR(ptr, end, COLOR_NUMBER);
+  APPZERO(ptr, end);
 
   qfree(data);
-  lines[0] = str;
+  out->push_back(str);
   *default_lnnum = 0;
   return 1;
 }
 
+//-------------------------------------------------------------------------
+void ida_export hex_place_t__serialize(const hex_place_t *_this, bytevec_t *out)
+{
+  place_t__serialize(_this, out);
+  append_ea(*out, _this->n);
+}
+
+//-------------------------------------------------------------------------
+bool ida_export hex_place_t__deserialize(hex_place_t *_this, const uchar **pptr, const uchar *end)
+{
+  if ( !place_t__deserialize(_this, pptr, end) || *pptr >= end )
+    return false;
+  _this->n = unpack_ea(pptr, end);
+  return true;
+}
+
+//-------------------------------------------------------------------------
+//lint -esym(843,hex_place_id) could be declared const
+static int hex_place_id = -1;
+static hex_place_t _template;
+void register_hex_place()
+{
+  hex_place_id = register_place_class(&_template, 0, &PLUGIN);
+}
+
+//-------------------------------------------------------------------------
+int ida_export hex_place_t__id(const hex_place_t *)
+{
+  return hex_place_id;
+}
+
+//-------------------------------------------------------------------------
+const char *ida_export hex_place_t__name(const hex_place_t *)
+{
+  return "hexview:hex_place_t";
+}
+
+//-------------------------------------------------------------------------
+ea_t ida_export hex_place_t__toea(const hex_place_t *)
+{
+  return BADADDR;
+}
+
+//-------------------------------------------------------------------------
+place_t *ida_export hex_place_t__enter(const hex_place_t *, uint32 *)
+{
+  return NULL;
+}
+
+//-------------------------------------------------------------------------
+void ida_export hex_place_t__leave(const hex_place_t *, uint32)
+{
+}
+
+//-------------------------------------------------------------------------
+bool ida_export hex_place_t__rebase(hex_place_t *, const segm_move_infos_t &)
+{
+  return false;
+}

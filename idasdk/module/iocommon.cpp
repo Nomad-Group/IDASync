@@ -17,7 +17,7 @@
 #include <entry.hpp>
 
 //lint -esym(843,respect_info) could be declared as const
-char deviceparams[MAXSTR];
+qstring deviceparams;
 static int respect_info;
 
 #define IORESP_PORT     1       // rename port names in memory
@@ -28,11 +28,6 @@ static int respect_info;
 #define IORESP_NONE     0
 
 #define NONEPROC        "NONE"
-
-// Option: complain about missing config files
-// Default: yes, complain
-// Change: define SILENT
-//#define SILENT        - don't complain about missing config files
 
 // Option: additional segment class to appear in the device description
 // Default: EEPROC
@@ -71,10 +66,10 @@ static void standard_apply_io_port(ea_t ea, const char *name, const char *cmt)
 // (e.g., "area", "mirror", ...)
 // Default: standard_handle_unknown_directive
 // Change: define HANDLE_UNKNOWN_DIRECTIVE to be a specific handler.
-static const char *idaapi parse_area_line(const char *line, char *buf, size_t bufsize);
+static const char *idaapi parse_area_line(qstring *buf, const char *line);
 static const char *standard_handle_unknown_directive(const char *line)
 {
-  return parse_area_line(line, deviceparams, sizeof(deviceparams));
+  return parse_area_line(&deviceparams, line);
 }
 #ifndef HANDLE_UNKNOWN_DIRECTIVE
 #define HANDLE_UNKNOWN_DIRECTIVE standard_handle_unknown_directive
@@ -93,7 +88,7 @@ static const char *standard_handle_unknown_directive(const char *line)
 // Change: define NO_GET_CFG_PATH and write your own get_cfg_path()
 
 //------------------------------------------------------------------
-static const char *idaapi parse_area_line(const char *line, char *buf, size_t bufsize)
+static const char *idaapi parse_area_line(qstring *buf, const char *line)
 {
   if ( line[0] != ';' )
   {
@@ -108,20 +103,20 @@ static const char *idaapi parse_area_line(const char *line, char *buf, size_t bu
       size_t _eeprom = 0;
       static const char *const format =
         "RAM=%" FMT_Z " ROM=%" FMT_Z " EPROM=%" FMT_Z " " CUSTOM1 "=%" FMT_Z;
-      qsscanf(buf, format, &_ram, &_rom, &_eprom, &_eeprom);
+      qsscanf(buf->c_str(), format, &_ram, &_rom, &_eprom, &_eeprom);
       size_t size = size_t(ea2 - ea1);
-      if ( stristr(word, "RAM")    != NULL )
+      if ( stristr(word, "RAM") != NULL )
         _ram += size;
-      else if ( stristr(word, CUSTOM1)  != NULL )
+      else if ( stristr(word, CUSTOM1) != NULL )
         _eeprom += size;
-      else if ( stristr(word, "EPROM")  != NULL )
+      else if ( stristr(word, "EPROM") != NULL )
         _eprom  += size;
-      else if ( stristr(word, "ROM")    != NULL )
+      else if ( stristr(word, "ROM") != NULL )
         _rom    += size;
       if ( _ram || _rom || _eprom || _eeprom )
-        qsnprintf(buf, bufsize, format, _ram, _rom, _eprom, _eeprom);
+        buf->sprnt(format, _ram, _rom, _eprom, _eeprom);
       else
-        buf[0] = '\0';
+        buf->qclear();
       if ( (respect_info & IORESP_AREA) != 0 && get_first_seg() != NULL )
       {
 #ifdef AREA_PROCESSING
@@ -131,16 +126,25 @@ static const char *idaapi parse_area_line(const char *line, char *buf, size_t bu
 #ifdef I8051
           if ( stristr(word, "FSR") != NULL || stristr(word, "RAM") != NULL )
           {
-            AdditionalSegment( size_t(ea2-ea1), (size_t)ea1, word );
+            AdditionalSegment(ea2-ea1, ea1, word);
           }
           else
-#endif // I8051
+#endif
           {
-            sel_t sel = allocate_selector(0);
-            add_segm(sel, ea1, ea2, word, aclass);
+            segment_t s;
+            s.sel     = setup_selector(0);
+            s.start_ea = ea1;
+            s.end_ea   = ea2;
+            s.align   = saRelByte;
+            s.comb    = streq(aclass, "STACK") ? scStack : scPub;
+            s.bitness = ph.get_segm_bitness();
+            if ( s.bitness == 0 && s.size() > 0xFFFF )
+              s.bitness = 1;
+            int sfl = ADDSEG_NOSREG;
+            if ( !is_loaded(s.start_ea) )
+              sfl |= ADDSEG_SPARSE;
+            add_segm_ex(&s, word, aclass, sfl);
           }
-          if ( ea2-ea1 > 0xFFFF )
-            set_segm_addressing(getseg(ea1), true);
         }
       }
       return NULL;
@@ -150,15 +154,15 @@ static const char *idaapi parse_area_line(const char *line, char *buf, size_t bu
 }
 
 //------------------------------------------------------------------
-const char *idaapi parse_area_line0(const char *line, char *buf, size_t bufsize)
+const char *idaapi parse_area_line0(qstring *buf, const char *line)
 {
   respect_info = 0;
-  parse_area_line(line, buf, bufsize);
+  parse_area_line(buf, line);
   return NULL;
 }
 
 //------------------------------------------------------------------
-static const char *idaapi standard_callback(const ioport_t *, size_t, const char *line)
+static const char *idaapi standard_callback(const ioports_t &, const char *line)
 {
   char word[MAXSTR];
   ea_t ea1;
@@ -171,19 +175,19 @@ static const char *idaapi standard_callback(const ioport_t *, size_t, const char
       segment_t *s = getseg(ea1);
       if ( s != NULL && s->use32() )
       {
-        doDwrd(ea1, 4);
-        proc = get_long(ea1);
+        create_dword(ea1, 4);
+        proc = get_dword(ea1);
         wrong = 0xFFFFFFFF;
       }
       else
       {
-        doWord(ea1, 2);
+        create_word(ea1, 2);
         proc = get_word(ea1);
         wrong = 0xFFFF;
       }
-      if ( proc != wrong && isEnabled(proc) )
+      if ( proc != wrong && is_mapped(proc) )
       {
-        set_offset(ea1, 0, 0);
+        op_plain_offset(ea1, 0, 0);
         add_entry(proc, proc, word, true);
       }
       else
@@ -191,7 +195,7 @@ static const char *idaapi standard_callback(const ioport_t *, size_t, const char
         set_name(ea1, word);
       }
       const char *ptr = &line[len];
-      ptr = skipSpaces(ptr);
+      ptr = skip_spaces(ptr);
       if ( ptr[0] != '\0' )
         set_cmt(ea1, ptr, true);
     }
@@ -201,10 +205,10 @@ static const char *idaapi standard_callback(const ioport_t *, size_t, const char
   {
     if ( (respect_info & IORESP_INT) != 0 )
     {
-      if ( isEnabled(ea1) )
+      if ( is_mapped(ea1) )
       {
         const char *ptr = &line[len];
-        ptr = skipSpaces(ptr);
+        ptr = skip_spaces(ptr);
 #ifdef ENTRY_PROCESSING
         if ( !ENTRY_PROCESSING(ea1, word, ptr) )
 #endif
@@ -224,7 +228,7 @@ static const char *idaapi standard_callback(const ioport_t *, size_t, const char
 #ifndef NO_GET_CFG_PATH
 inline void get_cfg_filename(char *buf, size_t bufsize)
 {
-  inf.get_proc_name(buf);
+  qstrncpy(buf, inf.procname, bufsize);
   qstrlwr(buf);
   qstrncat(buf, ".cfg", bufsize);
 }
@@ -233,33 +237,24 @@ inline void get_cfg_filename(char *buf, size_t bufsize)
 //------------------------------------------------------------------
 static bool apply_config_file(int _respect_info)
 {
-  if ( strcmp(device, NONEPROC) == 0 )  // processor not selected
+  if ( device == NONEPROC ) // processor not selected
     return true;
 
   char cfgfile[QMAXFILE];
-  char cfgpath[QMAXPATH];
   get_cfg_filename(cfgfile, sizeof(cfgfile));
-  if ( getsysfile(cfgpath, sizeof(cfgpath), cfgfile, CFG_SUBDIR) == NULL )
-  {
-#ifndef SILENT
-    warning("ICON ERROR\n"
-            "Can not open %s, I/O port definitions are not loaded", cfgfile);
-#endif
-    return false;
-  }
-  deviceparams[0] = '\0';
+  deviceparams.qclear();
   if ( !CHECK_IORESP )
     _respect_info = 0;
   respect_info = _respect_info;
-  free_ioports(ports, numports);
-  ports = read_ioports(&numports, cfgpath, device, sizeof(device), callback);
+  ports.clear();
+  read_ioports(&ports, &device, cfgfile, callback);
   if ( respect_info & IORESP_PORT )
   {
-    for ( size_t i=0; i < numports; i++ )
+    for ( size_t i=0; i < ports.size(); i++ )
     {
-      ioport_t *p = ports + i;
-      ea_t ea = p->address;
-      APPLY_IO_PORT(ea, p->name, p->cmt);
+      const ioport_t &p = ports[i];
+      ea_t ea = p.address;
+      APPLY_IO_PORT(ea, p.name.c_str(), p.cmt.c_str());
     }
   }
   return true;
@@ -270,8 +265,8 @@ void set_device_name(const char *dname, int respinfo)
 {
   if ( dname != NULL )
   {
-    qstrncpy(device, dname, sizeof(device));
-    helper.supset(-1, device);
+    device = dname;
+    helper.supset(-1, device.c_str());
     apply_config_file(respinfo);
   }
 }
@@ -317,12 +312,21 @@ bool display_infotype_dialog(
 #undef ADD_FIELD
   qnotused(B);
   APPEND(ptr, end, ">\n\n");
-  if ( !AskUsingForm_c(buf, &b) )
+  if ( !ask_form(buf, &b) )
     return false;
   B = 1;
-  if ( display_info & IORESP_PORT ) { setflag(r, IORESP_PORT, (B & b) != 0); B <<= 1; }
-  if ( display_info & IORESP_AREA ) { setflag(r, IORESP_AREA, (B & b) != 0); B <<= 1; }
-  if ( display_info & IORESP_INT  ) { setflag(r, IORESP_INT , (B & b) != 0);          }
+  if ( display_info & IORESP_PORT )
+  {
+    setflag(r, IORESP_PORT, (B & b) != 0);
+    B <<= 1;
+  }
+  if ( display_info & IORESP_AREA )
+  {
+    setflag(r, IORESP_AREA, (B & b) != 0);
+    B <<= 1;
+  }
+  if ( display_info & IORESP_INT )
+    setflag(r, IORESP_INT, (B & b) != 0);
   *p_resp_info = r;
   return true;
 }

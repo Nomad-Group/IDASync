@@ -14,8 +14,9 @@
 #include <kernwin.hpp>
 
 // the editor form
-static TForm *editor_tform;
+static TWidget *editor_widget;
 
+//---------------------------------------------------------------------------
 // chooser (list view) items
 static const char *const names[] =
 {
@@ -32,8 +33,33 @@ static qstring txts[] =
   "Text three:\n And finally text for the last item"
 };
 
+struct of_chooser_t : public chooser_t
+{
+public:
+  // this object must be allocated using `new`
+  // as it used in the non-modal form
+  of_chooser_t() : chooser_t()
+  {
+    columns = 1;
+    static const int widths_[] = { 12 };
+    static const char *const header_[] = { "Name" };
+    widths = widths_;
+    header = header_;
+  }
+
+  virtual size_t idaapi get_count() const { return qnumber(names); }
+  virtual void idaapi get_row(
+          qstrvec_t *cols,
+          int *,
+          chooser_item_attrs_t *,
+          size_t n) const
+  {
+    (*cols)[0] = names[n];
+  }
+};
+
 // Current index for chooser list view
-static int curidx = 0;
+static size_t curidx = 0;
 // Form actions for control dialog
 static form_actions_t *control_fa;
 // Defines where to place new/existing editor window
@@ -65,7 +91,7 @@ inline void enable_button(form_actions_t &fa, int fid, bool enabled)
 // Update control window buttons state
 static void update_buttons(form_actions_t &fa)
 {
-  bool visible = editor_tform != NULL;
+  bool visible = editor_widget != NULL;
   enable_button(fa, 10, !dock && visible);
   enable_button(fa, 11, dock && visible);
   enable_button(fa, 12, !visible);
@@ -74,9 +100,9 @@ static void update_buttons(form_actions_t &fa)
 
 //--------------------------------------------------------------------------
 // this callback is called when the user clicks on a button
-static int idaapi btn_cb(TView *[], int)
+static int idaapi btn_cb(int, form_actions_t &)
 {
-  msg("button has been pressed -> ");
+  msg("button has been pressed -> \n");
   return 0;
 }
 
@@ -92,7 +118,7 @@ static int idaapi editor_modcb(int fid, form_actions_t &fa)
     case CB_CLOSE:    // Closing the form
       msg("closing editor form\n");
       // mark the form as closed
-      editor_tform = NULL;
+      editor_widget = NULL;
       // If control form exists then update buttons
       if ( control_fa != NULL )
         update_buttons(*control_fa);
@@ -107,10 +133,10 @@ static int idaapi editor_modcb(int fid, form_actions_t &fa)
       break;
     case ITEM_SELECTED:    // list item selected
       {
-        intvec_t sel;
+        sizevec_t sel;
         if ( fa.get_chooser_value(2, &sel) )
         {
-          curidx = sel[0] - 1;
+          curidx = sel[0];
           textctrl_info_t ti;
           ti.cb = sizeof(textctrl_info_t);
           ti.text = txts[curidx];
@@ -125,20 +151,6 @@ static int idaapi editor_modcb(int fid, form_actions_t &fa)
   }
   return 1;
 }
-//---------------------------------------------------------------------------
-// chooser: return the text to display at line 'n' (0 returns the column header)
-static void idaapi getl(void *, uint32 n, char * const *arrptr)
-{
-  qstrncpy(arrptr[0], n == 0 ? "Name" : names[n-1], MAXSTR);
-}
-
-//---------------------------------------------------------------------------
-// chooser: return the number of lines in the list
-static uint32 idaapi sizer(void *)
-{
-  return qnumber(names);
-}
-
 //---------------------------------------------------------------------------
 // create and open the editor form
 static void open_editor_form(int options = 0)
@@ -158,30 +170,25 @@ static void open_editor_form(int options = 0)
   ti.cb = sizeof(textctrl_info_t);
   ti.text = txts[0];
   // structure for chooser list view
-  chooser_info_t chi = { 0 };
-  chi.cb = sizeof(chooser_info_t);
-  chi.columns = 1;
-  chi.getl   = getl;
-  chi.sizer  = sizer;
-  static const int widths[] = { 12 };
-  chi.widths = widths;
+  of_chooser_t *ofch = new of_chooser_t();
   // selection for chooser list view
-  intvec_t selected;
-  editor_tform = OpenForm_c(formdef,
-                            FORM_QWIDGET | options,
+  sizevec_t selected;
+  selected.push_back(0);  // first item by default
+  editor_widget = open_form(formdef,
+                            options,
                             editor_modcb,
-                            &chi,
-                            &selected,
+                            ofch, &selected,
                             &ti);
+  //lint -e{429} Custodial pointer 'ofch' has not been freed or returned
 }
 
 
 //---------------------------------------------------------------------------
 static void close_editor_form()
 {
-  msg("closing editor form\n");
-  close_tform(editor_tform, FORM_CLOSE_LATER);
-  editor_tform = NULL;
+  msg("closing editor widget\n");
+  close_widget(editor_widget, WCLS_CLOSE_LATER);
+  editor_widget = NULL;
 }
 //--------------------------------------------------------------------------
 inline void dock_form(bool _dock)
@@ -219,7 +226,7 @@ static int idaapi control_modcb(int fid, form_actions_t &fa)
       break;
     case BTN_OPEN:
       msg("open editor form\n");
-      open_editor_form(FORM_TAB|FORM_RESTORE);
+      open_editor_form(WOPN_TAB|WOPN_RESTORE);
       dock_form(dock);
       break;
     case BTN_CLOSE:
@@ -234,10 +241,10 @@ static int idaapi control_modcb(int fid, form_actions_t &fa)
 
 //--------------------------------------------------------------------------
 // the main function of the plugin
-static void idaapi run(int)
+static bool idaapi run(size_t)
 {
   // first open the editor form
-  open_editor_form(FORM_RESTORE);
+  open_editor_form(WOPN_RESTORE);
 
   static const char control_form[] =
     "BUTTON NO NONE\n"          // do not display standard buttons at the bottom
@@ -247,11 +254,12 @@ static void idaapi run(int)
     "%/"                        // placeholder for control_modcb
     "<Dock:B10:30:::><Undock:B11:30:::><Show:B12:30:::><Hide:B13:30:::>\n"; // Create control buttons
 
-  OpenForm_c(control_form,
-                             FORM_QWIDGET | FORM_RESTORE | FORM_MENU,
-                             control_modcb,
-                             btn_cb, btn_cb, btn_cb, btn_cb);
+  open_form(control_form,
+            WOPN_RESTORE | WOPN_MENU,
+            control_modcb,
+            btn_cb, btn_cb, btn_cb, btn_cb);
   set_dock_pos("Control form", NULL, DP_FLOATING, 0, 0, 300, 100);
+  return true;
 }
 
 //--------------------------------------------------------------------------

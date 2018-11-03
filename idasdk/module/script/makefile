@@ -9,3 +9,6 @@ $(R)procs/ebc.py: ebc.py
 msp430: $(R)procs/msp430.py
 $(R)procs/msp430.py: msp430.py
 	$(CP) $? $@
+
+clean::
+	rm -f $(R)procs/ebc.py $(R)procs/msp430.py

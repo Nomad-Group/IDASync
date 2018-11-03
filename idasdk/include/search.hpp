@@ -7,7 +7,6 @@
 
 #ifndef __SEARCH_HPP
 #define __SEARCH_HPP
-#pragma pack(push, 1)   // IDA uses 1 byte alignments!
 
 /*! \file search.hpp
 
@@ -18,19 +17,19 @@
 
 /// \defgroup SEARCH_ Search flags
 //@{
-#define SEARCH_UP       0x000           ///< search lower addresses
-#define SEARCH_DOWN     0x001           ///< search higher addresses
+#define SEARCH_UP       0x000           ///< search towards lower addresses
+#define SEARCH_DOWN     0x001           ///< search towards higher addresses
 #define SEARCH_NEXT     0x002           ///< useful only for search() and find_binary().
                                         ///< for other find_.. functions it is implicitly set
-#define SEARCH_CASE     0x004           ///< case-sensitive search
-#define SEARCH_REGEX    0x008           ///< regular expressions (only for txt search)
-#define SEARCH_NOBRK    0x010           ///< don't test ctrl-break
-#define SEARCH_NOSHOW   0x020           ///< don't display the search progress
-#define SEARCH_UNICODE  0x040           ///< treat strings as unicode
-#define SEARCH_IDENT    0x080           ///< search for an identifier.
+#define SEARCH_CASE     0x004           ///< case-sensitive search (case-insensitive otherwise)
+#define SEARCH_REGEX    0x008           ///< regular expressions  in search string (only supported for txt search)
+#define SEARCH_NOBRK    0x010           ///< don't test for ctrl-break to interrupt the search
+#define SEARCH_NOSHOW   0x020           ///< don't display the search progress/refresh screen
+#define SEARCH_UNICODE  0x040           ///< treat literal strings as unicode (find_binary() only)
+#define SEARCH_IDENT    0x080           ///< search for an identifier (text search).
                                         ///< it means that the characters before
-                                        ///< and after the pattern can not be is_visible_char().
-#define SEARCH_BRK      0x100           ///< return #BADADDR if break is pressed during find_imm()
+                                        ///< and after the match can not be is_visible_char().
+#define SEARCH_BRK      0x100           ///< return #BADADDR if Ctrl-Break wass pressed during search
 //@}
 
 
@@ -59,17 +58,17 @@ idaman ea_t ida_export find_notype(ea_t ea, int sflag, int *opnum=NULL);
 
 /// Find next unexplored address
 
-idaman ea_t ida_export find_unknown(ea_t ea,int sflag);
+idaman ea_t ida_export find_unknown(ea_t ea, int sflag);
 
 
 /// Find next ea that is the start of an instruction or data
 
-idaman ea_t ida_export find_defined(ea_t ea,int sflag);
+idaman ea_t ida_export find_defined(ea_t ea, int sflag);
 
 
-/// Find next void operand
+/// Find next suspicious operand
 
-idaman ea_t ida_export find_void(ea_t ea,int sflag, int *opnum=NULL);
+idaman ea_t ida_export find_suspop(ea_t ea, int sflag, int *opnum=NULL);
 
 
 /// Find next data address
@@ -89,23 +88,24 @@ idaman ea_t ida_export find_not_func(ea_t ea,int sflag);
 
 /// Find next immediate operand with the given value
 
-idaman ea_t ida_export find_imm(ea_t newEA,int sflag, sval_t srchValue, int *opnum=NULL);
+idaman ea_t ida_export find_imm(ea_t newEA, int sflag, uval_t srchValue, int *opnum=NULL);
 
 
-/// Find next address that denotes the start of the specified binary string.
+/// Find next address that denotes the start of the specified binary sequence (specified in text form).
 /// \param startea,endea   range to search
 /// \param ubinstr,radix   see user2bin()
 
-idaman ea_t ida_export find_binary(ea_t startea,
-                 ea_t endea,
-                 const char *ubinstr,
-                 int radix,
-                 int sflag);
+idaman ea_t ida_export find_binary(
+        ea_t startea,
+        ea_t endea,
+        const char *ubinstr,
+        int radix,
+        int sflag);
 
 
 /// See search()
 
-idaman ea_t ida_export find_text(ea_t startEA, int y, int x, const char *ustr, int sflag);
+idaman ea_t ida_export find_text(ea_t start_ea, int y, int x, const char *ustr, int sflag);
 
 //@}
 
@@ -135,15 +135,19 @@ class place_t;
 ///            The error message was displayed.
 
 idaman int ida_export search(
-                void *ud,
-                place_t *start,
-                const place_t *end,
-                int *startx,
-                const char *str,
-                int sflag);
+        void *ud,
+        place_t *start,
+        const place_t *end,
+        int *startx,
+        const char *str,
+        int sflag);
 
 
 /// Convert user-specified binary string to internal representation.
+/// \param [out] out   buffer for the output sequence of bytes
+/// \param [out] mask  buffer for the output comparison mask.
+///                    if mask[0] == 0xFF upon return, then there were question marks in
+///                    the input text string.
 /// \param ea          linear address to convert for (the conversion depends on the
 ///                    address, because the number of bits in a byte depend on the
 ///                    segment type)
@@ -153,12 +157,15 @@ idaman int ida_export search(
 ///                          - if value of number fits a word, it is considered as 2 bytes
 ///                          - if value of number fits a dword,it is considered as 4 bytes
 ///                      - "..." string constants
-///                      - 'x' character constants
-///                      - ? question marks (to denote variable bytes)
-/// \param [out] out   buffer for the output sequence of bytes
-/// \param [out] mask  buffer for the output comparison mask.
-///                    if mask[0] == 0xFF upon return, then there were question marks in
-///                    the input text string.
+///                      - 'x'  single-character constants
+///                      - ?    variable bytes
+/// \note Examples of search strings (assuming base 16):
+///  CD 21          - bytes 0xCD, 0x21
+///  21CD           - bytes 0xCD, 0x21 (little endian ) or 0x21, 0xCD (big-endian)
+///  "Hello", 0     - the null terminated string "Hello"
+///  L"Hello"       - 'H', 0, 'e', 0, 'l', 0, 'l', 0, 'o', 0
+///  B8 ? ? ? ? 90  - byte 0xB8, 4 bytes with any value, byte 0x90
+///
 /// \param radix       numeric base of numbers (8,10,16)
 /// \param unicode     treat strings as unicode
 ///                    \note L"string" is another way to enter unicode strings
@@ -167,12 +174,11 @@ idaman int ida_export search(
 /// \note the output buffers are assumed to be #MAXSTR bytes
 
 idaman int ida_export user2bin(
-                ea_t ea,
-                const char *in,
-                uchar *out,
-                uchar *mask,
-                int radix,
-                bool unicode);
+        uchar *out,
+        uchar *mask,
+        ea_t ea,
+        const char *in,
+        int radix,
+        bool unicode);
 
-#pragma pack(pop)
 #endif // __SEARCH_HPP

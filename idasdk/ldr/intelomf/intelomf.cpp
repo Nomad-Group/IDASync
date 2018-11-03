@@ -19,19 +19,19 @@ static sel_t dsel = BADSEL;
 //--------------------------------------------------------------------------
 static void create32(
         sel_t sel,
-        ea_t startEA,
-        ea_t endEA,
+        ea_t start_ea,
+        ea_t end_ea,
         const char *name,
         const char *sclass)
 {
   set_selector(sel, 0);
 
   segment_t s;
-  s.sel    = sel;
-  s.startEA= startEA;
-  s.endEA  = endEA;
-  s.align  = saRelByte;
-  s.comb   = sclass != NULL && streq(sclass, "STACK") ? scStack : scPub;
+  s.sel     = sel;
+  s.start_ea = start_ea;
+  s.end_ea   = end_ea;
+  s.align   = saRelByte;
+  s.comb    = sclass != NULL && streq(sclass, "STACK") ? scStack : scPub;
   s.bitness = 1; // 32-bit
 
   if ( !add_segm_ex(&s, name, sclass, ADDSEG_NOSREG|ADDSEG_SPARSE) )
@@ -77,7 +77,7 @@ BAD_FILE:
     if ( strcmp(sname, "DATA") == 0 )
       dsel = n;
     set_selector(n, 0);
-    ea_t ea = freechunk(inf.maxEA, segsize, -(1<<s.align));
+    ea_t ea = free_chunk(inf.max_ea, segsize, -(1<<s.align));
     create32(n, ea, ea+segsize, sname, sclas);
   }
 }
@@ -86,7 +86,7 @@ BAD_FILE:
 static ea_t getsea(ushort i)
 {
   segment_t *s = get_segm_by_sel(i & 0xFF);
-  return s ? s->startEA : BADADDR;
+  return s ? s->start_ea : BADADDR;
 }
 
 //-----------------------------------------------------------------------
@@ -108,7 +108,7 @@ static void show_pubdefs(linput_t *li, uint32 offset, uint32 length)
     if ( sea != BADADDR )
     {
       sea += p.PUB_offset;
-      add_entry(sea, sea, p.sym_name, segtype(sea) == SEG_CODE);
+      add_entry(sea, sea, p.sym_name, segtype(sea) == SEG_CODE, AEF_IDBENC);
     }
   }
 }
@@ -120,9 +120,9 @@ static void show_extdefs(linput_t *li, uint32 offset, uint32 length)
     return;
   qlseek(li, offset);
 
-  inf.specsegs = 1;
-  int16 segsize = 4 * h.num_externals;
-  if ( !is_mul_ok(uint16(4), uint16(h.num_externals))
+  inf.specsegs = inf.is_64bit() ? 8 : 4;
+  int16 segsize = inf.specsegs * h.num_externals;
+  if ( !is_mul_ok(uint16(inf.specsegs), uint16(h.num_externals))
     || segsize < 0
     || segsize < h.num_externals )
   {
@@ -131,7 +131,7 @@ BAD_EXTDEFS:
   }
   sel_t sel = h.num_segs+1;
   set_selector(sel, 0);
-  xea = freechunk(inf.maxEA, segsize, -15);
+  xea = free_chunk(inf.max_ea, segsize, -15);
   create32(sel, xea, xea+segsize, "XTRN", "XTRN");
 
   int n = 0;
@@ -151,9 +151,9 @@ BAD_EXTDEFS:
     i += size + 1 + nlen;
 
     ea_t a = xea + 4 * n++;
-    set_name(a, p.sym_name);
+    set_name(a, p.sym_name, SN_IDBENC);
     if ( p.allocate )
-      put_long(a, p.allocate_len.len_4);
+      put_dword(a, p.allocate_len.len_4);
   }
 }
 
@@ -166,20 +166,20 @@ static void read_text(linput_t *li)
     loader_failure("Corrupted text data");
   if ( txt.length != 0 )
   {
-    uint32 fptr = qltell(li);
+    qoff64_t fptr = qltell(li);
     ea_t sea = getsea(txt.txt_IN);
     if ( sea != BADADDR )
     {
       ea_t start = sea + txt.txt_offset;
       ea_t end   = start + txt.length;
-      uint32 fsize = qlsize(li);
+      uint64 fsize = qlsize(li);
       segment_t *s = getseg(start);
       if ( start < sea
         || end < start
         || fptr > fsize
         || fsize-fptr < txt.length
         || s == NULL
-        || s->endEA < end )
+        || s->end_ea < end )
       {
         loader_failure("Corrupted text data");
       }
@@ -198,7 +198,7 @@ static void read_fixup(linput_t *li)
   const int size = offsetof(fixup, fixups);
   if ( qlread(li, &fix, size) != size || fix.length < 0 )
     loader_failure("Corrupted fixups");
-  uint32 fptr = qltell(li);
+  qoff64_t fptr = qltell(li);
   ea_t sea = getsea(fix.where_IN);
   if ( sea != BADADDR )
   {
@@ -217,13 +217,12 @@ static void read_fixup(linput_t *li)
     const uchar *end = b + fix.length;
     while ( ptr < end )
     {
-      fixup_data_t fd;
       uint32 where_offset = 0;
       uint32 what_offset = 0;
       ushort what_in = 9;
       bool selfrel = false;
       bool isfar = false;
-      fd.type = FIXUP_OFF32;
+      fixup_data_t fd(FIXUP_OFF32);
       switch ( *ptr++ )
       {
         case 0x2C:      // GEN
@@ -268,34 +267,30 @@ static void read_fixup(linput_t *li)
           break;
         case 0x06:      // externs
           target = xea + 4 * ((what_in & 0xFFF) - 1);
-          fd.type |= FIXUP_EXTDEF;
+          fd.set_extdef();
           break;
         default:
           ask_for_feedback("Unknown relocation target %04X", what_in);
           add_pgm_cmt("!!! Unknown relocation target %04X", what_in);
           break;
       }
-      segment_t *ts = getseg(target);
-      fd.sel = ts ? (ushort)ts->sel : 0;
-      if ( (fd.type & FIXUP_EXTDEF) == 0 )
+      fd.set_target_sel();
+      if ( !fd.is_extdef() )
       {
         target += what_offset;
         what_offset = 0;
       }
-      fd.off = target;
+      fd.off = target - fd.get_base();
       fd.displacement = what_offset;
       target += what_offset;
       if ( selfrel )
-      {
-        fd.type |= FIXUP_SELFREL;
         target -= source + 4;
-      }
-      set_fixup(source, &fd);
-      put_long(source, target);
+      fd.set(source);
+      put_dword(source, target);
       if ( isfar )
       {
-        fd.type = FIXUP_SEG16;
-        set_fixup(source+4, &fd);
+        fd.set_type_and_flags(FIXUP_SEG16);
+        fd.set(source+4);
         put_word(source+4, fd.sel);
       }
     }
@@ -316,11 +311,11 @@ static void read_iterat(linput_t *li)
     if ( itr.text.length < 0 || itr.it_count < 0 )
 BAD_FILE:
       loader_failure("Corrupted iterated data");
-    uint32 fptr = qltell(li);
+    qoff64_t fptr = qltell(li);
     ea_t sea = getsea(itr.it_segment);
     if ( sea != BADADDR )
     {
-      uint32 fsize = qlsize(li);
+      uint64 fsize = qlsize(li);
       ea_t start = sea + itr.it_offset;
       segment_t *s = getseg(start);
       if ( start < sea
@@ -333,7 +328,7 @@ BAD_FILE:
       }
       uint32 total = itr.text.length * itr.it_count;
       ea_t final_end = start + total;
-      if ( final_end < start || final_end > s->endEA )
+      if ( final_end < start || final_end > s->end_ea )
         goto BAD_FILE;
       if ( change_storage_type(start, final_end, STT_VA) != eOk )
         INTERR(20061);
@@ -353,8 +348,8 @@ static void show_txtfixs(linput_t *li, uint32 offset, uint32 length)
 {
   if ( offset == 0 || length == 0 )
     return;
-  uint32 fsize = qlsize(li);
-  uint32 eoff = offset + length;
+  uint64 fsize = qlsize(li);
+  uint64 eoff = offset + length;
   if ( eoff < offset || offset > fsize || eoff > fsize )
     loader_failure("Corrupted fixups");
   qlseek(li, offset);
@@ -381,11 +376,16 @@ static void show_txtfixs(linput_t *li, uint32 offset, uint32 length)
 }
 
 //--------------------------------------------------------------------------
-int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], int n)
+static int idaapi accept_file(
+        qstring *fileformatname,
+        qstring *processor,
+        linput_t *li,
+        const char *)
 {
-  if ( n == 0 && is_intelomf_file(li) )
+  if ( is_intelomf_file(li) )
   {
-    qstrncpy(fileformatname, "Intel OMF386", MAX_FILE_FORMAT_NAME);
+    *fileformatname = "Intel OMF386";
+    *processor      = "metapc";
     return 1;
   }
   return 0;
@@ -394,6 +394,8 @@ int idaapi accept_file(linput_t *li, char fileformatname[MAX_FILE_FORMAT_NAME], 
 //--------------------------------------------------------------------------
 void idaapi load_file(linput_t *li, ushort /*neflag*/, const char * /*fileformatname*/)
 {
+  set_processor_type("metapc", SETPROC_LOADER);
+
   qlseek(li, 1);
   lread(li, &h, sizeof(h));
 
@@ -430,5 +432,7 @@ loader_t LDSC =
 //      create output file from the database.
 //      this function may be absent.
 //
+  NULL,
+  NULL,
   NULL,
 };

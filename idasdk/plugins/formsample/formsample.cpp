@@ -9,9 +9,10 @@
 #include <kernwin.hpp>
 
 //--------------------------------------------------------------------------
-static void idaapi btn_cb(TView *[], int)
+static int idaapi btn_cb(int, form_actions_t &)
 {
   warning("button pressed");
+  return 0;
 }
 
 //--------------------------------------------------------------------------
@@ -19,10 +20,10 @@ static int idaapi modcb(int fid, form_actions_t &fa)
 {
   switch ( fid )
   {
-    case -1:
+    case CB_INIT:
       msg("initializing\n");
       break;
-    case -2:
+    case CB_YES:
       msg("terminating\n");
       break;
     case 5:     // operand
@@ -42,16 +43,16 @@ static int idaapi modcb(int fid, form_actions_t &fa)
       break;
   }
 
-  bool is_gui = callui(ui_get_hwnd).vptr != NULL || is_idaq();
+  bool is_gui = is_idaq();
 
-  char buf0[MAXSTR];
-  if ( !fa.get_ascii_value(5, buf0, sizeof(buf0)) )
+  qstring buf0;
+  if ( !fa.get_string_value(5, &buf0) )
     INTERR(30145);
 
-  if ( streq(buf0, "on") )
+  if ( buf0 == "on" )
     fa.enable_field(12, true);
 
-  if ( streq(buf0, "off") )
+  if ( buf0 == "off" )
     fa.enable_field(12, false);
 
   ushort buf1;
@@ -95,14 +96,14 @@ static int idaapi modcb(int fid, form_actions_t &fa)
   bgcolor_t bgc = -1;
   if ( is_gui && !fa.get_color_value(8, &bgc) )
     INTERR(30151);
-  msg("  op=%s change=%x color=%x\n", buf0, buf1, bgc);
+  msg("  op=%s change=%x color=%x\n", buf0.c_str(), buf1, bgc);
 
-  fa.set_label_value(9, buf0);
+  fa.set_label_value(9, buf0.c_str());
   return 1;
 }
 
 //--------------------------------------------------------------------------
-static void idaapi run(int)
+static bool idaapi run(size_t)
 {
   static const char form[] =
     "@0:477[]\n"
@@ -110,7 +111,7 @@ static void idaapi run(int)
     "\n"
     "%/Enter alternate string for the %9D operand\n"
     "\n"
-    "  <~O~perand:A5:100:40::>\n"
+    "  <~O~perand:q5:100:40::>\n"
     "  <~X~:D4:100:10::>\n"
     "  <~Y~:D3:100:10::>\n"
     "  <~W~:D2:100:10::>\n"
@@ -127,21 +128,23 @@ static void idaapi run(int)
     "\n"
     "\n";
   uval_t ln = 1;
-  char buf[MAXSTR];
-  qstrncpy(buf, "original operand", sizeof(buf));
+  qstring buf("original operand");
   ushort check = 0x12;
   bgcolor_t bgc = 0x556677;
   uval_t x = -1;
   uval_t y = -1;
   uval_t w = -1;
   uval_t h = -1;
-  if ( AskUsingForm_c(form, modcb, &ln, buf, &x, &y, &w, &h, &check, btn_cb, &bgc) > 0 )
+  CASSERT(IS_FORMCHGCB_T(modcb));
+  CASSERT(IS_QSTRING(buf));
+  if ( ask_form(form, modcb, &ln, &buf, &x, &y, &w, &h, &check, btn_cb, &bgc) > 0 )
   {
-    msg("operand: %s\n", buf);
+    msg("operand: %s\n", buf.c_str());
     msg("check = %d\n", check);
     msg("dim = %a %a %a %a\n", x, y, w, h);
     msg("bgc = %x\n", bgc);
   }
+  return true;
 }
 
 //--------------------------------------------------------------------------
@@ -160,6 +163,6 @@ plugin_t PLUGIN =
   run,                  // invoke plugin
   NULL,                 // long comment about the plugin
   NULL,                 // multiline help about the plugin
-  "AskUsingForm sample",// the preferred short name of the plugin
+  "ask_form sample",    // the preferred short name of the plugin
   NULL                  // the preferred hotkey to run the plugin
 };

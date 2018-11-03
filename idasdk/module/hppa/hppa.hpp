@@ -13,7 +13,7 @@
 
 #include "../idaidp.hpp"
 #include "ins.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <typeinf.hpp>
 
 //------------------------------------------------------------------
@@ -121,31 +121,26 @@ const proc_t PROC_HPPA = 0;    // HPPA big endian
 extern proc_t ptype;               // processor type
 
 //------------------------------------------------------------------
-void interr(const char *module);
+void interr(const insn_t &insn, const char *module);
 
-void idaapi header(void);
-void idaapi footer(void);
+void idaapi hppa_header(outctx_t &ctx);
+void idaapi hppa_footer(outctx_t &ctx);
 
-void idaapi segstart(ea_t ea);
-void idaapi segend(ea_t ea);
-void idaapi assumes(ea_t ea);         // function to produce assume directives
+void idaapi hppa_segstart(outctx_t &ctx, segment_t *seg);
+void idaapi hppa_segend(outctx_t &ctx, segment_t *seg);
+void idaapi hppa_assumes(outctx_t &ctx);         // function to produce assume directives
 
-void idaapi out(void);
-int  idaapi outspec(ea_t ea,uchar segtype);
-
-int  idaapi ana(void);
-int  idaapi emu(void);
-bool idaapi outop(op_t &op);
-void idaapi data(ea_t ea);
+int  idaapi ana(insn_t *_insn);
+int  idaapi emu(const insn_t &insn);
 
 int  idaapi is_align_insn(ea_t ea);
 bool idaapi create_func_frame(func_t *pfn);
-int  idaapi hppa_get_frame_retsize(func_t *);
+int  idaapi hppa_get_frame_retsize(const func_t *);
 
-int idaapi is_sp_based(const op_t &x);
-int is_sane_insn(int nocrefs);
-int may_be_func(void);           // can a function start here?
-bool is_basic_block_end(void);
+int idaapi is_sp_based(const insn_t &insn, const op_t &x);
+int is_sane_insn(const insn_t &insn, int nocrefs);
+int may_be_func(const insn_t &insn);           // can a function start here?
+bool is_basic_block_end(const insn_t &insn);
 
 //--------------------------------------------------------------------------
 // functions to get various fields from the instruction code
@@ -195,8 +190,8 @@ inline int get_ldo(uint32 code) { return assemble_16((code>>14)&3,code & 0x3FFF)
 
 //--------------------------------------------------------------------------
 
-char *build_insn_completer(uint32 code, char *buf, size_t bufsize);
-ea_t calc_possible_memref(const op_t &x);
+char *build_insn_completer(const insn_t &insn, uint32 code, char *buf, size_t bufsize);
+ea_t calc_possible_memref(const insn_t &insn, const op_t &x);
 
 
 // type system functions

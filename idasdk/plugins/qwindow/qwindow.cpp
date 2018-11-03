@@ -4,12 +4,7 @@
  *
  */
 
-#ifdef __QT5__
 #include <QtWidgets/QtWidgets>
-#else
-#include <QWidget>
-#include <QPushButton>
-#endif
 
 #include <ida.hpp>
 #include <idp.hpp>
@@ -26,14 +21,14 @@ void MyActions::clicked()
 }
 
 //--------------------------------------------------------------------------
-static int idaapi ui_callback(void *user_data, int notification_code, va_list va)
+static ssize_t idaapi ui_callback(void *user_data, int notification_code, va_list va)
 {
-  if ( notification_code == ui_tform_visible )
+  if ( notification_code == ui_widget_visible )
   {
-    TForm *form = va_arg(va, TForm *);
-    if ( form == user_data )
+    TWidget *widget = va_arg(va, TWidget *);
+    if ( widget == user_data )
     {
-      QWidget *w = (QWidget *)form;
+      QWidget *w = (QWidget *) widget;
       MyActions *actions = new MyActions(w);
 
       // create a widget
@@ -45,18 +40,18 @@ static int idaapi ui_callback(void *user_data, int notification_code, va_list va
       // position and display it
       b->move(50, 50);
       b->show();
-      msg("Qt form is displayed\n");
+      msg("Qt widget is displayed\n");
       //lint -e{429} actions,b not freed
     }
   }
-  else if ( notification_code == ui_tform_invisible )
+  else if ( notification_code == ui_widget_invisible )
   {
-    TForm *form = va_arg(va, TForm *);
-    if ( form == user_data )
+    TWidget *widget = va_arg(va, TWidget *);
+    if ( widget == user_data )
     {
-      // user defined form is closed, destroy its controls
+      // user defined widget is closed, destroy its controls
       // (to be implemented)
-      msg("Qt form is closed\n");
+      msg("Qt widget is closed\n");
     }
   }
   return 0;
@@ -76,17 +71,20 @@ void idaapi term(void)
 }
 
 //--------------------------------------------------------------------------
-void idaapi run(int /*arg*/)
+bool idaapi run(size_t)
 {
-  HWND hwnd = NULL;
-  TForm *form = create_tform("Sample Qt subwindow", &hwnd);
-  if ( hwnd != NULL )
+  TWidget *widget = find_widget("Sample Qt subwindow");
+  if ( widget == NULL )
   {
-    hook_to_notification_point(HT_UI, ui_callback, form);
-    open_tform(form, FORM_TAB|FORM_MENU|FORM_RESTORE|FORM_QWIDGET);
+    widget = create_empty_widget("Sample Qt subwindow");
+    hook_to_notification_point(HT_UI, ui_callback, widget);
+    display_widget(widget, WOPN_TAB|WOPN_MENU|WOPN_RESTORE);
   }
   else
-    close_tform(form, FORM_SAVE);
+  {
+    close_widget(widget, WCLS_SAVE);
+  }
+  return true;
 }
 
 //--------------------------------------------------------------------------

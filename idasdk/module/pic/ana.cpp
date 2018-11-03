@@ -9,19 +9,19 @@
  */
 
 #include "pic.hpp"
-#include <srarea.hpp>
+#include <segregs.hpp>
 
-static int basic_ana(void);
+static int basic_ana(insn_t &insn);
 
 #define PIC18_IP_RANGE 0x1FFFFF
 
 //--------------------------------------------------------------------------
 static int ana(ea_t ea, insn_t &insn)
 {
-  insn_t saved = cmd;
-  int len = decode_insn(ea);
-  if ( len ) insn = cmd;
-  cmd = saved;
+  insn_t l;
+  int len = decode_insn(&l, ea);
+  if ( len != 0 )
+    insn = l;
   return len;
 }
 
@@ -30,21 +30,26 @@ static int ana(ea_t ea, insn_t &insn)
 //  - no crefs to the second instruction of the macro
 //  - nothing there
 
-static bool may_grow(void)
+static bool may_grow(const insn_t &insn)
 {
-  flags_t lF = get_flags_novalue(cmd.ea+1);
-  return (isUnknown(lF) || isTail(lF)) && !hasRef(lF);
+  flags_t lF = get_flags(insn.ea+1);
+  return (is_unknown(lF) || is_tail(lF)) && !has_xref(lF);
 }
 
-int idaapi ana(void)
+int idaapi ana(insn_t *_insn)
 {
   static bool inside = false;
-  int len = basic_ana();
-  if ( inside || len == 0 ) return len;
+
+  if ( _insn == NULL )
+    return 0;
+  insn_t &insn = *_insn;
+  int len = basic_ana(insn);
+  if ( inside || len == 0 )
+    return len;
   if ( macro() )
   {
     inside = true;
-    switch ( cmd.itype )
+    switch ( insn.itype )
     {
 // movfw   macro   f       ; Move Contents of File Reg to W
 //      movf    f,0
@@ -53,8 +58,8 @@ int idaapi ana(void)
 //      movf    f,1
 //      endm
       case PIC_movf:
-        cmd.itype = (cmd.Op2.reg == W) ? PIC_movfw : PIC_tstf;
-        cmd.Op2.type = o_void;
+        insn.itype = (insn.Op2.reg == W) ? PIC_movfw : PIC_tstf;
+        insn.Op2.type = o_void;
         break;
 
 // negf    macro   f,d     ; Negate File Register Contents
@@ -62,17 +67,17 @@ int idaapi ana(void)
 //      incf    f,d
 //      endm
       case PIC_comf:
-        if ( cmd.Op2.reg == F && may_grow() )
+        if ( insn.Op2.reg == F && may_grow(insn) )
         {
           insn_t incf;
-          if ( ana(cmd.ea+1, incf)
+          if ( ana(insn.ea+1, incf)
             && incf.itype == PIC_incf
             && incf.Op1.type == o_mem
-            && incf.Op1.addr == cmd.Op1.addr )
+            && incf.Op1.addr == insn.Op1.addr )
           {
-            cmd.itype = PIC_negf;
-            cmd.Op2.reg = incf.Op2.reg;
-            cmd.size  = 2;
+            insn.itype = PIC_negf;
+            insn.Op2.reg = incf.Op2.reg;
+            insn.size = 2;
           }
         }
         break;
@@ -81,7 +86,7 @@ int idaapi ana(void)
 //      goto    k
 //      endm
       case PIC_goto:
-        cmd.itype = PIC_b;
+        insn.itype = PIC_b;
         break;
 
 // clrc    macro           ; Clear Carry
@@ -94,14 +99,14 @@ int idaapi ana(void)
 //      bcf     3,2
 //      endm
       case PIC_bcf:
-        if ( is_bank() ) switch ( cmd.Op2.value )
+        if ( is_bank(insn) ) switch ( insn.Op2.value )
         {
-          case 0: cmd.itype = PIC_clrc;  goto NOOP;
-          case 1: cmd.itype = PIC_clrdc; goto NOOP;
-          case 2: cmd.itype = PIC_clrz;  goto NOOP;
+          case 0: insn.itype = PIC_clrc;  goto NOOP;
+          case 1: insn.itype = PIC_clrdc; goto NOOP;
+          case 2: insn.itype = PIC_clrz;  goto NOOP;
 NOOP:
-            cmd.Op1.type = o_void;
-            cmd.Op2.type = o_void;
+            insn.Op1.type = o_void;
+            insn.Op2.type = o_void;
             break;
         }
         break;
@@ -116,11 +121,11 @@ NOOP:
 //      bcf     3,2
 //      endm
       case PIC_bsf:
-        if ( is_bank() ) switch ( cmd.Op2.value )
+        if ( is_bank(insn) ) switch ( insn.Op2.value )
         {
-          case 0: cmd.itype = PIC_setc;  goto NOOP;
-          case 1: cmd.itype = PIC_setdc; goto NOOP;
-          case 2: cmd.itype = PIC_setz;  goto NOOP;
+          case 0: insn.itype = PIC_setc;  goto NOOP;
+          case 1: insn.itype = PIC_setdc; goto NOOP;
+          case 2: insn.itype = PIC_setz;  goto NOOP;
         }
         break;
 
@@ -134,11 +139,11 @@ NOOP:
 //      btfsc   3,2
 //      endm
       case PIC_btfsc:
-        if ( is_bank() ) switch ( cmd.Op2.value )
+        if ( is_bank(insn) ) switch ( insn.Op2.value )
         {
-          case 0: cmd.itype = PIC_skpnc;  goto NOOP_BTF;
-          case 1: cmd.itype = PIC_skpndc; goto NOOP_BTF;
-          case 2: cmd.itype = PIC_skpnz;  goto NOOP_BTF;
+          case 0: insn.itype = PIC_skpnc;  goto NOOP_BTF;
+          case 1: insn.itype = PIC_skpndc; goto NOOP_BTF;
+          case 2: insn.itype = PIC_skpnz;  goto NOOP_BTF;
         }
         break;
 
@@ -152,20 +157,20 @@ NOOP:
 //      btfss   3,2
 //      endm
       case PIC_btfss:
-        if ( is_bank() ) switch ( cmd.Op2.value )
+        if ( is_bank(insn) ) switch ( insn.Op2.value )
         {
-          case 0: cmd.itype = PIC_skpc;  goto NOOP_BTF;
-          case 1: cmd.itype = PIC_skpdc; goto NOOP_BTF;
-          case 2: cmd.itype = PIC_skpz;  goto NOOP_BTF;
+          case 0: insn.itype = PIC_skpc;  goto NOOP_BTF;
+          case 1: insn.itype = PIC_skpdc; goto NOOP_BTF;
+          case 2: insn.itype = PIC_skpz;  goto NOOP_BTF;
         }
         break;
 NOOP_BTF:
-        cmd.Op1.type = o_void;
-        cmd.Op2.type = o_void;
-        if ( may_grow() )
+        insn.Op1.type = o_void;
+        insn.Op2.type = o_void;
+        if ( may_grow(insn) )
         {
           insn_t b;
-          if ( ana(cmd.ea+1, b) ) switch ( b.itype )
+          if ( ana(insn.ea+1, b) ) switch ( b.itype )
           {
 // bnc     macro   k       ; Branch on No Carry to k
 //      btfss   3,0
@@ -192,13 +197,13 @@ NOOP_BTF:
 //      goto    k
 //      endm
             case PIC_goto:
-              cmd.Op1  = b.Op1;
-              cmd.size = 2;
-              cmd.itype = (cmd.itype == PIC_skpc)  ? PIC_bnc :
-                          (cmd.itype == PIC_skpdc) ? PIC_bndc:
-                          (cmd.itype == PIC_skpz)  ? PIC_bnz :
-                          (cmd.itype == PIC_skpnc) ? PIC_bc  :
-                          (cmd.itype == PIC_skpndc)? PIC_bdc : PIC_bz;
+              insn.Op1  = b.Op1;
+              insn.size = 2;
+              insn.itype = (insn.itype == PIC_skpc)  ? PIC_bnc :
+                           (insn.itype == PIC_skpdc) ? PIC_bndc:
+                           (insn.itype == PIC_skpz)  ? PIC_bnz :
+                           (insn.itype == PIC_skpnc) ? PIC_bc  :
+                           (insn.itype == PIC_skpndc)? PIC_bdc : PIC_bz;
               break;
 // addcf   macro   f,d     ; Add Carry to File Register
 //      btfsc   3,0
@@ -209,18 +214,18 @@ NOOP_BTF:
 //      incf    f,d
 //      endm
             case PIC_incf:
-              if ( cmd.itype == PIC_skpnc )
+              if ( insn.itype == PIC_skpnc )
               {
-                cmd.itype = PIC_addcf;
+                insn.itype = PIC_addcf;
                 goto COPYOPS;
               }
-              if ( cmd.itype == PIC_skpndc )
+              if ( insn.itype == PIC_skpndc )
               {
-                cmd.itype = PIC_adddcf;
+                insn.itype = PIC_adddcf;
 COPYOPS:
-                cmd.Op1 = b.Op1;
-                cmd.Op2 = b.Op2;
-                cmd.size = 2;
+                insn.Op1 = b.Op1;
+                insn.Op2 = b.Op2;
+                insn.size = 2;
               }
               break;
 // subcf   macro   f,d     ; Subtract Carry from File Reg
@@ -228,9 +233,9 @@ COPYOPS:
 //      decf    f,d
 //      endm
             case PIC_decf:
-              if ( cmd.itype == PIC_skpnc )
+              if ( insn.itype == PIC_skpnc )
               {
-                cmd.itype = PIC_subcf;
+                insn.itype = PIC_subcf;
                 goto COPYOPS;
               }
               break;
@@ -242,57 +247,61 @@ COPYOPS:
   }
 
   // if the instruction is too long, recreate it:
-  if ( cmd.size == 1 && isTail(get_flags_novalue(cmd.ea+1)) )
+  if ( insn.size == 1 && is_tail(get_flags(insn.ea+1)) )
   {
-    auto_make_code(cmd.ea);
-    auto_make_code(cmd.ea+1);
-    ea_t saved = cmd.ea;
-    do_unknown(cmd.ea, DOUNK_SIMPLE);    // destroys cmd.ea
-    cmd.ea = saved;
+    auto_make_code(insn.ea);
+    auto_make_code(insn.ea+1);
+    ea_t saved = insn.ea;
+    del_items(insn.ea, DELIT_SIMPLE);    // destroys insn.ea
+    insn.ea = saved;
   }
-  return cmd.size;
+  return insn.size;
 }
 
 //--------------------------------------------------------------------------
-static void opf12(int code)
+static void opf12(insn_t &insn, int code)
 {
-  cmd.Op1.type = o_mem;
-  cmd.Op1.dtyp = dt_byte;
-  sel_t v = get_segreg(cmd.ea, BANK);
-  if ( v == BADSEL ) v = 0;
-  cmd.Op1.addr = (code & 0x1F) | ((v&1) << 5);
+  insn.Op1.type = o_mem;
+  insn.Op1.dtype = dt_byte;
+  sel_t v = get_sreg(insn.ea, BANK);
+  if ( v == BADSEL )
+    v = 0;
+  insn.Op1.addr = (code & 0x1F) | ((v&1) << 5);
 }
 
 //--------------------------------------------------------------------------
-static void opf14(int code)
+static void opf14(insn_t &insn, int code)
 {
-  cmd.Op1.type = o_mem;
-  cmd.Op1.dtyp = dt_byte;
-  sel_t v = get_segreg(cmd.ea, BANK);
-  if ( v == BADSEL ) v = 0;
-  cmd.Op1.addr = (code & 0x7F) | ((v&3) << 7);
+  insn.Op1.type = o_mem;
+  insn.Op1.dtype = dt_byte;
+  sel_t v = get_sreg(insn.ea, BANK);
+  if ( v == BADSEL )
+    v = 0;
+  insn.Op1.addr = (code & 0x7F) | ((v&3) << 7);
 }
 
 //--------------------------------------------------------------------------
-static void opfa16(int code)
+static void opfa16(insn_t &insn, int code)
 {
-  cmd.Op1.type = o_mem;
-  cmd.Op1.dtyp = dt_byte;
+  insn.Op1.type = o_mem;
+  insn.Op1.dtype = dt_byte;
   if ( code & 0x0100 ) // if a == 1 (BSR)
   {
-    sel_t v = get_segreg(cmd.ea, BANK);
-    if ( v == BADSEL ) v = 0;
-    cmd.Op1.addr = ((v&0xF) << 8) | (code & 0xFF);
+    sel_t v = get_sreg(insn.ea, BANK);
+    if ( v == BADSEL )
+      v = 0;
+    insn.Op1.addr = ((v&0xF) << 8) | (code & 0xFF);
   }
   else                 // if a == 0 (access bank)
   {
-    cmd.Op1.addr = code & 0xFF;
-    if ( cmd.Op1.addr >= 128 ) cmd.Op1.addr = 3840 + cmd.Op1.addr;
+    insn.Op1.addr = code & 0xFF;
+    if ( insn.Op1.addr >= 128 )
+      insn.Op1.addr = 3840 + insn.Op1.addr;
   }
 }
 
 //--------------------------------------------------------------------------
-static void basic_ana12(int code)
+static void basic_ana12(insn_t &insn, int code)
 {
   int b4;
 
@@ -304,16 +313,21 @@ static void basic_ana12(int code)
 // 0000 0000 0100 CLRWDT                 Clear Watchdog Timer
 // 0000 0000 0010 OPTION                 Load OPTION register
 // 0000 0000 0011 SLEEP                  Go into standby mode
-      if ( code == 0x040 )      cmd.itype = PIC_clrw;
-      else if ( code == 0x000 ) cmd.itype = PIC_nop;
-      else if ( code == 0x004 ) cmd.itype = PIC_clrwdt;
-      else if ( code == 0x002 ) cmd.itype = PIC_option;
-      else if ( code == 0x003 ) cmd.itype = PIC_sleep;
+      if ( code == 0x040 )
+        insn.itype = PIC_clrw;
+      else if ( code == 0x000 )
+        insn.itype = PIC_nop;
+      else if ( code == 0x004 )
+        insn.itype = PIC_clrwdt;
+      else if ( code == 0x002 )
+        insn.itype = PIC_option;
+      else if ( code == 0x003 )
+        insn.itype = PIC_sleep;
       else if ( ( code & 0xFF8 ) == 0 )
       {
 // 0000 0000 0fff TRIS    f (4<f<8)      Load TRIS Register
-        cmd.itype = PIC_tris;
-        opf12(code);
+        insn.itype = PIC_tris;
+        opf12(insn, code);
       }
       else if ( ( code & 0xF80 ) == 0 )
 // 0000 001f ffff MOVWF   f              Move W to f
@@ -323,8 +337,8 @@ static void basic_ana12(int code)
         {
           PIC_null, PIC_movwf, PIC_null, PIC_clrf
         };
-        cmd.itype = codes[(code>>5)&3];
-        opf12(code);
+        insn.itype = codes[(code>>5)&3];
+        opf12(insn, code);
       }
       else
       {
@@ -350,11 +364,11 @@ static void basic_ana12(int code)
           PIC_movf,  PIC_comf,  PIC_incf,  PIC_decfsz,
           PIC_rrf,   PIC_rlf,   PIC_swapf, PIC_incfsz
         };
-        cmd.itype = codes[b4];
-        opf12(code);
-        cmd.Op2.type = o_reg;
-        cmd.Op2.reg  = (code & 0x20) ? F : W;
-        cmd.Op2.dtyp = dt_byte;
+        insn.itype = codes[b4];
+        opf12(insn, code);
+        insn.Op2.type = o_reg;
+        insn.Op2.reg = (code & 0x20) ? F : W;
+        insn.Op2.dtype = dt_byte;
       }
       break;
     case 1:
@@ -367,11 +381,11 @@ static void basic_ana12(int code)
         {
           PIC_bcf, PIC_bsf, PIC_btfsc, PIC_btfss
         };
-        cmd.itype = codes[(code>>8)&3];
-        opf12(code);
-        cmd.Op2.type  = o_imm;
-        cmd.Op2.value = (code >> 5) & 7;
-        cmd.Op2.dtyp  = dt_byte;
+        insn.itype = codes[(code>>8)&3];
+        opf12(insn, code);
+        insn.Op2.type  = o_imm;
+        insn.Op2.value = (code >> 5) & 7;
+        insn.Op2.dtype = dt_byte;
       }
       break;
     case 2:
@@ -380,10 +394,10 @@ static void basic_ana12(int code)
       {
         case 0:
 // 1000 kkkk kkkk RETLW   k              Return with literal in W
-          cmd.itype = PIC_retlw;
-          cmd.Op1.type  = o_imm;
-          cmd.Op1.value = code & 0xFF;
-          cmd.Op1.dtyp  = dt_byte;
+          insn.itype = PIC_retlw;
+          insn.Op1.type  = o_imm;
+          insn.Op1.value = code & 0xFF;
+          insn.Op1.dtype = dt_byte;
           break;
         case 1:
 // 1001 kkkk kkkk CALL    k              Call subroutine
@@ -391,27 +405,27 @@ static void basic_ana12(int code)
             // old databases used status reg (PCLATH) for hight bit of the address
             // new code uses BANK for that
             // so we get both and try to guess
-            sel_t status = get_segreg(cmd.ea, PCLATH);
-            sel_t bank = get_segreg(cmd.ea, BANK);
-            if ( (status != BADSEL && status != 0) && (bank == BADSEL || bank==0) )
+            sel_t status = get_sreg(insn.ea, PCLATH);
+            sel_t bank = get_sreg(insn.ea, BANK);
+            if ( (status != BADSEL && status != 0) && (bank == BADSEL || bank == 0) )
               bank = (status >> 5) & 3;
-            cmd.itype = PIC_call;
-            cmd.Op1.type = o_near;
-            cmd.Op1.addr = ( bank << 9 ) | ( code & 0xFF );
-            cmd.Op1.dtyp = dt_code;
+            insn.itype = PIC_call;
+            insn.Op1.type = o_near;
+            insn.Op1.addr = ( bank << 9 ) | ( code & 0xFF );
+            insn.Op1.dtype = dt_code;
           }
           break;
         default:
 // 101k kkkk kkkk GOTO    k              Go to address
           {
-            sel_t status = get_segreg(cmd.ea, PCLATH);
-            sel_t bank = get_segreg(cmd.ea, BANK);
-            if ( (status != BADSEL && status != 0) && (bank == BADSEL || bank==0) )
+            sel_t status = get_sreg(insn.ea, PCLATH);
+            sel_t bank = get_sreg(insn.ea, BANK);
+            if ( (status != BADSEL && status != 0) && (bank == BADSEL || bank == 0) )
               bank = (status >> 5) & 3;
-            cmd.itype = PIC_goto;
-            cmd.Op1.type = o_near;
-            cmd.Op1.addr = ( bank << 9 ) | ( code & 0x1FF );
-            cmd.Op1.dtyp = dt_code;
+            insn.itype = PIC_goto;
+            insn.Op1.type = o_near;
+            insn.Op1.addr = ( bank << 9 ) | ( code & 0x1FF );
+            insn.Op1.dtype = dt_code;
           }
           break;
       }
@@ -426,17 +440,17 @@ static void basic_ana12(int code)
         {
           PIC_movlw, PIC_iorlw, PIC_andlw, PIC_xorlw
         };
-        cmd.itype = codes[(code>>8)&3];
-        cmd.Op1.type  = o_imm;
-        cmd.Op1.value = (uchar)code;
-        cmd.Op1.dtyp  = dt_byte;
+        insn.itype = codes[(code>>8)&3];
+        insn.Op1.type  = o_imm;
+        insn.Op1.value = (uchar)code;
+        insn.Op1.dtype = dt_byte;
       }
       break;
   }
 }
 
 //--------------------------------------------------------------------------
-static void basic_ana14(int code)
+static void basic_ana14(insn_t &insn, int code)
 {
   int b4 = (code >> 8) & 0xF;
 
@@ -448,14 +462,14 @@ static void basic_ana14(int code)
 // 00 0000 1fff ffff MOVWF   f           Move W to f
         if ( code & 0x80 )
         {
-          cmd.itype = PIC_movwf;
-          opf14(code);
+          insn.itype = PIC_movwf;
+          opf14(insn, code);
           break;
         }
 // 00 0000 0xx0 0000 NOP                 No Operation
         if ( (code & 0x3F9F) == 0 )
         {
-          cmd.itype = PIC_nop;
+          insn.itype = PIC_nop;
           break;
         }
 // 00 0000 0000 1000 RETURN              Return from Subroutine
@@ -464,17 +478,22 @@ static void basic_ana14(int code)
 // 00 0000 0110 0011 SLEEP               Go into standby mode
 // 00 0000 0110 0100 CLRWDT              Clear Watchdog Timer
 // 00 0000 0110 0fff TRIS   f (4<f<8)    Load TRIS Register
-        if      ( code == 0x0008 ) cmd.itype = PIC_return;
-        else if ( code == 0x0009 ) cmd.itype = PIC_retfie;
-        else if ( code == 0x0062 ) cmd.itype = PIC_option;
-        else if ( code == 0x0063 ) cmd.itype = PIC_sleep;
-        else if ( code == 0x0064 ) cmd.itype = PIC_clrwdt;
+        if ( code == 0x0008 )
+          insn.itype = PIC_return;
+        else if ( code == 0x0009 )
+          insn.itype = PIC_retfie;
+        else if ( code == 0x0062 )
+          insn.itype = PIC_option;
+        else if ( code == 0x0063 )
+          insn.itype = PIC_sleep;
+        else if ( code == 0x0064 )
+          insn.itype = PIC_clrwdt;
         else if ( code >= 0x0065 && code <= 0x0067 )
         {
-          cmd.itype = PIC_tris;
-          cmd.Op1.type = o_imm;
-          cmd.Op1.dtyp = dt_byte;
-          cmd.Op1.value = code & 7;
+          insn.itype = PIC_tris;
+          insn.Op1.type = o_imm;
+          insn.Op1.dtype = dt_byte;
+          insn.Op1.value = code & 7;
         }
       }
       else if ( b4 == 1 )
@@ -482,13 +501,13 @@ static void basic_ana14(int code)
 // 00 0001 1fff ffff CLRF    f           Clear f
         if ( code & 0x80 )
         {
-          cmd.itype = PIC_clrf;
-          opf14(code);
+          insn.itype = PIC_clrf;
+          opf14(insn, code);
         }
 // 00 0001 0xxx xxxx CLRW                Clear W
         else
         {
-          cmd.itype = PIC_clrw;
+          insn.itype = PIC_clrw;
         }
       }
       else
@@ -514,11 +533,11 @@ static void basic_ana14(int code)
           PIC_movf,  PIC_comf,  PIC_incf,  PIC_decfsz,
           PIC_rrf,   PIC_rlf,   PIC_swapf, PIC_incfsz
         };
-        cmd.itype = codes[b4];
-        opf14(code);
-        cmd.Op2.type = o_reg;
-        cmd.Op2.reg  = (code & 0x80) ? F : W;
-        cmd.Op2.dtyp = dt_byte;
+        insn.itype = codes[b4];
+        opf14(insn, code);
+        insn.Op2.type = o_reg;
+        insn.Op2.reg = (code & 0x80) ? F : W;
+        insn.Op2.dtype = dt_byte;
       }
       break;
     case 1:
@@ -531,22 +550,22 @@ static void basic_ana14(int code)
         {
           PIC_bcf, PIC_bsf, PIC_btfsc, PIC_btfss
         };
-        cmd.itype = codes[(code>>10)&3];
-        opf14(code);
-        cmd.Op2.type  = o_imm;
-        cmd.Op2.value = (code >> 7) & 7;
-        cmd.Op2.dtyp  = dt_byte;
+        insn.itype = codes[(code>>10)&3];
+        opf14(insn, code);
+        insn.Op2.type  = o_imm;
+        insn.Op2.value = (code >> 7) & 7;
+        insn.Op2.dtype = dt_byte;
       }
       break;
     case 2:
 // 10 0kkk kkkk kkkk CALL    k           Call subroutine
 // 10 1kkk kkkk kkkk GOTO    k           Go to address
       {
-        sel_t pclath = get_segreg(cmd.ea, PCLATH) & 0x18; // & 00011000b
-        cmd.itype = (code & 0x800) ? PIC_goto : PIC_call;
-        cmd.Op1.type = o_near;
-        cmd.Op1.addr = (pclath << (11-3)) | (code & 0x7FF);
-        cmd.Op1.dtyp = dt_code;
+        sel_t pclath = get_sreg(insn.ea, PCLATH) & 0x18; // & 00011000b
+        insn.itype = (code & 0x800) ? PIC_goto : PIC_call;
+        insn.Op1.type = o_near;
+        insn.Op1.addr = (pclath << (11-3)) | (code & 0x7FF);
+        insn.Op1.dtype = dt_code;
       }
       break;
     case 3:
@@ -565,10 +584,10 @@ static void basic_ana14(int code)
           PIC_iorlw, PIC_andlw, PIC_xorlw, PIC_null,
           PIC_sublw, PIC_sublw, PIC_addlw, PIC_addlw
         };
-        cmd.itype = codes[b4];
-        cmd.Op1.type  = o_imm;
-        cmd.Op1.value = code & 0xFF;
-        cmd.Op1.dtyp  = dt_byte;
+        insn.itype = codes[b4];
+        insn.Op1.type  = o_imm;
+        insn.Op1.value = code & 0xFF;
+        insn.Op1.dtype = dt_byte;
       }
       break;
   }
@@ -591,7 +610,7 @@ int get_signed(int byte,int mask)
 }
 
 //--------------------------------------------------------------------------
-static void basic_ana16(int code)
+static void basic_ana16(insn_t &insn, int code)
 {
   if ( ( code >> 12 ) == 0 )
   {
@@ -619,7 +638,7 @@ static void basic_ana16(int code)
         PIC_tblrd0, PIC_tblrd0p, PIC_tblrd0m, PIC_tblrdp0,
         PIC_tblwt0, PIC_tblwt0p, PIC_tblwt0m, PIC_tblwtp0
       };
-      cmd.itype = codes[code & 15];
+      insn.itype = codes[code & 15];
     }
     else if ( b3 < 0x80 )
     {
@@ -627,54 +646,57 @@ static void basic_ana16(int code)
       {
 // 0000 0000 0001 000s RETFIE s          Return from interrupt enable
 // 0000 0000 0001 001s RETURN s          Return from Subroutine
-        cmd.itype = (code & 0x2) ? PIC_return1 : PIC_retfie1;
+        insn.itype = (code & 0x2) ? PIC_return1 : PIC_retfie1;
         if ( code & 1 )
         {
-          cmd.Op1.type  = o_reg;
-          cmd.Op1.reg   = FAST;
+          insn.Op1.type  = o_reg;
+          insn.Op1.reg   = FAST;
         }
         else
         {
-          cmd.Op1.type  = o_imm;
-          cmd.Op1.value = 0;
+          insn.Op1.type  = o_imm;
+          insn.Op1.value = 0;
         }
-        cmd.Op1.dtyp  = dt_byte;
+        insn.Op1.dtype = dt_byte;
       }
       else if ( code == 0x00FF )
       {
 // 0000 0000 1111 1111 RESET             Software device Reset
-        cmd.itype = PIC_reset0;
+        insn.itype = PIC_reset0;
       }
       else if ( ( code & 0xFFF0 ) == 0x0100 )
       {
 // 0000 0001 0000 kkkk MOVLB  k          Move literal to BSR
-        cmd.itype = PIC_movlb1;
-        cmd.Op1.type  = o_imm;
-        cmd.Op1.value = code & 0xF;
-        cmd.Op1.dtyp  = dt_byte;
+        insn.itype = PIC_movlb1;
+        insn.Op1.type  = o_imm;
+        insn.Op1.value = code & 0xF;
+        insn.Op1.dtype = dt_byte;
       }
       else if ( ( code & 0xFE00 ) == 0x0200 )
       {
 // 0000 001a ffff ffff MULWF  f, a       Multiply W with f
-        cmd.itype = PIC_mulwf2;
-        opfa16(code);
-        cmd.Op2.type = o_reg;
-        cmd.Op2.reg  = (code & 0x100) ? BANKED : ACCESS;
-        cmd.Op2.dtyp = dt_byte;
+        insn.itype = PIC_mulwf2;
+        opfa16(insn, code);
+        insn.Op2.type = o_reg;
+        insn.Op2.reg = (code & 0x100) ? BANKED : ACCESS;
+        insn.Op2.dtype = dt_byte;
       }
       else if ( ( code & 0xFC00 ) == 0x0400 )
       {
 // 0000 01da ffff ffff DECF   f, d, a    Decrement f
-        cmd.itype = PIC_decf3;
-        opfa16(code);
-        cmd.Op2.type = o_reg;
-        cmd.Op2.reg  = (code & 0x200) ? F : W;
-        cmd.Op2.dtyp = dt_byte;
-        cmd.Op3.type = o_reg;
-        cmd.Op3.reg  = (code & 0x100) ? BANKED : ACCESS;
-        cmd.Op3.dtyp = dt_byte;
+        insn.itype = PIC_decf3;
+        opfa16(insn, code);
+        insn.Op2.type = o_reg;
+        insn.Op2.reg = (code & 0x200) ? F : W;
+        insn.Op2.dtype = dt_byte;
+        insn.Op3.type = o_reg;
+        insn.Op3.reg = (code & 0x100) ? BANKED : ACCESS;
+        insn.Op3.dtype = dt_byte;
       }
-      else cmd.itype = PIC_null;
+      else
+      {
+        insn.itype = PIC_null;
+      }
     }
     else
     {
@@ -691,10 +713,10 @@ static void basic_ana16(int code)
         PIC_sublw, PIC_iorlw,  PIC_xorlw, PIC_andlw,
         PIC_retlw, PIC_mullw1, PIC_movlw, PIC_addlw
       };
-      cmd.itype = codes[(code>>8)&7];
-      cmd.Op1.type  = o_imm;
-      cmd.Op1.value = (char)code;
-      cmd.Op1.dtyp  = dt_byte;
+      insn.itype = codes[(code>>8)&7];
+      insn.Op1.type  = o_imm;
+      insn.Op1.value = (char)code;
+      insn.Op1.dtype = dt_byte;
     }
   }
   else if ( ( code >> 14 ) <= 2 )
@@ -731,15 +753,15 @@ static void basic_ana16(int code)
         PIC_rrncf3,  PIC_rlncf3,  PIC_infsnz3, PIC_dcfsnz3,
         PIC_movf3,   PIC_subfwb3, PIC_subwfb3, PIC_subwf3,
       };
-      QASSERT(10097, (code>>10)<24);
-      cmd.itype = codes[code>>10];
-      opfa16(code);
-      cmd.Op2.type = o_reg;
-      cmd.Op2.reg  = (code & 0x200) ? F : W;
-      cmd.Op2.dtyp = dt_byte;
-      cmd.Op3.type = o_reg;
-      cmd.Op3.reg  = (code & 0x100) ? BANKED : ACCESS;
-      cmd.Op3.dtyp = dt_byte;
+      QASSERT(10097, (code>>10) < 24);
+      insn.itype = codes[code>>10];
+      opfa16(insn, code);
+      insn.Op2.type = o_reg;
+      insn.Op2.reg = (code & 0x200) ? F : W;
+      insn.Op2.dtype = dt_byte;
+      insn.Op3.type = o_reg;
+      insn.Op3.reg = (code & 0x100) ? BANKED : ACCESS;
+      insn.Op3.dtype = dt_byte;
     }
     else if ( b1 == 6 )
     {
@@ -756,11 +778,11 @@ static void basic_ana16(int code)
         PIC_cpfslt2, PIC_cpfseq2, PIC_cpfsgt2, PIC_tstfsz2,
         PIC_setf2,   PIC_clrf2,   PIC_negf2,   PIC_movwf2,
       };
-      cmd.itype = codes[(code>>9)&7];
-      opfa16(code);
-      cmd.Op2.type = o_reg;
-      cmd.Op2.reg  = (code & 0x100) ? BANKED : ACCESS;
-      cmd.Op2.dtyp = dt_byte;
+      insn.itype = codes[(code>>9)&7];
+      opfa16(insn, code);
+      insn.Op2.type = o_reg;
+      insn.Op2.reg = (code & 0x100) ? BANKED : ACCESS;
+      insn.Op2.dtype = dt_byte;
     }
     else
     {
@@ -773,15 +795,15 @@ static void basic_ana16(int code)
       {
         PIC_btg3, PIC_bsf3, PIC_bcf3, PIC_btfss3, PIC_btfsc3
       };
-      QASSERT(10098, (b1-7)<5);
-      cmd.itype = codes[b1-7];
-      opfa16(code);
-      cmd.Op2.type  = o_imm;
-      cmd.Op2.value = (code >> 9) & 7;
-      cmd.Op2.dtyp  = dt_byte;
-      cmd.Op3.type = o_reg;
-      cmd.Op3.reg  = (code & 0x100) ? BANKED : ACCESS;
-      cmd.Op3.dtyp = dt_byte;
+      QASSERT(10098, (b1-7) < 5);
+      insn.itype = codes[b1-7];
+      opfa16(insn, code);
+      insn.Op2.type  = o_imm;
+      insn.Op2.value = (code >> 9) & 7;
+      insn.Op2.dtype = dt_byte;
+      insn.Op3.type = o_reg;
+      insn.Op3.reg = (code & 0x100) ? BANKED : ACCESS;
+      insn.Op3.dtype = dt_byte;
     }
   }
   else
@@ -792,21 +814,21 @@ static void basic_ana16(int code)
     {
       case 0:
 // 1100 ffff ffff ffff 1111 ffff ffff ffff MOVFF fs, fd  Move fs to fd
-        cmd.itype = PIC_movff2;
-        cmd.Op1.type = o_mem;
-        cmd.Op1.dtyp = dt_byte;
-        cmd.Op1.addr = code & 0xFFF;
-        cmd.Op2.type = o_mem;
-        cmd.Op2.dtyp = dt_byte;
-        cmd.Op2.addr = ua_next_word() & 0xFFF;
+        insn.itype = PIC_movff2;
+        insn.Op1.type = o_mem;
+        insn.Op1.dtype = dt_byte;
+        insn.Op1.addr = code & 0xFFF;
+        insn.Op2.type = o_mem;
+        insn.Op2.dtype = dt_byte;
+        insn.Op2.addr = insn.get_next_word() & 0xFFF;
         break;
       case 1:
 // 1101 0nnn nnnn nnnn BRA    n          Branch unconditionally
 // 1101 1nnn nnnn nnnn RCALL  n          Relative Call subroutine
-        cmd.itype = (code & 0x800) ? PIC_rcall1 : PIC_bra1;
-        cmd.Op1.type = o_near;
-        cmd.Op1.addr = (cmd.ea + 2 + 2 * get_signed(code,0x07FF)) & PIC18_IP_RANGE;
-        cmd.Op1.dtyp = dt_code;
+        insn.itype = (code & 0x800) ? PIC_rcall1 : PIC_bra1;
+        insn.Op1.type = o_near;
+        insn.Op1.addr = (insn.ea + 2 + 2 * get_signed(code,0x07FF)) & PIC18_IP_RANGE;
+        insn.Op1.dtype = dt_code;
         break;
       case 2:
         if ( b3 <= 7 )
@@ -824,10 +846,10 @@ static void basic_ana16(int code)
             PIC_bz1,  PIC_bnz1,  PIC_bc1, PIC_bnc1,
             PIC_bov1, PIC_bnov1, PIC_bn1, PIC_bnn1
           };
-          cmd.itype = codes[(code>>8)&7];
-          cmd.Op1.type = o_near;
-          cmd.Op1.addr = (cmd.ea + 2 + 2 * get_signed(code,0x00FF)) & PIC18_IP_RANGE;
-          cmd.Op1.dtyp = dt_code;
+          insn.itype = codes[(code>>8)&7];
+          insn.Op1.type = o_near;
+          insn.Op1.addr = (insn.ea + 2 + 2 * get_signed(code,0x00FF)) & PIC18_IP_RANGE;
+          insn.Op1.dtype = dt_code;
         }
         else if ( b3 == 0xC || b3 == 0xD || b3 == 0xF )
         {
@@ -837,69 +859,73 @@ static void basic_ana16(int code)
           {
             PIC_call2, PIC_call2, PIC_null, PIC_goto
           };
-          cmd.itype = codes[(code>>8)&3];
-          cmd.Op1.type = o_near;
-          cmd.Op1.addr = ( (ua_next_word()& 0xFFF) << 9 ) | ( (code&0x00FF) << 1 );
-          cmd.Op1.dtyp = dt_code;
-          if ( cmd.itype == PIC_call2 )
+          insn.itype = codes[(code>>8)&3];
+          insn.Op1.type = o_near;
+          insn.Op1.addr = ((insn.get_next_word() & 0xFFF) << 9) | ((code & 0x00FF) << 1);
+          insn.Op1.dtype = dt_code;
+          if ( insn.itype == PIC_call2 )
           {
             if ( code & 0x0100 )
             {
-              cmd.Op2.type  = o_reg;
-              cmd.Op2.reg   = FAST;
+              insn.Op2.type  = o_reg;
+              insn.Op2.reg   = FAST;
             }
             else
             {
-              cmd.Op2.type  = o_imm;
-              cmd.Op2.value = 0;
+              insn.Op2.type  = o_imm;
+              insn.Op2.value = 0;
             }
-            cmd.Op2.dtyp = dt_byte;
+            insn.Op2.dtype = dt_byte;
           }
         }
         else if ( ( code & 0xFFC0 ) == 0xEE00 )
         {
 // 1110 1110 00ff kkkk 1111 0000 kkkk kkkk LFSR f, k     Move literal to FSR
-          cmd.itype = PIC_lfsr2;
-          cmd.Op1.type  = o_reg;
-          cmd.Op1.reg   = FSR0 + ( ( code >> 4 ) & 3 );
-          cmd.Op1.dtyp = dt_byte;
-          cmd.Op2.type  = o_imm;
-          cmd.Op2.value = ( (code&0xF) << 8 ) | (ua_next_word() & 0xFF);
-          cmd.Op2.dtyp  = dt_word;
+          insn.itype = PIC_lfsr2;
+          insn.Op1.type  = o_reg;
+          insn.Op1.reg   = FSR0 + ( ( code >> 4 ) & 3 );
+          insn.Op1.dtype = dt_byte;
+          insn.Op2.type = o_imm;
+          insn.Op2.value = ( (code&0xF) << 8 ) | (insn.get_next_word() & 0xFF);
+          insn.Op2.dtype = dt_word;
         }
-        else cmd.itype = PIC_null;
+        else
+        {
+          insn.itype = PIC_null;
+        }
         break;
       case 3:
 // 1111 xxxx xxxx xxxx NOP               No Operation
-        cmd.itype = PIC_nop;
+        insn.itype = PIC_nop;
         break;
     }
   }
 }
 
 //--------------------------------------------------------------------------
-static int basic_ana(void)
+static int basic_ana(insn_t &insn)
 {
   int code;
 
   switch ( ptype )
   {
     case PIC12:
-      code = get_full_byte(cmd.ea); cmd.size = 1;
-      basic_ana12(code);
+      code = get_wide_byte(insn.ea); insn.size = 1;
+      basic_ana12(insn, code);
       break;
     case PIC14:
-      code = get_full_byte(cmd.ea); cmd.size = 1;
-      basic_ana14(code);
+      code = get_wide_byte(insn.ea); insn.size = 1;
+      basic_ana14(insn, code);
       break;
     case PIC16:
-      code = ua_next_word();
-      basic_ana16(code);
+      code = insn.get_next_word();
+      basic_ana16(insn, code);
       break;
     default:
       error("interr: ana");
       break;
   }
-  if ( cmd.itype == PIC_null ) return 0;
-  return cmd.size;
+  if ( insn.itype == PIC_null )
+    return 0;
+  return insn.size;
 }

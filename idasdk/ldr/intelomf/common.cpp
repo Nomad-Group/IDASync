@@ -6,8 +6,11 @@ bool is_intelomf_file(linput_t *li)
   lmh h;
   qlseek(li, 0);
   if ( qlread(li, &magic, sizeof(magic)) != sizeof(magic)
-    || qlread(li, &h, sizeof(h)) != sizeof(h) ) return false;
-  int fsize = qlsize(li);
+    || qlread(li, &h, sizeof(h)) != sizeof(h) )
+  {
+    return false;
+  }
+  int64 fsize = qlsize(li);
   return magic == INTELOMF_MAGIC_BYTE
       && h.tot_length < fsize;
 }

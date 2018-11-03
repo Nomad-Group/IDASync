@@ -1,49 +1,43 @@
 /*
  *      Interactive disassembler (IDA).
- *      Copyright (c) 1990-2008 Hex-Rays
+ *      Copyright (c) 1990-2015 Hex-Rays
  *      ALL RIGHTS RESERVED.
  *
  */
 
 #ifndef _INTEL_HPP
 #define _INTEL_HPP
-
-#include "../module/idaidp.hpp"
-#include <idd.hpp>
-#include <dbg.hpp>
-#include <ieee.h>
-#include <ints.hpp>
-#include <fixup.hpp>
-#include <frame.hpp>
-#include <struct.hpp>
-#include <srarea.hpp>
+#include <ua.hpp>
 #include <typeinf.hpp>
-#include <demangle.hpp>
 #include <allins.hpp>
 
-#pragma pack(push, 4)
 
 //---------------------------------
 // not in ash.uflag for kernel (out struc/union descriptions)
 inline bool tasm_ideal(void)  { return (ash.flag2 & AS2_IDEALDSCR) != 0; }
 
 //---------------------------------
-// Intel 80x86 cmd.auxpref bits
-#define aux_lock        0x0001
-#define aux_rep         0x0002
-#define aux_repne       0x0004
-#define aux_use32       0x0008  // segment type is 32-bits
-#define aux_use64       0x0010  // segment type is 64-bits
-#define aux_large       0x0020  // offset field is 32-bit (16-bit is not enough)
-#define aux_short       0x0040  // short (byte) displacement used
-#define aux_sgpref      0x0080  // a segment prefix byte is not used
-#define aux_oppref      0x0100  // operand size prefix byte is not used
-#define aux_adpref      0x0200  // address size prefix byte is not used
-#define aux_basess      0x0400  // SS based instruction
-#define aux_natop       0x0800  // operand size is not overridden by prefix
-#define aux_natad       0x1000  // addressing mode is not overridden by prefix
-#define aux_fpemu       0x2000  // FP emulator instruction
-#define aux_vexpr       0x4000  // VEX-encoded instruction
+// Intel 80x86 insn_t.auxpref bits
+#define aux_lock        0x00000001
+#define aux_rep         0x00000002
+#define aux_repne       0x00000004
+#define aux_use32       0x00000008  // segment type is 32-bits
+#define aux_use64       0x00000010  // segment type is 64-bits
+#define aux_large       0x00000020  // offset field is 32-bit (16-bit is not enough)
+#define aux_short       0x00000040  // short (byte) displacement used
+#define aux_sgpref      0x00000080  // a segment prefix byte is not used
+#define aux_oppref      0x00000100  // operand size prefix byte is not used
+#define aux_adpref      0x00000200  // address size prefix byte is not used
+#define aux_basess      0x00000400  // SS based instruction
+#define aux_natop       0x00000800  // operand size is not overridden by prefix
+#define aux_natad       0x00001000  // addressing mode is not overridden by prefix
+#define aux_fpemu       0x00002000  // FP emulator instruction
+#define aux_vexpr       0x00004000  // VEX-encoded instruction
+#define aux_bnd         0x00008000  // MPX-encoded instruction
+#define aux_evex        0x00010000  // EVEX-encoded instruction
+#define aux_xop         0x00020000  // XOP-encoded instruction
+#define aux_xacquire    0x00040000  // HLE prefix hints
+#define aux_xrelease    0x00080000  // HLE prefix hints
 
 //---------------------------------
 // operand types and other customization:
@@ -54,6 +48,8 @@ inline bool tasm_ideal(void)  { return (ash.flag2 & AS2_IDEALDSCR) != 0; }
 #define o_mmxreg        o_idpspec4      // IDP specific type
 #define o_xmmreg        o_idpspec5      // xmm register
 #define o_ymmreg        o_idpspec5+1    // ymm register
+#define o_zmmreg        o_idpspec5+2    // zmm register
+#define o_kreg          o_idpspec5+3    // opmask register
 
 // 04.10.97: For o_mem,o_near,o_far we keep segment information as
 // segrg - number of segment register to use
@@ -69,9 +65,20 @@ inline bool tasm_ideal(void)  { return (ash.flag2 & AS2_IDEALDSCR) != 0; }
 #define sib             specflag2
 #define rex             insnpref        // REX byte for 64-bit mode, or bits from the VEX byte if vexpr()
 
+// Op6 is used for opmask registers in EVEX.
+// specflags from Op6 are used to extend insn_t.
+#define evex_flags      Op6.specflag2   // bits from the EVEX byte if evexpr()
+
 #define cr_suff         specflag1       // o_crreg: D suffix for cr registers (used for CR8D)
 
-// bits in cmd.rex:
+// bits in insn_t.evex_flags:
+const int EVEX_R = 0x01;           // High-16 register specifier modifier
+const int EVEX_L = 0x02;           // Vector length/RC
+const int EVEX_z = 0x04;           // Zeroing/Merging
+const int EVEX_b = 0x08;           // Broadcast/RC/SAE Context
+const int EVEX_V = 0x10;           // High-16 NDS/VIDX register specifier
+
+// bits in insn_t.rex:
 const int REX_W = 8;               // 64-bit operand size
 const int REX_R = 4;               // modrm reg field extension
 const int REX_X = 2;               // sib index field extension
@@ -84,134 +91,217 @@ enum RegNo
 {
   R_none = -1,
   R_ax = 0,
-  R_cx = 1,
-  R_dx = 2,
-  R_bx = 3,
-  R_sp = 4,
-  R_bp = 5,
-  R_si = 6,
-  R_di = 7,
-  R_r8 = 8,
-  R_r9 = 9,
-  R_r10 = 10,
-  R_r11 = 11,
-  R_r12 = 12,
-  R_r13 = 13,
-  R_r14 = 14,
-  R_r15 = 15,
+  R_cx,
+  R_dx,
+  R_bx,
+  R_sp,
+  R_bp,
+  R_si,
+  R_di,
+  R_r8,
+  R_r9,
+  R_r10,
+  R_r11,
+  R_r12,
+  R_r13,
+  R_r14,
+  R_r15,
 
-  R_al = 16,
-  R_cl = 17,
-  R_dl = 18,
-  R_bl = 19,
-  R_ah = 20,
-  R_ch = 21,
-  R_dh = 22,
-  R_bh = 23,
+  R_al,
+  R_cl,
+  R_dl,
+  R_bl,
+  R_ah,
+  R_ch,
+  R_dh,
+  R_bh,
 
-  R_spl = 24,
-  R_bpl = 25,
-  R_sil = 26,
-  R_dil = 27,
+  R_spl,
+  R_bpl,
+  R_sil,
+  R_dil,
 
-  R_ip = 28,
+  R_ip,
 
-  R_es = 29,    // 0
-  R_cs = 30,    // 1
-  R_ss = 31,    // 2
-  R_ds = 32,    // 3
-  R_fs = 33,
-  R_gs = 34,
+  R_es,    // 0
+  R_cs,    // 1
+  R_ss,    // 2
+  R_ds,    // 3
+  R_fs,
+  R_gs,
 
-  R_cf = 35,    // main cc's
-  R_zf = 36,
-  R_sf = 37,
-  R_of = 38,
+  R_cf,    // main cc's
+  R_zf,
+  R_sf,
+  R_of,
 
-  R_pf = 39,    // additional cc's
-  R_af = 40,
-  R_tf = 41,
-  R_if = 42,
-  R_df = 43,
+  R_pf,    // additional cc's
+  R_af,
+  R_tf,
+  R_if,
+  R_df,
 
-  R_efl = 44,   // eflags
+  R_efl,   // eflags
 
   // the following registers will be used in the disassembly
   // starting from ida v5.7
 
-  R_st0 = 45,   // floating point registers (not used in disassembly)
-  R_st1 = 46,
-  R_st2 = 47,
-  R_st3 = 48,
-  R_st4 = 49,
-  R_st5 = 50,
-  R_st6 = 51,
-  R_st7 = 52,
-  R_fpctrl = 53,// fpu control register
-  R_fpstat = 54,// fpu status register
-  R_fptags = 55,// fpu tags register
+  R_st0,   // floating point registers (not used in disassembly)
+  R_st1,
+  R_st2,
+  R_st3,
+  R_st4,
+  R_st5,
+  R_st6,
+  R_st7,
+  R_fpctrl,// fpu control register
+  R_fpstat,// fpu status register
+  R_fptags,// fpu tags register
 
-  R_mm0 = 56,   // mmx registers
-  R_mm1 = 57,
-  R_mm2 = 58,
-  R_mm3 = 59,
-  R_mm4 = 60,
-  R_mm5 = 61,
-  R_mm6 = 62,
-  R_mm7 = 63,
+  R_mm0,   // mmx registers
+  R_mm1,
+  R_mm2,
+  R_mm3,
+  R_mm4,
+  R_mm5,
+  R_mm6,
+  R_mm7,
 
-  R_xmm0 = 64,  // xmm registers
-  R_xmm1 = 65,
-  R_xmm2 = 66,
-  R_xmm3 = 67,
-  R_xmm4 = 68,
-  R_xmm5 = 69,
-  R_xmm6 = 70,
-  R_xmm7 = 71,
-  R_xmm8 = 72,
-  R_xmm9 = 73,
-  R_xmm10 = 74,
-  R_xmm11 = 75,
-  R_xmm12 = 76,
-  R_xmm13 = 77,
-  R_xmm14 = 78,
-  R_xmm15 = 79,
-  R_mxcsr = 80,
+  R_xmm0,  // xmm registers
+  R_xmm1,
+  R_xmm2,
+  R_xmm3,
+  R_xmm4,
+  R_xmm5,
+  R_xmm6,
+  R_xmm7,
+  R_xmm8,
+  R_xmm9,
+  R_xmm10,
+  R_xmm11,
+  R_xmm12,
+  R_xmm13,
+  R_xmm14,
+  R_xmm15,
+  R_mxcsr,
 
-  R_ymm0  = 81, // AVX 256-bit registers
-  R_ymm1  = 82,
-  R_ymm2  = 83,
-  R_ymm3  = 84,
-  R_ymm4  = 85,
-  R_ymm5  = 86,
-  R_ymm6  = 87,
-  R_ymm7  = 88,
-  R_ymm8  = 89,
-  R_ymm9  = 90,
-  R_ymm10 = 91,
-  R_ymm11 = 92,
-  R_ymm12 = 93,
-  R_ymm13 = 94,
-  R_ymm14 = 95,
-  R_ymm15 = 96,
+  R_ymm0,  // AVX 256-bit registers
+  R_ymm1,
+  R_ymm2,
+  R_ymm3,
+  R_ymm4,
+  R_ymm5,
+  R_ymm6,
+  R_ymm7,
+  R_ymm8,
+  R_ymm9,
+  R_ymm10,
+  R_ymm11,
+  R_ymm12,
+  R_ymm13,
+  R_ymm14,
+  R_ymm15,
+
+  R_bnd0, // MPX registers
+  R_bnd1,
+  R_bnd2,
+  R_bnd3,
+
+  R_xmm16, // AVX-512 extended XMM registers
+  R_xmm17,
+  R_xmm18,
+  R_xmm19,
+  R_xmm20,
+  R_xmm21,
+  R_xmm22,
+  R_xmm23,
+  R_xmm24,
+  R_xmm25,
+  R_xmm26,
+  R_xmm27,
+  R_xmm28,
+  R_xmm29,
+  R_xmm30,
+  R_xmm31,
+
+  R_ymm16, // AVX-512 extended YMM registers
+  R_ymm17,
+  R_ymm18,
+  R_ymm19,
+  R_ymm20,
+  R_ymm21,
+  R_ymm22,
+  R_ymm23,
+  R_ymm24,
+  R_ymm25,
+  R_ymm26,
+  R_ymm27,
+  R_ymm28,
+  R_ymm29,
+  R_ymm30,
+  R_ymm31,
+
+  R_zmm0, // AVX-512 ZMM registers
+  R_zmm1,
+  R_zmm2,
+  R_zmm3,
+  R_zmm4,
+  R_zmm5,
+  R_zmm6,
+  R_zmm7,
+  R_zmm8,
+  R_zmm9,
+  R_zmm10,
+  R_zmm11,
+  R_zmm12,
+  R_zmm13,
+  R_zmm14,
+  R_zmm15,
+  R_zmm16,
+  R_zmm17,
+  R_zmm18,
+  R_zmm19,
+  R_zmm20,
+  R_zmm21,
+  R_zmm22,
+  R_zmm23,
+  R_zmm24,
+  R_zmm25,
+  R_zmm26,
+  R_zmm27,
+  R_zmm28,
+  R_zmm29,
+  R_zmm30,
+  R_zmm31,
+
+  R_k0, // AVX-512 opmask registers
+  R_k1,
+  R_k2,
+  R_k3,
+  R_k4,
+  R_k5,
+  R_k6,
+  R_k7,
 
   R_last,
 };
+
+CASSERT(R_last == 173);
 
 inline bool is_segreg(int r) { return r >= R_es && r <= R_gs; }
 inline bool is_fpureg(int r) { return r >= R_st0 && r <= R_st7; }
 inline bool is_mmxreg(int r) { return r >= R_mm0 && r <= R_mm7; }
 inline bool is_xmmreg(int r) { return r >= R_xmm0 && r <= R_xmm15; }
-inline bool is_ymm_reg(int r) { return r >= R_ymm0 && r <= R_ymm15; }
+inline bool is_ymmreg(int r) { return r >= R_ymm0 && r <= R_ymm15; }
 
 int cvt_to_wholereg(int _reg, bool allow_high_byte_regs); // byte reg -> whole reg
 int calc_dbg_reg_index(const char *name);
 
 //-------------------------------------------------------------------------
 // is conditional branch?
-inline bool insn_jcc(void)
+inline bool insn_jcc(const insn_t &insn)
 {
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case NN_ja:
     case NN_jae:
@@ -249,11 +339,11 @@ inline bool insn_jcc(void)
 }
 
 //-------------------------------------------------------------------------
-inline bool insn_default_opsize_64(void)
+inline bool insn_default_opsize_64(const insn_t &insn)
 {
-  if ( insn_jcc() )
+  if ( insn_jcc(insn) )
     return true;
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     // use ss
     case NN_pop:
@@ -292,72 +382,84 @@ inline bool insn_default_opsize_64(void)
   return false;
 }
 
-inline bool mode16(void){ return (cmd.auxpref & (aux_use32|aux_use64)) == 0; } // 16-bit mode?
-inline bool mode32(void){ return (cmd.auxpref & aux_use32) != 0; } // 32-bit mode?
-inline bool mode64(void){ return (cmd.auxpref & aux_use64) != 0; } // 64-bit mode?
-inline bool natad(void) { return (cmd.auxpref & aux_natad) != 0; } // natural address size (no prefixes)?
-inline bool natop(void) { return (cmd.auxpref & aux_natop) != 0; } // natural operand size (no prefixes)?
-inline bool vexpr(void) { return (cmd.auxpref & aux_vexpr) != 0; } // VEX encoding used
+inline bool mode16(const insn_t &insn)  { return (insn.auxpref & (aux_use32|aux_use64)) == 0; } // 16-bit mode?
+inline bool mode32(const insn_t &insn)  { return (insn.auxpref & aux_use32) != 0; } // 32-bit mode?
+inline bool mode64(const insn_t &insn)  { return (insn.auxpref & aux_use64) != 0; } // 64-bit mode?
+inline bool natad(const insn_t &insn)   { return (insn.auxpref & aux_natad) != 0; } // natural address size (no prefixes)?
+inline bool natop(const insn_t &insn)   { return (insn.auxpref & aux_natop) != 0; } // natural operand size (no prefixes)?
+inline bool vexpr(const insn_t &insn)   { return (insn.auxpref & aux_vexpr) != 0; } // VEX encoding used
+inline bool evexpr(const insn_t &insn)  { return (insn.auxpref & aux_evex)  != 0; } // EVEX encoding used
+inline bool xopexpr(const insn_t &insn) { return (insn.auxpref & aux_xop)   != 0; } // XOP encoding used
 
-inline bool ad16(void)          // is current addressing 16-bit?
+inline bool ad16(const insn_t &insn)          // is current addressing 16-bit?
 {
-  int p = cmd.auxpref & (aux_use32|aux_use64|aux_natad);
+  int p = insn.auxpref & (aux_use32|aux_use64|aux_natad);
   return p == aux_natad || p == aux_use32;
 }
 
-inline bool ad32(void)          // is current addressing 32-bit?
+inline bool ad32(const insn_t &insn)          // is current addressing 32-bit?
 {
-  int p = cmd.auxpref & (aux_use32|aux_use64|aux_natad);
+  int p = insn.auxpref & (aux_use32|aux_use64|aux_natad);
   return p == (aux_natad|aux_use32)
       || p == 0
       || p == aux_use64;
 }
 
-inline bool ad64(void)          // is current addressing 64-bit?
+inline bool ad64(const insn_t &insn)          // is current addressing 64-bit?
 {
 #ifdef __EA64__
-  int p = cmd.auxpref & (aux_use32|aux_use64|aux_natad);
+  int p = insn.auxpref & (aux_use32|aux_use64|aux_natad);
   return p == (aux_natad|aux_use64);
 #else
+  qnotused(insn);
   return false;
 #endif
 }
 
-inline bool op16(void)          // is current operand size 16-bit?
+inline bool op16(const insn_t &insn)          // is current operand size 16-bit?
 {
-  int p = cmd.auxpref & (aux_use32|aux_use64|aux_natop);
+  int p = insn.auxpref & (aux_use32|aux_use64|aux_natop);
   return p == aux_natop                                 // 16-bit segment, no prefixes
       || p == aux_use32                                 // 32-bit segment, 66h
-      || p == aux_use64 && (cmd.rex & REX_W) == 0;      // 64-bit segment, 66h, no rex.w
+      || p == aux_use64 && (insn.rex & REX_W) == 0;      // 64-bit segment, 66h, no rex.w
 }
 
-inline bool op32(void)          // is current operand size 32-bit?
+inline bool op32(const insn_t &insn)          // is current operand size 32-bit?
 {
-  int p = cmd.auxpref & (aux_use32|aux_use64|aux_natop);
+  int p = insn.auxpref & (aux_use32|aux_use64|aux_natop);
   return p == 0                                         // 16-bit segment, 66h
       || p == (aux_use32|aux_natop)                     // 32-bit segment, no prefixes
-      || p == (aux_use64|aux_natop) && (cmd.rex & REX_W) == 0; // 64-bit segment, 66h, no rex.w
+      || p == (aux_use64|aux_natop) && (insn.rex & REX_W) == 0; // 64-bit segment, 66h, no rex.w
 }
 
-inline bool op64(void)          // is current operand size 64-bit?
+inline bool op64(const insn_t &insn)          // is current operand size 64-bit?
 {
 #ifdef __EA64__
-  return mode64()
-      && ((cmd.rex & REX_W) != 0
-       || natop() && insn_default_opsize_64()); // 64-bit segment, rex.w or insns-64
+  return mode64(insn)
+      && ((insn.rex & REX_W) != 0
+       || natop(insn) && insn_default_opsize_64(insn)); // 64-bit segment, rex.w or insns-64
 #else
+  qnotused(insn);
   return false;
 #endif
 }
 
-inline bool op256(void)        // is VEX.L set?
+inline bool op256(const insn_t &insn)        // is VEX.L == 1 or EVEX.L'L == 01?
 {
-  return vexpr() && (cmd.rex & VEX_L) != 0;
+  return (insn.rex & VEX_L) != 0
+      && (vexpr(insn)
+       || xopexpr(insn)
+       || evexpr(insn) && (insn.evex_flags & EVEX_L) == 0);
 }
 
-inline bool is_vsib(void)  // does instruction use VSIB variant of the sib byte?
+inline bool op512(const insn_t &insn)        // is EVEX.L'L == 10?
 {
-  switch ( cmd.itype )
+  return evexpr(insn) && (insn.rex & VEX_L) == 0 && (insn.evex_flags & EVEX_L) != 0;
+}
+
+inline bool is_vsib(const insn_t &insn)  // does instruction use VSIB variant of the sib byte?
+{
+  switch ( insn.itype )
   {
     case NN_vgatherdps:
     case NN_vgatherdpd:
@@ -367,30 +469,126 @@ inline bool is_vsib(void)  // does instruction use VSIB variant of the sib byte?
     case NN_vpgatherdq:
     case NN_vpgatherqd:
     case NN_vpgatherqq:
+
+    case NN_vscatterdps:
+    case NN_vscatterdpd:
+    case NN_vscatterqps:
+    case NN_vscatterqpd:
+    case NN_vpscatterdd:
+    case NN_vpscatterdq:
+    case NN_vpscatterqd:
+    case NN_vpscatterqq:
+
+    case NN_vgatherpf0dps:
+    case NN_vgatherpf0qps:
+    case NN_vgatherpf0dpd:
+    case NN_vgatherpf0qpd:
+    case NN_vgatherpf1dps:
+    case NN_vgatherpf1qps:
+    case NN_vgatherpf1dpd:
+    case NN_vgatherpf1qpd:
+
+    case NN_vscatterpf0dps:
+    case NN_vscatterpf0qps:
+    case NN_vscatterpf0dpd:
+    case NN_vscatterpf0qpd:
+    case NN_vscatterpf1dps:
+    case NN_vscatterpf1qps:
+    case NN_vscatterpf1dpd:
+    case NN_vscatterpf1qpd:
       return true;
   }
   return false;
 }
 
-inline int sib_base(const op_t &x)                    // get extended sib base
+inline regnum_t vsib_index_fixreg(const insn_t &insn, regnum_t index)
+{
+  switch ( insn.itype )
+  {
+    case NN_vscatterdps:
+    case NN_vscatterqps:
+    case NN_vscatterqpd:
+    case NN_vpscatterdd:
+    case NN_vpscatterqd:
+    case NN_vpscatterqq:
+
+    case NN_vpgatherdd:
+    case NN_vpgatherqd:
+    case NN_vpgatherqq:
+    case NN_vgatherdps:
+    case NN_vgatherqps:
+    case NN_vgatherqpd:
+      if ( index > 15 )
+        index += op512(insn) ? R_zmm0 : op256(insn) ? (R_ymm16 - 16) : (R_xmm16 - 16);
+      else
+        index += op512(insn) ? R_zmm0 : op256(insn) ? R_ymm0 : R_xmm0;
+      break;
+
+    case NN_vscatterdpd:
+    case NN_vpscatterdq:
+
+    case NN_vgatherdpd:
+    case NN_vpgatherdq:
+      if ( index > 15 )
+        index += op512(insn) ? (R_ymm16 - 16) : (R_xmm16 - 16);
+      else
+        index += op512(insn) ? R_ymm0 : R_xmm0;
+      break;
+
+    case NN_vgatherpf0dps:
+    case NN_vgatherpf0qps:
+    case NN_vgatherpf0qpd:
+    case NN_vgatherpf1dps:
+    case NN_vgatherpf1qps:
+    case NN_vgatherpf1qpd:
+
+    case NN_vscatterpf0dps:
+    case NN_vscatterpf0qps:
+    case NN_vscatterpf0qpd:
+    case NN_vscatterpf1dps:
+    case NN_vscatterpf1qps:
+    case NN_vscatterpf1qpd:
+      index += R_zmm0;
+      break;
+
+    case NN_vgatherpf0dpd:
+    case NN_vgatherpf1dpd:
+    case NN_vscatterpf0dpd:
+    case NN_vscatterpf1dpd:
+      if ( index > 15 )
+        index += R_ymm16 - 16;
+      else
+        index += R_ymm0;
+      break;
+  }
+  return index;
+}
+
+inline int sib_base(const insn_t &insn, const op_t &x)                    // get extended sib base
 {
   int base = x.sib & 7;
 #ifdef __EA64__
-  if ( cmd.rex & REX_B )
+  if ( insn.rex & REX_B )
     base |= 8;
+#else
+  qnotused(insn);
 #endif
   return base;
 }
 
-inline regnum_t sib_index(const op_t &x)                   // get extended sib index
+inline regnum_t sib_index(const insn_t &insn, const op_t &x)                   // get extended sib index
 {
   regnum_t index = regnum_t((x.sib >> 3) & 7);
 #ifdef __EA64__
-  if ( cmd.rex & REX_X )
+  if ( (insn.rex & REX_X) != 0 )
     index |= 8;
 #endif
-  if ( is_vsib() )
-    index += op256() ? R_ymm0 : R_xmm0;
+  if ( is_vsib(insn) )
+  {
+    if ( (insn.evex_flags & EVEX_V) != 0 )
+      index |= 16;
+    index = vsib_index_fixreg(insn, index);
+  }
   return index;
 }
 
@@ -401,18 +599,83 @@ inline int sib_scale(const op_t &x)
 }
 
 // get the base register of the operand with a displacement
-inline int x86_base(const op_t &x)
+// NB: for 16-bit code, returns a phrase number
+// use x86_base_reg() if you need to handle 16-bit instructions
+inline int x86_base(const insn_t &insn, const op_t &x)
 {
-  return x.hasSIB ? sib_base(x) : x.phrase;
+  return x.hasSIB ? sib_base(insn, x) : x.phrase;
+}
+
+// get the base register of the operand with a displacement
+// returns correct register for 16-bit code too
+inline int x86_base_reg(const insn_t &insn, const op_t &x)
+{
+  if ( x.hasSIB )
+  {
+    return sib_base(insn, x); // base register is encoded in the SIB
+  }
+  else if ( !ad16(insn) )
+  {
+    return x.phrase; // 'phrase' contains the base register number
+  }
+  else if ( x.phrase == ushort(R_none) )
+  {
+    return R_sp;
+  }
+  switch ( x.phrase )
+  {
+    case 0: // [BX+SI]
+    case 1: // [BX+DI]
+    case 7: // [BX]
+      return R_bx;
+    case 2: // [BP+SI]
+    case 3: // [BP+DI]
+    case 6: // [BP]
+      return R_bp;
+    case 4: // [SI]
+      return R_si;
+    case 5: // [DI]
+      return R_di;
+    default:
+      INTERR(10259);
+  }
 }
 
 const int INDEX_NONE = 4;       // no index register is present
 // get the index register of the operand with a displacement
-inline int x86_index(const op_t &x)
+inline int x86_index(const insn_t &insn, const op_t &x)
 {
-  return x.hasSIB ? sib_index(x) : INDEX_NONE;
+  return x.hasSIB ? sib_index(insn, x) : INDEX_NONE;
 }
 
+inline int x86_index_reg(const insn_t &insn, const op_t &x)
+{
+  if ( x.hasSIB )
+  {
+    int idx = sib_index(insn, x);
+    if ( idx != INDEX_NONE )
+      return idx;
+    return R_none;
+  }
+  if ( !ad16(insn) )
+    return R_none;
+  switch ( x.phrase )
+  {
+    case 0: // [BX+SI]
+    case 2: // [BP+SI]
+      return R_si;
+    case 1: // [BX+DI]
+    case 3: // [BP+DI]
+      return R_di;
+    case 4: // [SI]
+    case 5: // [DI]
+    case 7: // [BX]
+    case 6: // [BP]
+      return R_none;
+    default:
+      INTERR(10260);
+  }
+}
 // get the scale factor of the operand with a displacement
 inline int x86_scale(const op_t &x)
 {
@@ -425,27 +688,47 @@ inline int has_displ(const op_t &x)
   return x.type == o_displ || x.type == o_mem && x.hasSIB;
 }
 
+// does the insn refer to the TLS variable?
+inline bool has_tls_segpref(const insn_t &insn)
+{
+  if ( insn.segpref == 0 )
+    return false;
+  return mode64(insn) && insn.segpref == R_fs
+      || mode32(insn) && insn.segpref == R_gs;
+}
+
+// should we treat the memory operand as a displacement?
+inline bool mem_as_displ(const insn_t &insn, const op_t &x)
+{
+  // the operand should be an offset and it should be the TLS variable
+  // or the second operand of "lea" instruction
+  // .text:08000000 mov eax, gs:(ti1 - static_TP)
+  // .text:08000E8F lea ecx, (_ZN4dmngL4sessE - _GLOBAL_OFFSET_TABLE_)
+  return (has_tls_segpref(insn) || insn.itype == NN_lea)
+      && is_off(get_flags(insn.ea), x.n);
+}
+
 // does the operand refer to stack? (sp or bp based)
-bool is_stack_ref(const op_t &x);
+bool is_stack_ref(const insn_t &insn, const op_t &x, int breg);
 
 // return addressing width in form of dt_... constant
-inline char address_dtyp(void)
+inline op_dtype_t address_dtype(const insn_t &insn)
 {
-  return char(ad64() ? dt_qword : ad32() ? dt_dword : dt_word);
+  return char(ad64(insn) ? dt_qword : ad32(insn) ? dt_dword : dt_word);
 }
 
 // return operand width in form of dt_... constant
-inline char operand_dtyp(void)
+inline op_dtype_t operand_dtype(const insn_t &insn)
 {
-  return char(op64() ? dt_qword : op32() ? dt_dword : op16() ? dt_word : dt_byte);
+  return char(op64(insn) ? dt_qword : op32(insn) ? dt_dword : op16(insn) ? dt_word : dt_byte);
 }
 
-inline bool is_io_insn(void)
+inline bool is_io_insn(const insn_t &insn)
 {
-  return cmd.itype == NN_ins
-      || cmd.itype == NN_outs
-      || cmd.itype == NN_out
-      || cmd.itype == NN_in;
+  return insn.itype == NN_ins
+      || insn.itype == NN_outs
+      || insn.itype == NN_out
+      || insn.itype == NN_in;
 }
 
 //---------------------------------
@@ -465,7 +748,9 @@ extern netnode intel_node;              // name: "$ vmm functions"
                                         // charval('P') - is callee a ptr?
                                         // blob('F')    - finally_block_t
                                         // altval('h')  - function owning SEH handler at current ea
+                                        //                saved as delta=owner-ea
 
+const char callee_tag   = 'A';
 const char fbase_tag    = 'b';
 const char frame_tag    = 'f';
 const char purge_tag    = 'p';
@@ -474,13 +759,18 @@ const char pushinfo_tag = 's';
 const char is_ptr_tag   = 'P';
 const char finally_tag  = 'F';
 const char handler_tag  = 'h';
+const char vxd_tag1     = 'V';
+const char vxd_tag2     = 'W';
+
+inline void set_callee(ea_t ea, ea_t callee) { intel_node.easet(ea, callee, callee_tag); }
+inline ea_t get_callee(ea_t ea) { return intel_node.eaget(ea, callee_tag); }
+inline void del_callee(ea_t ea) { intel_node.eadel(ea, callee_tag); }
 
 struct fbase_reg_t
 {
   ea_t value;
   ea_t minea;
   int16 reg;
-  int16 unused;
 };
 
 // fbase reg is a register used to access data for the current function
@@ -492,7 +782,7 @@ void set_fbase_reg(ea_t ea, ea_t minea, int reg, ea_t value);
 // (for example: push off; ret). The following functions mark such 'ret' instructions.
 inline bool get_ret_target(ea_t ea, ea_t *target)
 {
-  if ( intel_node.supval(ea, target, sizeof(ea_t), ret_tag) != sizeof(ea_t) )
+  if ( intel_node.supval_ea(ea, target, sizeof(ea_t), ret_tag) != sizeof(ea_t) )
     return false;
   if ( target != NULL )
     *target += ea;
@@ -501,20 +791,15 @@ inline bool get_ret_target(ea_t ea, ea_t *target)
 
 inline void set_ret_target(ea_t ea, ea_t target)
 {
-  intel_node.altset(ea, target-ea, ret_tag);
+  intel_node.altset_ea(ea, target-ea, ret_tag);
 }
 
 inline void del_ret_target(ea_t ea)
 {
-  intel_node.altdel(ea, ret_tag);
+  intel_node.altdel_ea(ea, ret_tag);
 }
 
-extern bool loading_complete;
-extern bgcolor_t prolog_color;
-extern bgcolor_t epilog_color;
-extern bgcolor_t switch_color;
-extern int max_simplex_size;
-extern uint32 idpflags;                  // name: "$ idpflags"
+extern uint32 idpflags;                 // name: "$ idpflags"
 
 #define AFIDP_PUSH      0x0001          // push seg; push num; is converted to offset
 #define AFIDP_NOP       0x0002          // db 90h after jmp is converted to nop
@@ -544,38 +829,37 @@ extern uint32 idpflags;                  // name: "$ idpflags"
                                         //      call <func>
                                         //      int 3 <- this is likely a no-return guard
 
-inline bool should_af_push(void)   { return (idpflags & AFIDP_PUSH) != 0; }
-inline bool should_af_nop(void)    { return (idpflags & AFIDP_NOP) != 0; }
-inline bool should_af_movoff(void) { return (idpflags & AFIDP_MOVOFF) != 0; }
-inline bool should_af_movoff2(void){ return (idpflags & AFIDP_MOVOFF2) != 0; }
-inline bool should_af_zeroins(void){ return (idpflags & AFIDP_ZEROINS) != 0; }
-inline bool should_af_brtti(void)  { return (idpflags & AFIDP_BRTTI) != 0; }
-inline bool should_af_urtti(void)  { return (idpflags & AFIDP_UNKRTTI) != 0; }
-inline bool should_af_fexp(void)   { return (idpflags & AFIDP_EXPFUNC) != 0; }
-inline bool should_af_difbase(void){ return (idpflags & AFIDP_DIFBASE) != 0; }
-inline bool should_af_nopref(void) { return (idpflags & AFIDP_NOPREF) != 0; }
-inline bool should_af_vxd(void)    { return (idpflags & AFIDP_NOVXD) == 0; }
-inline bool should_af_fpemu(void)  { return (idpflags & AFIDP_NOFPEMU) == 0; }
-inline bool should_af_showrip(void){ return (idpflags & AFIDP_SHOWRIP) != 0; }
-inline bool should_af_seh(void)    { return (idpflags & AFIDP_NOSEH) == 0; }
+inline bool should_af_push(void)     { return (idpflags & AFIDP_PUSH) != 0; }
+inline bool should_af_nop(void)      { return (idpflags & AFIDP_NOP) != 0; }
+inline bool should_af_movoff(void)   { return (idpflags & AFIDP_MOVOFF) != 0; }
+inline bool should_af_movoff2(void)  { return (idpflags & AFIDP_MOVOFF2) != 0; }
+inline bool should_af_zeroins(void)  { return (idpflags & AFIDP_ZEROINS) != 0; }
+inline bool should_af_brtti(void)    { return (idpflags & AFIDP_BRTTI) != 0; }
+inline bool should_af_urtti(void)    { return (idpflags & AFIDP_UNKRTTI) != 0; }
+inline bool should_af_fexp(void)     { return (idpflags & AFIDP_EXPFUNC) != 0; }
+inline bool should_af_difbase(void)  { return (idpflags & AFIDP_DIFBASE) != 0; }
+inline bool should_af_nopref(void)   { return (idpflags & AFIDP_NOPREF) != 0; }
+inline bool should_af_vxd(void)      { return (idpflags & AFIDP_NOVXD) == 0; }
+inline bool should_af_fpemu(void)    { return (idpflags & AFIDP_NOFPEMU) == 0; }
+inline bool should_af_showrip(void)  { return (idpflags & AFIDP_SHOWRIP) != 0; }
+inline bool should_af_seh(void)      { return (idpflags & AFIDP_NOSEH) == 0; }
 inline bool should_af_int3stop(void) { return (idpflags & AFIDP_INT3STOP) != 0; }
-
-inline int indent_spaces(size_t sz) { int len = inf.indent - sz;
-                                         return (len < 1) ? 1 : len; }
 
 // the second operand of lea instruction should not be treated as memory reference
 // unless there is cs: prefix or the user has specified 'offset' flag
 // in other cases lea is used for arbirary calculations
-inline bool is_arith_lea(const op_t &x)
+inline bool is_arith_lea(const insn_t &insn, const op_t &x)
 {
-  return cmd.itype == NN_lea && x.segrg != R_cs && !isOff(uFlag, x.n);
+  return insn.itype == NN_lea
+      && x.segrg != R_cs
+      && !is_off(get_flags(insn.ea), x.n);
 }
 
 // the following operand types are ignored for imul's third operand
-inline bool is_forbidden_imul_flag(const op_t &x, flags_t F)
+inline bool is_forbidden_imul_flag(const insn_t &insn, const op_t &x, flags_t F)
 {
-  if ( x.n == 2 && cmd.Op2.shown() )
-    return isOff1(F) || isStroff1(F) || isStkvar1(F);
+  if ( x.n == 2 && insn.Op2.shown() )
+    return is_off1(F) || is_stroff1(F) || is_stkvar1(F);
   return false;
 }
 
@@ -611,49 +895,23 @@ inline bool is_volatile_reg(int r)
       && r != R_r15;
 }
 
-
-
 //------------------------------------------------------------------
-inline sel_t getDS(ea_t EA) { return get_segreg(EA,R_ds); }
-inline sel_t getES(ea_t EA) { return get_segreg(EA,R_es); }
-inline sel_t getSS(ea_t EA) { return get_segreg(EA,R_ss); }
-inline sel_t getFS(ea_t EA) { return get_segreg(EA,R_fs); }
-inline sel_t getGS(ea_t EA) { return get_segreg(EA,R_gs); }
-
-//------------------------------------------------------------------
-
-void idaapi intel_header(void);
-void idaapi intel_footer(void);
-
-void idaapi intel_assumes(ea_t ea);
-void idaapi intel_segstart(ea_t ea);
-void idaapi intel_segend(ea_t ea);
-
-void idaapi intel_out(void);
-void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v);
-ssize_t idaapi get_type_name(flags_t flag, ea_t ea_or_id, char *buf, size_t bufsize);
-int idaapi is_align_insn(ea_t ea);
-ea_t get_segval(const op_t &x);
-ea_t get_mem_ea(const op_t &x);
-int get_imm_outf(const op_t &x);
-int get_displ_outf(const op_t &x);
-
-void idaapi pc_data(ea_t ea);
-int  idaapi pc_ana(void);
-int  idaapi pc_emu(void);
-bool idaapi pc_outop(op_t &op);
-
 struct pushreg_t
 {
   ea_t     ea;    // instruction ea
-  uval_t   off;   // offset from the frame top (sp delta)
-  uval_t   width; // register width (or number of allocated bytes)
+  sval_t   off;   // offset from the frame top (sp delta)
+  sval_t   width; // register width (or number of allocated bytes)
   regnum_t reg;   // register number (R_none means stack space allocation)
+  uint16   flags; // additional flags
+#define PRF_NONE   0x0000 // Entry describes a push or an allocation
+#define PRF_MOVE   0x0001 // Entrz describes a register save by a move instruction
+#define PRF_SPILL  0x0002 // Indicates that entry is located before local stack region
+#define PRF_MASK (PRF_MOVE | PRF_SPILL)
 };
 
 struct pushinfo_t
 {
-  enum { PUSHINFO_VERSION = 3 };
+  enum { PUSHINFO_VERSION = 4 };
   int flags;
 #define PINF_SEHCALL    0x0001  // call to SEH_prolog is present
 #define PINF_SEHMAN     0x0002  // Manual SEH setup
@@ -662,6 +920,7 @@ struct pushinfo_t
 #define PINF_VARARG     0x0010  // Vararg prolog (currently used for gcc64)
 #define PINF_BPOFF      0x0020  // xmm_stkoff/reg_stkoff are from rbp (otherwise from rsp)
 #define PINF_HAVE_SSIZE 0x0040  // pushinfo_t structure contains its own size (field 'cb')
+#define PINF_PSI_FLAGS  0x0080  // pushreg_t structure contains flags field
   qvector<pushreg_t> psi;       // stack allocation instructions
   ssize_t bpidx;                // index into psi
   uint32 spoiled;               // bitmask of spoiled registers at the end of prolog
@@ -705,16 +964,17 @@ struct pushinfo_t
                                 // see PINF_BPOFF for that
   int xmm_nsaved;               // number of saved xmm regs
   int reg_nsaved;               // number of saved general purpose regs
-  int cb;                       // // size of this structure
+
+  int cb;                       // size of this structure
 
   pushinfo_t(void)
-    : flags(PINF_HAVE_SSIZE), bpidx(-1), spoiled(0),
+    : flags(PINF_HAVE_SSIZE | PINF_PSI_FLAGS), bpidx(-1), spoiled(0),
       eh_type(EH_NONE), eh_info(BADADDR),
       xmm_stkoff(0), reg_stkoff(0), xmm_nsaved(0), reg_nsaved(0),
       cb(sizeof(pushinfo_t))
   {
   }
-  int verify(func_t *pfn);
+  int verify(const insn_t &insn, func_t *pfn);
   void save_to_idb(ea_t ea);
   bool restore_from_idb(ea_t ea);
 };
@@ -732,131 +992,24 @@ enum spec_func_type_t
   SF_LSTRCATN,
 };
 
-spec_func_type_t get_spec_func_type(ea_t callee, sval_t *p_delta);
+spec_func_type_t get_spec_func_type(
+        const insn_t &insn,
+        ea_t callee,
+        sval_t *p_delta);
 
-int spoils(const uint32 *regs, int n);
-inline bool spoils(int _reg)
+inline bool is_msabi(void)
 {
-  uint32 r = _reg;
-  return spoils(&r, 1) != -1;
+  comp_t cc = default_compiler();
+  return cc == COMP_MS || cc == COMP_UNK && inf.filetype == f_PE;
 }
+
 inline int pc_shadow_area_size()
 {
-  return (inf.is_64bit() && default_compiler() == COMP_MS) ? 4 * 8 : 0;
+  return inf.is_64bit() && is_msabi() ? 4 * 8 : 0;
 }
-bool find_reg_value(int _reg, sval_t *v, bool only_lea = false);
-bool idaapi is_switch ( switch_info_ex_t *si );
-bool idaapi equal_ops(const op_t &x, const op_t &y);
-int  idaapi sp_based(const op_t &x);
-bool is_sp_based(const op_t &x);
-bool idaapi create_func_frame(func_t *pfn);
-int  idaapi is_jump_func(func_t *pfn, ea_t *jump_target, ea_t *func_pointer);
-bool is_alloca_probe(const char *name);
-bool is_stack_changing_func(const char *name);
-bool is_stack_changing_func(ea_t ea);
-void check_new_name(ea_t ea, const char *name);
-bool verify_sp(func_t *pfn);
-ea_t find_callee(bool *p_is_ptr=NULL);
-int pc_calc_purged_from_type(const tinfo_t &tif);
-int pc_calc_purged_from_type(const func_type_data_t &fti);
-bool pc_calc_arglocs(func_type_data_t *fti);
-bool pc_calc_varglocs(
-        func_type_data_t *fti,
-        regobjs_t *regargs,
-        int nfixed);
-bool pc_compare_arglocs(const argloc_t &v1, const argloc_t &v2);
-bool pc_calc_retloc(const tinfo_t &tif, cm_t cc, argloc_t *retloc);
-bool pc_use_stkvar_type(ea_t ea, const funcarg_t &fa);
-int pc_use_regarg_type(ea_t ea, const funcargvec_t &rargs);
-void use_pc_arg_types(
-        ea_t ea,
-        func_type_data_t *fti,
-        funcargvec_t *rargs);
-int get_varcall_regs(callregs_t *callregs);
-int get_fastcall_regs(callregs_t *callregs);
-int get_thiscall_regs(callregs_t *callregs);
-int calc_cdecl_purged_bytes(ea_t ea);
-sval_t calc_sp_delta(void);
-uval_t analyze_frame(
-        func_t *pfn,
-        bool *p_bpused,
-        uval_t *p_fpd,
-        uval_t *p_preregs,
-        uval_t *p_postregs,
-        sval_t *p_argsize,
-        sval_t sym_jmps[2]);
-void handle_pending_frame_analyses(void);
-void del_additional_frame_info(func_t *pfn);
-bool calc_func_call_delta(func_t *caller, ea_t callee, sval_t *p_delta, spec_func_type_t *p_functype);
-sval_t calc_ebp_phrase(func_t *pfn, op_t &x);
-bool is_ret_itype(ushort itype);
-bool is_pc_return(bool strict);
-bool is_move_insn(void);
-void setup_til(void);
-bool loader_is_xbe(void);
-bool is_userland_app(void);
-bool is_userland_pe(void);
-bool is_efi_pe(void);
-//------------------------------
-struct vxd_info       // loaded from ida.int
-{
-  ushort sp_off;      // bytes purge upon return
-  ushort prm_pos;     // offset in strings to params (0 if none)
-  ushort cmt_pos;     // offset in strings to comment (0 if none)
-  char   strings[MAXSTR]; // name [param] [comment]
-};
 
-bool is_vxd_interrupt(void);
-bool vxd_information(vxd_info *vx);
-void pc_move_segm(ea_t from, const segment_t *s);
-void pc_erase_info(ea_t ea1, ea_t ea2);
-
+struct regval_t;
 typedef const regval_t &idaapi getreg_t(const char *name, const regval_t *regvalues);
-
-#ifdef NO_OBSOLETE_FUNCS
-bool pc_get_operand_info(
-        ea_t ea,
-        int n,
-        int tid,
-        getreg_t *getreg,
-        const regval_t *regvalues,
-        idd_opinfo_t *opinf);
-#endif
-bool calc_opval(
-        op_t &op,
-        int tid,
-        getreg_t *getreg,
-        const regval_t *rv,
-        idd_opinfo_t *opinf);
-bool calc_sreg_base(int tid, int sreg_value, ea_t *base);
-uval_t getr(int _reg, char dtyp, getreg_t *getreg, const regval_t *rv);
-//------------------------------
-bool borland_template(va_list va);
-int  borland_coagulate(va_list va);
-void borland_signature(void);
-//-------------------------------
-ea_t get_codeseq_target(ea_t ea, ea_t eea);
-void cover_func_finalize(func_t *pf);
-void compiler_finalize(void);
-bool is_sane_insn(int reason);
-int  may_be_func(bool creating_chunks=false);
-bool validate_flirt_func(ea_t ea);
-bool might_change_sp(ea_t ea);
-void parse_func_seh(func_t *pfn);
-void reattach_handler_block(ea_t ea, ea_t handler_start = BADADDR);
-bool label_seh_table(ea_t from, ea_t to);
-int map_to_fullreg(int regnum);
-ssize_t pc_get_reg_name(int _reg, size_t width, char *buf, size_t bufsize, int reghi);
-ssize_t pc_get_one_reg_name(int _reg, size_t width, char *outbuf, size_t bufsize);
-void parse_linux_syscall(char *params);
-int is_get_pc_thunk(ea_t *p_end=NULL);
-//----------------------------------------------------------------------
-bool is_segment_normal(ea_t ea);
-bool is_seh_entry(ea_t ea);
-bool is_local_label(ea_t ea);
-void del_func_seh(func_t *pfn);
-
-#define INFO_TAG  'B'
 
 // Structure where information about a mmx/xmm/ymm type is returned
 struct mmtype_t
@@ -873,58 +1026,143 @@ namespace pc_module_t
 {
   enum event_codes_t
   {
-    set_difbase = processor_t::loader,
+    ev_set_difbase = processor_t::ev_loader,
                         // set AFIDP_DIFBASE flag
                         // in: int onoff
                         // Returns: nothing
-    restore_pushinfo,   // Restore function prolog info from the database
+    ev_restore_pushinfo,// Restore function prolog info from the database
+                        // in: pushinfo_t *pi
+                        //     ea_t func_start
+                        // Returns: 1-ok, otherwise-failed
+    ev_save_pushinfo,   // Save function prolog info to the database
                         // in: ea_t func_start
                         //     pushinfo_t *pi
-                        // Returns: 2-ok, otherwise-failed
-    save_pushinfo,      // Save function prolog info to the database
-                        // in: ea_t func_start
-                        //     pushinfo_t *pi
-                        // Returns: 2-ok, otherwise-failed
-    prolog_analyzed,    // This event is generated by the PC module
+                        // Returns: 1-ok, otherwise-failed
+    ev_prolog_analyzed,    // This event is generated by the PC module
                         // at the end of prolog analysis. Plugins may
                         // hook to it and improve the analysis.
                         // in: ea_t first_past_prolog_insn
                         //     pushinfo_t *pi
                         // Returns: 1-ok, 2-ok but do not automatically verify epilog
-    verify_epilog,      // Verify function epilog
-                        // in: pushinfo_t *pi
-                        //     int *answer
-                        // cmd structure must be filled with the first epilog insn
+    ev_verify_epilog,   // Verify function epilog
+                        // in: int *answer
+                        //     pushinfo_t *pi
+                        //     const insn_t *insn
+                        // 'insn' structure must be filled with the first epilog instruction
                         // number of verified epilog instructions will be in the 'answer'
-                        // returns: 2-ok, otherwise-failed
-    find_reg_value,     // Find a register value by looking backwards from cmd.ea
-                        // in: int regnum
-                        //     sval_t *value
-                        // returns: 2-found, 0-not found, otherwise not implemented
-                        // This function spoils cmd
-    dbgtools_path,      // Returns the configuration value of the debugging tools path (from IDA.CFG)
+                        // returns: 1-ok, otherwise-failed
+    ev_find_reg_value,  // Find a register value by looking backwards from insn_t.ea
+                        // in: sval_t *value
+                        //     const insn_t *insn
+                        //     int regnum
+                        // returns: 1-found, -1-not found, 0-not implemented
+    ev_dbgtools_path,   // Returns the configuration value of the debugging tools path (from IDA.CFG)
                         // in: char *path
                         //     size_t path_size
                         // returns: 1-if value is set, 0-if value not set in IDA.CFG
-                        // This function spoils cmd
-    get_mmtype,         // Retrieve mmx/xmm/ymm related type
-                        // in: const char *name
-                        //     const mmtype_t **ptr
-                        // Returns: number of found types+1
-                        //          -1-type exists but is wrong
-                        // If name==NULL, initialize all mmx/xmm/ymm types
+    ev_is_get_pc_thunk, // Detect get_pc_thunk calls
+                        // in: RegNo *p_reg,
+                        //     ea_t *p_end
+                        //     const insn_t *ins
+                        // returns: 1-found, -1-not found, 0-not implemented
+
+    ev_vxd_loaded,      // notification: a virtual device driver (Vxd) is loaded
+
+    ev_get_borland_template_node,
+                        // out: netnode *node
+                        // returns: 1-found, -1-not found
+    ev_clear_borland_template_node,
+                        // returns: nothing
+    ev_borland_template,// Applies Borland RTTI template for the given address
+                        // in: ea_t ea,
+                        //     bool bp_mode if false - bc
+                        //     bool recursive
+                        // returns: 1-created, -1-not created
+    ev_get_segval,      // Get segment for the specified instruction operand
+                        // in: ea_t *out,
+                        //     const insn_t *insn,
+                        //     const op_t *x
+                        // returns: 1-success
   };
+
+  inline processor_t::event_t idp_ev(event_codes_t ev)
+  {
+    return processor_t::event_t(ev);
+  }
+
+  inline void set_difbase(int onoff)
+  {
+    ph.notify(idp_ev(ev_set_difbase), onoff);
+  }
+
+  inline bool restore_pushinfo(pushinfo_t *pi, ea_t func_start)
+  {
+    return ph.notify(idp_ev(ev_restore_pushinfo), pi, func_start) == 1;
+  }
+
+  inline bool save_pushinfo(ea_t func_start, pushinfo_t *pi)
+  {
+    return ph.notify(idp_ev(ev_restore_pushinfo), func_start, pi) == 1;
+  }
+
+  inline int prolog_analyzed(ea_t first_past_prolog_insn, pushinfo_t *pi)
+  {
+    return ph.notify(idp_ev(ev_prolog_analyzed), first_past_prolog_insn, pi);
+  }
+
+  inline bool verify_epilog(int *answer, pushinfo_t *pi, const insn_t &insn)
+  {
+    return ph.notify(idp_ev(ev_verify_epilog), answer, pi, &insn) == 1;
+  }
+
+  inline int find_reg_value(sval_t *value, const insn_t &insn, int regnum)
+  {
+    return ph.notify(idp_ev(ev_find_reg_value), value, &insn, regnum);
+  }
+
+  inline bool dbgtools_path(char *path, size_t path_size)
+  {
+    return ph.notify(idp_ev(ev_dbgtools_path), path, path_size) == 1;
+  }
+
+  inline int is_get_pc_thunk(RegNo *p_reg, ea_t *p_end, const insn_t &insn)
+  {
+    return ph.notify(idp_ev(ev_is_get_pc_thunk), p_reg, p_end, &insn);
+  }
+
+  inline int vxd_loaded()
+  {
+    return ph.notify(idp_ev(ev_vxd_loaded));
+  }
+
+  inline bool get_borland_template_node(netnode *node)
+  {
+    return ph.notify(idp_ev(ev_get_borland_template_node), node) > 0;
+  }
+
+  inline void clear_borland_template_node(void)
+  {
+    ph.notify(idp_ev(ev_clear_borland_template_node));
+  }
+
+  inline bool borland_template(ea_t ea, bool bp_mode, bool recursive)
+  {
+    return ph.notify(idp_ev(ev_borland_template),
+                     ea,
+                     bp_mode,
+                     recursive) > 0;
+  }
+
+  inline ea_t get_segval(const insn_t &insn, const op_t &x)
+  {
+    ea_t ea = BADADDR;
+    ph.notify(idp_ev(ev_get_segval), &ea, &insn, &x);
+    return ea;
+  }
 }
 
 //-------------------------------------------------------------------------
-
-//
-//      Don't use the following define's with underscores at the start!
-//
-
-extern int procnum;     // internal processor number
-extern uint32 pflag;
-
+// Don't use the following define's with underscores at the start!
 #define _PT_486p        0x00000001
 #define _PT_486r        0x00000002
 #define _PT_386p        0x00000004
@@ -974,23 +1212,24 @@ extern uint32 pflag;
 //   The following values mean 'is exactly XXX processor?'
 //
 
-#define PT_ismmx        ( _PT_mmx             )
-#define PT_is686        ( _PT_686r | _PT_686p )
-#define PT_is586        ( _PT_586r | _PT_586p )
-#define PT_is486        ( _PT_486r | _PT_486p )
-#define PT_is386        ( _PT_386r | _PT_386p )
-#define PT_is286        ( _PT_286r | _PT_286p )
-#define PT_is086        ( _PT_086 )
+#define PT_ismmx        (_PT_mmx            )
+#define PT_is686        (_PT_686r | _PT_686p)
+#define PT_is586        (_PT_586r | _PT_586p)
+#define PT_is486        (_PT_486r | _PT_486p)
+#define PT_is386        (_PT_386r | _PT_386p)
+#define PT_is286        (_PT_286r | _PT_286p)
+#define PT_is086        (_PT_086)
 
 //---------------------------------------------------------------------
 inline bool isProtected(uint32 type)
 {
-   return (type & (_PT_286p |
-                   _PT_386p |
-                   _PT_486p |
-                   _PT_586p |
-                   _PT_686p |
-                   _PT_pii    )) != 0;
+  return (type
+        & (_PT_286p
+         | _PT_386p
+         | _PT_486p
+         | _PT_586p
+         | _PT_686p
+         | _PT_pii)) != 0;
 }
 
 inline bool isAMD(uint32 type)   { return (type & PT_k7  ) != 0; }
@@ -1005,5 +1244,4 @@ inline bool is486(uint32 type)   { return (type & PT_486r) != 0; }
 inline bool is386(uint32 type)   { return (type & PT_386r) != 0; } // is 386 or better ?
 inline bool is286(uint32 type)   { return (type & PT_286r) != 0; } // is 286 or better ?
 
-#pragma pack(pop)
 #endif // _INTEL_HPP

@@ -6,104 +6,100 @@
 
 #include "78k0.hpp"
 
-static bool flow;       // флажок стопа
+static bool flow;       // флажок стоп
 //----------------------------------------------------------------------
 // поставим использование/изменение операндов
-static void TouchArg(op_t &x,int isAlt,int isload)
+static void handle_operand(const op_t &x,int isAlt,int isload, const insn_t &insn)
 {
-ea_t ea = toEA(codeSeg(x.addr,x.n), x.addr);
-ea_t ev = toEA(codeSeg(x.value,x.n), x.value);
-switch ( x.type ) {
-// эта часть не используется !
-case o_void:break;
+  ea_t ea = map_code_ea(insn, x.addr, x.n);
+  ea_t ev = map_code_ea(insn, x.value, x.n);
+  switch ( x.type )
+  {
+    // эта часть не используется !
+    case o_void:
+      break;
 
-case o_reg:     if ( isAlt )break;
-                        if ( isOff(uFlag, x.n))ua_add_dref(x.n, ev,dr_O );
-                        break;
+    case o_reg:
+      if ( isAlt )
+        break;
+      if ( is_off(get_flags(insn.ea), x.n) )
+        insn.add_dref(ev, x.n, dr_O);
+      break;
 
-case o_imm:     // непосредственный не может меняться
-                        if ( ! isload ) goto badTouch;
-                        // поставим флажок непосредственного операнда
-                        doImmd(cmd.ea);
-                        // если не форсирован и помечен смещением
-                        if ( !isAlt && isOff(uFlag, x.n) )
-                                // это смещение !
-                                ua_add_dref(x.offb,ev,dr_O);
-                        break;
+    case o_imm:     // непосредственный не может меняться
+      if ( !isload )
+        goto badTouch;
+      // поставим флажок непосредственного операнд
+      set_immd(insn.ea);
+      // если не форсирован и помечен смещением
+      if ( !isAlt && is_off(get_flags(insn.ea), x.n) )
+        insn.add_dref(ev, x.offb, dr_O); // это смещение !
+      break;
+
+    case o_mem:
+      insn.create_op_data(ea, x);
+      // если изменяется - поставим переменную
+      insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+      break;
 
 
-case o_mem:     ua_dodata2(x.offb, ea, x.dtyp);
-                        // если изменяется - поставим переменную
-                        if ( ! isload ) doVar(x.addr);
-                        ua_add_dref(x.offb, ea, isload ? dr_R : dr_W);
-                        break;
+    case o_near:// это вызов ? (или переход)
+      if ( has_insn_feature(insn.itype, CF_CALL) )
+      {
+        // поставим ссылку на код
+        insn.add_cref(ea, x.offb, fl_CN);
+        flow = func_does_return(ea);
+      }
+      else
+      {
+        insn.add_cref(ea, x.offb, fl_JN);
+      }
+      break;
 
-
-case o_near:// это вызов ? (или переход)
-                        if ( InstrIsSet(cmd.itype, CF_CALL) ){
-                                // поставим ссылку на код
-                                ua_add_cref(x.offb, ea, fl_CN);
-#if IDP_INTERFACE_VERSION > 37
-                                flow = func_does_return(ea);
-#else
-                                // получим описатель функции
-                                func_t *pfn = get_func(ea);
-                                // если функция описана и не имеет возврата - остановим
-                                if ( pfn != NULL && (pfn->flags & FUNC_NORET)  ) flow = false;
-#endif
-                        }
-                        else    ua_add_cref(x.offb, ea, fl_JN);
-                        break;
-
-case o_bit:     switch ( x.FormOut ){
-                    case FORM_OUT_S_ADDR:
-                        case FORM_OUT_SFR:
-                                ua_dodata2(x.offb, ea, x.dtyp);
-                                ua_add_dref(x.offb,ea, isload ? dr_R : dr_W);
-                                break;
-                        }
-                        break;
-// прочее - сообщим ошибку
-default:
+    case o_bit:
+      switch ( x.FormOut )
+      {
+        case FORM_OUT_S_ADDR:
+        case FORM_OUT_SFR:
+          insn.create_op_data(ea, x);
+          insn.add_dref(ea, x.offb, isload ? dr_R : dr_W);
+          break;
+      }
+      break;
+    // прочее - сообщим ошибку
+    default:
 badTouch:
-#if IDP_INTERFACE_VERSION > 37
-          warning("%a %s,%d: bad optype %d",
-                                        cmd.ea, cmd.get_canon_mnem(),
-#else
-    warning("%08lX %s,%d: bad optype (%x)",
-                                        cmd.ea,(char far *)Instructions[cmd.itype].name,
-#endif
-                                        x.n, x.type);
-                        break;
-}
+      warning("%a %s,%d: bad optype %d",
+              insn.ea, insn.get_canon_mnem(),
+              x.n, x.type);
+      break;
+  }
 }
 
 
 //----------------------------------------------------------------------
 // емулятер
-int idaapi N78K_emu(void)
+
+int idaapi N78K_emu(const insn_t &insn)
 {
-#if IDP_INTERFACE_VERSION > 37
-uint32 Feature = cmd.get_canon_feature();
-#else
-uint32 Feature = Instructions[cmd.itype].feature;
-uFlag = getFlags(cmd.ea);
-#endif
+  uint32 Feature = insn.get_canon_feature();
   // получим типы операндов
-  int flag1 = is_forced_operand(cmd.ea, 0);
-  int flag2 = is_forced_operand(cmd.ea, 1);
+  int flag1 = is_forced_operand(insn.ea, 0);
+  int flag2 = is_forced_operand(insn.ea, 1);
 
   flow = (Feature & CF_STOP) == 0;
 
   // пометим ссылки двух операндов
-  if ( Feature & CF_USE1) TouchArg(cmd.Op1, flag1, 1 );
-  if ( Feature & CF_USE2) TouchArg(cmd.Op2, flag2, 1 );
+  if ( Feature & CF_USE1) handle_operand(insn.Op1, flag1, 1, insn);
+  if ( Feature & CF_USE2) handle_operand(insn.Op2, flag2, 1, insn);
   // поставим переход в очередь
-  if ( Feature & CF_JUMP) QueueSet(Q_jumps, cmd.ea );
+  if ( Feature & CF_JUMP )
+    remember_problem(PR_JUMP, insn.ea);
   // поставим изменения
-  if ( Feature & CF_CHG1) TouchArg(cmd.Op1, flag1, 0 );
-  if ( Feature & CF_CHG2) TouchArg(cmd.Op2, flag2, 0 );
+  if ( Feature & CF_CHG1) handle_operand(insn.Op1, flag1, 0, insn);
+  if ( Feature & CF_CHG2) handle_operand(insn.Op2, flag2, 0, insn);
   // если не стоп - продолжим на след. инструкции
-  if ( flow) ua_add_cref(0, cmd.ea + cmd.size, fl_F );
-  return(1);
+  if ( flow )
+    add_cref(insn.ea, insn.ea + insn.size, fl_F);
+  return 1;
 }

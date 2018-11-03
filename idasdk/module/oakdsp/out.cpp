@@ -1,13 +1,11 @@
 
 #include "oakdsp.hpp"
 #include <frame.hpp>
-#include <srarea.hpp>
+#include <segregs.hpp>
 #include <struct.hpp>
 
-
-
 //--------------------------------------------------------------------------
-static const char * const cc_text[] =
+static const char *const cc_text[] =
 {
   "",          //Always
   "eq",        //Equal to zero Z = 1
@@ -29,7 +27,7 @@ static const char * const cc_text[] =
 };
 
 
-static const char * const formats[] =
+static const char *const formats[] =
 {
   COLSTR("(", SCOLOR_SYMBOL) COLSTR("r%d", SCOLOR_REG) COLSTR(")", SCOLOR_SYMBOL),
   COLSTR("(", SCOLOR_SYMBOL) COLSTR("r%d", SCOLOR_REG) COLSTR(")+1", SCOLOR_SYMBOL),
@@ -44,7 +42,7 @@ static const char * const formats[] =
 //3 (Rn)+s
 //4 (any_reg)
 
-static const char * const formats2[] =
+static const char *const formats2[] =
 {
   COLSTR("(", SCOLOR_SYMBOL) COLSTR("rb+#", SCOLOR_REG),
   COLSTR("#", SCOLOR_REG),
@@ -52,22 +50,22 @@ static const char * const formats2[] =
 //0 (rb + #)
 //1 #
 
-static const char * const swap_formats[] =
+static const char *const swap_formats[] =
 {
-        COLSTR("(a0, b0)", SCOLOR_REG),
-        COLSTR("(a0, b1)", SCOLOR_REG),
-        COLSTR("(a1, b0)", SCOLOR_REG),
-        COLSTR("(a1, b1)", SCOLOR_REG),
-        COLSTR("(a0, b0), (a1, b1)", SCOLOR_REG),
-        COLSTR("(a0, b1), (a1, b0)", SCOLOR_REG),
-        COLSTR("(a0, b0, a1)", SCOLOR_REG),
-        COLSTR("(a0, b1, a1)", SCOLOR_REG),
-        COLSTR("(a1, b0, a0)", SCOLOR_REG),
-        COLSTR("(a1, b1, a0)", SCOLOR_REG),
-        COLSTR("(b0, a0, b1)", SCOLOR_REG),
-        COLSTR("(b0, a1, b1)", SCOLOR_REG),
-        COLSTR("(b1, a0, b0)", SCOLOR_REG),
-        COLSTR("(b1, a1, b0)", SCOLOR_REG),
+  COLSTR("(a0, b0)", SCOLOR_REG),
+  COLSTR("(a0, b1)", SCOLOR_REG),
+  COLSTR("(a1, b0)", SCOLOR_REG),
+  COLSTR("(a1, b1)", SCOLOR_REG),
+  COLSTR("(a0, b0), (a1, b1)", SCOLOR_REG),
+  COLSTR("(a0, b1), (a1, b0)", SCOLOR_REG),
+  COLSTR("(a0, b0, a1)", SCOLOR_REG),
+  COLSTR("(a0, b1, a1)", SCOLOR_REG),
+  COLSTR("(a1, b0, a0)", SCOLOR_REG),
+  COLSTR("(a1, b1, a0)", SCOLOR_REG),
+  COLSTR("(b0, a0, b1)", SCOLOR_REG),
+  COLSTR("(b0, a1, b1)", SCOLOR_REG),
+  COLSTR("(b1, a0, b0)", SCOLOR_REG),
+  COLSTR("(b1, a1, b0)", SCOLOR_REG),
 };
 
 //(a0, b0)
@@ -86,65 +84,72 @@ static const char * const swap_formats[] =
 //(b1, a1, b0)
 
 //----------------------------------------------------------------------
-static bool out_port_address(ea_t addr)
+class out_oakdsp_t : public outctx_t
 {
-  const char *name = find_port(addr);
-  if ( name != NULL )
+  out_oakdsp_t(void) : outctx_t(BADADDR) {} // not used
+public:
+  void outreg(int r) { out_register(ph.reg_names[r]); }
+  bool out_port_address(ea_t addr);
+  void out_bad_address(ea_t addr);
+  void out_address(ea_t ea, const op_t &x);
+  void out_ip_rel(int displ)
   {
-    out_line(name, COLOR_IMPNAME);
+    out_printf(COLSTR("%s+", SCOLOR_SYMBOL) COLSTR("%d", SCOLOR_NUMBER),
+               ash.a_curip, displ);
+  }
+  bool out_operand(const op_t &x);
+  void out_insn(void);
+};
+CASSERT(sizeof(out_oakdsp_t) == sizeof(outctx_t));
+
+DECLARE_OUT_FUNCS_WITHOUT_OUTMNEM(out_oakdsp_t)
+
+//----------------------------------------------------------------------
+bool out_oakdsp_t::out_port_address(ea_t addr)
+{
+  const ioport_t *port = find_port(addr);
+  if ( port != NULL && !port->name.empty() )
+  {
+    out_line(port->name.c_str(), COLOR_IMPNAME);
     return true;
   }
   return false;
 }
 
 //----------------------------------------------------------------------
-static void out_bad_address(ea_t addr)
+void out_oakdsp_t::out_bad_address(ea_t addr)
 {
   if ( !out_port_address(addr) )
   {
     out_tagon(COLOR_ERROR);
-    OutLong(addr, 16);
+    out_btoa(addr, 16);
     out_tagoff(COLOR_ERROR);
-    QueueSet(Q_noName, cmd.ea);
+    remember_problem(PR_NONAME, insn.ea);
   }
 }
 
 //----------------------------------------------------------------------
-static void out_address(ea_t ea, op_t &x)
+void out_oakdsp_t::out_address(ea_t ea, const op_t &x)
 {
-
-    if ( !out_name_expr(x, ea,/* ea */ BADADDR) )
-    {
-          out_tagon(COLOR_ERROR);
-          OutValue(x, OOFW_IMM|OOF_ADDR|OOFW_16);
-          out_snprintf(" (ea = %a)", ea);
-          out_tagoff(COLOR_ERROR);
-          QueueSet(Q_noName, cmd.ea);
-    }
+  if ( !out_name_expr(x, ea,/* ea */ BADADDR) )
+  {
+    out_tagon(COLOR_ERROR);
+    out_value(x, OOFW_IMM|OOF_ADDR|OOFW_16);
+    out_printf(" (ea = %a)", ea);
+    out_tagoff(COLOR_ERROR);
+    remember_problem(PR_NONAME, insn.ea);
+  }
 
 }
 
-
 //----------------------------------------------------------------------
-inline void outreg(int r)
-{
-  out_register(ph.regNames[r]);
-}
-
-//----------------------------------------------------------------------
-inline void out_ip_rel(int displ)
-{
-  out_snprintf(COLSTR("%s+", SCOLOR_SYMBOL) COLSTR("%d", SCOLOR_NUMBER),
-              ash.a_curip, displ);
-}
-
-//----------------------------------------------------------------------
-bool idaapi outop(op_t &x)
+bool out_oakdsp_t::out_operand(const op_t & x)
 {
   ea_t ea;
   char buf[MAXSTR];
 
-  if ( x.type == o_imm ) out_symbol('#');
+  if ( x.type == o_imm )
+    out_symbol('#');
 
   switch ( x.type )
   {
@@ -153,9 +158,9 @@ bool idaapi outop(op_t &x)
 
     case o_imm:
       if ( x.amode & amode_signed )
-              OutValue(x, OOF_SIGNED|OOFW_IMM);
+        out_value(x, OOF_SIGNED|OOFW_IMM);
       else
-              OutValue(x, OOFS_IFSIGN|OOFW_IMM);
+        out_value(x, OOFS_IFSIGN|OOFW_IMM);
       break;
 
     case o_reg:
@@ -164,31 +169,31 @@ bool idaapi outop(op_t &x)
 
     case o_mem:
       // no break;
-      ea = calc_mem(x);
+      ea = calc_mem(insn, x);
       if ( ea != BADADDR )
         out_address(ea, x);
       else
       {
         out_tagon(COLOR_ERROR);
-        OutValue(x, OOFW_IMM|OOF_ADDR|OOFW_16);
+        out_value(x, OOFW_IMM|OOF_ADDR|OOFW_16);
         out_tagoff(COLOR_ERROR);
       }
       break;
 
     case o_near:
       {
-        ea_t lea = calc_mem(x);
+        ea_t lea = calc_mem(insn, x);
         // xmem ioports
         if ( x.amode & (amode_x) && out_port_address(x.addr) )
         {
           qstring name;
-          const char *pnam = find_port(x.addr);
-          if ( get_true_name(&name, lea) <= 0 || name != pnam )
-            set_name(lea, pnam);
+          const ioport_t *port = find_port(x.addr);
+          if ( port != NULL && (get_name(&name, lea) <= 0 || name != port->name) )
+            set_name(lea, port->name.c_str());
           break;
         }
-        if ( lea == cmd.ea+cmd.size )
-          out_ip_rel(cmd.size);
+        if ( lea == insn.ea+insn.size )
+          out_ip_rel(insn.size);
         else if ( !out_name_expr(x, lea, x.addr) )
           out_bad_address(x.addr);
       }
@@ -213,7 +218,7 @@ bool idaapi outop(op_t &x)
     case o_local:
       {
         out_colored_register_line(formats2[uchar(x.phtype)]);
-        OutValue(x, OOF_SIGNED|OOF_ADDR);
+        out_value(x, OOF_SIGNED|OOF_ADDR);
         if ( x.phtype == 0 )
           out_symbol(')');
         break;
@@ -284,44 +289,32 @@ bool idaapi outop(op_t &x)
 
 
     default:
-      interr("out");
+      interr(insn, "out");
       break;
   }
   return 1;
 }
 
 //----------------------------------------------------------------------
-void idaapi out(void)
+void out_oakdsp_t::out_insn(void)
 {
-  char buf[MAXSTR];
-  init_output_buffer(buf, sizeof(buf));
-
-  // output instruction mnemonics
-  char postfix[10];
-  postfix[0] = '\0';
-
-  OutMnem(8);
+  out_mnemonic();
 
   bool comma = out_one_operand(0);
-  if ( cmd.Op2.type != o_void )
+  if ( insn.Op2.type != o_void )
   {
-    if ( comma ) out_symbol(',');
+    if ( comma )
+      out_symbol(',');
     out_one_operand(1);
   }
-  if ( cmd.Op3.type != o_void )
+  if ( insn.Op3.type != o_void )
   {
     out_symbol(',');
     out_one_operand(2);
   }
+  out_immchar_cmts();
 
-
-
-
-  if ( isVoid(cmd.ea, uFlag, 0) ) OutImmChar(cmd.Op1);
-  if ( isVoid(cmd.ea, uFlag, 1) ) OutImmChar(cmd.Op2);
-  if ( isVoid(cmd.ea, uFlag, 3) ) OutImmChar(cmd.Op3);
-
-  switch ( cmd.itype )
+  switch ( insn.itype )
   {
     case OAK_Dsp_callr:
     case OAK_Dsp_ret:
@@ -348,29 +341,32 @@ void idaapi out(void)
     case OAK_Dsp_maxd:
     case OAK_Dsp_max:
     case OAK_Dsp_min:
-            qsnprintf(postfix, sizeof(postfix), "%s%s%s", ( (cmd.auxpref & aux_comma_cc) ? ", ": ""), \
-            cc_text[cmd.auxpref & aux_cc], \
-            ( (cmd.auxpref & aux_iret_context) ? ", context": "") );
-            out_line(postfix, COLOR_REG);
-            break;
+      char buf[MAXSTR];
+      qsnprintf(buf,
+                sizeof(buf),
+                "%s%s%s",
+                (insn.auxpref & aux_comma_cc) ? ", ": "",
+                cc_text[insn.auxpref & aux_cc],
+                (insn.auxpref & aux_iret_context) ? ", context": "");
+      out_line(buf, COLOR_REG);
+      break;
   }
-
-  term_output_buffer();
-
-  gl_comm = 1;
-  MakeLine(buf);
+  flush_outbuf();
 }
 
 //--------------------------------------------------------------------------
-void idaapi segstart(ea_t ea)
+//lint -esym(1764, ctx) could be made const
+//lint -esym(818, Srange) could be made const
+void idaapi oakdsp_segstart(outctx_t &ctx, segment_t *Srange)
 {
-  segment_t *Sarea = getseg(ea);
-  if ( is_spec_segm(Sarea->type) ) return;
+  ea_t ea = ctx.insn_ea;
+  if ( is_spec_segm(Srange->type) )
+    return;
 
-  char sname[MAXNAMELEN];
-  char sclas[MAXNAMELEN];
-  get_true_segm_name(Sarea, sname, sizeof(sname));
-  get_segm_class(Sarea, sclas, sizeof(sclas));
+  qstring sname;
+  qstring sclas;
+  get_segm_name(&sname, Srange);
+  get_segm_class(&sclas, Srange);
 
   if ( ash.uflag & UAS_GNU )
   {
@@ -382,125 +378,116 @@ void idaapi segstart(ea_t ea)
       ".comm",
     };
 
-    int i;
-    for ( i=0; i < qnumber(predefined); i++ )
-      if ( strcmp(sname, predefined[i]) == 0 )
-        break;
-    if ( i != qnumber(predefined) )
-      printf_line(inf.indent, COLSTR("%s", SCOLOR_ASMDIR), sname);
-    else
-      printf_line(inf.indent, COLSTR(".section %s", SCOLOR_ASMDIR) " " COLSTR("%s %s", SCOLOR_AUTOCMT),
-                   sname,
-                   ash.cmnt,
-                   sclas);
+    if ( !print_predefined_segname(ctx, &sname, predefined, qnumber(predefined)) )
+      ctx.gen_printf(inf.indent,
+                     COLSTR(".section %s", SCOLOR_ASMDIR) " " COLSTR("%s %s", SCOLOR_AUTOCMT),
+                     sname.c_str(),
+                     ash.cmnt,
+                     sclas.c_str());
   }
   else
   {
-    if ( strcmp(sname, "XMEM") == 0 )
+    validate_name(&sname, VNT_IDENT);
+    if ( sname == "XMEM" )
     {
       char buf[MAX_NUMBUF];
-      btoa(buf, sizeof(buf), ea-get_segm_base(Sarea));
-      printf_line(inf.indent, COLSTR("%s %c:%s", SCOLOR_ASMDIR),
-                  ash.origin,
-                  qtolower(sname[0]),
-                  buf);
+      btoa(buf, sizeof(buf), ea-get_segm_base(Srange));
+      ctx.gen_printf(inf.indent,
+                     COLSTR("%s %c:%s", SCOLOR_ASMDIR),
+                     ash.origin,
+                     qtolower(sname[0]),
+                     buf);
     }
     else
     {
-      printf_line(inf.indent, COLSTR("section %s", SCOLOR_ASMDIR) " "
-                              COLSTR("%s %s", SCOLOR_AUTOCMT),
-                  sname,
-                  ash.cmnt,
-                  sclas);
+      ctx.gen_printf(inf.indent,
+                     COLSTR("section %s", SCOLOR_ASMDIR) " " COLSTR("%s %s", SCOLOR_AUTOCMT),
+                     sname.c_str(),
+                     ash.cmnt,
+                     sclas.c_str());
     }
   }
 }
 
 //--------------------------------------------------------------------------
-static void print_segment_register(int reg, sel_t value)
+static void print_segment_register(outctx_t &ctx, int reg, sel_t value)
 {
-  if ( reg == ph.regDataSreg ) return;
+  if ( reg == ph.reg_data_sreg )
+    return;
   if ( value != BADADDR )
   {
     char buf[MAX_NUMBUF];
     btoa(buf, sizeof(buf), value);
-    gen_cmt_line("assume %s = %s", ph.regNames[reg], buf);
+    ctx.gen_cmt_line("assume %s = %s", ph.reg_names[reg], buf);
   }
   else
   {
-    gen_cmt_line("drop %s", ph.regNames[reg]);
+    ctx.gen_cmt_line("drop %s", ph.reg_names[reg]);
   }
 }
 
 //--------------------------------------------------------------------------
 // function to produce assume directives
-void idaapi assumes(ea_t ea)
+void idaapi oakdsp_assumes(outctx_t &ctx)
 {
+  ea_t ea = ctx.insn_ea;
   segment_t *seg = getseg(ea);
-  if ( seg == NULL || !inf.s_assume )
+  if ( seg == NULL || (inf.outflags & OFLG_GEN_ASSUME) == 0 )
     return;
-  bool seg_started = (ea == seg->startEA);
+  bool seg_started = (ea == seg->start_ea);
 
-  for ( int i = ph.regFirstSreg; i <= ph.regLastSreg; ++i )
+  for ( int i = ph.reg_first_sreg; i <= ph.reg_last_sreg; ++i )
   {
-    if ( i == ph.regCodeSreg )
+    if ( i == ph.reg_code_sreg )
       continue;
-    segreg_area_t sra;
-    if ( !get_srarea2(&sra, ea, i) )
+    sreg_range_t sra;
+    if ( !get_sreg_range(&sra, ea, i) )
       continue;
-    sel_t now  = get_segreg(ea, i);
-    if ( seg_started || sra.startEA == ea )
+    sel_t now = get_sreg(ea, i);
+    if ( seg_started || sra.start_ea == ea )
     {
-      segreg_area_t prev_sra;
-      bool prev_exists = get_srarea2(&prev_sra, ea - 1, i);
-      if ( seg_started || (prev_exists && get_segreg(prev_sra.startEA, i) != now) )
-        print_segment_register(i, now);
+      sreg_range_t prev_sra;
+      bool prev_exists = get_sreg_range(&prev_sra, ea - 1, i);
+      if ( seg_started || (prev_exists && get_sreg(prev_sra.start_ea, i) != now) )
+        print_segment_register(ctx, i, now);
     }
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi segend(ea_t ea)
+void idaapi oakdsp_segend(outctx_t &ctx, segment_t *Srange)
 {
-  segment_t *Sarea = getseg(ea-1);
-  if ( is_spec_segm(Sarea->type) ) return;
-  if ( (ash.uflag & UAS_GNU) == 0 )
+  if ( !is_spec_segm(Srange->type) && (ash.uflag & UAS_GNU) == 0 )
   {
-    char sname[MAXNAMELEN];
-    get_true_segm_name(Sarea, sname, sizeof(sname));
-    if ( strcmp(sname, "XMEM") != 0 )
-      printf_line(inf.indent, "endsec");
+    qstring sname;
+    get_segm_name(&sname, Srange);
+    if ( sname != "XMEM" )
+      ctx.gen_printf(inf.indent, "endsec");
   }
 }
 
 //--------------------------------------------------------------------------
-void idaapi header(void)
+void idaapi oakdsp_header(outctx_t &ctx)
 {
-  gen_header(GH_PRINT_ALL, NULL, device);
+  ctx.gen_header(GH_PRINT_ALL, NULL, device.c_str());
 }
 
 //--------------------------------------------------------------------------
-void idaapi footer(void)
+void idaapi oakdsp_footer(outctx_t &ctx)
 {
-  qstring nbuf = get_colored_name(inf.beginEA);
+  qstring nbuf = get_colored_name(inf.start_ea);
   const char *name = nbuf.c_str();
   const char *end = ash.end;
   if ( end == NULL )
-    printf_line(inf.indent,COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
+    ctx.gen_printf(inf.indent, COLSTR("%s end %s",SCOLOR_AUTOCMT), ash.cmnt, name);
   else
-    printf_line(inf.indent,COLSTR("%s",SCOLOR_ASMDIR)
-                " "
-                COLSTR("%s %s",SCOLOR_AUTOCMT), ash.end, ash.cmnt, name);
+    ctx.gen_printf(inf.indent,
+                   COLSTR("%s",SCOLOR_ASMDIR) " " COLSTR("%s %s",SCOLOR_AUTOCMT),
+                   ash.end, ash.cmnt, name);
 }
 
 //--------------------------------------------------------------------------
-void idaapi oakdsp_data(ea_t ea)
-{
-  intel_data(ea);
-}
-
-//--------------------------------------------------------------------------
-void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval_t v)
+void idaapi gen_stkvar_def(outctx_t &ctx, const member_t *mptr, sval_t v)
 {
   char sign = ' ';
   if ( v < 0 )
@@ -509,17 +496,16 @@ void idaapi gen_stkvar_def(char *buf, size_t bufsize, const member_t *mptr, sval
     v = -v;
   }
 
-  qstring name = get_member_name2(mptr->id);
+  qstring name = get_member_name(mptr->id);
 
   char vstr[MAX_NUMBUF];
   btoa(vstr, sizeof(vstr), v);
-  qsnprintf(buf, bufsize,
-            COLSTR("%s",SCOLOR_KEYWORD) " "
-            COLSTR("%c%s",SCOLOR_DNUM)
-            COLSTR(",",SCOLOR_SYMBOL) " "
-            COLSTR("%s",SCOLOR_LOCNAME),
-            ash.a_equ,
-            sign,
-            vstr,
-            name.c_str());
+  ctx.out_printf(COLSTR("%s",SCOLOR_KEYWORD) " "
+                 COLSTR("%c%s",SCOLOR_DNUM)
+                 COLSTR(",",SCOLOR_SYMBOL) " "
+                 COLSTR("%s",SCOLOR_LOCNAME),
+                 ash.a_equ,
+                 sign,
+                 vstr,
+                 name.c_str());
 }

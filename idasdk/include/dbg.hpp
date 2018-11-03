@@ -12,8 +12,6 @@
 #include <idd.hpp>
 #include <kernwin.hpp>          // for callui() and ui_notification_t
 
-#pragma pack(push, 4)
-
 /*! \file dbg.hpp
 
   \brief Contains functions to control the debugging of a process.
@@ -91,7 +89,7 @@ idaman debugger_t ida_export_data *dbg;
 /// unless the process memory config have changed after the last time the process
 /// was suspended. The invalidate_dbgmem_contents() is fast and flushes the
 /// memory cache in the ida kernel. Without it, functions like get_byte() would
-/// return obsolete values!
+/// return stale values!
 enum dbg_notification_t
 {
   dbg_null = 0,
@@ -357,15 +355,17 @@ inline int idaapi invalidate_dbg_state(int dbginv)
 /// \retval  0   the starting of the process was cancelled by the user
 /// \retval  1   the process was properly started
 
-int idaapi start_process(const char *path = NULL,
-                         const char *args = NULL,
-                         const char *sdir = NULL);
+int idaapi start_process(
+        const char *path = NULL,
+        const char *args = NULL,
+        const char *sdir = NULL);
 
 /// Post a start_process() request
 
-int idaapi request_start_process(const char *path = NULL,
-                                 const char *args = NULL,
-                                 const char *sdir = NULL);
+int idaapi request_start_process(
+        const char *path = NULL,
+        const char *args = NULL,
+        const char *sdir = NULL);
 
 
 /// Suspend the process in the debugger.
@@ -419,23 +419,13 @@ bool idaapi exit_process(void);
 bool idaapi request_exit_process(void);
 
 
-/// Take a snapshot of running processes and return their number.
+/// Take a snapshot of running processes and return their description.
 /// \sq{Type, Synchronous function,
 ///     Notification, none (synchronous function)}
+/// \param[out]  array with information about each running process
+/// \return number of processes or -1 on error
 
-int idaapi get_process_qty(void);
-
-
-/// Get information about a running process.
-/// \sq{Type, Synchronous function,
-///     Notification, none (synchronous function)}
-/// \note Always first call get_process_qty() to initialize the snapshot.
-/// \param n             number of process, is in range 0..get_process_qty()-1
-/// \param process_info  if not NULL, is filled with the information.
-/// \return #NO_PROCESS if the process doesn't exist.
-
-pid_t idaapi get_process_info(int n, process_info_t *process_info);
-inline pid_t getn_process(int n) { return get_process_info(n, NULL); } ///< See get_process_info()
+ssize_t idaapi get_processes(procinfo_vec_t *proclist);
 
 
 /// Attach the debugger to a running process.
@@ -631,7 +621,7 @@ bool idaapi request_run_to(ea_t ea);
 
 
 /// Execute instructions in the current thread until
-/// a function return instruction is reached.
+/// a function return instruction is executed (aka "step out").
 /// Other threads are kept suspended.
 /// \sq{Type,         Asynchronous function - available as Request,
 ///     Notification, ::dbg_step_until_ret}
@@ -694,6 +684,13 @@ inline bool get_reg_val(const char *regname, uint64 *ival)
   return true;
 }
 
+/// Get value of the SP register for the current thread.
+/// Requires a suspended debugger.
+bool idaapi get_sp_val(ea_t *out_spval);
+
+/// Get value of the IP (program counter) register for the current thread.
+/// Requires a suspended debugger.
+bool idaapi get_ip_val(ea_t *out_ipval);
 
 /// Write a register value to the current thread.
 /// \sq{Type,         Synchronous function - available as Request,
@@ -777,7 +774,7 @@ struct bpt_location_t
   uval_t offset(void) const { return (uval_t)info; }                  ///< Get offset (::BPLT_REL, ::BPLT_SYM)
   ea_t ea(void) const { return info; }                                ///< Get address (::BPLT_ABS)
 
-  bpt_location_t(void) : loctype(BPLT_ABS) {}                         ///< Constructor (default type is ::BPLT_ABS)
+  bpt_location_t(void) : info(BADADDR), index(0), loctype(BPLT_ABS) {}  ///< Constructor (default type is ::BPLT_ABS)
 
   /// Specify an absolute address location
   void set_abs_bpt(ea_t a)
@@ -824,7 +821,7 @@ struct bpt_location_t
   bool operator>=(const bpt_location_t &r) const { return compare(r) >= 0; }
 
   /// Internal function
-  size_t print(char *buf, size_t bufsize) const;
+  size_t print(qstring *buf) const;
 };
 
 /// Characteristics of a breakpoint
@@ -854,6 +851,8 @@ struct bpt_t
                              ///< trace insns, functions, and basic blocks.
                              ///< if any of #BPT_TRACE_TYPES bits are set but #BPT_TRACEON is clear,
                              ///< then turn off tracing for the specified trace types
+#define BPT_ELANG_MASK  0xF0000000u
+#define BPT_ELANG_SHIFT 28 ///< index of the extlang (scripting language) of the condition
 //@}
 
   uint32 props;            ///< \ref BKPT_
@@ -870,8 +869,6 @@ struct bpt_t
                             ///< bpt of the same type is active at the same address(es)
 #define BKPT_PAGE     0x80  ///< written to the process as a page bpt. is available
                             ///< only after writing the bpt to the process.
-#define BKPT_ELANG_MASK  0xF0000000u
-#define BKPT_ELANG_SHIFT 28 ///< index of the extlang (scripting language) of the condition
 //@}
 
   int size;                 ///< Size of the breakpoint (0 for software breakpoints)
@@ -920,7 +917,7 @@ struct bpt_t
   /// Configure tracing options
   bool set_trace_action(bool enable, int trace_types)
   {
-    trace_types &= ~BPT_TRACE_TYPES;
+    trace_types &= BPT_TRACE_TYPES;
     if ( trace_types == 0 )
       return false;
     flags |= trace_types;
@@ -934,6 +931,8 @@ struct bpt_t
   /// Set the scripting language name for the condition string
   /// \return false if too many languages were used
   bool set_cnd_elang(const char *name);
+
+  size_t get_cnd_elang_idx() const { return flags >> BPT_ELANG_SHIFT; }
 
   void set_cond(const char *cnd); ///< Internal function
   bool eval_cond(ea_t ea, bool *fire, const char *bpt_type); ///< Internal function
@@ -1063,6 +1062,18 @@ bool idaapi request_del_bpt(const bpt_location_t &bptloc);
 ///   - bpt_t::pass_count
 ///   - bpt_t::flags
 ///   - bpt_t::size
+///   - bpt_t::type
+/// \note Changing some properties will require removing and then re-adding
+///       the breakpoint to the process memory (or the debugger backend), which
+///       can lead to race conditions (i.e., breakpoint(s) can be missed) in
+///       case the process is not suspended.
+///       Here are a list of scenarios that will require the breakpoint
+///       to be removed & then re-added:
+///   - bpt_t::size is modified
+///   - bpt_t::type is modified
+///   - bpt_t::flags's BPT_ENABLED is modified
+///   - bpt_t::flags's BPT_LOWCND is changed
+///   - bpt_t::flags's BPT_LOWCND remains set, but cndbody changed
 
 bool idaapi update_bpt(const bpt_t *bpt);
 
@@ -1079,9 +1090,13 @@ bool idaapi find_bpt(const bpt_location_t &bptloc, bpt_t *bpt);
 /// Move breakpoint(s) from one location to another
 /// \param  movinfo    what bpts to move and where to
 /// \param  codes      vector of return codes, if detailed error info is required
+/// \param  del_hindering_bpts should delete hindering breakpoints?
 /// \return            number of moved bpts
 
-int idaapi change_bptlocs(const movbpt_infos_t &movinfo, movbpt_codes_t *codes=NULL);
+int idaapi change_bptlocs(
+        const movbpt_infos_t &movinfo,
+        movbpt_codes_t *codes=NULL,
+        bool del_hindering_bpts=true);
 
 
 /// \name enable/disable breakpoints
@@ -1122,7 +1137,7 @@ int idaapi check_bpt(ea_t ea);
 struct bpt_visitor_t
 {
   int _for_all_bpts(int bvflags); ///< do not use this function.
-  area_t range;                   ///< if specified, restricts the address range
+  range_t range;                  ///< if specified, restricts the address range
   const char *name;               ///< if specified, restricts bpts to the ones that match the given name
   bpt_visitor_t(void) : range(0, BADADDR), name(NULL) {}
   /// Defines action taken when breakpoint is visited
@@ -1433,6 +1448,16 @@ struct tev_info_t
 };
 typedef qvector<tev_info_t> tevinfo_vec_t; ///< vector of trace event info objects
 
+
+/// Required typedef for get_insn_tev_reg_mem()
+struct memreg_info_t
+{
+   ea_t ea;
+   bytevec_t bytes;
+};
+DECLARE_TYPE_AS_MOVABLE(memreg_info_t);
+typedef qvector<memreg_info_t> memreg_infos_t;
+
 #ifndef SWIG
 /// Get number of trace events available in trace buffer.
 /// \sq{Type,         Synchronous function,
@@ -1464,15 +1489,6 @@ bool idaapi get_tev_info(int n, tev_info_t *tev_info);
 ///       the instruction.
 
 bool idaapi get_insn_tev_reg_val(int n, const char *regname, regval_t *regval);
-
-/// Required typedef for get_insn_tev_reg_mem()
-struct memreg_info_t
-{
-   ea_t ea;
-   bytevec_t bytes;
-};
-DECLARE_TYPE_AS_MOVABLE(memreg_info_t);
-typedef qvector<memreg_info_t> memreg_infos_t;
 
 
 /// Read the memory pointed by register values from an instruction trace event.
@@ -1705,7 +1721,7 @@ void idaapi dbg_add_debug_event(debug_event_t *event);
 /// If the call succeeds and 'buf' is not null, the description of the
 /// trace stored in the binary trace file will be returned in 'buf'
 
-bool idaapi load_trace_file(const char *filename, char *buf, size_t bufsize);
+bool idaapi load_trace_file(qstring *buf, const char *filename);
 
 
 /// Save the current trace in the specified file
@@ -1725,12 +1741,12 @@ bool idaapi set_trace_file_desc(const char *filename, const char *description);
 
 /// Get the file header of the specified trace file
 
-bool idaapi get_trace_file_desc(const char *filename, char *buf, size_t bufsize);
+bool idaapi get_trace_file_desc(qstring *buf, const char *filename);
 
 
 /// Show the choose trace dialog
 
-bool idaapi choose_trace_file(char *buf, size_t bufsize);
+bool idaapi choose_trace_file(qstring *buf);
 
 
 /// Show difference between the current trace and the one from 'filename'
@@ -1746,9 +1762,9 @@ bool idaapi graph_trace(void);
 /// Set highlight trace parameters.
 
 void idaapi set_highlight_trace_options(
-    bool highlight,
-    bgcolor_t color,
-    bgcolor_t diff);
+        bool highlight,
+        bgcolor_t color,
+        bgcolor_t diff);
 
 
 /// Set platform name of current trace
@@ -1854,15 +1870,25 @@ void idaapi set_remote_debugger(const char *host, const char *pass, int port=-1)
 /// Get process options.
 /// Any of the arguments may be NULL
 
-void idaapi get_process_options(qstring *path, qstring *args, qstring *sdir,
-                                qstring *host, qstring *pass, int *port);
+void idaapi get_process_options(
+        qstring *path,
+        qstring *args,
+        qstring *sdir,
+        qstring *host,
+        qstring *pass,
+        int *port);
 
 
 /// Set process options.
 /// Any of the arguments may be NULL, which means 'do not modify'
 
-void idaapi set_process_options(const char *path, const char *args, const char *sdir,
-                                const char *host, const char *pass, int port);
+void idaapi set_process_options(
+        const char *path,
+        const char *args,
+        const char *sdir,
+        const char *host,
+        const char *pass,
+        int port);
 
 
 /// Retrieve the exception information.
@@ -1896,7 +1922,7 @@ const char *idaapi define_exception(uint code, const char *name, const char *des
 
 inline bool have_set_options(const debugger_t *_dbg)
 {
-  return _dbg != NULL && _dbg->version >= 10 && _dbg->set_dbg_options != NULL;
+  return _dbg != NULL && _dbg->set_dbg_options != NULL;
 }
 
 //--------------------------------------------------------------------
@@ -1913,19 +1939,7 @@ inline const char *idaapi set_dbg_options(
 {
   const char *code = IDPOPT_BADKEY;
   if ( have_set_options(_dbg) )
-  {
-    if ( _dbg->version < 17 )
-    {
-      typedef const char *idaapi old_setopts_t(const char *keyword,
-                                            int value_type, const void *value);
-      old_setopts_t *old_setopt = *(old_setopts_t**)&_dbg->set_dbg_options;
-      code = old_setopt(keyword, value_type, value);
-    }
-    else
-    {
-      code = _dbg->set_dbg_options(keyword, pri, value_type, value);
-    }
-  }
+    code = _dbg->set_dbg_options(keyword, pri, value_type, value);
   return code;
 }
 
@@ -1963,7 +1977,7 @@ inline const char *idaapi set_int_dbg_options(
 //@} dbg_funcs_high
 
 //---------------------------------------------------------------------------
-//      S O U R C E  I N F O R M A T I O N  P R O V I D E R S
+//      S O U R C E   I N F O R M A T I O N   P R O V I D E R S
 //---------------------------------------------------------------------------
 /// \defgroup dbg_funcs_srcinfo Source information providers
 /// \ingroup dbg_funcs
@@ -1984,7 +1998,7 @@ class srcinfo_provider_t;
 #define ENABLE_SRCDBG // not ready yet
 #ifdef ENABLE_SRCDBG
 class idc_value_t;
-class areaset_t;
+class rangeset_t;
 class source_item_t;
 class argloc_t;
 
@@ -2012,7 +2026,7 @@ public:
 
 
 #ifndef __UI__
-namespace Forms { class TForm; }
+class TWidget;
 #endif
 
 //--------------------------------------------------------------------------
@@ -2033,9 +2047,9 @@ public:
 
   /// Open window with source code (optional function).
   /// \param[out] strvec    pointer to source text. the text should not be destroyed until the form is closed
-  /// \param[out] pview     pointer to view that displays the source text (subview of TForm)
+  /// \param[out] pview     pointer to view that displays the source text (subview of TWidget)
   /// \param lnnum,colnum   cursor coordinates
-  virtual TForm *open_srcview(strvec_t **strvec, TCustomControl **pview, int lnnum, int colnum) = 0;
+  virtual TWidget *open_srcview(strvec_t **strvec, TWidget **pview, int lnnum, int colnum) = 0;
 
   /// Read entire file (colored lines).
   /// \param[out] buf     pointer to output buffer
@@ -2063,9 +2077,6 @@ enum src_item_kind_t
   SRCIT_FUNC,       ///< function
   SRCIT_STMT,       ///< a statement (if/while/for...)
   SRCIT_EXPR,       ///< an expression (a+b*c)
-  SRCIT_STKVAR,     ///< deprecated
-  SRCIT_REGVAR,     ///< deprecated
-  SRCIT_RRLVAR,     ///< deprecated
   SRCIT_STTVAR,     ///< static variable/code
   SRCIT_LOCVAR      ///< a stack, register, or register-relative local variable or parameter
 };
@@ -2084,10 +2095,10 @@ public:
   /// Get name of the item
   virtual bool idaapi get_name(qstring *buf) const = 0;
 
-  /// Get line number of the item
+  /// Get line number of the item (1-based)
   virtual int idaapi get_lnnum() const = 0;
 
-  /// Get ending line number.
+  /// Get ending line number (1-based.)
   /// The returned line number is the next
   /// line after the expression
   virtual int idaapi get_end_lnnum() const = 0;
@@ -2112,10 +2123,10 @@ public:
   /// On error, return (asize_t) -1.
   virtual asize_t idaapi get_size() const = 0;
 
-  /// Get item boundaries as a set of areas.
+  /// Get item boundaries as a set of ranges.
   /// This function will be used to determine what breakpoints to set for
   /// stepping into/stepping over the item.
-  virtual bool idaapi get_item_bounds(areaset_t *set) const = 0;
+  virtual bool idaapi get_item_bounds(rangeset_t *set) const = 0;
 
   /// Get parent of the item.
   /// \param  max_kind  maximal source item kind we are interested in.
@@ -2127,12 +2138,12 @@ public:
   virtual source_item_iterator idaapi create_children_iterator() = 0;
 
   /// Calculate a string to display as a hint.
-  /// \param ctx     execution context. NULL means missing context.
   /// \param hint    output buffer for the hint (may by multiline & with colors)
+  /// \param ctx     execution context. NULL means missing context.
   /// \param nlines  number of important lines in the hint
   virtual bool idaapi get_hint(
-        const eval_ctx_t *ctx,
         qstring *hint,
+        const eval_ctx_t *ctx,
         int *nlines) const = 0;
 
   /// Evaluate item value (meaningful only for expression items).
@@ -2156,59 +2167,26 @@ public:
   /// that have the same file offset.
   virtual bool idaapi equals(const source_item_t *other) const = 0;
 
-  /// \name Old get_kind()
-  /// The following methods are deprecated - see get_kind()
-  //@{
-  virtual src_item_kind_t idaapi get_item_kind() const { return SRCIT_NONE; }
-  bool is_stmt()   const { return get_item_kind() == SRCIT_STMT; }
-  bool is_module() const { return get_item_kind() == SRCIT_MODULE; }
-  bool is_func()   const { return get_item_kind() == SRCIT_FUNC; }
-  bool is_expr()   const { return get_item_kind() >= SRCIT_EXPR; }
-  bool is_var()    const { return get_item_kind() >= SRCIT_STKVAR; }
-  bool is_stkvar() const { return get_item_kind() == SRCIT_STKVAR; }
-  bool is_regvar() const { return get_item_kind() == SRCIT_REGVAR; }
-  bool is_rrlvar() const { return get_item_kind() == SRCIT_RRLVAR; }
-  bool is_sttvar() const { return get_item_kind() == SRCIT_STTVAR; }
-  //@}
-
-  /// \name Old get_location()
-  /// The following methods are deprecated - see get_location()
-  //@{
-  virtual bool idaapi get_stkvar_info(char *, size_t, uval_t *, ea_t) const { return false; }
-  virtual bool idaapi get_regvar_info(char *, size_t) const { return false; }
-  virtual bool idaapi get_rrlvar_info(char *, size_t, uval_t *) const { return false; }
-  //@}
-
-  /// Deprecated - see get_expr_tinfo()
-  virtual bool idaapi get_expr_type(qtype *, qtype *) const { return false; }
-
   /// \name Getters (for modification)
   /// The following functions can be used to extract the item information
   /// in order to modify it. For example, if the user wants to modify a variable
   /// we will find what exactly needs to be modified.
   //@{
 
-  // WARNING: Do ***NOT*** name this 'get_item_kind()'. Counting on
-  // polymorphism to tell methods apart is not something
-  // that works with VisualStudio: It'll put this 'get_item_kind(const eval_ctx_t *)'
-  // right alongside the 'get_item_kind()' in the VTable, thereby offsetting all other
-  // virtual methods, causing the Hex-Rays source-level debugging to
-  // fail miserably.
-  // Thank you for such a wonderful time, VS.
   /// Get item kind
-  virtual src_item_kind_t idaapi get_kind(const eval_ctx_t * /*ctx*/) const { return SRCIT_NONE; }
+  virtual src_item_kind_t idaapi get_item_kind(const eval_ctx_t * /*ctx*/) const { return SRCIT_NONE; }
   /// Does this source item represent a statement?
-  bool is_stmt(const eval_ctx_t *ctx)   const { return get_kind(ctx) == SRCIT_STMT; }
+  bool is_stmt(const eval_ctx_t *ctx)   const { return get_item_kind(ctx) == SRCIT_STMT; }
   /// Does this source item represent a module?
-  bool is_module(const eval_ctx_t *ctx) const { return get_kind(ctx) == SRCIT_MODULE; }
+  bool is_module(const eval_ctx_t *ctx) const { return get_item_kind(ctx) == SRCIT_MODULE; }
   /// Does this source item represent a function?
-  bool is_func(const eval_ctx_t *ctx)   const { return get_kind(ctx) == SRCIT_FUNC; }
+  bool is_func(const eval_ctx_t *ctx)   const { return get_item_kind(ctx) == SRCIT_FUNC; }
   /// Does this source item represent an expression?
-  bool is_expr(const eval_ctx_t *ctx)   const { return get_kind(ctx) >= SRCIT_EXPR; }
+  bool is_expr(const eval_ctx_t *ctx)   const { return get_item_kind(ctx) >= SRCIT_EXPR; }
   /// Does this source item represent a stack, register, or register-relative local variable or parameter?
-  bool is_locvar(const eval_ctx_t *ctx) const { return get_kind(ctx) >= SRCIT_LOCVAR; }
+  bool is_locvar(const eval_ctx_t *ctx) const { return get_item_kind(ctx) >= SRCIT_LOCVAR; }
   /// Does this source item represent a static variable or code?
-  bool is_sttvar(const eval_ctx_t *ctx) const { return get_kind(ctx) == SRCIT_STTVAR; }
+  bool is_sttvar(const eval_ctx_t *ctx) const { return get_item_kind(ctx) == SRCIT_STTVAR; }
 
   /// Get source info provider.
   /// The instance shouldn't be freed or released after using
@@ -2222,7 +2200,7 @@ public:
   //@}
 };
 
-#define SRCDBG_PROV_VERSION 3
+#define SRCDBG_PROV_VERSION 4
 
 //--------------------------------------------------------------------------
 /// Describes the mechanism used to retrieve source file information
@@ -2235,7 +2213,7 @@ public:
   /// \ref SPF_
   int flags;
 /// \defgroup SPF_ Source info provider property bits
-/// Used buy srcinfo_provider_t::flags
+/// Used by srcinfo_provider_t::flags
 //@{
 #define SPF_DECOMPILER    0x0001        ///< is a decompiler?
 #define SPF_ENABLED       0x0002        ///< enabled by the user
@@ -2334,6 +2312,16 @@ public:
 
   /// Create iterators to enumerate items
   virtual source_item_iterator idaapi create_item_iterator(const source_file_t *sf) = 0;
+
+  /// Apply the debug information (types, functions, globals)
+  /// from the module whose path is 'path', to the IDB
+  virtual bool idaapi apply_module_info(const char * /*path*/) { return false; }
+
+  /// Locate a global variable by its name.
+  /// \param name The variable name
+  /// \param ea The current address
+  /// \return the source item, or NULL
+  virtual source_item_ptr idaapi find_static_item(const char *name, ea_t ea) = 0;
 };
 
 
@@ -2358,28 +2346,31 @@ class source_view_t;
 /// Create a source code view
 
 inline source_view_t *create_source_viewer(
-        TWinControl *parent,
-        TCustomControl *custview,
+        TWidget **out_ccv,
+        TWidget *parent,
+        TWidget *custview,
         source_file_ptr sf,
         strvec_t *lines,
         int lnnum,
         int colnum,
         int flags)
 {
-  return (source_view_t *)callui(ui_new_source_viewer, parent, custview, &sf,
-                                 lines, lnnum, colnum, flags).vptr;
+  return (source_view_t *) callui(
+          ui_create_source_viewer, out_ccv, parent, custview, &sf,
+          lines, lnnum, colnum, flags).vptr;
 }
+
 #endif
 #endif // ENABLE_SRCDBG
 
 //--------------------------------------------------------------------------
 /// Get one byte of the debugged process memory.
-/// \param ea  linear address
 /// \param x   pointer to byte value
+/// \param ea  linear address
 /// \return true   success
 /// \return false  address inaccessible or debugger not running
 
-idaman bool ida_export get_dbg_byte(ea_t ea, uint32 *x);
+idaman bool ida_export get_dbg_byte(uint32 *x, ea_t ea);
 
 
 /// Change one byte of the debugged process memory.
@@ -2392,7 +2383,7 @@ idaman bool ida_export put_dbg_byte(ea_t ea, uint32 x);
 //@} dbg_funcs_srcinfo
 
 //--------------------------------------------------------------------------
-//      D E B U G G E R  M E M O R Y  F U N C T I O N S  F O R  U I
+//      D E B U G G E R   M E M O R Y   F U N C T I O N S   F O R   U I
 //--------------------------------------------------------------------------
 /// \defgroup dbg_funcs_mem Debugger memory functions for UI
 /// \ingroup dbg_funcs
@@ -2408,13 +2399,13 @@ idaman bool ida_export put_dbg_byte(ea_t ea, uint32 x);
 ///                               The kernel will qfree() it automatically.
 ///                               If this argument is NULL, then the debugged
 ///                               process memory is not used.
-///                               - n: number of ::area_t elements in the answer
+///                               - n: number of ::range_t elements in the answer
 /// \param  memory_read           read bytes from the debugged process memory
 /// \param  memory_write          write bytes to the debugged process memory
 ///                               (don't forget to call invalidate_dbgmem_contents() from it)
 
 idaman void ida_export set_dbgmem_source(
-        area_t *(idaapi*dbg_get_memory_config)(int *n),
+        range_t *(idaapi*dbg_get_memory_config)(int *n),
         int (idaapi*memory_read) (ea_t ea, void *buffer, int size),
         int (idaapi*memory_write)(ea_t ea, const void *buffer, int size));
 
@@ -2467,8 +2458,7 @@ inline bool idaapi continue_process(void)                                       
 inline bool idaapi request_continue_process(void)                                             { return callui(ui_dbg_request_continue_process).cnd; }
 inline bool idaapi exit_process(void)                                                         { return callui(ui_dbg_exit_process).cnd; }
 inline bool idaapi request_exit_process(void)                                                 { return callui(ui_dbg_request_exit_process).cnd; }
-inline int idaapi get_process_qty(void)                                                       { return callui(ui_dbg_get_process_qty).i; }
-inline pid_t idaapi get_process_info(int n, process_info_t *process_info)                     { return (pid_t)callui(ui_dbg_get_process_info, n, process_info).i; }
+inline ssize_t idaapi get_processes(procinfo_vec_t *proclist)                                 { return callui(ui_dbg_get_processes, proclist).ssize; }
 inline int idaapi attach_process(pid_t pid, int event_id)                                     { return callui(ui_dbg_attach_process, pid, event_id).i; }
 inline int idaapi request_attach_process(pid_t pid, int event_id)                             { return callui(ui_dbg_request_attach_process, pid, event_id).i; }
 inline bool idaapi detach_process(void)                                                       { return callui(ui_dbg_detach_process).cnd; }
@@ -2487,6 +2477,8 @@ inline bool idaapi run_to(ea_t ea)                                              
 inline bool idaapi request_run_to(ea_t ea)                                                    { return callui(ui_dbg_request_run_to, ea).cnd; }
 inline bool idaapi step_until_ret(void)                                                       { return callui(ui_dbg_step_until_ret).cnd; }
 inline bool idaapi request_step_until_ret(void)                                               { return callui(ui_dbg_request_step_until_ret).cnd; }
+inline bool idaapi get_sp_val(ea_t *out)                                                      { return callui(ui_dbg_get_sp_val, out).cnd; }
+inline bool idaapi get_ip_val(ea_t *out)                                                      { return callui(ui_dbg_get_ip_val, out).cnd; }
 inline bool idaapi get_reg_val(const char *regname, regval_t *regval)                         { return callui(ui_dbg_get_reg_val, regname, regval).cnd; }
 inline bool idaapi set_reg_val(const char *regname, const regval_t *regval)                   { return callui(ui_dbg_set_reg_val, regname, regval).cnd; }
 inline bool idaapi request_set_reg_val(const char *regname, const regval_t *regval)           { return callui(ui_dbg_request_set_reg_val, regname, regval).cnd; }
@@ -2494,7 +2486,7 @@ inline int idaapi get_bpt_qty(void)                                             
 inline bool idaapi getn_bpt(int n, bpt_t *bpt)                                                { return callui(ui_dbg_getn_bpt, n, bpt).cnd; }
 inline bool idaapi get_bpt(ea_t ea, bpt_t *bpt)                                               { return callui(ui_dbg_get_bpt, ea, bpt).cnd; }
 inline bool idaapi find_bpt(const bpt_location_t &bptloc, bpt_t *bpt)                         { return callui(ui_dbg_find_bpt, &bptloc, bpt).cnd; }
-inline int idaapi change_bptlocs(const movbpt_infos_t &movinfo, movbpt_codes_t *codes)        { return callui(ui_dbg_change_bptlocs, &movinfo, codes).i; }
+inline int idaapi change_bptlocs(const movbpt_infos_t &movinfo, movbpt_codes_t *codes, bool del_hindering_bpts) { return callui(ui_dbg_change_bptlocs, &movinfo, codes, del_hindering_bpts).i; }
 inline bool idaapi add_bpt(ea_t ea, asize_t size, bpttype_t type)                             { return callui(ui_dbg_add_oldbpt, ea, size, type).cnd; }
 inline bool idaapi add_bpt(const bpt_t &bpt)                                                  { return callui(ui_dbg_add_bpt, &bpt).cnd; }
 inline bool idaapi request_add_bpt(ea_t ea, asize_t size, bpttype_t type)                     { return callui(ui_dbg_request_add_oldbpt, ea, size, type).cnd; }
@@ -2549,16 +2541,13 @@ inline bool idaapi get_tev_event(int n, debug_event_t *d)                       
 inline ea_t idaapi get_tev_ea(int n)                                                          { ea_t ea; callui(ui_dbg_get_tev_ea, n, &ea); return ea; }
 inline int  idaapi get_tev_type(int n)                                                        { return callui(ui_dbg_get_tev_type, n).i; }
 inline int  idaapi get_tev_tid(int n)                                                         { return callui(ui_dbg_get_tev_tid, n).i; }
-inline ea_t idaapi get_tev_reg_val(int n, const char *regname)                                { ea_t ea; callui(ui_dbg_get_tev_reg_val, n, regname, &ea); return ea; }
-inline int  idaapi get_tev_reg_mem_qty(int n)                                                 { return callui(ui_dbg_get_tev_reg_mem_qty, n).i; }
-inline ea_t idaapi get_tev_reg_mem_ea(int n, int idx)                                         { ea_t ea; callui(ui_dbg_get_tev_reg_mem_ea, n, idx, &ea); return ea; }
 inline ea_t idaapi get_trace_base_address(void)                                               { ea_t ea; callui(ui_dbg_get_trace_base_address, &ea); return ea; }
-inline bool idaapi load_trace_file(const char *filename, char *buf, size_t bufsize)           { return callui(ui_dbg_load_trace_file, filename, buf, bufsize).cnd; }
+inline bool idaapi load_trace_file(qstring *buf, const char *filename)                        { return callui(ui_dbg_load_trace_file, buf, filename).cnd; }
 inline bool idaapi save_trace_file(const char *filename, const char *description)             { return callui(ui_dbg_save_trace_file, filename, description).cnd; }
 inline bool idaapi is_valid_trace_file(const char *filename)                                  { return callui(ui_dbg_is_valid_trace_file, filename).cnd; }
 inline bool idaapi set_trace_file_desc(const char *filename, const char *description)         { return callui(ui_dbg_set_trace_file_desc, filename, description).cnd; }
-inline bool idaapi get_trace_file_desc(const char *filename, char *buf, size_t bufsize)       { return callui(ui_dbg_get_trace_file_desc, filename, buf, bufsize).cnd; }
-inline bool idaapi choose_trace_file(char *buf, size_t bufsize)                               { return callui(ui_dbg_choose_trace_file, buf, bufsize).cnd; }
+inline bool idaapi get_trace_file_desc(qstring *buf, const char *filename)                    { return callui(ui_dbg_get_trace_file_desc, buf, filename).cnd; }
+inline bool idaapi choose_trace_file(qstring *buf)                                            { return callui(ui_dbg_choose_trace_file, buf).cnd; }
 inline bool idaapi diff_trace_file(const char *filename)                                      { return callui(ui_dbg_diff_trace_file, filename).cnd; }
 inline void idaapi set_trace_platform(const char *platform)                                   { callui(ui_dbg_set_trace_platform, platform); }
 inline const char *idaapi get_trace_platform()                                                { return callui(ui_dbg_get_trace_platform).cptr; }
@@ -2600,8 +2589,8 @@ inline void idaapi get_process_options(qstring *path, qstring *args, qstring *sd
 inline void idaapi set_process_options(const char *path, const char *args, const char *sdir, const char *host, const char *pass, int port) { callui(ui_dbg_set_process_options, path, args, sdir, host, pass, port); }
 inline int idaapi check_bpt(ea_t ea)                                                          { return callui(ui_dbg_check_bpt, ea).i; }
 inline int idaapi set_process_state(int newstate, thid_t *p_thid, int dbginv)                 { return callui(ui_dbg_set_process_state, newstate, p_thid, dbginv).i; }
-inline void idaapi get_manual_regions(meminfo_vec_t *areas)                                   { callui(ui_dbg_get_manual_regions, areas); }
-inline void idaapi set_manual_regions(const meminfo_vec_t *areas)                             { callui(ui_dbg_set_manual_regions, areas); }
+inline void idaapi get_manual_regions(meminfo_vec_t *ranges)                                  { callui(ui_dbg_get_manual_regions, ranges); }
+inline void idaapi set_manual_regions(const meminfo_vec_t *ranges)                            { callui(ui_dbg_set_manual_regions, ranges); }
 inline void idaapi edit_manual_regions()                                                      { callui(ui_dbg_edit_manual_regions); }
 inline void idaapi enable_manual_regions(bool enable)                                         { callui(ui_dbg_enable_manual_regions, enable); }
 inline bool idaapi is_debugger_busy(void)                                                     { return callui(ui_dbg_is_busy).cnd; }
@@ -2614,13 +2603,13 @@ inline bool idaapi del_virt_module(const ea_t base)                             
 inline int  idaapi set_bptloc_string(const char *s)                                           { return callui(ui_dbg_set_bptloc_string, s).i; }
 inline const char *idaapi get_bptloc_string(int i)                                            { return callui(ui_dbg_get_bptloc_string, i).cptr; }
 inline int  idaapi internal_cleanup_appcall(thid_t tid)                                       { return callui(ui_dbg_internal_cleanup_appcall, tid).i; }
-inline int  idaapi internal_get_sreg_base(thid_t tid, int sreg_value, ea_t *answer)           { return callui(ui_dbg_internal_get_sreg_base, tid, sreg_value, answer).i; }
+inline int  idaapi internal_get_sreg_base(ea_t *answer, thid_t tid, int sreg_value)           { return callui(ui_dbg_internal_get_sreg_base, answer, tid, sreg_value).i; }
 inline int  idaapi internal_ioctl(int fn, const void *buf, size_t size, void **poutbuf, ssize_t *poutsize) { return callui(ui_dbg_internal_ioctl, fn, buf, size, poutbuf, poutsize).i; }
 inline ssize_t idaapi read_dbg_memory(ea_t ea, void *buffer, size_t size)                     { return callui(ui_dbg_read_memory, ea, buffer, size).ssize; }
 inline ssize_t idaapi write_dbg_memory(ea_t ea, const void *buffer, size_t size)              { return callui(ui_dbg_write_memory, ea, buffer, size).ssize; }
 inline int idaapi get_reg_vals(thid_t tid, int clsmask, regval_t *values)                     { return callui(ui_dbg_read_registers, tid, clsmask, values).i; }
 inline int idaapi set_reg_val(thid_t tid, int regidx, const regval_t *value)                  { return callui(ui_dbg_write_register, tid, regidx, value).i; }
-inline int idaapi get_dbg_memory_info(meminfo_vec_t *areas)                                   { return callui(ui_dbg_get_memory_info, areas).i; }
+inline int idaapi get_dbg_memory_info(meminfo_vec_t *ranges)                                  { return callui(ui_dbg_get_memory_info, ranges).i; }
 inline void idaapi set_bpt_group(bpt_t &bpt, const char *grp_name)                            { callui(ui_dbg_set_bpt_group, &bpt, grp_name); }
 inline bool idaapi set_bptloc_group(const bpt_location_t &bptloc, const char *grp_name)       { return callui(ui_dbg_set_bptloc_group, &bptloc, grp_name).cnd; }
 inline bool idaapi get_bpt_group(qstring *grp_name, const bpt_location_t &bptloc)             { return callui(ui_dbg_get_bpt_group, grp_name, &bptloc).cnd; }
@@ -2633,7 +2622,11 @@ inline bool bpt_t::set_cnd_elang(const char *name)                              
 //@} dbg_funcs_conv
 #endif
 
+// internal kernel functions to lock the debugger memory configuration updates
+// Do not use these functions! They will be removed!
+idaman void ida_export lock_dbgmem_config(void);
+idaman void ida_export unlock_dbgmem_config(void);
 
 
-#pragma pack(pop)
+
 #endif

@@ -30,7 +30,7 @@
 
 //
 // IDA TMS320C1X processor module.
-//     Portability definitions 
+//     Portability definitions
 //
 #ifndef _IDP_TMS320C1X_IDP_HPP
 #define _IDP_TMS320C1X_IDP_HPP

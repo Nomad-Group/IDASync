@@ -35,75 +35,76 @@
 #ifndef _IDP_TMS320C1X_INS_H
 #define _IDP_TMS320C1X_INS_H
 
-enum nameNum {
-        // Accumulator Memory Reference Instructions
-        I__FIRST = 0,
-        I_ABS = 0,
-        I_ADD,
-        I_ADDH,
-        I_ADDS,
-        I_AND,
-        I_LAC,
-        I_LACK,
-        I_OR,
-        I_SACH,
-        I_SACL,
-        I_SUB,
-        I_SUBC,
-        I_SUBH,
-        I_SUBS,
-        I_XOR,
-        I_ZAC,
-        I_ZALH,
-        I_ZALS,
-        // Auxiliary Register and Data Page Pointer Instructions
-        I_LAR,
-        I_LARK,
-        I_LARP,
-        I_LDP,
-        I_LDPK,
-        I_MAR,
-        I_SAR,
-        // T Register, P Register, and Multiply Instructions
-        I_APAC,
-        I_LT,
-        I_LTA,
-        I_LTD,
-        I_MPY,
-        I_MPYK,
-        I_PAC,
-        I_SPAC,
-        // Branch/Call Instructions
-        I_B,
-        I_BANZ,
-        I_BGEZ,
-        I_BGZ,
-        I_BIOZ,
-        I_BLEZ,
-        I_BLZ,
-        I_BNZ,
-        I_BV,
-        I_BZ,
-        I_CALA,
-        I_CALL,
-        I_RET,
-        // Control Instructions
-        I_DINT,
-        I_EINT,
-        I_LST,
-        I_NOP,
-        I_POP,
-        I_PUSH,
-        I_ROVM,
-        I_SOVM,
-        I_SST,
-        // I/O and Data Memory Instructions
-        I_DMOV,
-        I_IN,
-        I_OUT,
-        I_TBLR,
-        I_TBLW,
-        I__LAST
+enum nameNum
+{
+  // Accumulator Memory Reference Instructions
+  I__FIRST = 0,
+  I_ABS = 0,
+  I_ADD,
+  I_ADDH,
+  I_ADDS,
+  I_AND,
+  I_LAC,
+  I_LACK,
+  I_OR,
+  I_SACH,
+  I_SACL,
+  I_SUB,
+  I_SUBC,
+  I_SUBH,
+  I_SUBS,
+  I_XOR,
+  I_ZAC,
+  I_ZALH,
+  I_ZALS,
+  // Auxiliary Register and Data Page Pointer Instructions
+  I_LAR,
+  I_LARK,
+  I_LARP,
+  I_LDP,
+  I_LDPK,
+  I_MAR,
+  I_SAR,
+  // T Register, P Register, and Multiply Instructions
+  I_APAC,
+  I_LT,
+  I_LTA,
+  I_LTD,
+  I_MPY,
+  I_MPYK,
+  I_PAC,
+  I_SPAC,
+  // Branch/Call Instructions
+  I_B,
+  I_BANZ,
+  I_BGEZ,
+  I_BGZ,
+  I_BIOZ,
+  I_BLEZ,
+  I_BLZ,
+  I_BNZ,
+  I_BV,
+  I_BZ,
+  I_CALA,
+  I_CALL,
+  I_RET,
+  // Control Instructions
+  I_DINT,
+  I_EINT,
+  I_LST,
+  I_NOP,
+  I_POP,
+  I_PUSH,
+  I_ROVM,
+  I_SOVM,
+  I_SST,
+  // I/O and Data Memory Instructions
+  I_DMOV,
+  I_IN,
+  I_OUT,
+  I_TBLR,
+  I_TBLW,
+  I__LAST
 };
 
 //
@@ -111,10 +112,11 @@ enum nameNum {
 // These are used to represent instruction operands that are not either
 // immediate values or registers.
 //
-enum regPhrase {
-        IPH_AR,      // Dereference current aux register
-        IPH_AR_INCR, // Dereference current aux register and post-increment
-        IPH_AR_DECR, // Dereference current aux register and post-decrement
+enum regPhrase
+{
+  IPH_AR,      // Dereference current aux register
+  IPH_AR_INCR, // Dereference current aux register and post-increment
+  IPH_AR_DECR, // Dereference current aux register and post-decrement
 };
 
 //

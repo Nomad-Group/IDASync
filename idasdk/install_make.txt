@@ -3,58 +3,141 @@
 Please read "readme.txt" before reading this file!
 
 
+Preparing the build environment on MS Windows
+---------------------------------------------
 
-How to install the SDK for command-line build
-----------------------------------------
-0. Unzip the archive with -d switch:
+  Prerequisites
+  =============
 
-        unzip -d idasdk.zip
+  In addition to the compilers specified in readme.txt, Cygwin is required
+  on MS Windows. It is available from:
 
-1. Edit file
-        defaults.mk            modify paths to your compilers and sdk
+    https://www.cygwin.com/
 
-2. Add to your path:
-        idasdk/bin
-        and you compiler directory
-
-3. Install a GNU make, if necessary. Under Windows you can use Cygwin.
-
-4. Compile and build utilities in ETC directory. See ETC\README file.
-
-5. Run make in the SDK directory (see commandlines below)
-
-----------------------------------------
-
-All source files are the same for all platforms and are compiled using the
-same makefile. You need to specify target in the command line:
-
-For Win32:
-        Microsoft compiler (VC10)
-          make __VC__=1
-        or just
-          make
-
-        Microsoft compiler optimized
-          make __VC__=1 NDEBUG=1
-
-        Build for IDA64 (64-bit ea_t size):
-          make __EA64__=1
-        
-Please note that idaq64 itself is a 32-bit application, so the above line
-compiles a 32-bit module that can handle 64-bit applications with idag64.
-
-        Build for x64 (only for win64_remotex64.exe):
-          make __X64__=1
-
-For Linux
-        idamake.pl -D__LINUX__                     -- non-optimized build
-        idamake.pl -DNDEBUG -D__LINUX__            -- optimized build
-        idamake.pl -D__LINUX__ -D__EA64__          -- for IDA64
-
-For Mac OS X
-        idamake.pl -D__MAC__                       -- non-optimized build
-        idamake.pl -DNDEBUG -D__MAC__              -- optimized build
-        idamake.pl -D__MAC__ -D__EA64__            -- for IDA64
+  Make sure to install the 32-bit version of Cygwin (setup-x86.exe) and to
+  install the 'make' package.
 
 
-Win32 versions can be created compiled using Microsoft Visual C++ 9.0 or greater.
+  Build environment
+  =================
+
+  On MS Windows, you may build the SDK using either the Cygwin shell or the
+  Command Prompt (cmd.exe).
+
+  If you wish to use the Cygwin shell to build the SDK, start it with:
+
+    > C:\cygwin\cygwin.bat
+
+  If you wish to use the Command Prompt, you must add Cygwin's bin directory
+  to your PATH:
+
+    > set PATH=C:\cygwin\bin;%PATH%
+
+  You should then navigate to IDA's SDK directory, for example:
+
+    > cd C:\idasdk
+
+  The MS Windows build automatically generates a configuration file from the
+  top-level directory of the SDK. To build this configuration file directly,
+  invoke make from the top-level directory with:
+
+    > make env
+
+  If this file is not generated, you will hit this error message:
+
+    cl : Command line error D8022 : cannot open '../../x64_win_vc_32.cfg'
+
+
+  Preparing the SDK
+  =================
+
+  The SDK provides a linker wrapper under the 'bin' directory. You may have to
+  set the executable flag on the 'bin\ld.exe' binary.
+
+  You must add the SDK's bin directory to your PATH.
+
+  On MS Windows' Command Prompt:
+
+    > set PATH=C:\idasdk\bin;%PATH%
+
+  On the Cygwin shell:
+
+    $ export PATH=~/idasdk/bin:$PATH
+
+  You should modify the 'defaults.mk' file to point to your Visual Studio and
+  Windows SDK paths (The 'VSPATH', 'WSDKPATH', and 'WSDKVER' variables).
+
+
+Preparing the build environment on Linux and Mac OS X
+-----------------------------------------------------
+
+  You must add the SDK's bin directory to your PATH.
+
+    $ export PATH=~/idasdk/bin:$PATH
+
+
+Target platform
+---------------
+
+  The target platform must be specified using one of the following environment
+  variables:
+
+    - MS Windows: __NT__
+    - Linux:      __LINUX__
+    - Mac OS X:   __MAC__
+
+  If no target platform is specified, the build defaults to MS Windows (__NT__).
+
+  It is a good idea to specify the platform directly on your ~/.bashrc file:
+    - MS Windows (Cygwin):
+      export __NT__=1
+    - Linux:
+      export __LINUX__=1
+    - Mac OS X:
+      export __MAC__=1
+
+
+How to build the SDK from the command-line
+------------------------------------------
+
+  All source files are the same for all platforms and are compiled using the
+  same makefile. It should suffice to invoke 'make' directly:
+
+    make
+
+  If you did not export the target platform's environment variable, you may
+  specify the target in the command line, for example:
+
+    make __LINUX__=1
+
+  To create optimized builds, you should set the NDEBUG variable, for example:
+
+    make NDEBUG=1
+
+  To build for IDA64 (64-bit ea_t size):
+
+    make __EA64__=1
+
+  Please note that both ida32 and ida64 are 64-bit applications.
+
+  To build 32-bit debug servers, you must unset the __X64__ variable, which is
+  set by defaults.mk. This can be achieved in the command line with:
+
+    make __X64__=
+
+  Some examples:
+    make __LINUX__=1                    -- non-optimized linux build
+    make NDEBUG=1 __MAC__=1             -- optimized mac build
+    make NDEBUG=1 __NT__=1 __EA64__=1   -- optimized ida64 windows build
+
+
+Aliases
+-------
+
+  Creating aliases for the build commands is a good idea. I have the following
+  in my .bashrc file:
+
+  export __LINUX__=1
+  export PATH=~/idasdk/bin:$PATH
+  alias mx='make 2>&1'
+  alias mmx='__EA64__=1 make 2>&1'

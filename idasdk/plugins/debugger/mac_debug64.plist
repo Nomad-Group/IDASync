@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleGetInfoString</key>
+	<string>OS X Remote Debug Server (64-bit) for IDA, Copyright (c) 2015 Hex-Rays SA</string>
+	<key>CFBundleExecutable</key>
+	<string>mac_server64</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.hexrays.mac_serverx64</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>mac_serverx64</string>
+	<key>CFBundleVersion</key>
+	<string>1.0</string>
+	<key>SecTaskAccess</key>
+	<array>
+		<string>allowed</string>
+		<string>debug</string>
+	</array>
+</dict>
+</plist>

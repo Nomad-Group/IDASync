@@ -3,11 +3,12 @@
 
 include allmake.mak
 
-ifdef USE_VC11
-  SDK_INCLUDE1=/I$(MSSDK)Include/um
-  SDK_INCLUDE2=/I$(MSSDK)Include/shared
-else
+ifneq ($(__VC8__)$(__VC10__),)
   SDK_INCLUDE1=/I$(MSSDK)Include
+else
+  SDK_INCLUDE1=/I$(WSDK_INCLUDE)um
+  SDK_INCLUDE2=/I$(WSDK_INCLUDE)shared
+  SDK_INCLUDE3=/I$(WSDK_INCLUDE)ucrt
 endif
 
 define CFG0             # Common flags
@@ -56,6 +57,7 @@ define CFG1
 /I$(MSVCDIR)Include
 $(SDK_INCLUDE1)
 $(SDK_INCLUDE2)
+$(SDK_INCLUDE3)
 #       Merge duplicate strings
 /GF
 #       Exception handling (try/catch can handle only C++ exceptions; use __except for SEH)
@@ -109,8 +111,12 @@ define CFG1a
 /wd4366
 #       warning C4371: xxx : layout of class may have changed from a previous version of the compiler due to better packing of member xxx
 /wd4371
+#       warning C4388: != : signed/unsigned mismatch
+/wd4388
 #       warning C4389: != : signed/unsigned mismatch
 /wd4389
+#       warning C4458: declaration of '' hides class member
+/wd4458
 #       warning C4480: != :  nonstandard extension used: ....
 /wd4480
 #       warning C4512: xxx : assignment operator could not be generated
@@ -121,6 +127,9 @@ define CFG1a
 /wd4548
 #       warning C4571: Informational: catch(...) semantics changed since Visual C++ 7.1; structured exceptions (SEH) are no longer caught
 /wd4571
+#       warning C4574: yvals.h(vc10): '_SECURE_SCL' is defined to be '0': did you mean to use '#if _SECURE_SCL'?
+#       warning C4574: ws2tcpicp.h(vc14): 'INCL_WINSOCK_API_TYPEDEFS' is defined to be '0': did you mean to use '#if INCL_WINSOCK_API_TYPEDEFS'?
+/wd4574
 #       warning C4611: interaction between _setjmp and C++ object destruction is non-portable
 /wd4611
 #       warning C4619: pragma warning : there is no warning number xxx
@@ -163,21 +172,48 @@ define CFG1a
 /we4315
 #       warning C4805: 'operation' : unsafe mix of type 'type' and type 'type' in operation
 /we4805
-#       
+#
 endef
 endif
 
-ifdef USE_VC11          # /analyze related suppressions
+ifneq ($(or $(__VC10__),$(__VC8__)),)
 define CFG2
-#       warning C4435: '' : Object layout under /vd2 will change due to virtual base ''
+#       warning C4505: '' : unreferenced local function has been removed
+/wd4505
+endef
+else          # new compiler vs15
+define CFG2
+#	Separate data for linker
+/Gw
+#       warning C4091: 'typedef ': ignored on left of '' when no variable is declared
+#       skd.../um/dbghelp/h
+/wd4091
+#       warning C4435: Object layout under /vd2 will change due to virtual base ''
 /wd4435
+#       warning C4456: declaration of '' hides previous local declaration
+/wd4456
+#       warning C4457: declaration of '' hides function parameter
+/wd4457
+#       warning C4459: declaration of '' hides global declaration
+/wd4459
+#       warning C4464: relative include path contains '..'
+/wd4464
+#       warning C4774: '' : format string expected in argument 1 is not a string literal
+#       this warning can not handle cnd ? "fmt1" : "fmt2" while gcc can
+/wd4774
+#       warning C4589: Constructor of abstract class '' ignores initializer for virtual base class
+#       completely wrong warning
+/wd4589
+#       warning C5025: move assignment operator was implicitly defined as deleted
+/wd5025
+#       warning C5026: move constructor was implicitly defined as deleted because a base class move constructor is inaccessible or deleted
+/wd5026
+#       warning C5027: move assignment operator was implicitly defined as deleted because a base class move assignment operator is inaccessible or deleted
+/wd5027
 #       warning C6323: Use of arithmetic operator on Boolean type(s).
 /wd6323
 #       warning C6340: Mismatch on sign: '' passed as '' when some signed type is required in call to ''
 /wd6340
-endef
-else
-define CFG2
 endef
 endif
 
@@ -190,8 +226,6 @@ define CFG3
 /Ox
 # Enable intrinsic functions
 /Oi
-#       warning C4574: yvals.h(vc10): '_SECURE_SCL' is defined to be '0': did you mean to use '#if _SECURE_SCL'?
-/wd4574
 endef
 else                    # Debug flags
 define CFG3
@@ -209,8 +243,8 @@ define newline
 
 endef
 
-all:    $(SYSDIR).cfg
-$(SYSDIR).cfg: makeenv_vc.mak allmake.mak defaults.mk makefile
+all:    $(SYSDIR)$(OPTSUF)$(STATSUF).cfg
+$(SYSDIR)$(OPTSUF)$(STATSUF).cfg: makeenv_vc.mak allmake.mak defaults.mk makefile
 	@echo -e '$(subst $(newline),\n,${CFG0})' | grep -v '^#' >$@
 	@echo -e '$(subst $(newline),\n,${CFG1})' | grep -v '^#' >>$@
 	@echo -e '$(subst $(newline),\n,${CFG1a})'| grep -v '^#' >>$@

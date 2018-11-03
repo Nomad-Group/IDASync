@@ -37,8 +37,14 @@ static inline void StoreOpis(uint index, const const_desc_t &opis)
 }
 
 //-----------------------------------------------------------------------------
-void xtrnSet(uint cin, const_desc_t *co, uint xip,
-             char *str, size_t strsize, bool full, uchar rmod=3);
+void xtrnSet(
+        uint cin,
+        const_desc_t *co,
+        uint xip,
+        char *str,
+        size_t strsize,
+        bool full,
+        uchar rmod=3);
 void SetName(ushort name, ea_t ea, ushort access, uval_t number, uchar rmod=3);
 void set_lv_name(ushort name, ea_t ea, uchar rmod=3);
 void xtrnRef(ea_t ea, const const_desc_t &opis);
@@ -57,25 +63,34 @@ void resizeLocVars(void);
 const char *CopyAttrToFile(const char *astr, uint32 size, ushort id);
 
 //-----------------------------------------------------------------------------
-extern char *_spcnamechar;
-void make_NameChars(uchar on_load);
+void make_NameChars(bool on_load);
+
+enum namechar_op_t
+{
+  ncop_disable,
+  ncop_enable,
+  ncop_enable_without_parens,
+};
+
+//-------------------------------------------------------------------------
+void op_NameChars(namechar_op_t op);
 
 //------------------
 static void inline endLoad_NameChar(void)
 {
-  _spcnamechar[2] = '\0';     // end load base (remove '()')
+  op_NameChars(ncop_enable_without_parens);     // end load base (remove '()')
 }
 
 //------------------
 static void inline enableExt_NameChar(void)
 {
-  *_spcnamechar = '.';  //j_field_dlm;  // (for searches)
+  op_NameChars(ncop_enable);  //j_field_dlm;  // (for searches)
 }
 
 //------------------
 static void inline disableExt_NameChar(void)
 {
-  *_spcnamechar = '\0';
+  op_NameChars(ncop_disable);
 }
 
 //-----------------------------------------------------------------------

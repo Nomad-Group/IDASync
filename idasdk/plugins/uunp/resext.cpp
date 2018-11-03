@@ -9,18 +9,18 @@
 #include <bytes.hpp>
 #include "uunp.hpp"
 
-static FILE    *fr;
-static ea_t     ResBase;
-static uint32   ResTop;
-static asize_t  ImgSize;
+static FILE *fr;
+static ea_t ResBase;
+static uint32 ResTop;
+static asize_t ImgSize;
 static struct
 {
   union
   {
     wchar_t *name;
-    uint16  Id;
+    uint16 Id;
   };
-  uint32    len;
+  uint32 len;
 } Names[3];
 
 //--------------------------------------------------------------------------
@@ -123,16 +123,24 @@ static void store(const void *Data, uint32 size)
 //---------------------------------------------------------------------------
 static bool initPtrs(const char *fname)
 {
-  IMAGE_DATA_DIRECTORY  res;
+  IMAGE_DATA_DIRECTORY res;
   ea_t nth;
 
-  nth = get_long(curmod.startEA + 0x3C) + curmod.startEA;
+  nth = get_dword(curmod.start_ea + 0x3C) + curmod.start_ea;
 
-  size_t off = offsetof(IMAGE_NT_HEADERS,
-                OptionalHeader.DataDirectory
-                  [IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress);
+  size_t off;
+  if ( inf.is_64bit() )
+  {
+    off = offsetof(IMAGE_NT_HEADERS64,
+                   OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress);
+  }
+  else
+  {
+    off = offsetof(IMAGE_NT_HEADERS32,
+                   OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_RESOURCE].VirtualAddress);
+  }
 
-  if ( !get_many_bytes(nth + off, &res, sizeof(res))
+  if ( get_bytes(&res, sizeof(res), nth + off) != sizeof(res)
     || !res.VirtualAddress
     || !res.Size )
   {
@@ -140,9 +148,9 @@ static bool initPtrs(const char *fname)
     return false;
   }
 
-  ResBase = curmod.startEA + res.VirtualAddress;
+  ResBase = curmod.start_ea + res.VirtualAddress;
   ResTop  = res.Size;
-  ImgSize = curmod.endEA - curmod.startEA;
+  ImgSize = curmod.end_ea - curmod.start_ea;
 
   int minres = 2*sizeof(IMAGE_RESOURCE_DIRECTORY_ENTRY)+3*sizeof(IMAGE_RESOURCE_DIRECTORY);
   if ( (res.Size & 3) != 0
@@ -170,13 +178,17 @@ static bool extractData(uint32 off)
 {
   IMAGE_RESOURCE_DATA_ENTRY rd;
 
-  if ( off + sizeof(rd) > ResTop ) return false;
-  if ( !get_many_bytes(ResBase + off, &rd, sizeof(rd)) ) return false;
+  if ( off + sizeof(rd) > ResTop )
+    return false;
+  if ( get_bytes(&rd, sizeof(rd), ResBase + off) != sizeof(rd) )
+    return false;
 
   if ( rd.OffsetToData >= ImgSize
     || rd.Size > ImgSize
-    || rd.OffsetToData + rd.Size > ImgSize ) return false;
-
+    || rd.OffsetToData + rd.Size > ImgSize )
+  {
+    return false;
+  }
   void *data = qalloc(rd.Size);
   if ( data == NULL )
   {
@@ -184,7 +196,7 @@ static bool extractData(uint32 off)
     return false;
   }
   bool res = false;
-  if ( get_many_bytes(curmod.startEA + rd.OffsetToData, data, rd.Size) )
+  if ( get_bytes(data, rd.Size, curmod.start_ea + rd.OffsetToData) == rd.Size )
   {
     store(data, rd.Size);
     res = true;
@@ -198,11 +210,11 @@ static bool extractDirectory(uint32 off, int level);
 
 static bool extractEntry(uint32 off, int level, bool named)
 {
-  IMAGE_RESOURCE_DIRECTORY_ENTRY  rde;
+  IMAGE_RESOURCE_DIRECTORY_ENTRY rde;
 
   if ( off + sizeof(rde) >= ResTop )
     return false;
-  if ( !get_many_bytes(ResBase + off, &rde, sizeof(rde)) )
+  if ( get_bytes(&rde, sizeof(rde), ResBase + off) != sizeof(rde) )
     return false;
 
   if ( (bool)rde.NameIsString != named )
@@ -220,7 +232,7 @@ static bool extractEntry(uint32 off, int level, bool named)
   else
   {
     ea_t npos = rde.NameOffset;
-    if( npos < off || npos + 2 >= ResTop )
+    if ( npos < off || npos + 2 >= ResTop )
       return false;
     uint32 nlen = get_word(npos + ResBase)*sizeof(wchar_t);
     if ( !nlen || npos + nlen > ResTop )
@@ -231,7 +243,7 @@ static bool extractEntry(uint32 off, int level, bool named)
       msg("Not enough memory for resource names\n");
       return false;
     }
-    if ( !get_many_bytes(npos + sizeof(uint16) + ResBase, p, nlen) )
+    if ( get_bytes(p, nlen, npos + sizeof(uint16) + ResBase) != nlen )
     {
 bad_name:
       qfree(p);
@@ -239,7 +251,8 @@ bad_name:
     }
     p[nlen/sizeof(wchar_t)] = 0;
     size_t wlen = wcslen(p);
-    if ( !wlen || wlen < nlen/2-1 ) goto bad_name;
+    if ( !wlen || wlen < nlen/2-1 )
+      goto bad_name;
     Names[level].name = p;
     Names[level].len = uint32((wlen+1)*sizeof(wchar_t));
   }
@@ -250,7 +263,8 @@ bad_name:
     if ( rde.OffsetToDirectory >= off )
       res = extractDirectory(rde.OffsetToDirectory, level+1);
 
-    if ( Names[level].len ) qfree(Names[level].name);
+    if ( Names[level].len )
+      qfree(Names[level].name);
     Names[level].name = NULL;
     Names[level].len  = 0;
     return res;
@@ -265,11 +279,11 @@ bad_name:
 //---------------------------------------------------------------------------
 static bool extractDirectory(uint32 off, int level)
 {
-  IMAGE_RESOURCE_DIRECTORY  rd;
+  IMAGE_RESOURCE_DIRECTORY rd;
 
   if ( off + sizeof(rd) >= ResTop )
     return false;
-  if ( !get_many_bytes(ResBase + off, &rd, sizeof(rd)) )
+  if ( get_bytes(&rd, sizeof(rd), ResBase + off) != sizeof(rd) )
     return false;
 
   off += sizeof(rd);

@@ -56,7 +56,8 @@ static void build_process_ext_name(ext_process_info_t *pinfo)
 // Returns the file name assciated with pid
 bool idaapi linuxbase_debmod_t::get_exec_fname(
         int _pid,
-        char *buf, size_t bufsize)
+        char *buf,
+        size_t bufsize)
 {
   char path[QMAXPATH];
   qsnprintf(path, sizeof(path), "/proc/%u/exe", _pid);
@@ -68,6 +69,18 @@ bool idaapi linuxbase_debmod_t::get_exec_fname(
   }
   else
   {
+    // ESXi keeps the real file name inside /proc/PID/exe (which is not a link)
+    FILE *fp = qfopen(path, "r");
+    if ( fp != NULL )
+    {
+      len = qfread(fp, buf, bufsize);
+      qfclose(fp);
+      if ( len > 1 && len < bufsize && buf[0] == '/' ) // sanity check
+      {
+        buf[len] = '\0';
+        return true;
+      }
+    }
     buf[0] = '\0';
     return false;
   }
@@ -84,15 +97,17 @@ int idaapi linuxbase_debmod_t::get_process_bitness(int _pid)
     return 0;
 
   int bitness = 4;
-  char line[2*MAXSTR];
-  while ( qfgets(line, sizeof(line), mapfp) != NULL )
+  qstring line;
+  while ( qgetline(&line, mapfp) >= 0 )
   {
+    if ( line.empty() )
+      continue;
     ea_t ea1;
     ea_t ea2;
-    if ( qsscanf(line, "%a-%a ", &ea1, &ea2) == 2 )
+    if ( qsscanf(line.begin(), "%a-%a ", &ea1, &ea2) == 2 )
     {
-      const char *found = strchr(line, '-');
-      if ( (found - line) > 8 )
+      size_t pos = line.find('-');
+      if ( pos != qstring::npos && pos > 8 )
       {
         bitness = 8;
         break;
@@ -109,9 +124,9 @@ int idaapi linuxbase_debmod_t::get_process_list(procvec_t *list)
   int mypid = getpid();
   list->clear();
   qffblk64_t fb;
-  for ( int code = qfindfirst64("/proc/*", &fb, FA_DIREC);
+  for ( int code = qfindfirst("/proc/*", &fb, FA_DIREC);
         code == 0;
-        code = qfindnext64(&fb) )
+        code = qfindnext(&fb) )
   {
     if ( !qisdigit(fb.ff_name[0]) )
       continue;
@@ -119,8 +134,10 @@ int idaapi linuxbase_debmod_t::get_process_list(procvec_t *list)
     pinfo.pid = atoi(fb.ff_name);
     if ( pinfo.pid == mypid )
       continue;
-    if ( !get_exec_fname(pinfo.pid, pinfo.name, sizeof(pinfo.name)) )
+    char buf[MAXSTR];
+    if ( !get_exec_fname(pinfo.pid, buf, sizeof(buf)) )
       continue; // we skip the process because we can not debug it anyway
+    pinfo.name = buf;
     pinfo.addrsize = get_process_bitness(pinfo.pid);
     build_process_ext_name(&pinfo);
     list->push_back(pinfo);
