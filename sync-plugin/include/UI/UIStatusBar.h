@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QtGui/QDockWidget>
+#include <QtWidgets/qdockwidget.h>
 #include "ui_StatusBar.h"
 
 class UIStatusBar : public QDockWidget, public Ui::StatusBar

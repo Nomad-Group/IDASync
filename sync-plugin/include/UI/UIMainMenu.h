@@ -1,7 +1,7 @@
 #pragma once
 
 #include "UIFunctions.h"
-#include <QtGui/QDialog>
+#include <QtWidgets/qdialog.h>
 #include "ui_MenuMain.h"
 
 class UIMainMenu : public QDialog, public Ui::MainMenu

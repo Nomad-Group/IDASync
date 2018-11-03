@@ -110,7 +110,7 @@ bool SyncManager::SendUpdate(IdbUpdateData* updateData)
 	return g_client->Send(packet);
 }
 
-int idaapi SyncManager::ida_notification_point(void* ud, int notificationCode, va_list args)
+ssize_t idaapi SyncManager::ida_notification_point(void* ud, int notificationCode, va_list args)
 {
 	IdaNotification notification;
 

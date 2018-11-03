@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QtGui/QDialog>
+#include <QtWidgets/qdialog.h>
 #include "ui_UpdateOperationDialog.h"
 
 class UIUpdateOperationDialog : public QDialog, public Ui::UpdateOperationDialog

@@ -1,8 +1,8 @@
 #include "UI/UIFunctions.h"
 #include "UI/UIStatusBar.h"
 
-#include <QtGui/QMainWindow>
-#include <QtGui/QStatusBar>
+#include <QtWidgets/qmainwindow.h>
+#include <QtWidgets/qstatusbar.h>
 
 UIStatusBar* uiStatusBar = nullptr;
 

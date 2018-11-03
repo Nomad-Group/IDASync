@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QtGui/QDialog>
+#include <QtWidgets/qdialog.h>
 #include "ui_AutoConnectStartupDialog.h"
 
 class UIAutoConnectStartupDialog : public QDialog, public Ui::AutoConnectStartupDialog

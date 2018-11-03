@@ -7,20 +7,20 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sync-plugin", "sync-plugin.
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug (idaq32)|x86 = Debug (idaq32)|x86
-		Debug (idaq64)|x86 = Debug (idaq64)|x86
-		Release (idaq32)|x86 = Release (idaq32)|x86
-		Release (idaq64)|x86 = Release (idaq64)|x86
+		Debug (idaq32)|x64 = Debug (idaq32)|x64
+		Debug (idaq64)|x64 = Debug (idaq64)|x64
+		Release (idaq32)|x64 = Release (idaq32)|x64
+		Release (idaq64)|x64 = Release (idaq64)|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Debug (idaq32)|x86.ActiveCfg = Debug (idaq32)|Win32
-		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Debug (idaq32)|x86.Build.0 = Debug (idaq32)|Win32
-		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Debug (idaq64)|x86.ActiveCfg = Debug (idaq64)|Win32
-		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Debug (idaq64)|x86.Build.0 = Debug (idaq64)|Win32
-		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Release (idaq32)|x86.ActiveCfg = Release (idaq32)|Win32
-		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Release (idaq32)|x86.Build.0 = Release (idaq32)|Win32
-		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Release (idaq64)|x86.ActiveCfg = Release (idaq64)|Win32
-		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Release (idaq64)|x86.Build.0 = Release (idaq64)|Win32
+		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Debug (idaq32)|x64.ActiveCfg = Debug (idaq32)|x64
+		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Debug (idaq32)|x64.Build.0 = Debug (idaq32)|x64
+		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Debug (idaq64)|x64.ActiveCfg = Debug (idaq64)|x64
+		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Debug (idaq64)|x64.Build.0 = Debug (idaq64)|x64
+		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Release (idaq32)|x64.ActiveCfg = Release (idaq32)|x64
+		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Release (idaq32)|x64.Build.0 = Release (idaq32)|x64
+		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Release (idaq64)|x64.ActiveCfg = Release (idaq64)|x64
+		{399EA364-0A63-41F5-B2C2-932F64BEFEAE}.Release (idaq64)|x64.Build.0 = Release (idaq64)|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

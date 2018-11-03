@@ -14,7 +14,7 @@
 
 SyncPlugin* g_plugin = nullptr;
 
-int idaapi ui_event(void *user_data, int notification_code, va_list va)
+ssize_t idaapi ui_event(void *user_data, int notification_code, va_list va)
 {
 	if (notification_code == ui_notification_t::ui_ready_to_run && g_idb->HasPersistentData())
 	{
