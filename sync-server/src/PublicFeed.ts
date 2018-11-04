@@ -5,27 +5,32 @@ import { User } from "./database/User";
 const FEED_ENABLED: boolean = false;
 
 export class PublicFeed {
-    public postActivity(text: string) {
-        if (!FEED_ENABLED) {
-            return;
-        }
+	public postActivity(text: string) {
+		if (!FEED_ENABLED) {
+			return;
+		}
 
-        discordBot.sendMessage(text);
-    }
+		discordBot.sendMessage(text);
+	}
 
-    public postUserActivity(user: User, text: string) {
-        if (!FEED_ENABLED) {
-            return;
-        }
+	public postUserActivity(user: User, text: string, version?: number) {
+		if (!FEED_ENABLED) {
+			return;
+		}
 
-        discordBot.sendMessage("**" + user.username + "** " + text);
-    }
+		let str = "**" + user.username + "** " + text;
+		if (version) {
+			str = `[${version}] ` + str;
+		}
 
-    public postServerError(error: Error, user: User = null) {
-        if (!FEED_ENABLED) {
-            return;
-        }
+		discordBot.sendMessage(str);
+	}
 
-        discordBot.sendServerError(error, user);
-    }
+	public postServerError(error: Error, user: User = null) {
+		if (!FEED_ENABLED) {
+			return;
+		}
+
+		discordBot.sendServerError(error, user);
+	}
 }
