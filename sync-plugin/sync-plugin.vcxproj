@@ -127,42 +127,46 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">
     <OutDir>$(SolutionDir)/build/$(Configuration)_$(Platform)/</OutDir>
     <IntDir>$(SolutionDir)/build/.temp/$(Configuration)_$(Platform)/</IntDir>
-    <TargetExt>.plw</TargetExt>
+    <TargetExt>.dll</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|x64'">
     <OutDir>$(SolutionDir)/build/$(Configuration)_$(Platform)/</OutDir>
     <IntDir>$(SolutionDir)/build/.temp/$(Configuration)_$(Platform)/</IntDir>
-    <TargetExt>.plw</TargetExt>
+    <TargetExt>.dll</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|Win32'">
     <OutDir>$(SolutionDir)/build/$(Configuration)_$(Platform)/</OutDir>
     <IntDir>$(SolutionDir)/build/.temp/$(Configuration)_$(Platform)/</IntDir>
-    <TargetExt>.p64</TargetExt>
+    <TargetExt>.dll</TargetExt>
+    <TargetName>$(ProjectName)64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug (idaq64)|x64'">
     <OutDir>$(SolutionDir)/build/$(Configuration)_$(Platform)/</OutDir>
     <IntDir>$(SolutionDir)/build/.temp/$(Configuration)_$(Platform)/</IntDir>
-    <TargetExt>.p64</TargetExt>
+    <TargetExt>.dll</TargetExt>
+    <TargetName>$(ProjectName)64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|Win32'">
     <OutDir>$(SolutionDir)/build/$(Configuration)_$(Platform)/</OutDir>
     <IntDir>$(SolutionDir)/build/.temp/$(Configuration)_$(Platform)/</IntDir>
-    <TargetExt>.plw</TargetExt>
+    <TargetExt>.dll</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (idaq32)|x64'">
     <OutDir>$(SolutionDir)/build/$(Configuration)_$(Platform)/</OutDir>
     <IntDir>$(SolutionDir)/build/.temp/$(Configuration)_$(Platform)/</IntDir>
-    <TargetExt>.plw</TargetExt>
+    <TargetExt>.dll</TargetExt>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|Win32'">
     <OutDir>$(SolutionDir)/build/$(Configuration)_$(Platform)/</OutDir>
     <IntDir>$(SolutionDir)/build/.temp/$(Configuration)_$(Platform)/</IntDir>
-    <TargetExt>.p64</TargetExt>
+    <TargetExt>.dll</TargetExt>
+    <TargetName>$(ProjectName)64</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (idaq64)|x64'">
     <OutDir>$(SolutionDir)/build/$(Configuration)_$(Platform)/</OutDir>
     <IntDir>$(SolutionDir)/build/.temp/$(Configuration)_$(Platform)/</IntDir>
-    <TargetExt>.p64</TargetExt>
+    <TargetExt>.dll</TargetExt>
+    <TargetName>$(ProjectName)64</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug (idaq32)|Win32'">
     <ClCompile>

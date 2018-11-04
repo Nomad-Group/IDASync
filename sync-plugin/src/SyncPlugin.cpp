@@ -124,7 +124,7 @@ bool SyncPlugin::Connect()
 #ifdef _DEBUG
 	std::string ip = "127.0.0.1";
 #else
-	std::string ip = "62.75.142.79";
+	std::string ip = "93.186.200.158";
 #endif
 
 	if (!g_client->Connect(ip))
