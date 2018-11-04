@@ -89,6 +89,10 @@ void SyncPlugin::Run()
 		Connect();
 		break;
 
+	case UIMainMenuResult::RequestUpdates:
+		Log("This feature is not implemented yet.");
+		break;
+
 	default:
 		return;
 	}

@@ -101,6 +101,9 @@ bool SyncPlugin::HandleIdbUpdatePacket(NetworkBufferT<BasePacket>* packet)
 		return false;
 	}
 
+	// Status Text
+	UIStatusBarSetText("Update Version: " + std::to_string(updateData->version));
+
 	// Done
 	delete updateData;
 	return true;
@@ -113,5 +116,9 @@ bool SyncPlugin::HandleIdbUpdateResponsePacket(NetworkBufferT<BasePacket>* packe
 		return false;
 
 	g_idb->SetVersion(version);
+
+	// Status Text
+	UIStatusBarSetText("Update Version: " + std::to_string(version));
+
 	return true;
 }

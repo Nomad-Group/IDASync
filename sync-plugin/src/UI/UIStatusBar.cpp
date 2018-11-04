@@ -41,3 +41,11 @@ void UIStatusBarSetColor(const char* color)
 	std::string col = "QWidget { background-color: " + std::string(color) + "; }";
 	uiStatusBar->setStyleSheet(col.c_str());
 }
+
+void UIStatusBarSetText(const std::string& text)
+{
+	if (uiStatusBar == nullptr)
+		return;
+
+	uiStatusBar->setWindowTitle(("IDA Sync-Plugin - " + text).c_str());
+}

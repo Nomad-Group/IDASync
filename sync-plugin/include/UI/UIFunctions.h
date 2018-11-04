@@ -1,9 +1,11 @@
 #pragma once
+#include <string>
 
 // Status Bar
 void UIShowStatusBar();
 void UIHideStatusBar();
 void UIStatusBarSetColor(const char* color);
+void UIStatusBarSetText(const std::string&);
 
 // Auto Connect Startup Dialog
 bool UIShowAutoConnectStartupDialog(); // true => Connect
