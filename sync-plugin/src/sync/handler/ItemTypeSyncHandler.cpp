@@ -22,7 +22,10 @@ bool ItemTypeSyncHandler::ApplyUpdateImpl(ItemTypeSyncUpdateData* updateData)
 bool ItemTypeSyncHandler::HandleNotification(IdaNotification& notification, ItemTypeSyncUpdateData* updateData)
 {
 	updateData->ptr  = static_cast<uint64_t>(va_arg(notification.args, ea_t));
-	updateData->type = va_arg(notification.args, const char*); // type_t = char
+
+	const char* stype = va_arg(notification.args, const char*); // type_t = char
+	if (stype)
+		updateData->type = stype;
 
 	const char* fnames = va_arg(notification.args, const char*); // p_list = char
 	if(fnames)
